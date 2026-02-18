@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chimera HFT Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0e27;
+            color: #00ff41;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1f3a, #0f1424);
+            padding: 20px;
+            border-bottom: 2px solid #00ff41;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            font-size: 24px;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px #00ff41;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        .status-dot.connected { background: #00ff41; }
+        .status-dot.disconnected { background: #ff4757; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: #0f1424;
+            border: 1px solid #1a3d5c;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .card-title {
+            font-size: 14px;
+            color: #4a9eff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+        }
+        .metric {
+            margin: 12px 0;
+        }
+        .metric-label {
+            font-size: 11px;
+            color: #888;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .metric-value.positive { color: #00ff41; }
+        .metric-value.negative { color: #ff4757; }
+        .metric-value.neutral { color: #ffa502; }
+        .error {
+            background: #ff4757;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚡ CHIMERA HFT ENGINE</h1>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Initializing...</span> | 
+            Last Update: <span id="lastUpdate">--</span>
+        </div>
+    </div>
+
+    <div id="errorContainer"></div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-title">💰 Portfolio</div>
+            <div class="metric">
+                <div class="metric-label">EQUITY</div>
+                <div class="metric-value positive" id="equity">$0.00</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">TOTAL P&L</div>
+                <div class="metric-value" id="totalPnl">$0.00</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">EXPOSURE</div>
+                <div class="metric-value neutral" id="exposure">$0.00</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">₿ BITCOIN</div>
+            <div class="metric">
+                <div class="metric-label">PRICE</div>
+                <div class="metric-value neutral" id="btcPrice">$0.00</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">IMBALANCE</div>
+                <div class="metric-value" id="btcImb">0.00</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Ξ ETHEREUM</div>
+            <div class="metric">
+                <div class="metric-label">PRICE</div>
+                <div class="metric-value neutral" id="ethPrice">$0.00</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">IMBALANCE</div>
+                <div class="metric-value" id="ethImb">0.00</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">📊 Execution</div>
+            <div class="metric">
+                <div class="metric-label">FILLS</div>
+                <div class="metric-value neutral" id="fills">0</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">WIN RATE</div>
+                <div class="metric-value neutral" id="winRate">0%</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">AVG SLIPPAGE</div>
+                <div class="metric-value neutral" id="avgSlip">0.00 bps</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api';
+        
+        function updateDashboard(data) {
+            if (typeof data.equity === 'number') {
+                document.getElementById('equity').textContent = '$' + data.equity.toFixed(2);
+            }
+            if (typeof data.total_pnl === 'number') {
+                document.getElementById('totalPnl').textContent = '$' + data.total_pnl.toFixed(2);
+            }
+            if (typeof data.exposure === 'number') {
+                document.getElementById('exposure').textContent = '$' + data.exposure.toFixed(2);
+            }
+            if (typeof data.btc_price === 'number' && data.btc_price > 0) {
+                document.getElementById('btcPrice').textContent = '$' + data.btc_price.toFixed(2);
+            }
+            if (typeof data.eth_price === 'number' && data.eth_price > 0) {
+                document.getElementById('ethPrice').textContent = '$' + data.eth_price.toFixed(2);
+            }
+            if (typeof data.btc_imbalance === 'number') {
+                document.getElementById('btcImb').textContent = data.btc_imbalance.toFixed(3);
+            }
+            if (typeof data.eth_imbalance === 'number') {
+                document.getElementById('ethImb').textContent = data.eth_imbalance.toFixed(3);
+            }
+            if (typeof data.fills === 'number') {
+                document.getElementById('fills').textContent = data.fills;
+            }
+            if (typeof data.wins === 'number' && typeof data.fills === 'number' && data.fills > 0) {
+                document.getElementById('winRate').textContent = (data.wins / data.fills * 100).toFixed(1) + '%';
+            }
+            if (typeof data.avg_slippage === 'number') {
+                document.getElementById('avgSlip').textContent = data.avg_slippage.toFixed(2) + ' bps';
+            }
+            
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            document.getElementById('statusDot').className = 'status-dot connected';
+            document.getElementById('statusText').textContent = 'Connected';
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                console.log('Data:', data);
+                updateDashboard(data);
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('statusDot').className = 'status-dot disconnected';
+                document.getElementById('statusText').textContent = 'Disconnected';
+            }
+        }
+
+        setInterval(fetchData, 1000);
+        fetchData();
+    </script>
+</body>
+</html>

@@ -1,0 +1,107 @@
+ChimeraCrypto - Fixed Version Manifest
+Generated: 2026-02-20
+
+CRITICAL FILES MODIFIED:
+========================
+
+1. src/main.cpp
+   - FIXED: Removed HttpTelemetryServer forward declaration
+   - FIXED: Now includes WsTelemetryServer.hpp properly
+   - FIXED: Instantiates WsTelemetryServer on port 9001
+   - STATUS: Header/implementation alignment verified
+
+2. gui/app.js
+   - FIXED: WebSocket connects to /ws endpoint (not root)
+   - ADDED: Error handling and reconnection logic
+   - ADDED: Console logging for debugging
+   - STATUS: Transport layer matches backend
+
+3. config/nginx_chimera.conf (NEW FILE)
+   - CREATED: Complete nginx configuration
+   - INCLUDES: SSL/TLS settings
+   - INCLUDES: WebSocket proxy to localhost:9001
+   - INCLUDES: Static file serving from gui/
+   - STATUS: Production-ready
+
+4. FORENSIC_AUDIT.md (NEW FILE)
+   - DOCUMENTS: All issues found in original tarball
+   - EXPLAINS: Root causes of instability
+   - PROVIDES: Architecture analysis
+   - STATUS: Complete audit trail
+
+5. DEPLOYMENT.md (NEW FILE)
+   - PROVIDES: Step-by-step deployment instructions
+   - INCLUDES: Troubleshooting guide
+   - INCLUDES: Security checklist
+   - STATUS: Production deployment guide
+
+UNMODIFIED CORE FILES (Verified Correct):
+==========================================
+- include/telemetry/WsTelemetryServer.hpp (CORRECT)
+- src/telemetry/WsTelemetryServer.cpp (CORRECT)
+- include/telemetry/TelemetrySpine.hpp (CORRECT)
+- src/telemetry/TelemetrySpine.cpp (CORRECT)
+- gui/index.html (CORRECT)
+- gui/style.css (CORRECT)
+- CMakeLists.txt (CORRECT)
+
+ARCHITECTURE VALIDATION:
+========================
+Transport: WebSocket (libwebsockets)
+Frontend Port: 9443 (nginx)
+Backend Port: 9001 (localhost only)
+Static Serving: nginx
+WebSocket Endpoint: /ws
+Protocol: RFC6455 compliant
+
+REMOVED/DEPRECATED:
+===================
+- HttpTelemetryServer forward declaration (removed from main.cpp)
+- Root path WebSocket connection (changed to /ws)
+- Static file serving from libwebsockets (moved to nginx)
+
+VERIFICATION COMMANDS:
+======================
+# Build test
+cd build && cmake .. && make
+
+# Check main.cpp
+grep "WsTelemetryServer.hpp" src/main.cpp
+
+# Check app.js
+grep "/ws" gui/app.js
+
+# Check nginx config exists
+ls -la config/nginx_chimera.conf
+
+CRITICAL SUCCESS CRITERIA:
+==========================
+✓ No forward-declaration-only classes in main.cpp
+✓ GUI transport matches backend (WebSocket)
+✓ nginx configuration complete and documented
+✓ Port 9001 not exposed to public
+✓ Static files served by nginx, not Chimera
+✓ No ABI mismatches between headers and implementations
+✓ Single transport model (WebSocket) locked in
+
+BUILD DEPENDENCIES REQUIRED:
+============================
+- cmake >= 3.16
+- g++ with C++20 support
+- libwebsockets-dev
+- libssl-dev
+- libcurl4-openssl-dev
+- nginx
+
+DEPLOYMENT DEPENDENCIES:
+========================
+- nginx configured and running
+- SSL certificate (self-signed for testing, real for production)
+- Port 9443 accessible (firewall rules)
+- Port 9001 NOT accessible externally
+
+This manifest confirms the tarball is in a STABLE, DEPLOYABLE state.
+All architectural conflicts documented in the original issue have been resolved.
+
+Signed-off-by: Forensic Analysis
+Date: 2026-02-20

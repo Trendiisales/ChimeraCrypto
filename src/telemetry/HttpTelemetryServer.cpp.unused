@@ -1,0 +1,81 @@
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <thread>
+#include <atomic>
+#include <cstring>
+#include <iostream>
+#include "telemetry/TelemetrySpine.hpp"
+
+namespace chimera {
+
+class HttpTelemetryServer {
+public:
+    HttpTelemetryServer(int port, TelemetrySpine& spine)
+        : port_(port), spine_(spine), running_(false) {}
+
+    void start() {
+        running_ = true;
+        server_thread_ = std::thread([this]() { run(); });
+    }
+
+    void stop() {
+        running_ = false;
+        if (server_thread_.joinable())
+            server_thread_.join();
+    }
+
+private:
+    int port_;
+    TelemetrySpine& spine_;
+    std::atomic<bool> running_;
+    std::thread server_thread_;
+
+    void run() {
+        int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0) {
+            std::cerr << "Socket creation failed\n";
+            return;
+        }
+
+        int opt = 1;
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = inet_addr("127.0.0.1");
+        address.sin_port = htons(port_);
+
+        if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+            std::cerr << "Bind failed\n";
+            return;
+        }
+
+        listen(server_fd, 16);
+
+        while (running_) {
+            socklen_t addrlen = sizeof(address);
+            int client = accept(server_fd, (struct sockaddr*)&address, &addrlen);
+            if (client < 0)
+                continue;
+
+            char buffer[1024] = {0};
+            read(client, buffer, sizeof(buffer));
+
+            std::string json = spine_.json();
+
+            std::string response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Content-Length: " + std::to_string(json.size()) + "\r\n"
+                "Connection: close\r\n\r\n" +
+                json;
+
+            send(client, response.c_str(), response.size(), 0);
+            close(client);
+        }
+
+        close(server_fd);
+    }
+};
+
+}

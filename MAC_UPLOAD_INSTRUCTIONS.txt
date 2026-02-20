@@ -1,0 +1,114 @@
+═══════════════════════════════════════════════════════════════════════
+           ChimeraCrypto Production - Mac Upload Instructions
+═══════════════════════════════════════════════════════════════════════
+
+YOUR VPS: jo@154.45.251.118
+SSH KEY: ~/.ssh/chimera_ed25519
+
+═══════════════════════════════════════════════════════════════════════
+STEP 1: VERIFY FILES ON YOUR MAC
+═══════════════════════════════════════════════════════════════════════
+
+Open Terminal on your Mac and run:
+
+cd ~/Downloads  # or wherever you downloaded the tarball
+
+ls -lh ChimeraCrypto_PRODUCTION.tar.gz
+
+Expected:
+-rw-r--r--  1 youruser  staff    45K Feb 20 03:45 ChimeraCrypto_PRODUCTION.tar.gz
+
+═══════════════════════════════════════════════════════════════════════
+STEP 2: VERIFY SSH KEY EXISTS
+═══════════════════════════════════════════════════════════════════════
+
+ls -la ~/.ssh/chimera_ed25519
+
+Expected:
+-rw-------  1 youruser  staff  464 Feb 20 03:45 /Users/youruser/.ssh/chimera_ed25519
+
+If not found, you need to copy your SSH key to ~/.ssh/ first.
+
+═══════════════════════════════════════════════════════════════════════
+STEP 3: UPLOAD TARBALL TO VPS
+═══════════════════════════════════════════════════════════════════════
+
+Run this EXACT command in Terminal:
+
+scp -i ~/.ssh/chimera_ed25519 \
+    ChimeraCrypto_PRODUCTION.tar.gz \
+    jo@154.45.251.118:~/
+
+Expected output:
+ChimeraCrypto_PRODUCTION.tar.gz        100%   45KB   1.5MB/s   00:00
+
+If you see "Permission denied (publickey)":
+  - Check SSH key path: ls -la ~/.ssh/chimera_ed25519
+  - Check SSH key permissions: chmod 600 ~/.ssh/chimera_ed25519
+  - Verify username is "jo" (not "root")
+
+If you see "No such file or directory":
+  - cd to the directory with the tarball first
+  - Use full path: ~/Downloads/ChimeraCrypto_PRODUCTION.tar.gz
+
+═══════════════════════════════════════════════════════════════════════
+STEP 4: VERIFY UPLOAD
+═══════════════════════════════════════════════════════════════════════
+
+SSH into VPS to verify:
+
+ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
+
+Once logged in, check:
+
+ls -lh ~/ChimeraCrypto_PRODUCTION.tar.gz
+
+Should show:
+-rw-r--r-- 1 jo jo 45K Feb 20 03:45 ChimeraCrypto_PRODUCTION.tar.gz
+
+If file exists, proceed to VPS_DEPLOY_COMMANDS.txt
+
+═══════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════
+
+Error: "ssh: connect to host 154.45.251.118 port 22: Connection refused"
+Solution: VPS might be down or firewall blocking. Check VPS status.
+
+Error: "Permission denied (publickey)"
+Solution: 
+  chmod 600 ~/.ssh/chimera_ed25519
+  ssh-add ~/.ssh/chimera_ed25519
+
+Error: "Host key verification failed"
+Solution:
+  ssh-keyscan 154.45.251.118 >> ~/.ssh/known_hosts
+
+Error: Upload stalls at 0%
+Solution: Check your internet connection and VPS firewall
+
+═══════════════════════════════════════════════════════════════════════
+ALTERNATIVE: UPLOAD FROM ANY DIRECTORY
+═══════════════════════════════════════════════════════════════════════
+
+If you want to upload from a different directory:
+
+scp -i ~/.ssh/chimera_ed25519 \
+    /full/path/to/ChimeraCrypto_PRODUCTION.tar.gz \
+    jo@154.45.251.118:~/
+
+Example:
+scp -i ~/.ssh/chimera_ed25519 \
+    ~/Desktop/ChimeraCrypto_PRODUCTION.tar.gz \
+    jo@154.45.251.118:~/
+
+═══════════════════════════════════════════════════════════════════════
+NEXT STEP
+═══════════════════════════════════════════════════════════════════════
+
+After successful upload:
+1. Keep Terminal open
+2. Open VPS_DEPLOY_COMMANDS.txt
+3. Follow the VPS deployment instructions
+
+═══════════════════════════════════════════════════════════════════════

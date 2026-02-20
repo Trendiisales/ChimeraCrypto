@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chimera Trading Desk</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="stylesheet" href="/style.css?v=11">
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="title">
+            <img src="/favicon.png" alt="Chimera" class="logo">
+            <div>
+                <h1>CHIMERA</h1>
+                <span class="subtitle">Live Shadow Trading</span>
+            </div>
+        </div>
+        <div class="status-indicators">
+            <div class="status-item">
+                <span class="status-label">Mode</span>
+                <span id="mode" class="status-value mode-badge">SHADOW</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Health</span>
+                <span id="health-indicator" class="health-dot"></span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Uptime</span>
+                <span id="uptime" class="status-value">0.0h</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="prices-panel">
+        <div class="price-item">
+            <span class="price-symbol">BTC</span>
+            <span id="btc_price" class="price-value">--</span>
+            <span id="btc_change" class="price-change">--</span>
+        </div>
+        <div class="price-item">
+            <span class="price-symbol">ETH</span>
+            <span id="eth_price" class="price-value">--</span>
+            <span id="eth_change" class="price-change">--</span>
+        </div>
+        <div class="price-item">
+            <span class="price-symbol">SOL</span>
+            <span id="sol_price" class="price-value">--</span>
+            <span id="sol_change" class="price-change">--</span>
+        </div>
+    </div>
+
+    <div class="pnl-summary">
+        <div class="pnl-item">
+            <span class="pnl-label">Equity</span>
+            <span id="equity" class="pnl-value large">$10,000</span>
+        </div>
+        <div class="pnl-item">
+            <span class="pnl-label">Day P&L</span>
+            <span id="day_pnl" class="pnl-value large">$0.00</span>
+        </div>
+        <div class="pnl-item">
+            <span class="pnl-label">Realized</span>
+            <span id="pnl" class="pnl-value">$0.00</span>
+        </div>
+        <div class="pnl-item">
+            <span class="pnl-label">Unrealized</span>
+            <span id="unrealized_pnl" class="pnl-value">$0.00</span>
+        </div>
+    </div>
+
+    <div class="main-grid">
+        <div class="trade-feed-panel">
+            <div class="panel-header">
+                <h2>Live Trades</h2>
+                <span id="trade-count" class="badge">0</span>
+            </div>
+            <div id="trade-feed" class="trade-feed">
+                <div class="no-trades">Waiting for trades...</div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-header">Execution</div>
+                <div class="stat-row">
+                    <span class="stat-label">RTT</span>
+                    <span id="latency_ms" class="stat-value">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Orders</span>
+                    <span id="orders_sent" class="stat-value">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Fills</span>
+                    <span id="fills_received" class="stat-value">0</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-header">Risk</div>
+                <div class="stat-row">
+                    <span class="stat-label">Governor</span>
+                    <span id="governor" class="stat-value badge">ACTIVE</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Exposure</span>
+                    <span id="exposure_usd" class="stat-value">$0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Positions</span>
+                    <span id="positions" class="stat-value">0</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-header">Performance</div>
+                <div class="stat-row">
+                    <span class="stat-label">Win Rate</span>
+                    <span id="win_rate" class="stat-value">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Sharpe</span>
+                    <span id="sharpe_ratio" class="stat-value">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Trades</span>
+                    <span id="trades_today" class="stat-value">0</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-header">Positions</div>
+                <div class="stat-row">
+                    <span class="stat-label">BTC</span>
+                    <span id="btc_position" class="stat-value">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">ETH</span>
+                    <span id="eth_position" class="stat-value">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">SOL</span>
+                    <span id="sol_position" class="stat-value">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="footer-item">
+            <span class="footer-label">System Time:</span>
+            <span id="system-time" class="footer-value">--</span>
+        </div>
+        <div class="footer-item">
+            <span class="footer-label">WebSocket:</span>
+            <span id="ws-status" class="footer-value">Connecting...</span>
+        </div>
+    </div>
+</div>
+
+<script src="/app.js?v=11"></script>
+</body>
+</html>

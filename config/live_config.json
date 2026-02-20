@@ -1,0 +1,9 @@
+{
+    "credentials_file": "./config/binance_credentials.json",
+    "shadow_mode": true,
+    "shadow_mode_description": "Orders are logged and validated but NOT executed on exchange",
+    "cost_bps": 6.5,
+    "min_edge_bps": 8.0,
+    "max_position_usd": 10000,
+    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+}

@@ -1,0 +1,341 @@
+═══════════════════════════════════════════════════════════════════════
+        ChimeraCrypto Production - VPS Deployment Commands
+═══════════════════════════════════════════════════════════════════════
+
+⚠️  IMPORTANT: These commands run on your VPS after SSH login
+⚠️  Copy the ENTIRE block and paste into VPS terminal
+
+═══════════════════════════════════════════════════════════════════════
+PREREQUISITES (verify first)
+═══════════════════════════════════════════════════════════════════════
+
+1. You have SSH'd into: jo@154.45.251.118
+2. Tarball uploaded: ~/ChimeraCrypto_PRODUCTION.tar.gz
+3. You have sudo access
+
+═══════════════════════════════════════════════════════════════════════
+DEPLOYMENT SCRIPT - COPY ENTIRE BLOCK BELOW
+═══════════════════════════════════════════════════════════════════════
+
+# ────────────────────────────────────────────────────────────────
+# STEP 1: Backup and prepare
+# ────────────────────────────────────────────────────────────────
+
+cd ~
+
+# Stop any running Chimera process
+echo "Stopping existing Chimera..."
+pkill -9 chimera 2>/dev/null || echo "No existing process"
+sleep 2
+
+# Backup existing installation
+if [ -d "ChimeraCrypto" ]; then
+    echo "Backing up existing installation..."
+    mv ChimeraCrypto ChimeraCrypto.backup.$(date +%Y%m%d_%H%M%S)
+fi
+
+# ────────────────────────────────────────────────────────────────
+# STEP 2: Extract production tarball
+# ────────────────────────────────────────────────────────────────
+
+mkdir -p ChimeraCrypto
+cd ChimeraCrypto
+tar -xzf ~/ChimeraCrypto_PRODUCTION.tar.gz
+
+echo "✓ Extracted production tarball"
+
+# ────────────────────────────────────────────────────────────────
+# STEP 3: Verify integrity
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Verifying integrity..."
+bash verify_integrity.sh
+
+echo ""
+echo "Press Enter to continue after reviewing verification results..."
+read
+
+# ────────────────────────────────────────────────────────────────
+# STEP 4: Secure credentials file
+# ────────────────────────────────────────────────────────────────
+
+echo "Securing Binance credentials..."
+chmod 600 config/binance_credentials.json
+ls -la config/binance_credentials.json
+
+echo "✓ Credentials secured (owner read/write only)"
+
+# ────────────────────────────────────────────────────────────────
+# STEP 5: Install dependencies
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Installing dependencies..."
+sudo apt update
+sudo apt install -y \
+    build-essential \
+    cmake \
+    libwebsockets-dev \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    nginx
+
+echo "✓ Dependencies installed"
+
+# ────────────────────────────────────────────────────────────────
+# STEP 6: Build Chimera
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Building ChimeraCrypto..."
+
+mkdir -p build
+cd build
+
+# Configure
+cmake ..
+
+# Build with all CPU cores
+make -j$(nproc)
+
+# Verify binary exists
+if [ -f "chimera" ]; then
+    echo "✓ Build successful"
+    ls -lh chimera
+else
+    echo "✗ Build failed - check errors above"
+    exit 1
+fi
+
+cd ..
+
+# ────────────────────────────────────────────────────────────────
+# STEP 7: Configure nginx
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Configuring nginx..."
+
+# Backup existing config
+if [ -f "/etc/nginx/sites-available/chimera" ]; then
+    sudo mv /etc/nginx/sites-available/chimera \
+         /etc/nginx/sites-available/chimera.backup.$(date +%Y%m%d_%H%M%S)
+fi
+
+# Install new config
+sudo cp config/nginx_chimera.conf /etc/nginx/sites-available/chimera
+
+# Update path to current directory
+sudo sed -i "s|/home/jo/ChimeraCrypto|$(pwd)|g" /etc/nginx/sites-available/chimera
+
+# Enable site
+sudo ln -sf /etc/nginx/sites-available/chimera /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+echo "✓ nginx configured"
+
+# ────────────────────────────────────────────────────────────────
+# STEP 8: SSL certificate
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Setting up SSL..."
+
+if [ ! -f "/etc/ssl/certs/chimera.crt" ]; then
+    echo "Generating self-signed certificate..."
+    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout /etc/ssl/private/chimera.key \
+        -out /etc/ssl/certs/chimera.crt \
+        -subj "/C=US/ST=State/L=City/O=Chimera/CN=154.45.251.118"
+    
+    sudo chmod 600 /etc/ssl/private/chimera.key
+    sudo chmod 644 /etc/ssl/certs/chimera.crt
+    echo "✓ Certificate generated"
+else
+    echo "✓ Certificate already exists"
+fi
+
+# ────────────────────────────────────────────────────────────────
+# STEP 9: Test and reload nginx
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Testing nginx configuration..."
+sudo nginx -t
+
+if [ $? -eq 0 ]; then
+    echo "✓ Configuration valid"
+    sudo systemctl reload nginx
+    echo "✓ nginx reloaded"
+else
+    echo "✗ nginx configuration error - fix before continuing"
+    exit 1
+fi
+
+# ────────────────────────────────────────────────────────────────
+# STEP 10: Start Chimera in Shadow Mode
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "  STARTING CHIMERA IN SHADOW MODE"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "⚠️  SHADOW MODE ENABLED - Orders logged but NOT executed"
+echo ""
+
+cd ~/ChimeraCrypto
+
+# Create log directory
+mkdir -p logs
+
+# Start with nohup
+nohup ./build/chimera > logs/chimera.log 2>&1 &
+echo $! > chimera.pid
+
+# Wait for startup
+sleep 5
+
+# ────────────────────────────────────────────────────────────────
+# STEP 11: Verify deployment
+# ────────────────────────────────────────────────────────────────
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "  VERIFICATION"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Check nginx
+if systemctl is-active --quiet nginx; then
+    echo "✓ nginx is running"
+else
+    echo "✗ nginx is not running"
+fi
+
+# Check Chimera process
+if [ -f chimera.pid ] && ps -p $(cat chimera.pid) > /dev/null; then
+    echo "✓ Chimera is running (PID: $(cat chimera.pid))"
+else
+    echo "✗ Chimera is not running"
+    echo "Check logs: tail -f logs/chimera.log"
+    exit 1
+fi
+
+# Check ports
+if sudo netstat -tlnp | grep -q ":9001"; then
+    echo "✓ Port 9001 listening (Chimera WebSocket)"
+else
+    echo "✗ Port 9001 not listening"
+fi
+
+if sudo netstat -tlnp | grep -q ":9443"; then
+    echo "✓ Port 9443 listening (nginx SSL)"
+else
+    echo "✗ Port 9443 not listening"
+fi
+
+# Check shadow mode
+echo ""
+echo "Checking shadow mode configuration..."
+if grep -q '"shadow_mode": true' config/binance_credentials.json; then
+    echo "✓ SHADOW MODE ENABLED (safe testing)"
+else
+    echo "⚠️  WARNING: shadow_mode might be disabled"
+fi
+
+# Show recent logs
+echo ""
+echo "Recent Chimera logs:"
+echo "─────────────────────────────────────────────────────────"
+tail -20 logs/chimera.log
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "  DEPLOYMENT COMPLETE"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "🌐 GUI Access: https://154.45.251.118:9443"
+echo ""
+echo "⚠️  SHADOW MODE ACTIVE"
+echo "   - All trading logic runs LIVE"
+echo "   - Orders are LOGGED ONLY"
+echo "   - NO orders sent to Binance"
+echo "   - Safe for testing"
+echo ""
+echo "📊 Monitor Commands:"
+echo "   Live logs:        tail -f ~/ChimeraCrypto/logs/chimera.log"
+echo "   Shadow orders:    tail -f ~/ChimeraCrypto/logs/shadow_orders.log"
+echo "   Check process:    ps aux | grep chimera"
+echo "   Check config:     cat ~/ChimeraCrypto/config/binance_credentials.json"
+echo ""
+echo "🛑 Stop Chimera:"
+echo "   kill \$(cat ~/ChimeraCrypto/chimera.pid)"
+echo ""
+echo "🔄 Restart Chimera:"
+echo "   cd ~/ChimeraCrypto"
+echo "   nohup ./build/chimera > logs/chimera.log 2>&1 &"
+echo "   echo \$! > chimera.pid"
+echo ""
+echo "📖 Documentation:"
+echo "   Production fixes: cat ~/ChimeraCrypto/PRODUCTION_FIXES.md"
+echo "   Deployment guide: cat ~/ChimeraCrypto/DEPLOYMENT.md"
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "✅ Next Steps:"
+echo "1. Open browser: https://154.45.251.118:9443"
+echo "2. Monitor logs: tail -f logs/chimera.log"
+echo "3. Watch shadow orders: tail -f logs/shadow_orders.log"
+echo "4. Let it run for 24-48 hours in shadow mode"
+echo "5. Review performance before enabling live trading"
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+
+# ────────────────────────────────────────────────────────────────
+# END OF DEPLOYMENT SCRIPT
+# ────────────────────────────────────────────────────────────────
+
+═══════════════════════════════════════════════════════════════════════
+DEPLOYMENT SCRIPT ENDS HERE
+═══════════════════════════════════════════════════════════════════════
+
+After deployment completes:
+
+1. ✓ GUI should be accessible at: https://154.45.251.118:9443
+2. ✓ Accept the self-signed certificate warning
+3. ✓ You should see live telemetry updating
+4. ✓ Shadow mode logs will show trading signals
+
+═══════════════════════════════════════════════════════════════════════
+MONITORING SHADOW MODE
+═══════════════════════════════════════════════════════════════════════
+
+Watch for shadow orders (these are NOT executed):
+
+tail -f ~/ChimeraCrypto/logs/shadow_orders.log
+
+Expected output:
+[SHADOW] 2026-02-20 15:30:45 BUY 0.01 BTCUSDT @ 50000.00 - LOGGED ONLY
+[SHADOW] 2026-02-20 15:31:12 SELL 0.5 ETHUSDT @ 3000.00 - LOGGED ONLY
+
+═══════════════════════════════════════════════════════════════════════
+TO ENABLE LIVE TRADING (AFTER TESTING)
+═══════════════════════════════════════════════════════════════════════
+
+1. Stop Chimera:
+   kill $(cat ~/ChimeraCrypto/chimera.pid)
+
+2. Edit config:
+   nano ~/ChimeraCrypto/config/binance_credentials.json
+   Change: "shadow_mode": false
+
+3. Restart:
+   cd ~/ChimeraCrypto
+   nohup ./build/chimera > logs/chimera.log 2>&1 &
+   echo $! > chimera.pid
+
+4. Monitor VERY closely for first hour
+
+═══════════════════════════════════════════════════════════════════════

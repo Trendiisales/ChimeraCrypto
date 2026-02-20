@@ -132,18 +132,18 @@
             </div>
 
             <div class="stat-card">
-                <div class="stat-header">Positions</div>
-                <div class="stat-row">
-                    <span class="stat-label">BTC</span>
-                    <span id="btc_position" class="stat-value">0</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">ETH</span>
-                    <span id="eth_position" class="stat-value">0</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">SOL</span>
-                    <span id="sol_position" class="stat-value">0</span>
+                <div class="stat-header">Trade Filters</div>
+                <div style="font-size: 10px; max-height: 120px; overflow-y: auto;">
+                    <table style="width:100%; color: #aaa;">
+                        <thead>
+                            <tr style="font-size: 9px;">
+                                <th>Sym</th><th>Blk%</th><th>Lat</th><th>Vol</th><th>Rnk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rejection-data">
+                            <tr><td colspan="5">--</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -162,5 +162,44 @@
 </div>
 
 <script src="/app.js?v=11"></script>
+
+<script>
+// Handle rejection stats messages
+function updateRejectionStats(data) {
+    const container = document.getElementById('rejection-data');
+    if (!container) return;
+    
+    let html = '<table style="width:100%; color: #fff;"><tr><th>Symbol</th><th>Evals</th><th>Blocks</th><th>Rate</th><th>Latency</th><th>Vol</th><th>Spread</th><th>Velocity</th><th>Loss</th><th>Rank</th></tr>';
+    
+    for (const [symbol, stats] of Object.entries(data)) {
+        const rate = (stats.block_rate * 100).toFixed(1);
+        html += `<tr>
+            <td>${symbol}</td>
+            <td>${stats.evaluations}</td>
+            <td>${stats.blocks}</td>
+            <td>${rate}%</td>
+            <td>${stats.latency}</td>
+            <td>${stats.volatility}</td>
+            <td>${stats.spread}</td>
+            <td>${stats.velocity}</td>
+            <td>${stats.loss_streak}</td>
+            <td>${stats.not_ranked}</td>
+        </tr>`;
+    }
+    html += '</table>';
+    container.innerHTML = html;
+}
+
+// Extend WebSocket message handler
+const originalOnMessage = ws.onmessage;
+ws.onmessage = function(event) {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'rejection_stats') {
+        updateRejectionStats(msg.data);
+    } else if (originalOnMessage) {
+        originalOnMessage(event);
+    }
+};
+</script>
 </body>
 </html>

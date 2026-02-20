@@ -82,6 +82,11 @@ int main() {
     // Ultra controller
     chimera::BalancedEngine controller;
     
+    // Immediate rejection stats test
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    std::printf("[IMMEDIATE-REJECTION-TEST] %s\n", controller.get_rejection_stats().c_str());
+    std::fflush(stdout);
+    
     // Per-symbol engine instances (disabled)
     chimera::VEConfig ve_cfg{7.0, 15.0, 9.0, 28.0, 1.8, 12.0, 500, 5000};
     chimera::LVConfig lv_cfg{7.0, 14.0, 8.0, 26.0, 14.0, 2.4, 0.30, 3.0, 64, 800};

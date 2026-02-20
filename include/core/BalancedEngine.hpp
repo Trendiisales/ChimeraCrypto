@@ -5,6 +5,7 @@
 #include "VolatilityScoring.hpp"
 #include "Governor.hpp"
 #include "MultiSymbolAllocator.hpp"
+#include "RejectionTelemetryAsync.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -98,6 +99,17 @@ public:
     }
 
     inline void on_tick(int id, double price, int64_t ts, double latency_ms) {
+        // Record evaluation immediately
+        std::string my_symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+        rejection_telemetry_.recordEvaluation(my_symbol);
+        
+        // Debug print every 1000 ticks
+        static int eval_count = 0;
+        if (++eval_count % 1000 == 0) {
+            std::printf("[EVAL-COUNT] %d evals, JSON: %s\n", eval_count, rejection_telemetry_.build_json_snapshot().c_str());
+            std::fflush(stdout);
+        }
+        
         latency_gov_.update(latency_ms, ts);
         leadlag_.update_price(id, price, ts);
         vol_scoring_[id].update(price, ts);
@@ -133,17 +145,22 @@ public:
             }
             
             auto active_symbols = allocator_.selectActiveSymbols(all_snapshots);
-            std::string my_symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
             
             bool is_active = std::find(active_symbols.begin(), active_symbols.end(), my_symbol) != active_symbols.end();
             
             if (!is_active) {
+                rejection_telemetry_.recordBlock(my_symbol, TradeBlockReason::NOT_TOP_RANKED);
                 return; // Symbol not in top N, skip trading
             }
         }
         
+        rejection_telemetry_.recordEvaluation(my_symbol);
+        
         if (ts < kill_until_) return;
-        if (latency_ms > 12.0) return;
+        if (latency_ms > 12.0) {
+            rejection_telemetry_.recordBlock(my_symbol, TradeBlockReason::LATENCY);
+            return;
+        }
         if (!latency_gov_.allow_entry(ts)) return;
 
         SymbolState& s = symbols_[id];
@@ -434,6 +451,7 @@ private:
     }
 
 public:
+    std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
     double get_total_pnl() const { return total_pnl_; }
     double get_realized_pnl() const { return realized_pnl_; }
     int get_total_trades() const { return total_trades_; }
@@ -446,6 +464,7 @@ private:
     VolatilityScoring vol_scoring_[3];
     StatefulGovernor governor_;
     MultiSymbolAllocator allocator_;
+    RejectionTelemetryAsync rejection_telemetry_;
     
     SymbolSnapshot snapshots_[3];
     int64_t last_snapshot_update_[3];

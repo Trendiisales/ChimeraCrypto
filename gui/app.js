@@ -167,3 +167,32 @@
     
     connect();
 })();
+
+
+// Handle rejection stats
+function updateRejectionStats(data) {
+    const tbody = document.getElementById('rejection-data');
+    if (!tbody) return;
+    
+    try {
+        const stats = typeof data === 'string' ? JSON.parse(data) : data;
+        let html = '';
+        
+        for (const [symbol, s] of Object.entries(stats)) {
+            const rate = (s.block_rate * 100).toFixed(0);
+            const sym = symbol.replace('usdt', '').toUpperCase();
+            const color = s.block_rate > 0.6 ? '#ff4444' : s.block_rate > 0.3 ? '#ffaa44' : '#44ff44';
+            html += `<tr style="font-size: 9px;">
+                <td>${sym}</td>
+                <td style="color: ${color}">${rate}%</td>
+                <td>${s.latency}</td>
+                <td>${s.volatility}</td>
+                <td>${s.not_ranked}</td>
+            </tr>`;
+        }
+        
+        tbody.innerHTML = html || '<tr><td colspan="5">--</td></tr>';
+    } catch (e) {
+        console.error('Rejection stats error:', e);
+    }
+}

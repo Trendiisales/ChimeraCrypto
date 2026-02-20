@@ -13,7 +13,6 @@
     };
     const fmtPct = (v) => (v == null || v === '--') ? '--' : (Number(v) * 100).toFixed(2) + '%';
     
-    // Update system clock every second
     setInterval(() => {
         const now = new Date();
         $('system-time').textContent = now.toLocaleTimeString('en-US', {hour12: false});
@@ -98,16 +97,16 @@
                     <div class="trade-size">${fmt(t.size, 4)}</div>
                     <div class="trade-price">$${fmt(t.price, 2)}</div>
                     <div class="trade-conviction ${edgePass ? 'positive' : 'negative'}">${fmt(t.conviction, 1)} bps</div>
-                    <div class="trade-pnl ${pnlClass}">${pnlChange > 0 ? '+' : ''}$${fmt(pnlChange, 2)}</div>
+                    <div class="trade-pnl ${pnlClass}">${pnlChange >= 0 ? '+' : ''}$${fmt(Math.abs(pnlChange), 2)}</div>
                 </div>
             `;
         }
-        
         feed.innerHTML = html;
-        $('trade-count').textContent = tradeHistory.length;
     }
     
     function updateTelemetry(d) {
+        if (!d) return;
+        
         try {
             if (d.btc_price) updatePrice('btc', d.btc_price, d.btc_change_pct);
             if (d.eth_price) updatePrice('eth', d.eth_price, d.eth_change_pct);
@@ -118,9 +117,9 @@
             if (d.pnl !== undefined) updatePnL('pnl', d.pnl);
             if (d.unrealized_pnl !== undefined) updatePnL('unrealized_pnl', d.unrealized_pnl);
             
-            // FIX LATENCY DISPLAY
             if (d.latency_ms !== undefined && d.latency_ms > 0) {
-                $('latency_ms').textContent = fmt(d.latency_ms, 1) + 'ms';
+                const us = (d.latency_ms * 1000).toFixed(2);
+                $('latency_ms').textContent = us + 'µs';
             }
             
             if (d.orders_sent !== undefined) $('orders_sent').textContent = d.orders_sent;
@@ -131,27 +130,15 @@
             if (d.positions !== undefined) $('positions').textContent = d.positions;
             
             if (d.win_rate !== undefined) $('win_rate').textContent = fmtPct(d.win_rate);
-            if (d.sharpe_ratio !== undefined) $('sharpe_ratio').textContent = fmt(d.sharpe_ratio, 2);
-            if (d.trades_today !== undefined) $('trades_today').textContent = d.trades_today;
+            if (d.sharpe_ratio !== undefined) $('sharpe').textContent = fmt(d.sharpe_ratio, 2);
+            if (d.trades_today !== undefined) $('trades').textContent = d.trades_today;
             
-            if (d.btc_position !== undefined) $('btc_position').textContent = fmt(d.btc_position, 4);
-            if (d.eth_position !== undefined) $('eth_position').textContent = fmt(d.eth_position, 4);
-            if (d.sol_position !== undefined) $('sol_position').textContent = fmt(d.sol_position, 4);
-            
-            if (d.uptime_hours) $('uptime').textContent = fmt(d.uptime_hours, 1) + 'h';
-            if (d.mode) $('mode').textContent = d.mode;
-            if (d.healthy !== undefined) {
-                const el = $('health-indicator');
-                if (el) {
-                    el.style.background = d.healthy ? '#10b981' : '#ef4444';
-                    el.style.boxShadow = d.healthy ? '0 0 12px #10b981' : '0 0 12px #ef4444';
-                }
-            }
+            if (d.btc_position !== undefined) $('btc_pos').textContent = fmt(d.btc_position, 4);
+            if (d.eth_position !== undefined) $('eth_pos').textContent = fmt(d.eth_position, 4);
+            if (d.sol_position !== undefined) $('sol_pos').textContent = fmt(d.sol_position, 4);
             
             addTrade(d);
-        } catch (err) {
-            console.error('Update error:', err);
-        }
+        } catch(e) {}
     }
     
     let ws = null, reconnectTimer = null, attempts = 0;
@@ -173,13 +160,10 @@
         ws.onclose = () => {
             if (el) { el.textContent = 'Disconnected'; el.className = 'footer-value disconnected'; }
             attempts++;
-            reconnectTimer = setTimeout(connect, Math.min(1000 * Math.pow(2, attempts), 10000));
+            const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+            reconnectTimer = setTimeout(connect, delay);
         };
     }
     
-    document.addEventListener('DOMContentLoaded', connect);
-    window.addEventListener('beforeunload', () => { 
-        if (ws) ws.close(); 
-        if (reconnectTimer) clearTimeout(reconnectTimer); 
-    });
+    connect();
 })();

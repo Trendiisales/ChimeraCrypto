@@ -23,6 +23,10 @@
 #include "execution/AdaptiveThrottle.hpp"
 #include "live/ShadowSpotExecutor.hpp"
 #include "engine/AdaptiveFadeController.hpp"
+#include "execution/ExchangeLatencyEngine.hpp"
+#include "engine/VolatilityExpansionEngine.hpp"
+#include "engine/LiquidityVacuumEngine.hpp"
+#include "engine/MultiSymbolAlignmentEngine.hpp"
 
 namespace chimera {
 
@@ -48,19 +52,20 @@ public:
     void tick(const std::string& symbol);
 
     double get_equity() const;
-    bool is_halted() const { return latency_kill_.halted(); }
-    const char* get_governor_state() const;
-    
-    int total_shadow_orders() const { return order_tracker_.total_orders(); }
-    int num_positions() const { return position_ledger_.num_positions(); }
-    int get_blocked_orders() const { return blocked_orders_; }
-    
-    LastOrder get_last_order() const;
-    double get_position(SymbolID id) const { return position_ledger_.get_position(id); }
-    
     double get_realized_pnl() const { return pnl_tracker_.get_total_realized_pnl(); }
     double get_unrealized_pnl() const { return pnl_tracker_.get_total_unrealized_pnl(); }
     double get_total_pnl() const { return pnl_tracker_.get_total_pnl(); }
+    int get_orders_sent() const { return order_tracker_.total_orders(); }
+    int get_fills() const { return 0; }
+    int get_rejects() const { return 0; }
+    double get_exposure_usd() const { return 0.0; }
+    bool is_halted() const { return latency_kill_.halted(); }
+    const char* get_governor_state() const;
+    int total_shadow_orders() const { return order_tracker_.total_orders(); }
+    int num_positions() const { return position_ledger_.num_positions(); }
+    int get_blocked_orders() const { return blocked_orders_; }
+    LastOrder get_last_order() const;
+    double get_position(SymbolID id) const { return position_ledger_.get_position(id); }
 
 private:
     double equity_;

@@ -3,7 +3,7 @@
 
 namespace chimera {
 
-struct Signal
+struct PressureSignal
 {
     bool fire = false;
     bool is_buy = true;
@@ -13,7 +13,7 @@ struct Signal
 class PressureEngine
 {
 public:
-    Signal evaluate(
+    PressureSignal evaluate(
         double bid,
         double ask,
         double bid_size,

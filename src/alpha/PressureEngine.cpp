@@ -2,7 +2,7 @@
 
 namespace chimera {
 
-Signal PressureEngine::evaluate(
+PressureSignal PressureEngine::evaluate(
     double bid,
     double ask,
     double bid_size,
@@ -10,7 +10,7 @@ Signal PressureEngine::evaluate(
     double last_trade_bid,
     double last_trade_ask)
 {
-    Signal s;
+    PressureSignal s;
 
     double imbalance = (bid_size - ask_size) /
                        (bid_size + ask_size + 1e-9);

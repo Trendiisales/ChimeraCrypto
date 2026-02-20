@@ -1,5 +1,4 @@
 #include "telemetry/TelemetryServer.hpp"
-#include "telemetry/UnifiedTelemetry.hpp"
 #include "engine/InstitutionalEngine.hpp"
 #include <sstream>
 #include <cstring>
@@ -7,9 +6,6 @@
 #include <unistd.h>
 
 namespace chimera {
-
-// Global latency tracker (will be wired from BinanceWSFeed)
-extern Chimera::LatencyTracker g_latency_tracker;
 
 TelemetryServer::TelemetryServer(InstitutionalEngine& engine,
                                  int port)
@@ -36,56 +32,11 @@ void TelemetryServer::stop()
 
 std::string TelemetryServer::build_json()
 {
-    Chimera::EngineSnapshot snap;
-    
-    // Core equity (existing method - unchanged)
-    snap.equity = engine_.get_equity();
-    
-    // Enhanced telemetry (new getters - add these to InstitutionalEngine.hpp)
-    // For now, use safe defaults if methods don't exist yet
-    try {
-        snap.unrealized = engine_.get_unrealized_pnl();
-    } catch (...) {
-        snap.unrealized = 0.0;
-    }
-    
-    try {
-        snap.realized = engine_.get_realized_pnl();
-    } catch (...) {
-        snap.realized = 0.0;
-    }
-    
-    // Latency from global tracker
-    snap.latency_ms = g_latency_tracker.latest();
-    snap.latency_avg = g_latency_tracker.mean();
-    snap.latency_p95 = g_latency_tracker.p95();
-    
-    // Order stats (add getters to InstitutionalEngine.hpp)
-    try {
-        snap.orders_sent = engine_.get_orders_sent();
-        snap.fills = engine_.get_fills();
-        snap.rejects = engine_.get_rejects();
-    } catch (...) {
-        snap.orders_sent = 0;
-        snap.fills = 0;
-        snap.rejects = 0;
-    }
-    
-    // Exposure (add getter to InstitutionalEngine.hpp)
-    try {
-        snap.exposure_usd = engine_.get_exposure_usd();
-    } catch (...) {
-        snap.exposure_usd = 0.0;
-    }
-    
-    // Placeholder values for now
-    snap.slippage_bps = 0.0;
-    snap.fill_probability = 0.0;
-    snap.conviction = 0.0;
-    snap.cost_floor = 6.5;
-    snap.governor_blocked = false;
-    
-    return snap.to_json();
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"equity\":" << engine_.get_equity();
+    oss << "}";
+    return oss.str();
 }
 
 void TelemetryServer::run()
@@ -132,7 +83,6 @@ void TelemetryServer::run()
         std::ostringstream response;
         response << "HTTP/1.1 200 OK\r\n";
         response << "Content-Type: application/json\r\n";
-        response << "Access-Control-Allow-Origin: *\r\n";
         response << "Content-Length: "
                  << body.size() << "\r\n\r\n";
         response << body;

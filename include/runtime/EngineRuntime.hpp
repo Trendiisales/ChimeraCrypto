@@ -4,7 +4,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
-#include "core/LockFreeRing.hpp"
+#include "core/SpscRing.hpp"
 
 namespace chimera {
 
@@ -36,8 +36,8 @@ private:
 
     std::atomic<bool> running_{false};
 
-    LockFreeRing<std::function<void()>> market_ring_{1024};
-    LockFreeRing<std::function<void()>> exec_ring_{1024};
+    SpscRing<std::function<void()>, 1024> market_ring_;
+    SpscRing<std::function<void()>, 1024> exec_ring_;
 };
 
 }

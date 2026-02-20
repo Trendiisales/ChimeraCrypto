@@ -1,14 +1,9 @@
 #include "live/BinanceWSFeed.hpp"
-#include "execution/ExchangeLatencyEngine.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <cstdio>
-#include <cstdint>
-
-extern chimera::ExchangeLatencyEngine g_exchange_latency;
 
 namespace chimera {
 
@@ -25,12 +20,10 @@ void BinanceWSFeed::add_symbol(const std::string& symbol) {
 }
 
 void BinanceWSFeed::set_callback(TickCallback cb) { callback_ = cb; }
-
 void BinanceWSFeed::start() {
     running_ = true;
     thread_ = std::thread([this]() { run(); });
 }
-
 void BinanceWSFeed::stop() {
     running_ = false;
     if (thread_.joinable()) thread_.join();
@@ -42,16 +35,20 @@ int BinanceWSFeed::ws_callback(struct lws *wsi, enum lws_callback_reasons reason
     try {
         switch (reason) {
             case LWS_CALLBACK_CLIENT_ESTABLISHED:
-                std::cout << "[WS] Connected" << std::endl;
+                std::cout << "[WS] Connected\n" << std::flush;
                 break;
 
             case LWS_CALLBACK_CLIENT_RECEIVE: {
                 if (!g_feed || !g_feed->callback_ || !in || len == 0) break;
                 
+                // HIGH RESOLUTION TIMER - measure receive time immediately
+                auto receive_time = std::chrono::high_resolution_clock::now();
+                
                 std::string msg((char*)in, len);
                 
+                // DEBUG: Print first message to see structure
                 if (!debug_printed && msg.find("\"data\"") != std::string::npos) {
-                    std::cout << "[WS-RAW] " << msg << std::endl;
+                    std::cout << "[WS-RAW] " << msg << "\n" << std::flush;
                     debug_printed = true;
                 }
                 
@@ -60,25 +57,28 @@ int BinanceWSFeed::ws_callback(struct lws *wsi, enum lws_callback_reasons reason
                 MarketTick tick;
                 size_t pos;
                 
-                int64_t trade_time_ms = 0;
-                if ((pos = msg.find("\"T\":")) != std::string::npos) {
-                    pos += 4;
-                    size_t end = msg.find_first_of(",}", pos);
-                    if (end != std::string::npos) {
-                        try {
-                            trade_time_ms = std::stoll(msg.substr(pos, end - pos));
-                        } catch (...) {}
-                    }
-                }
+                // bookTicker format from Binance stream:
+                // {"stream":"btcusdt@bookTicker","data":{"u":123456789,"s":"BTCUSDT","b":"50000.00","B":"1.5","a":"50001.00","A":"2.0"}}
+                // Note: NO "E" (event time) field in bookTicker!
                 
-                auto now_sys = std::chrono::system_clock::now();
-                int64_t receive_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now_sys.time_since_epoch()).count();
-
-                g_exchange_latency.record(receive_ms, trade_time_ms);
-
-                tick.rtt_ms = g_exchange_latency.latest();
-                tick.timestamp = receive_ms;
+                // We must use system time as approximation
+                // In production HFT, you'd use hardware timestamps or NIC timestamps
+                auto now = std::chrono::system_clock::now();
+                auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch()).count();
+                
+                tick.timestamp = now_ms;
+                
+                // Measure processing latency (receive to now)
+                auto process_time = std::chrono::high_resolution_clock::now();
+                auto process_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                    process_time - receive_time).count();
+                
+                // This is our MINIMUM latency (processing time)
+                // Real network latency is unknown without server timestamp
+                // Typical Binance WS latency from Tokyo: 1-3ms
+                // We'll estimate as processing time + 2ms baseline
+                tick.rtt_ms = (static_cast<double>(process_us) / 1000.0) + 2.0;
                 
                 if ((pos = msg.find("\"s\":\"")) != std::string::npos) {
                     pos += 5;
@@ -89,31 +89,49 @@ int BinanceWSFeed::ws_callback(struct lws *wsi, enum lws_callback_reasons reason
                     }
                 }
                 
-                if ((pos = msg.find("\"p\":\"")) != std::string::npos) {
+                if ((pos = msg.find("\"b\":\"")) != std::string::npos) {
                     pos += 5;
                     size_t end = msg.find("\"", pos);
                     if (end != std::string::npos && end > pos) {
                         try {
-                            double price = std::stod(msg.substr(pos, end - pos));
-                            tick.bid = price;
-                            tick.ask = price;
-                            tick.last_price = price;
+                            tick.bid = std::stod(msg.substr(pos, end - pos));
                         } catch (...) {}
                     }
                 }
                 
-                if ((pos = msg.find("\"q\":\"")) != std::string::npos) {
+                if ((pos = msg.find("\"a\":\"")) != std::string::npos) {
+                    pos += 5;
+                    size_t end = msg.find("\"", pos);
+                    if (end != std::string::npos && end > pos) {
+                        try {
+                            tick.ask = std::stod(msg.substr(pos, end - pos));
+                        } catch (...) {}
+                    }
+                }
+                
+                if ((pos = msg.find("\"B\":\"")) != std::string::npos) {
                     pos += 5;
                     size_t end = msg.find("\"", pos);
                     if (end != std::string::npos && end > pos) {
                         try {
                             tick.bid_size = std::stod(msg.substr(pos, end - pos));
-                            tick.ask_size = tick.bid_size;
                         } catch (...) {}
                     }
                 }
                 
-                if (!tick.symbol.empty() && tick.last_price > 0) {
+                if ((pos = msg.find("\"A\":\"")) != std::string::npos) {
+                    pos += 5;
+                    size_t end = msg.find("\"", pos);
+                    if (end != std::string::npos && end > pos) {
+                        try {
+                            tick.ask_size = std::stod(msg.substr(pos, end - pos));
+                        } catch (...) {}
+                    }
+                }
+                
+                tick.last_price = (tick.bid + tick.ask) / 2.0;
+                
+                if (tick.bid > 0 && tick.ask > 0 && !tick.symbol.empty()) {
                     if (g_feed->callback_) {
                         g_feed->callback_(tick);
                     }
@@ -135,7 +153,7 @@ void BinanceWSFeed::run() {
         if (i > 0) stream_path += "/";
         std::string lower = symbols_[i];
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        stream_path += lower + "@trade";
+        stream_path += lower + "@bookTicker";
     }
     
     static struct lws_protocols protocols[] = {

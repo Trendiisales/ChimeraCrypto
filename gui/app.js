@@ -144,7 +144,7 @@
     let ws = null, reconnectTimer = null, attempts = 0;
     function connect() {
         if (reconnectTimer) clearTimeout(reconnectTimer);
-        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+        const wsUrl = 'ws://154.45.251.118:9001';
         const el = $('ws-status');
         if (el) { el.textContent = 'Connecting...'; el.className = 'footer-value connecting'; }
         

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdio>
 #include <cmath>
+#include "config/TradingConfig.hpp"
 
 namespace chimera {
 
@@ -24,13 +25,13 @@ inline const char* regime_name(Regime r) {
 // DIAGNOSTIC VERSION - prints why regime is assigned
 inline Regime classify_regime(double short_avg, double long_avg) {
     static int diag_counter = 0;
-    bool should_print = (++diag_counter % 500 == 0); // Print every 500 calls
+    bool should_print = (++diag_counter % TradingConfig::REGIME_DIAG_INTERVAL == 0);
     
-    // Safeguard against division by zero - LOWERED from 0.01 to 0.004
-    // Most crypto microstructure shows long_avg in 0.004-0.009 range during normal conditions
-    if (long_avg < 0.004) {
+    // Safeguard against division by zero
+    if (long_avg < TradingConfig::REGIME_MIN_LONG_AVG) {
         if (should_print) {
-            std::printf("[REGIME-DIAG] long_avg=%.4f < 0.004 → REGIME_DEAD (insufficient baseline)\n", long_avg);
+            std::printf("[REGIME-DIAG] long_avg=%.4f < %.4f → REGIME_DEAD (insufficient baseline)\n", 
+                       long_avg, TradingConfig::REGIME_MIN_LONG_AVG);
             std::fflush(stdout);
         }
         return REGIME_DEAD;
@@ -38,27 +39,21 @@ inline Regime classify_regime(double short_avg, double long_avg) {
     
     double ratio = short_avg / long_avg;
     
-    // Regime classification thresholds - UPDATED to allow GRIND/BUILDUP more easily
-    // DEAD: ratio < 0.6 (market extremely quiet - was 0.8, too strict)
-    // GRIND: 0.6 <= ratio < 1.5 (normal market, MICRO strategy allowed)
-    // BUILDUP: 1.5 <= ratio < 2.5 (increasing volatility)
-    // BREAKOUT: ratio >= 2.5 (high volatility)
-    
     Regime result;
     const char* reason;
     
-    if (ratio < 0.6) {
+    if (ratio < TradingConfig::REGIME_DEAD_THRESHOLD) {
         result = REGIME_DEAD;
-        reason = "ratio < 0.6";
-    } else if (ratio < 1.5) {
+        reason = "ratio < DEAD_THRESHOLD";
+    } else if (ratio < TradingConfig::REGIME_GRIND_THRESHOLD) {
         result = REGIME_GRIND;
-        reason = "0.6 <= ratio < 1.5 (MICRO allowed)";
-    } else if (ratio < 2.5) {
+        reason = "DEAD <= ratio < GRIND (MICRO allowed)";
+    } else if (ratio < TradingConfig::REGIME_BUILDUP_THRESHOLD) {
         result = REGIME_BUILDUP;
-        reason = "1.5 <= ratio < 2.5";
+        reason = "GRIND <= ratio < BUILDUP";
     } else {
         result = REGIME_BREAKOUT;
-        reason = "ratio >= 2.5";
+        reason = "ratio >= BUILDUP (BREAKOUT)";
     }
     
     if (should_print) {

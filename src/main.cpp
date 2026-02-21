@@ -237,7 +237,7 @@ int main() {
             snapshot.pnl = controller.get_realized_pnl();
             snapshot.unrealized_pnl = 0.0;
             snapshot.day_pnl = controller.get_total_pnl();
-            snapshot.latency_ms = g_exchange_latency.latest();
+            snapshot.latency_ms = g_exchange_latency.p95();
             snapshot.orders_sent = controller.get_total_trades();
             snapshot.fills_received = controller.get_total_trades();
             snapshot.positions = controller.get_open_positions();
@@ -246,6 +246,10 @@ int main() {
             snapshot.kill_switch = false;
             
             spine.publish(&snapshot);
+            
+            // Broadcast to WebSocket
+            ws_server.broadcast(spine.json());
+            
             last_snapshot = now;
         }
         

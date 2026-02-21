@@ -102,10 +102,6 @@ int WsTelemetryServer::callback_ws(struct lws* wsi,
         break;
     }
 
-    case LWS_CALLBACK_CLOSED:
-        std::printf("[WS] Client disconnected\n");
-        std::fflush(stdout);
-        break;
 
     default:
         break;

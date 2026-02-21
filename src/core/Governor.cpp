@@ -104,6 +104,12 @@ void StatefulGovernor::log_reject(const Signal& signal,
 
 bool StatefulGovernor::approve(const Signal& signal)
 {
+    // CRITICAL: MICRO layer is PARKED - reject all MICRO signals
+    if (signal.layer == LayerType::MICRO) {
+        log_reject(signal, "MICRO_PARKED");
+        return false;
+    }
+
     update_symbol_ranking();
 
     if (current_latency_ > config_.latency_limit_ms) {

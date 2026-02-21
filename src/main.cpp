@@ -2,7 +2,6 @@
 #include <chrono>
 #include <csignal>
 #include <atomic>
-#include "engine/InstitutionalEngine.hpp"
 #include "live/BinanceWSFeed.hpp"
 #include "telemetry/TelemetrySpine.hpp"
 #include "telemetry/WsTelemetryServer.hpp"
@@ -105,10 +104,14 @@ int main() {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    chimera::InstitutionalEngine engine(10000.0);
     chimera::TelemetrySpine spine;
     chimera::WsTelemetryServer ws_server(9001, spine, "");
     ws_server.start();
+    
+    // Wire BalancedEngine to broadcast to GUI
+    controller.set_gui_broadcast([&ws_server](const std::string& json_message) {
+        ws_server.broadcast(json_message);
+    });
 
     chimera::BinanceWSFeed feed;
     feed.add_symbol("btcusdt");
@@ -120,8 +123,8 @@ int main() {
         else if (tick.symbol == "ethusdt") price_cache.set_eth(tick.last_price);
         else if (tick.symbol == "solusdt") price_cache.set_sol(tick.last_price);
         
-        engine.update_book(tick.symbol, tick.bid, tick.ask, tick.bid_size, tick.ask_size);
-        engine.tick(tick.symbol);
+        // engine.update_book(tick.symbol, tick.bid, tick.ask, tick.bid_size, tick.ask_size);
+        // engine.tick(tick.symbol);
         
         // Call engines
         if (!g_exchange_latency.ready()) return;
@@ -238,9 +241,9 @@ int main() {
             snapshot.orders_sent = controller.get_total_trades();
             snapshot.fills_received = controller.get_total_trades();
             snapshot.positions = controller.get_open_positions();
-            snapshot.orders_blocked = engine.get_blocked_orders();
-            snapshot.governor = engine.get_governor_state();
-            snapshot.kill_switch = engine.is_halted();
+            snapshot.orders_blocked = 0;
+            snapshot.governor = 0;
+            snapshot.kill_switch = false;
             
             spine.publish(&snapshot);
             last_snapshot = now;

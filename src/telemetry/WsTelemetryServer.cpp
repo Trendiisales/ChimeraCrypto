@@ -3,10 +3,13 @@
 #include <iostream>
 #include <queue>
 #include <mutex>
+#include <set>
 
 using namespace chimera;
 
 WsTelemetryServer* WsTelemetryServer::self_ = nullptr;
+static std::set<struct lws*> connected_clients;
+static std::mutex clients_mutex;
 
 WsTelemetryServer::WsTelemetryServer(int port,
                                      TelemetrySpine& spine,
@@ -26,17 +29,14 @@ WsTelemetryServer::~WsTelemetryServer()
 }
 
 void WsTelemetryServer::broadcast(const std::string& json_message) {
-    std::printf("[WS-BROADCAST] Called with message: %s\n", json_message.substr(0, 100).c_str());
-    std::fflush(stdout);
-    
     std::lock_guard<std::mutex> lock(queue_mutex_);
     message_queue_.push(json_message);
     
-    std::printf("[WS-BROADCAST] Message queued, queue size: %zu\n", message_queue_.size());
-    std::fflush(stdout);
-    
     if (context_) {
-        lws_cancel_service(context_);
+        std::lock_guard<std::mutex> client_lock(clients_mutex);
+        for (auto* wsi : connected_clients) {
+            lws_callback_on_writable(wsi);
+        }
     }
 }
 
@@ -49,28 +49,26 @@ int WsTelemetryServer::callback_ws(struct lws* wsi,
     switch (reason) {
 
     case LWS_CALLBACK_ESTABLISHED:
-        std::printf("[WS] Client connected\n");
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        connected_clients.insert(wsi);
+        std::printf("[WS] Client connected, total: %zu\n", connected_clients.size());
         std::fflush(stdout);
         lws_callback_on_writable(wsi);
         break;
+    }
 
     case LWS_CALLBACK_SERVER_WRITEABLE:
     {
         if (!self_) break;
 
-        // Check if we have queued messages first
         std::string msg_to_send;
-        bool has_message = false;
         {
             std::lock_guard<std::mutex> lock(self_->queue_mutex_);
             if (!self_->message_queue_.empty()) {
                 msg_to_send = self_->message_queue_.front();
                 self_->message_queue_.pop();
-                has_message = true;
-                std::printf("[WS-SEND] Sending queued message: %s\n", msg_to_send.substr(0, 50).c_str());
-                std::fflush(stdout);
             } else {
-                // Fall back to regular telemetry snapshot
                 msg_to_send = self_->spine_.json();
             }
         }
@@ -86,7 +84,21 @@ int WsTelemetryServer::callback_ws(struct lws* wsi,
 
         lws_write(wsi, p, msg_len, LWS_WRITE_TEXT);
 
-        lws_callback_on_writable(wsi);
+        {
+            std::lock_guard<std::mutex> lock(self_->queue_mutex_);
+            if (!self_->message_queue_.empty()) {
+                lws_callback_on_writable(wsi);
+            }
+        }
+        break;
+    }
+
+    case LWS_CALLBACK_CLOSED:
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        connected_clients.erase(wsi);
+        std::printf("[WS] Client disconnected, remaining: %zu\n", connected_clients.size());
+        std::fflush(stdout);
         break;
     }
 
@@ -146,5 +158,10 @@ void WsTelemetryServer::stop()
     if (context_) {
         lws_context_destroy(context_);
         context_ = nullptr;
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        connected_clients.clear();
     }
 }

@@ -3,6 +3,8 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <queue>
+#include <mutex>
 #include <libwebsockets.h>
 #include "telemetry/TelemetrySpine.hpp"
 
@@ -18,6 +20,9 @@ public:
 
     void start();
     void stop();
+    
+    // NEW: Broadcast arbitrary JSON message to all connected clients
+    void broadcast(const std::string& json_message);
 
     // MUST BE PUBLIC for libwebsockets protocol table
     static int callback_ws(struct lws* wsi,
@@ -34,6 +39,10 @@ private:
     struct lws_context* context_;
     std::thread service_thread_;
     std::atomic<bool> running_;
+    
+    // NEW: Message queue for broadcasting
+    std::queue<std::string> message_queue_;
+    std::mutex queue_mutex_;
 
     static WsTelemetryServer* self_;
 };

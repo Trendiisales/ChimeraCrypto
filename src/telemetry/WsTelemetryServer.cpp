@@ -1,6 +1,8 @@
 #include "telemetry/WsTelemetryServer.hpp"
 #include <cstring>
 #include <iostream>
+#include <queue>
+#include <mutex>
 
 using namespace chimera;
 
@@ -23,6 +25,21 @@ WsTelemetryServer::~WsTelemetryServer()
     stop();
 }
 
+void WsTelemetryServer::broadcast(const std::string& json_message) {
+    std::printf("[WS-BROADCAST] Called with message: %s\n", json_message.substr(0, 100).c_str());
+    std::fflush(stdout);
+    
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    message_queue_.push(json_message);
+    
+    std::printf("[WS-BROADCAST] Message queued, queue size: %zu\n", message_queue_.size());
+    std::fflush(stdout);
+    
+    if (context_) {
+        lws_cancel_service(context_);
+    }
+}
+
 int WsTelemetryServer::callback_ws(struct lws* wsi,
                                     enum lws_callback_reasons reason,
                                     void* user,
@@ -32,6 +49,8 @@ int WsTelemetryServer::callback_ws(struct lws* wsi,
     switch (reason) {
 
     case LWS_CALLBACK_ESTABLISHED:
+        std::printf("[WS] Client connected\n");
+        std::fflush(stdout);
         lws_callback_on_writable(wsi);
         break;
 
@@ -39,22 +58,42 @@ int WsTelemetryServer::callback_ws(struct lws* wsi,
     {
         if (!self_) break;
 
-        std::string json = self_->spine_.json();
+        // Check if we have queued messages first
+        std::string msg_to_send;
+        bool has_message = false;
+        {
+            std::lock_guard<std::mutex> lock(self_->queue_mutex_);
+            if (!self_->message_queue_.empty()) {
+                msg_to_send = self_->message_queue_.front();
+                self_->message_queue_.pop();
+                has_message = true;
+                std::printf("[WS-SEND] Sending queued message: %s\n", msg_to_send.substr(0, 50).c_str());
+                std::fflush(stdout);
+            } else {
+                // Fall back to regular telemetry snapshot
+                msg_to_send = self_->spine_.json();
+            }
+        }
 
         unsigned char buffer[LWS_PRE + 4096];
         unsigned char* p = &buffer[LWS_PRE];
 
-        size_t msg_len = json.size();
+        size_t msg_len = msg_to_send.size();
         if (msg_len > 4096)
             msg_len = 4096;
 
-        std::memcpy(p, json.c_str(), msg_len);
+        std::memcpy(p, msg_to_send.c_str(), msg_len);
 
         lws_write(wsi, p, msg_len, LWS_WRITE_TEXT);
 
         lws_callback_on_writable(wsi);
         break;
     }
+
+    case LWS_CALLBACK_CLOSED:
+        std::printf("[WS] Client disconnected\n");
+        std::fflush(stdout);
+        break;
 
     default:
         break;

@@ -1,4 +1,6 @@
 #pragma once
+// MarketTick is defined in BinanceWSFeed.hpp - include that as the single source of truth
+#include "live/BinanceWSFeed.hpp"
 #include <string>
 #include <functional>
 #include <thread>
@@ -9,17 +11,8 @@
 
 namespace chimera {
 
-struct MarketTick {
-    std::string symbol;
-    double bid;
-    double ask;
-    double bid_size;
-    double ask_size;
-    double last_price;
-    uint64_t timestamp;
-    double rtt_ms;  // ADD THIS
-};
-
+// BinanceFeed is a legacy REST-based feed, kept for compilation.
+// Active feed is BinanceWSFeed. MarketTick struct lives in BinanceWSFeed.hpp.
 class BinanceFeed {
 public:
     using TickCallback = std::function<void(const MarketTick&)>;

@@ -147,8 +147,11 @@ struct TradingConfig {
     // ------------------------------------------------------------------------
     
     // Volatility-normalized trailing stop
-    // Trail distance = TRAIL_LONG_VOL_MULT * long_vol
-    static constexpr double TRAIL_LONG_VOL_MULT = 0.75;
+    // Trail distance = TRAIL_LONG_VOL_MULT * long_vol * price  (price units)
+    // long_vol is log-return stddev ~0.0003 on BTC
+    // At price=$85000: trail = 2.5 * 0.0003 * 85000 = $63.75 (~7.5bp)
+    // This gives the trade room to breathe without giving back the whole move
+    static constexpr double TRAIL_LONG_VOL_MULT = 2.5;
     
     // Minimum profit (in bp) before trailing stop activates
     // Raised from 1.0bp to 2.5bp - don't trail until we've beaten costs

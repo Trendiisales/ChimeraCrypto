@@ -763,14 +763,9 @@ private:
         s.pos.mfe = std::max(s.pos.mfe, move_bp);
         s.pos.mae = std::min(s.pos.mae, move_bp);
         
-        // CRITICAL: MFE SCRATCH - Exit if no profit after 8ms
-        // This prevents SOL-style losses: mfe=0.00, mae=-9.26bp in 30ms
-        int64_t hold_ms = (ts - s.pos.entry_ts) / 1000;
-        if (hold_ms > 8 && s.pos.mfe < 0.01) {
-            // No immediate followthrough - wrong-side entry, scratch it
-            exit(id, move_bp, ts, s);
-            return;
-        }
+        // Scratch rule removed - was using /1000 (microseconds, not ms)
+        // causing exit on tick 2 of every trade before price could move.
+        // Hard stop (-15bp) + trailing stop + 30s timeout handle bad entries.
         
         // Update peak price for trailing
         if (move_bp > 0) {  // In profit
@@ -778,24 +773,34 @@ private:
         }
         
         // VOLATILITY-NORMALIZED TRAILING EXIT
-        // Use EMA-based long_vol (adaptive baseline)
+        // long_vol_ema is log-return stddev (e.g. 0.0003 = 0.03% per tick)
+        // trail_distance must be in PRICE UNITS to compare with peak_price
+        // Correct: trail_distance = multiplier * long_vol * current_price
         double long_vol = s.long_vol_ema;
-        double trail_distance = TradingConfig::TRAIL_LONG_VOL_MULT * long_vol;
+        double trail_distance = TradingConfig::TRAIL_LONG_VOL_MULT * long_vol * price;
         
         // Calculate peak profit in bp
         double peak_profit_bp = (s.pos.peak_price - s.pos.entry_price) / s.pos.entry_price * 10000.0;
         
-        // If we've achieved minimum profit, enable trailing stop
+        // MICRO/GRIND: hard take-profit at +4bp
+        // Imbalance signals revert quickly - lock in the edge before it fades
+        if (s.pos.layer == LAYER_MICRO && move_bp >= 4.0) {
+            exit(id, move_bp, ts, s);
+            return;
+        }
+
+        // IMPULSE/EXPAND: trailing stop once minimum profit reached
         if (peak_profit_bp >= TradingConfig::MIN_PROFIT_TO_TRAIL_BP) {
-            // Check if price has retraced from peak by more than trail distance
             if (price < s.pos.peak_price - trail_distance) {
                 exit(id, move_bp, ts, s);
                 return;
             }
         }
         
-        // SAFETY STOPS - Prevent catastrophic loss
-        double max_loss_bp = -15.0;  // Hard stop at -15bp
+        // HARD STOP - Layer-aware
+        // MICRO/GRIND: tight stop, wrong-side imbalance reverses fast
+        // IMPULSE/EXPAND: wider stop, trend trades need room to breathe
+        double max_loss_bp = (s.pos.layer == LAYER_MICRO) ? -5.0 : -10.0;
         if (move_bp <= max_loss_bp) {
             exit(id, move_bp, ts, s);
             return;
@@ -806,8 +811,10 @@ private:
             return;  // Don't allow exit yet
         }
         
-        // TIME-BASED EMERGENCY EXIT - Prevent stale positions
-        int64_t max_hold_ms = 30000;  // 30 seconds max
+        // TIME EXIT - Layer-aware max hold
+        // MICRO/GRIND: 10s max - imbalance signals are short-lived
+        // IMPULSE/EXPAND: 60s max - trend trades need time to develop
+        int64_t max_hold_ms = (s.pos.layer == LAYER_MICRO) ? 10000 : 60000;
         if (ts - s.pos.entry_ts > max_hold_ms) {
             exit(id, move_bp, ts, s);
             return;
@@ -936,7 +943,7 @@ private:
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
         
-        int64_t hold_time_ms = (ts - s.pos.entry_ts) / 1000;
+        int64_t hold_time_ms = ts - s.pos.entry_ts;  // ts is already milliseconds
         double current_latency = snapshots_[id].lat_p95_ms;
         double slippage_bps = 2.0;
         

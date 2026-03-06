@@ -43,8 +43,9 @@ public:
         http_server_.stop();
     }
     
-    void on_tick(int id, double price, int64_t ts, double latency_ms) {
-        balanced_.on_tick(id, price, ts, latency_ms);
+    void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
+        balanced_.on_tick(id, tick, ts, latency_ms);
         update_market_state(id, price, ts);
         
         auto& ms = market_state_[id];

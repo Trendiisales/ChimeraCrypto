@@ -3,20 +3,277 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chimera Trading Desk</title>
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="stylesheet" href="/style.css?v=11">
+<title>Chimera Multi-Engine Trading Desk</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background: #0a0a0f;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.container {
+    max-width: 100%;
+    padding: 8px;
+}
+
+.header {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    padding: 12px 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.title h1 {
+    margin: 0;
+    font-size: 20px;
+    color: #00d4ff;
+    letter-spacing: 2px;
+}
+
+.subtitle {
+    font-size: 11px;
+    color: #888;
+    font-weight: 300;
+}
+
+.status-indicators {
+    display: flex;
+    gap: 20px;
+}
+
+.status-item {
+    text-align: center;
+}
+
+.status-label {
+    font-size: 9px;
+    color: #666;
+    display: block;
+    text-transform: uppercase;
+}
+
+.status-value {
+    font-size: 13px;
+    color: #fff;
+    font-weight: 600;
+}
+
+.mode-badge {
+    padding: 3px 10px;
+    background: #ff660033;
+    color: #ff6600;
+    border-radius: 10px;
+}
+
+.health-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #666;
+}
+
+.health-dot.active {
+    background: #00ff00;
+    box-shadow: 0 0 8px #00ff00;
+}
+
+/* Symbol sections - now with 4 engines */
+.symbol-engines {
+    margin-bottom: 12px;
+    background: #0f0f14;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.symbol-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: linear-gradient(90deg, #0f3460, #1a1a2e);
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.symbol-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #e94560;
+    letter-spacing: 1px;
+}
+
+.live-price {
+    font-size: 20px;
+    font-weight: 900;
+    color: #00d4ff;
+    text-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+}
+
+.portfolio-r {
+    font-size: 11px;
+    color: #00ff00;
+    font-weight: 600;
+}
+
+/* Flexible grid - scales to 4 engines */
+.engine-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}
+
+.engine-panel {
+    background: linear-gradient(145deg, #1a1a2e, #16213e);
+    border-radius: 6px;
+    padding: 10px;
+    border: 1px solid #2a2a3e;
+    transition: all 0.2s ease;
+}
+
+.engine-panel:hover {
+    border-color: #0f3460;
+    transform: translateY(-2px);
+}
+
+.engine-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #0f3460;
+}
+
+.engine-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #e94560;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.engine-status {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.engine-status.active {
+    background: #00ff0033;
+    color: #00ff00;
+    box-shadow: 0 0 5px #00ff0033;
+}
+
+.engine-status.inactive {
+    background: #33333344;
+    color: #666;
+}
+
+/* Compact stats grid */
+.engine-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+.engine-stat {
+    background: #0f1419;
+    padding: 6px;
+    border-radius: 4px;
+    border-left: 2px solid #0f3460;
+}
+
+.engine-stat-label {
+    font-size: 8px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 2px;
+}
+
+.engine-stat-value {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.engine-stat-value.positive {
+    color: #00ff00;
+}
+
+.engine-stat-value.negative {
+    color: #ff0055;
+}
+
+/* Footer */
+.footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: #0f0f14;
+    border-radius: 6px;
+    font-size: 10px;
+    color: #666;
+}
+
+.footer-item {
+    display: flex;
+    gap: 8px;
+}
+
+.footer-label {
+    color: #666;
+}
+
+.footer-value {
+    color: #fff;
+    font-weight: 600;
+}
+
+.footer-value.connected {
+    color: #00ff00;
+}
+
+.footer-value.disconnected {
+    color: #ff0055;
+}
+
+/* Responsive: collapse to 2 columns on smaller screens */
+@media (max-width: 1400px) {
+    .engine-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Reserve slot styling for 4th engine */
+.engine-panel.reserved {
+    border: 1px dashed #444;
+    background: linear-gradient(145deg, #0f0f14, #12121a);
+    opacity: 0.5;
+}
+
+.engine-panel.reserved .engine-title {
+    color: #666;
+}
+</style>
 </head>
 <body>
 
 <div class="container">
     <div class="header">
         <div class="title">
-            <img src="/favicon.png" alt="Chimera" class="logo">
-            <div>
-                <h1>CHIMERA</h1>
-                <span class="subtitle">Live Shadow Trading</span>
-            </div>
+            <h1>CHIMERA</h1>
+            <span class="subtitle">Multi-Engine Volatility Framework</span>
         </div>
         <div class="status-indicators">
             <div class="status-item">
@@ -27,123 +284,332 @@
                 <span class="status-label">Health</span>
                 <span id="health-indicator" class="health-dot"></span>
             </div>
-            <div class="status-item">
-                <span class="status-label">Uptime</span>
-                <span id="uptime" class="status-value">0.0h</span>
+        </div>
+    </div>
+
+    <!-- BTC Engines -->
+    <div class="symbol-engines">
+        <div class="symbol-header">
+            <span class="symbol-name">BTCUSDT</span>
+            <span class="live-price" id="btc-live-price">--</span>
+            <span id="btc-portfolio-r" class="portfolio-r">Portfolio: 0.00R</span>
+        </div>
+        <div class="engine-grid">
+            <!-- Micro -->
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Micro</span>
+                    <span id="btc-micro-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="btc-micro-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="btc-micro-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="btc-micro-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="btc-micro-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Structural -->
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Structural</span>
+                    <span id="btc-structural-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="btc-structural-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="btc-structural-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="btc-structural-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="btc-structural-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Convex -->
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Convex</span>
+                    <span id="btc-convex-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="btc-convex-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="btc-convex-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="btc-convex-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="btc-convex-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Compression -->
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Compression</span>
+                    <span id="btc-compression-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="btc-compression-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="btc-compression-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="btc-compression-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="btc-compression-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <div class="prices-panel">
-        <div class="price-item">
-            <span class="price-symbol">BTC</span>
-            <span id="btc_price" class="price-value">--</span>
-            <span id="btc_change" class="price-change">--</span>
+    <!-- ETH Engines -->
+    <div class="symbol-engines">
+        <div class="symbol-header">
+            <span class="symbol-name">ETHUSDT</span>
+            <span class="live-price" id="eth-live-price">--</span>
+            <span id="eth-portfolio-r" class="portfolio-r">Portfolio: 0.00R</span>
         </div>
-        <div class="price-item">
-            <span class="price-symbol">ETH</span>
-            <span id="eth_price" class="price-value">--</span>
-            <span id="eth_change" class="price-change">--</span>
-        </div>
-        <div class="price-item">
-            <span class="price-symbol">SOL</span>
-            <span id="sol_price" class="price-value">--</span>
-            <span id="sol_change" class="price-change">--</span>
+        <div class="engine-grid">
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Micro</span>
+                    <span id="eth-micro-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="eth-micro-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="eth-micro-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="eth-micro-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="eth-micro-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Structural</span>
+                    <span id="eth-structural-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="eth-structural-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="eth-structural-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="eth-structural-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="eth-structural-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Convex</span>
+                    <span id="eth-convex-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="eth-convex-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="eth-convex-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="eth-convex-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="eth-convex-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            <div class="engine-panel reserved">
+                <div class="engine-header">
+                    <span class="engine-title">Reserved</span>
+                    <span class="engine-status inactive">READY</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="pnl-summary">
-        <div class="pnl-item">
-            <span class="pnl-label">Equity</span>
-            <span id="equity" class="pnl-value large">$10,000</span>
+    <!-- SOL Engines -->
+    <div class="symbol-engines">
+        <div class="symbol-header">
+            <span class="symbol-name">SOLUSDT</span>
+            <span class="live-price" id="sol-live-price">--</span>
+            <span id="sol-portfolio-r" class="portfolio-r">Portfolio: 0.00R</span>
         </div>
-        <div class="pnl-item">
-            <span class="pnl-label">Day P&L</span>
-            <span id="day_pnl" class="pnl-value large">$0.00</span>
-        </div>
-        <div class="pnl-item">
-            <span class="pnl-label">Realized</span>
-            <span id="pnl" class="pnl-value">$0.00</span>
-        </div>
-        <div class="pnl-item">
-            <span class="pnl-label">Unrealized</span>
-            <span id="unrealized_pnl" class="pnl-value">$0.00</span>
-        </div>
-    </div>
-
-    <div class="main-grid">
-        <div class="trade-feed-panel">
-            <div class="panel-header">
-                <h2>Live Trades</h2>
-                <span id="trade-count" class="badge">0</span>
-            </div>
-            <div id="trade-feed" class="trade-feed">
-                <div class="no-trades">Waiting for trades...</div>
-            </div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-header">Execution</div>
-                <div class="stat-row">
-                    <span class="stat-label">RTT</span>
-                    <span id="latency_ms" class="stat-value">--</span>
+        <div class="engine-grid">
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Micro</span>
+                    <span id="sol-micro-status" class="engine-status inactive">INACTIVE</span>
                 </div>
-                <div class="stat-row">
-                    <span class="stat-label">Orders</span>
-                    <span id="orders_sent" class="stat-value">0</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Fills</span>
-                    <span id="fills_received" class="stat-value">0</span>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="sol-micro-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="sol-micro-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="sol-micro-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="sol-micro-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
                 </div>
             </div>
-
-            <div class="stat-card">
-                <div class="stat-header">Risk</div>
-                <div class="stat-row">
-                    <span class="stat-label">Governor</span>
-                    <span id="governor" class="stat-value badge">ACTIVE</span>
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Structural</span>
+                    <span id="sol-structural-status" class="engine-status inactive">INACTIVE</span>
                 </div>
-                <div class="stat-row">
-                    <span class="stat-label">Exposure</span>
-                    <span id="exposure_usd" class="stat-value">$0</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Positions</span>
-                    <span id="positions" class="stat-value">0</span>
-                </div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-header">Performance</div>
-                <div class="stat-row">
-                    <span class="stat-label">Win Rate</span>
-                    <span id="win_rate" class="stat-value">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Sharpe</span>
-                    <span id="sharpe_ratio" class="stat-value">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Trades</span>
-                    <span id="trades_today" class="stat-value">0</span>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="sol-structural-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="sol-structural-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="sol-structural-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="sol-structural-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
                 </div>
             </div>
-
-            <div class="stat-card">
-                <div class="stat-header">Trade Filters</div>
-                <div style="font-size: 10px; max-height: 120px; overflow-y: auto;">
-                    <table style="width:100%; color: #aaa;">
-                        <thead>
-                            <tr style="font-size: 9px;">
-                                <th>Sym</th><th>Blk%</th><th>Lat</th><th>Vol</th><th>Rnk</th>
-                            </tr>
-                        </thead>
-                        <tbody id="rejection-data">
-                            <tr><td colspan="5">--</td></tr>
-                        </tbody>
-                    </table>
+            <div class="engine-panel">
+                <div class="engine-header">
+                    <span class="engine-title">Convex</span>
+                    <span id="sol-convex-status" class="engine-status inactive">INACTIVE</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div id="sol-convex-size" class="engine-stat-value">0.00R</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div id="sol-convex-entry" class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div id="sol-convex-mfe" class="engine-stat-value">0.00bp</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div id="sol-convex-pnl" class="engine-stat-value">0.00bp</div>
+                    </div>
+                </div>
+            </div>
+            <div class="engine-panel reserved">
+                <div class="engine-header">
+                    <span class="engine-title">Reserved</span>
+                    <span class="engine-status inactive">READY</span>
+                </div>
+                <div class="engine-stats">
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Size</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">Entry</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">MFE</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
+                    <div class="engine-stat">
+                        <div class="engine-stat-label">P&L</div>
+                        <div class="engine-stat-value">--</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -155,51 +621,12 @@
             <span id="system-time" class="footer-value">--</span>
         </div>
         <div class="footer-item">
-            <span class="footer-label">WebSocket:</span>
-            <span id="ws-status" class="footer-value">Connecting...</span>
+            <span class="footer-label">Connection:</span>
+            <span id="connection-status" class="footer-value">Connecting...</span>
         </div>
     </div>
 </div>
 
-<script src="/app.js?v=11"></script>
-
-<script>
-// Handle rejection stats messages
-function updateRejectionStats(data) {
-    const container = document.getElementById('rejection-data');
-    if (!container) return;
-    
-    let html = '<table style="width:100%; color: #fff;"><tr><th>Symbol</th><th>Evals</th><th>Blocks</th><th>Rate</th><th>Latency</th><th>Vol</th><th>Spread</th><th>Velocity</th><th>Loss</th><th>Rank</th></tr>';
-    
-    for (const [symbol, stats] of Object.entries(data)) {
-        const rate = (stats.block_rate * 100).toFixed(1);
-        html += `<tr>
-            <td>${symbol}</td>
-            <td>${stats.evaluations}</td>
-            <td>${stats.blocks}</td>
-            <td>${rate}%</td>
-            <td>${stats.latency}</td>
-            <td>${stats.volatility}</td>
-            <td>${stats.spread}</td>
-            <td>${stats.velocity}</td>
-            <td>${stats.loss_streak}</td>
-            <td>${stats.not_ranked}</td>
-        </tr>`;
-    }
-    html += '</table>';
-    container.innerHTML = html;
-}
-
-// Extend WebSocket message handler
-const originalOnMessage = ws.onmessage;
-ws.onmessage = function(event) {
-    const msg = JSON.parse(event.data);
-    if (msg.type === 'rejection_stats') {
-        updateRejectionStats(msg.data);
-    } else if (originalOnMessage) {
-        originalOnMessage(event);
-    }
-};
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

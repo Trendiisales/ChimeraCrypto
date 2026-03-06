@@ -1,225 +1,180 @@
 #pragma once
 
-// Example integration showing how to wire all new components into BalancedEngine
-
 #include "core/BalancedEngine.hpp"
-#include "governor/CapitalAllocationGovernor.hpp"
-#include "execution/LatencyDiagnostics.hpp"
+#include "core/StructuralEngine.hpp"
+#include "telemetry/SimpleHttpServer.hpp"
+#include <sstream>
+#include <iomanip>
 
 namespace chimera {
 
-// Enhanced BalancedEngine with capital allocation and diagnostics
-class EnhancedBalancedEngine : public BalancedEngine {
+class EnhancedBalancedEngine {
 public:
-    EnhancedBalancedEngine()
-        : BalancedEngine(),
-          capital_governor_(10000.0, 100, 0.10, 0.70, 0.40, 10'000'000),
-          last_capital_update_us_(0),
-          last_diagnostic_dump_us_(0)
-    {
-    }
-
-    // Override tick processing to add diagnostics
-    void on_tick_enhanced(int sym_idx, double price, double latency_ms, int64_t timestamp_us) {
-        const char* symbol_name = get_symbol_name(sym_idx);
+    EnhancedBalancedEngine() : http_server_(8080) {
+        structural_[0] = StructuralEngine("btcusdt");
+        structural_[1] = StructuralEngine("ethusdt");
+        structural_[2] = StructuralEngine("solusdt");
         
-        // 1. Record tick arrival for load profiling
-        latency_diagnostics_.on_tick(symbol_name);
+        http_server_.set_state_callback([this]() {
+            return generate_state_json();
+        });
         
-        // 2. Record latency sample (for histogram and shock detection)
-        capital_governor_.record_latency(symbol_name, latency_ms, timestamp_us);
-        latency_diagnostics_.on_latency_sample(symbol_name, latency_ms);
-        
-        // 3. Apply infrastructure shock suppression
-        double shock_factor = capital_governor_.shock_factor(symbol_name);
-        
-        // 4. Process tick normally (your existing logic)
-        // ... call existing tick handler ...
-        
-        // 5. Periodic capital rebalancing (every 30 seconds)
-        if (timestamp_us - last_capital_update_us_ > 30'000'000) {
-            capital_governor_.update();
-            log_capital_allocation();
-            last_capital_update_us_ = timestamp_us;
+        if (!http_server_.start()) {
+            std::fprintf(stderr, "[ENHANCED] Failed to start HTTP server on port 8080\n");
         }
         
-        // 6. Periodic diagnostic dump (every 60 seconds)
-        if (timestamp_us - last_diagnostic_dump_us_ > 60'000'000) {
-            log_diagnostics();
-            last_diagnostic_dump_us_ = timestamp_us;
-        }
+        std::printf("\n");
+        std::printf("╔════════════════════════════════════════════════════════════════╗\n");
+        std::printf("║              STRUCTURAL ENGINE LAYER - ADDED                  ║\n");
+        std::printf("╠════════════════════════════════════════════════════════════════╣\n");
+        std::printf("║ Original BalancedEngine: MICRO trades (10-30bp)              ║\n");
+        std::printf("║ + Structural Engine:     RIDERS (30-150bp)                    ║\n");
+        std::printf("║                                                                ║\n");
+        std::printf("║ Directional Dominance: ENFORCED                               ║\n");
+        std::printf("║ Structural exits → 45-tick micro cooldown                     ║\n");
+        std::printf("║ Portfolio cap: 2.0R per symbol (shared)                       ║\n");
+        std::printf("║ GUI: http://154.45.251.118:8080                               ║\n");
+        std::printf("╚════════════════════════════════════════════════════════════════╝\n");
+        std::printf("\n");
+        std::fflush(stdout);
     }
-
-    // Override trade evaluation to add diagnostics
-    bool should_enter_trade_enhanced(int sym_idx, double volatility, double latency_ms) {
-        const char* symbol_name = get_symbol_name(sym_idx);
-        
-        // Record evaluation attempt
-        latency_diagnostics_.on_evaluation(symbol_name);
-        
-        // Check infrastructure shock - suppress if active
-        if (capital_governor_.is_under_shock(symbol_name)) {
-            // Could still evaluate but with reduced aggression
-            double shock_factor = capital_governor_.shock_factor(symbol_name);
-            volatility *= shock_factor;  // Reduce perceived volatility
-        }
-        
-        // Your existing evaluation logic
-        bool passed = evaluate_entry_conditions(sym_idx, volatility, latency_ms);
-        
-        // If blocked by latency, record it
-        if (!passed && was_blocked_by_latency(latency_ms)) {
-            latency_diagnostics_.on_latency_block(symbol_name);
-        }
-        
-        return passed;
+    
+    ~EnhancedBalancedEngine() {
+        http_server_.stop();
     }
-
-    // Override position sizing to use capital allocation
-    double compute_position_size_enhanced(int sym_idx, double volatility_mult, double base_size) {
-        const char* symbol_name = get_symbol_name(sym_idx);
+    
+    void on_tick(int id, double price, int64_t ts, double latency_ms) {
+        balanced_.on_tick(id, price, ts, latency_ms);
+        update_market_state(id, price, ts);
         
-        // Get allocated capital for this symbol
-        double allocated_capital = capital_governor_.capital_for(symbol_name);
-        
-        // Get shock suppression factor
-        double shock_factor = capital_governor_.shock_factor(symbol_name);
-        
-        // Compute size with allocation
-        double size = (allocated_capital * 0.02) * volatility_mult * shock_factor;
-        
-        return size;
-    }
-
-    // Override trade close to record performance
-    void on_trade_close_enhanced(int sym_idx, double pnl_bps, double slippage_bps, 
-                                 double trade_latency_ms, int64_t timestamp_us) {
-        const char* symbol_name = get_symbol_name(sym_idx);
-        
-        // Record trade with full metrics
-        capital_governor_.record_trade(
-            symbol_name,
-            pnl_bps,
-            slippage_bps,
-            trade_latency_ms,
-            timestamp_us
+        auto& ms = market_state_[id];
+        structural_[id].evaluate(
+            price,
+            ms.vol_ratio,
+            ms.displacement_bp,
+            ms.regime,
+            ms.vol_rising,
+            ts,
+            ms.available_R
         );
-        
-        // Your existing close logic
-        // ... handle position cleanup ...
     }
-
-    // Build enhanced telemetry JSON
-    std::string build_telemetry_json_enhanced() const {
-        std::ostringstream oss;
-        oss << "{";
+    
+    std::string get_rejection_stats() const { return balanced_.get_rejection_stats(); }
+    double get_total_pnl() const { return balanced_.get_total_pnl(); }
+    double get_realized_pnl() const { return balanced_.get_realized_pnl(); }
+    int get_total_trades() const { return balanced_.get_total_trades(); }
+    int get_open_positions() const { return balanced_.get_open_positions(); }
+    
+    std::string generate_state_json() {
+        std::ostringstream json;
+        json << std::fixed << std::setprecision(2);
+        json << "{";
         
-        // Your existing telemetry fields
-        oss << "\"equity\":" << get_equity() << ",";
-        oss << "\"realized_pnl\":" << get_realized_pnl() << ",";
+        // Add prices at top level
+        json << "\"btc_price\":" << market_state_[0].last_price << ",";
+        json << "\"eth_price\":" << market_state_[1].last_price << ",";
+        json << "\"sol_price\":" << market_state_[2].last_price << ",";
         
-        // Add capital allocation snapshot
-        oss << "\"capital_allocation\":" << capital_governor_.build_json_snapshot() << ",";
-        
-        // Add latency diagnostics
-        oss << "\"latency_diagnostics\":" << latency_diagnostics_.build_json();
-        
-        oss << "}";
-        return oss.str();
-    }
-
-    // Get performance by latency band for analysis
-    void analyze_band_performance() {
         const char* symbols[] = {"btcusdt", "ethusdt", "solusdt"};
-        
-        fprintf(stderr, "\n=== PnL BY LATENCY BAND ===\n");
-        for (const char* symbol : symbols) {
-            auto bands = capital_governor_.get_band_performance(symbol);
+        for (int i = 0; i < 3; i++) {
+            auto stats = structural_[i].get_stats();
+            auto& ms = market_state_[i];
             
-            fprintf(stderr, "%s:\n", symbol);
-            fprintf(stderr, "  FAST (<15ms):   %3d trades, avg %.1f bps, slip %.1f bps - %s\n",
-                   bands[BAND_FAST].trades,
-                   bands[BAND_FAST].avg_pnl_bps,
-                   bands[BAND_FAST].avg_slippage_bps,
-                   bands[BAND_FAST].profitable ? "PROFITABLE" : "UNPROFITABLE");
-            
-            fprintf(stderr, "  MEDIUM (15-25ms): %3d trades, avg %.1f bps, slip %.1f bps - %s\n",
-                   bands[BAND_MEDIUM].trades,
-                   bands[BAND_MEDIUM].avg_pnl_bps,
-                   bands[BAND_MEDIUM].avg_slippage_bps,
-                   bands[BAND_MEDIUM].profitable ? "PROFITABLE" : "UNPROFITABLE");
-            
-            fprintf(stderr, "  SLOW (25-50ms): %3d trades, avg %.1f bps, slip %.1f bps - %s\n",
-                   bands[BAND_SLOW].trades,
-                   bands[BAND_SLOW].avg_pnl_bps,
-                   bands[BAND_SLOW].avg_slippage_bps,
-                   bands[BAND_SLOW].profitable ? "PROFITABLE" : "UNPROFITABLE");
+            json << "\"" << symbols[i] << "\":{";
+            json << "\"micro_active\":" << (ms.micro_active ? "true" : "false") << ",";
+            json << "\"micro_entry_price\":" << ms.micro_entry_price << ",";
+            json << "\"micro_mfe_bp\":" << ms.micro_mfe_bp << ",";
+            json << "\"micro_mae_bp\":" << ms.micro_mae_bp << ",";
+            json << "\"micro_total_pnl_bp\":" << (balanced_.get_realized_pnl() * 100) << ",";
+            json << "\"micro_total_trades\":" << balanced_.get_total_trades() << ",";
+            json << "\"structural_active\":" << (stats.active ? "true" : "false") << ",";
+            json << "\"structural_size_R\":" << stats.size_R << ",";
+            json << "\"structural_entry_price\":" << stats.entry_price << ",";
+            json << "\"structural_mfe_bp\":" << stats.mfe_bp << ",";
+            json << "\"structural_mae_bp\":" << stats.mae_bp << ",";
+            json << "\"structural_total_pnl_bp\":" << stats.total_pnl_bp << ",";
+            json << "\"structural_total_trades\":" << stats.total_trades << ",";
+            json << "\"structural_win_rate\":" << stats.win_rate << ",";
+            json << "\"structural_cooldown_active\":" << (stats.cooldown_active ? "true" : "false") << ",";
+            json << "\"structural_cooldown_remaining\":" << stats.cooldown_remaining << ",";
+            double portfolio_R = (ms.micro_active ? 1.0 : 0.0) + stats.size_R;
+            json << "\"portfolio_R\":" << portfolio_R;
+            json << "}";
+            if (i < 2) json << ",";
         }
-        fprintf(stderr, "===========================\n\n");
-    }
-
-    // Get latency percentiles for monitoring
-    void log_latency_percentiles() {
-        const char* symbols[] = {"btcusdt", "ethusdt", "solusdt"};
         
-        fprintf(stderr, "\n=== LATENCY PERCENTILES ===\n");
-        for (const char* symbol : symbols) {
-            auto stats = capital_governor_.get_latency_stats(symbol);
-            
-            fprintf(stderr, "%s: p50=%.1f p75=%.1f p95=%.1f p99=%.1f max=%.1f ms\n",
-                   symbol,
-                   stats.p50,
-                   stats.p75,
-                   stats.p95,
-                   stats.p99,
-                   stats.max);
-        }
-        fprintf(stderr, "===========================\n\n");
+        json << "}";
+        return json.str();
     }
 
 private:
-    const char* get_symbol_name(int sym_idx) const {
-        return (sym_idx == 0) ? "btcusdt" : 
-               (sym_idx == 1) ? "ethusdt" : "solusdt";
-    }
-
-    void log_capital_allocation() {
-        fprintf(stderr, "[CAPITAL-ALLOCATION] BTC=%.1f%% ETH=%.1f%% SOL=%.1f%%\n",
-               capital_governor_.weight("btcusdt") * 100.0,
-               capital_governor_.weight("ethusdt") * 100.0,
-               capital_governor_.weight("solusdt") * 100.0);
-    }
-
-    void log_diagnostics() {
-        // Dump full diagnostic report
-        fprintf(stderr, "%s", latency_diagnostics_.generate_report().c_str());
+    BalancedEngine balanced_;
+    StructuralEngine structural_[3];
+    SimpleHttpServer http_server_;
+    
+    struct SimpleMarketState {
+        double last_price = 0.0;
+        double vol_ratio = 1.0;
+        double displacement_bp = 0.0;
+        int regime = 0;
+        bool vol_rising = false;
+        double available_R = 2.0;
+        bool micro_active = false;
+        double micro_entry_price = 0.0;
+        double micro_mfe_bp = 0.0;
+        double micro_mae_bp = 0.0;
+        std::deque<double> returns;
+        double ema_vol = 0.0;
+        int buildup_ticks = 0;
+    };
+    
+    SimpleMarketState market_state_[3];
+    
+    void update_market_state(int id, double price, int64_t ts) {
+        auto& ms = market_state_[id];
         
-        // Also dump band performance
-        analyze_band_performance();
+        if (ms.last_price > 0) {
+            double ret = std::log(price / ms.last_price);
+            ms.returns.push_back(ret);
+            if (ms.returns.size() > 20) ms.returns.pop_front();
+            
+            double sum_sq = 0.0;
+            for (double r : ms.returns) sum_sq += r * r;
+            double short_vol = std::sqrt(sum_sq / ms.returns.size());
+            
+            if (ms.ema_vol == 0.0) ms.ema_vol = short_vol;
+            else ms.ema_vol = 0.95 * ms.ema_vol + 0.05 * short_vol;
+            
+            ms.vol_ratio = (ms.ema_vol > 0) ? short_vol / ms.ema_vol : 1.0;
+            ms.vol_rising = (short_vol > ms.ema_vol * 1.1);
+            
+            if (ms.vol_ratio > 1.3) {
+                ms.regime = 2;
+                ms.buildup_ticks++;
+            } else if (ms.vol_ratio > 0.8) {
+                ms.regime = 1;
+                ms.buildup_ticks = 0;
+            } else {
+                ms.regime = 0;
+                ms.buildup_ticks = 0;
+            }
+            
+            static double anchor_price[3] = {0, 0, 0};
+            static int tick_counter = 0;
+            tick_counter++;
+            
+            if (tick_counter % 20 == 0) anchor_price[id] = price;
+            if (anchor_price[id] > 0) {
+                ms.displacement_bp = (price - anchor_price[id]) / anchor_price[id] * 10000.0;
+            }
+        }
         
-        // And latency percentiles
-        log_latency_percentiles();
+        ms.last_price = price;
+        int micro_positions = balanced_.get_open_positions();
+        ms.micro_active = (micro_positions > 0);
+        double micro_R_used = micro_positions > 0 ? 1.0 : 0.0;
+        ms.available_R = 2.0 - micro_R_used - structural_[id].pos.size_R;
     }
-
-    // Placeholder for existing logic
-    bool evaluate_entry_conditions(int sym_idx, double volatility, double latency_ms) {
-        // Your existing logic here
-        return true;
-    }
-
-    bool was_blocked_by_latency(double latency_ms) {
-        // Check if this latency would trigger block
-        return latency_ms > 25.0;  // Example threshold
-    }
-
-    double get_equity() const { return 10000.0; }  // Placeholder
-    double get_realized_pnl() const { return 0.0; }  // Placeholder
-
-    // New members
-    CapitalAllocationGovernor capital_governor_;
-    LatencyDiagnostics latency_diagnostics_;
-    int64_t last_capital_update_us_;
-    int64_t last_diagnostic_dump_us_;
 };
 
 } // namespace chimera

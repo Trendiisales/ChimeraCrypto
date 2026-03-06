@@ -29,6 +29,8 @@
 #include <string>
 #include <functional>
 #include <deque>
+#include <sstream>
+#include <iomanip>
 
 namespace chimera {
 
@@ -78,7 +80,15 @@ struct Position {
 struct SymbolState {
     double last_price;
     std::deque<double> short_returns;  // Rolling log returns for short window
-    std::deque<double> long_returns;   // Rolling log returns for long window
+    std::deque<double> long_returns;   // Rolling log returns for long window (deprecated - keeping for backwards compat)
+    
+    // EMA-based long volatility tracking (adaptive baseline)
+    double long_vol_ema;   // Exponential moving average of volatility
+    bool ema_initialized;  // Flag to track if EMA has been seeded
+    
+    // EMA-based vol_ratio smoothing (reduces tick-to-tick noise in regime classification)
+    double vol_ratio_ema;      // Smoothed volatility ratio
+    bool ratio_ema_initialized;  // Flag to track if ratio EMA has been seeded
 
     Position pos;
     int64_t cooldown_until;
@@ -90,6 +100,10 @@ struct SymbolState {
         last_price = 0;
         short_returns.clear();
         long_returns.clear();
+        long_vol_ema = 0.0;
+        ema_initialized = false;
+        vol_ratio_ema = 0.0;
+        ratio_ema_initialized = false;
         cooldown_until = 0;
         regime = REGIME_DEAD;
         regime_ticks = 0;
@@ -218,6 +232,35 @@ public:
                 static_cast<int>(stall_detector_.samples.load(std::memory_order_relaxed))
             ));
             
+            // Broadcast performance summary
+            broadcast_to_gui(GuiMessageBuilder::performance_summary(
+                10000.0 + total_pnl_,  // Base equity + realized PnL
+                total_pnl_,
+                total_trades_,
+                open_positions_,
+                loss_streak_
+            ));
+            
+            // Broadcast comprehensive telemetry for GUI dashboard
+            std::ostringstream telem;
+            telem << std::fixed << std::setprecision(2);
+            telem << "{\"type\":\"telemetry\","
+                  << "\"equity\":" << (10000.0 + total_pnl_) << ","
+                  << "\"day_pnl\":" << total_pnl_ << ","
+                  << "\"pnl\":" << total_pnl_ << ","
+                  << "\"unrealized_pnl\":0,"
+                  << "\"trades_today\":" << total_trades_ << ","
+                  << "\"positions\":" << open_positions_ << ","
+                  << "\"exposure_usd\":0,"
+                  << "\"win_rate\":" << (total_trades_ > 0 ? 1.0 - (double)consecutive_losses_ / total_trades_ : 0.0) << ","
+                  << "\"sharpe_ratio\":0.0,"
+                  << "\"btc_position\":0,"
+                  << "\"eth_position\":0,"
+                  << "\"sol_position\":0,"
+                  << "\"governor\":\"ACTIVE\""
+                  << "}";
+            broadcast_to_gui(telem.str());
+            
             std::fflush(stdout);
             last_report_ts = ts;
         }
@@ -300,12 +343,28 @@ public:
         }
         s.last_price = price;
         
-        // Push into short window
+        // Push into short window (rolling window for short-term volatility)
         s.short_returns.push_back(r);
         if (s.short_returns.size() > TradingConfig::SHORT_VOL_WINDOW)
             s.short_returns.pop_front();
         
-        // Push into long window
+        // Update long_vol using EMA instead of rolling window
+        // This makes long_vol adaptive instead of inert
+        if (s.short_returns.size() >= TradingConfig::SHORT_VOL_WINDOW) {
+            double current_short_vol = compute_volatility(s.short_returns);
+            
+            if (!s.ema_initialized) {
+                // Seed EMA with first valid short_vol measurement
+                s.long_vol_ema = current_short_vol;
+                s.ema_initialized = true;
+            } else {
+                // Update EMA: long_vol = alpha * current + (1-alpha) * previous
+                s.long_vol_ema = TradingConfig::LONG_VOL_EMA_ALPHA * current_short_vol + 
+                                (1.0 - TradingConfig::LONG_VOL_EMA_ALPHA) * s.long_vol_ema;
+            }
+        }
+        
+        // Keep old long_returns for backward compatibility (but not used anymore)
         s.long_returns.push_back(r);
         if (s.long_returns.size() > TradingConfig::LONG_VOL_WINDOW)
             s.long_returns.pop_front();
@@ -350,7 +409,8 @@ public:
     int get_open_positions() const { return open_positions_; }
     
     void set_gui_broadcast(GuiBroadcastCallback callback) {
-        gui_broadcast_ = callback;
+        // DISABLED - GUI decoupled, logs only
+        // gui_broadcast_ = callback;
     }
     
 private:
@@ -441,9 +501,9 @@ private:
     }
     
     void broadcast_to_gui(const std::string& message) {
-        if (gui_broadcast_) {
-            gui_broadcast_(message);
-        }
+        // DISABLED - GUI decoupled, using logs only
+        // No WebSocket, no broadcast, just pure trading
+        return;
     }
     
     const char* regime_name(Regime r) const {
@@ -473,24 +533,38 @@ private:
         // Increment regime stability counter
         s.regime_ticks++;
         
-        // Need minimum data
-        if (s.long_returns.size() < TradingConfig::LONG_VOL_WINDOW) 
+        // Need minimum data - wait for EMA to initialize
+        if (!s.ema_initialized || s.short_returns.size() < TradingConfig::SHORT_VOL_WINDOW) 
             return REGIME_DEAD;
         
-        // Compute short volatility (standard deviation of log returns)
+        // Compute short volatility (standard deviation of log returns from rolling window)
         double short_vol = compute_volatility(s.short_returns);
-        double long_vol = compute_volatility(s.long_returns);
         
-        // Compute volatility ratio
-        double vol_ratio = 0.0;
+        // Use EMA-based long_vol (adaptive baseline)
+        double long_vol = s.long_vol_ema;
+        
+        // Compute raw volatility ratio
+        double vol_ratio_raw = 0.0;
         if (long_vol > TradingConfig::VOL_MIN_LONG)
-            vol_ratio = short_vol / long_vol;
+            vol_ratio_raw = short_vol / long_vol;
+        
+        // Apply EMA smoothing to vol_ratio to reduce tick-to-tick noise
+        if (!s.ratio_ema_initialized) {
+            s.vol_ratio_ema = vol_ratio_raw;
+            s.ratio_ema_initialized = true;
+        } else {
+            s.vol_ratio_ema = TradingConfig::VOL_RATIO_EMA_ALPHA * vol_ratio_raw + 
+                             (1.0 - TradingConfig::VOL_RATIO_EMA_ALPHA) * s.vol_ratio_ema;
+        }
+        
+        // Use smoothed vol_ratio for regime classification
+        double vol_ratio = s.vol_ratio_ema;
         
         // INSTRUMENTATION - Print every 500 classifications
         static int diag_counter = 0;
         if (++diag_counter % TradingConfig::REGIME_DIAG_INTERVAL == 0) {
             const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
-            std::printf("[REGIME-RAW] %s | short_vol=%.6f | long_vol=%.6f | vol_ratio=%.3f | regime=%s | ticks=%d\n",
+            std::printf("[REGIME-RAW] %s | short_vol=%.6f | long_vol_ema=%.6f | vol_ratio_smooth=%.3f | regime=%s | ticks=%d\n",
                        sym, short_vol, long_vol, vol_ratio, regime_name(s.regime), s.regime_ticks);
             std::fflush(stdout);
         }
@@ -500,30 +574,36 @@ private:
             return s.regime;  // Hold current regime
         }
         
-        // HYSTERESIS STATE MACHINE - Separate ENTER and EXIT thresholds
+        // HYSTERESIS STATE MACHINE - Different thresholds for entering vs exiting regimes
         Regime new_regime = s.regime;
         
         switch (s.regime) {
             case REGIME_DEAD:
-                if (vol_ratio > TradingConfig::REGIME_GRIND_ENTER)
+                // Exit DEAD only if ratio rises above 0.90
+                if (vol_ratio > TradingConfig::REGIME_DEAD_EXIT)
                     new_regime = REGIME_GRIND;
                 break;
                 
             case REGIME_GRIND:
-                if (vol_ratio > TradingConfig::REGIME_BUILDUP_ENTER)
+                // Exit to BUILDUP if ratio > 1.45
+                if (vol_ratio > TradingConfig::REGIME_GRIND_EXIT_TO_BUILDUP)
                     new_regime = REGIME_BUILDUP;
-                else if (vol_ratio < TradingConfig::REGIME_GRIND_EXIT)
+                // Exit to DEAD only if ratio < 0.75
+                else if (vol_ratio < TradingConfig::REGIME_GRIND_EXIT_TO_DEAD)
                     new_regime = REGIME_DEAD;
                 break;
                 
             case REGIME_BUILDUP:
-                if (vol_ratio > TradingConfig::REGIME_BREAKOUT_ENTER)
+                // Exit to BREAKOUT if ratio > 1.95
+                if (vol_ratio > TradingConfig::REGIME_BUILDUP_TO_BREAKOUT)
                     new_regime = REGIME_BREAKOUT;
+                // Exit to GRIND only if ratio < 1.10
                 else if (vol_ratio < TradingConfig::REGIME_BUILDUP_EXIT)
                     new_regime = REGIME_GRIND;
                 break;
                 
             case REGIME_BREAKOUT:
+                // Exit to BUILDUP only if ratio < 1.55
                 if (vol_ratio < TradingConfig::REGIME_BREAKOUT_EXIT)
                     new_regime = REGIME_BUILDUP;
                 break;
@@ -532,7 +612,7 @@ private:
         // If regime changed, reset tick counter and log
         if (new_regime != s.regime) {
             const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
-            std::printf("[REGIME-CHANGE] %s: %s → %s (vol_ratio=%.3f after %d ticks)\n",
+            std::printf("[REGIME-CHANGE] %s: %s → %s (vol_ratio_smooth=%.3f after %d ticks)\n",
                        sym, regime_name(s.regime), regime_name(new_regime), vol_ratio, s.regime_ticks);
             std::fflush(stdout);
             s.regime_ticks = 0;
@@ -555,8 +635,15 @@ private:
         }
         
         if (s.regime == REGIME_BREAKOUT && s.short_returns.size() >= TradingConfig::IMPULSE_MIN_SHORT_TICKS) {
+            // VOLATILITY FLOOR GATE - Prevent trading in cost-dominated regimes
+            // Use EMA-based long_vol (adaptive baseline)
+            double long_vol = s.long_vol_ema;
+            if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+                rejection_throttle_.record(key, "low_long_vol");
+                return false;
+            }
+            
             // DISPLACEMENT CONFIRMATION - Require minimum price movement from regime anchor
-            double long_vol = compute_volatility(s.long_returns);
             double displacement = std::abs(price - s.regime_anchor_price);
             double min_required = TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol;
             
@@ -582,9 +669,16 @@ private:
         }
         
         if (s.regime == REGIME_BUILDUP || s.regime == REGIME_BREAKOUT) {
-            // Recompute volatility ratio
+            // Recompute volatility ratio using EMA-based long_vol
             double short_vol = compute_volatility(s.short_returns);
-            double long_vol = compute_volatility(s.long_returns);
+            double long_vol = s.long_vol_ema;  // Use EMA-based adaptive baseline
+            
+            // VOLATILITY FLOOR GATE - Prevent trading in cost-dominated regimes
+            if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+                rejection_throttle_.record(key, "low_long_vol");
+                return false;
+            }
+            
             double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
             
             if (vol_ratio > TradingConfig::EXPANSION_VOL_RATIO && s.short_returns.size() >= TradingConfig::EXPANSION_MIN_SHORT_TICKS) {
@@ -619,13 +713,27 @@ private:
         // Calculate current P&L in bp
         double move_bp = (price - s.pos.entry_price) / s.pos.entry_price * 10000.0;
         
+        // Update MFE (Maximum Favorable Excursion) and MAE (Maximum Adverse Excursion)
+        s.pos.mfe = std::max(s.pos.mfe, move_bp);
+        s.pos.mae = std::min(s.pos.mae, move_bp);
+        
+        // CRITICAL: MFE SCRATCH - Exit if no profit after 8ms
+        // This prevents SOL-style losses: mfe=0.00, mae=-9.26bp in 30ms
+        int64_t hold_ms = (ts - s.pos.entry_ts) / 1000;
+        if (hold_ms > 8 && s.pos.mfe < 0.01) {
+            // No immediate followthrough - wrong-side entry, scratch it
+            exit(id, move_bp, ts, s);
+            return;
+        }
+        
         // Update peak price for trailing
         if (move_bp > 0) {  // In profit
             s.pos.peak_price = std::max(s.pos.peak_price, price);
         }
         
         // VOLATILITY-NORMALIZED TRAILING EXIT
-        double long_vol = compute_volatility(s.long_returns);
+        // Use EMA-based long_vol (adaptive baseline)
+        double long_vol = s.long_vol_ema;
         double trail_distance = TradingConfig::TRAIL_LONG_VOL_MULT * long_vol;
         
         // Calculate peak profit in bp
@@ -666,10 +774,27 @@ private:
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
                     (layer == LAYER_EXPANSION) ? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
-        sig.expected_bps = (layer == LAYER_MICRO) ? 10.0 :
+        sig.expected_bps = (layer == LAYER_MICRO) ? 15.0 :
                           (layer == LAYER_IMPULSE) ? 18.0 :
                           (layer == LAYER_LEADLAG) ? 12.0 : 30.0;
         sig.confidence = 1.0;
+        
+        // CRITICAL: HARD COST FLOOR GATE
+        // Enforces economic minimum - trade only if expected edge > total costs
+        // Total cost = spread (2bp) + slippage (2bp) + commission (2.5bp) = 6.5bp
+        static constexpr double COST_FLOOR_BP = 6.5;
+        
+        if (sig.expected_bps < COST_FLOOR_BP) {
+            // HARD REJECT - insufficient expected edge to beat costs
+            std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + 
+                             " " + ((layer == LAYER_IMPULSE) ? "IMPULSE" : 
+                                    (layer == LAYER_EXPANSION) ? "EXPAND" : "OTHER");
+            rejection_throttle_.record(key, "cost_floor");
+            std::printf("[COST-FLOOR] Rejected %s | expected=%.2fbp < floor=%.2fbp\n",
+                       key.c_str(), sig.expected_bps, COST_FLOOR_BP);
+            std::fflush(stdout);
+            return;  // HARD STOP - do not proceed
+        }
         
         if (!governor_.approve(sig)) {
             return;
@@ -753,6 +878,12 @@ private:
         std::printf("[ENTER] %s | layer=%s | regime=%s | px=%.2f | weight=%.3f | legacy_mult=%.2f\n", 
             sym, mode, regime_name(s.regime), price, final_weight, legacy_size_mult);
         std::fflush(stdout);
+        
+        // Broadcast entry to GUI
+        std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+        broadcast_to_gui(GuiMessageBuilder::position_enter(
+            symbol_full, mode, price, (int)s.regime, final_weight
+        ));
     }
     
     void exit(int id, double pnl, int64_t ts, SymbolState& s) {
@@ -772,6 +903,29 @@ private:
         std::printf("[EXIT] %s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n", 
             sym, pnl, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
         std::fflush(stdout);
+        
+        // Broadcast exit to GUI with complete trade details
+        const char* layer_str = (s.pos.layer == LAYER_MICRO) ? "MICRO" : 
+                               (s.pos.layer == LAYER_IMPULSE) ? "IMPULSE" : 
+                               (s.pos.layer == LAYER_LEADLAG) ? "LEADLAG" : "EXPAND";
+        broadcast_to_gui(GuiMessageBuilder::position_exit(
+            symbol_full, layer_str, pnl, hold_time_ms, current_latency
+        ));
+        
+        // Also send trade info in format GUI expects
+        std::ostringstream trade_msg;
+        trade_msg << std::fixed << std::setprecision(2);
+        trade_msg << "{\"type\":\"trade\","
+                  << "\"last_order_symbol\":\"" << symbol_full << "\","
+                  << "\"last_order_side\":\"" << (pnl > 0 ? "WIN" : "LOSS") << "\","
+                  << "\"last_order_size\":0,"
+                  << "\"last_order_price\":" << s.pos.entry_price << ","
+                  << "\"last_order_conviction\":" << (pnl + 2.0) << ","  // pnl + spread
+                  << "\"last_order_cost_floor\":2.0,"
+                  << "\"last_order_time\":\"" << "now" << "\","
+                  << "\"day_pnl\":" << total_pnl_
+                  << "}";
+        broadcast_to_gui(trade_msg.str());
         
         // PHASE 2: Update reinforcement layer
         AdaptiveReinforcementLayer::TradeResult tr;

@@ -17,19 +17,32 @@ struct TradingConfig {
     // REGIME CLASSIFICATION THRESHOLDS
     // ------------------------------------------------------------------------
     // Controls when market transitions between DEAD/GRIND/BUILDUP/BREAKOUT
+    // Uses HYSTERESIS BANDS - different thresholds for entering vs exiting regimes
+    // This prevents thrashing at boundaries
     
     // Minimum long_avg to avoid division by zero
     static constexpr double REGIME_MIN_LONG_AVG = 0.004;
     
-    // REGIME HYSTERESIS - Separate ENTER and EXIT thresholds to prevent thrashing
-    static constexpr double REGIME_GRIND_ENTER = 0.60;      // Enter GRIND if score rises above this
-    static constexpr double REGIME_GRIND_EXIT = 0.40;       // Exit GRIND only if score falls below this
+    // DEAD REGIME
+    static constexpr double REGIME_DEAD_ENTER = 0.60;   // Enter DEAD if ratio falls below this
+    static constexpr double REGIME_DEAD_EXIT = 0.90;    // Exit DEAD only if ratio rises above this
     
-    static constexpr double REGIME_BUILDUP_ENTER = 1.30;    // Enter BUILDUP if score rises above this
-    static constexpr double REGIME_BUILDUP_EXIT = 1.10;     // Exit BUILDUP only if score falls below this
+    // GRIND REGIME
+    static constexpr double REGIME_GRIND_ENTER_FROM_DEAD = 0.90;     // Enter GRIND from DEAD if ratio > this
+    static constexpr double REGIME_GRIND_EXIT_TO_DEAD = 0.75;        // Exit GRIND to DEAD if ratio < this
+    static constexpr double REGIME_GRIND_EXIT_TO_BUILDUP = 1.55;     // Exit GRIND to BUILDUP if ratio > this (matches BUILDUP_ENTER)
     
-    static constexpr double REGIME_BREAKOUT_ENTER = 1.75;   // Enter BREAKOUT if score rises above this
-    static constexpr double REGIME_BREAKOUT_EXIT = 1.55;    // Exit BREAKOUT only if score falls below this
+    // BUILDUP REGIME
+    // Widened bands - BUILDUP must survive normal pullbacks
+    // Enter at 1.55 (not 1.45) and exit only at 0.95 (not 1.10)
+    // This creates 0.60 point separation for real inertia
+    static constexpr double REGIME_BUILDUP_ENTER = 1.55;    // Enter BUILDUP if ratio rises above this
+    static constexpr double REGIME_BUILDUP_EXIT = 0.95;     // Exit BUILDUP to GRIND only if ratio falls below this
+    static constexpr double REGIME_BUILDUP_TO_BREAKOUT = 1.95;  // Enter BREAKOUT from BUILDUP if ratio > this
+    
+    // BREAKOUT REGIME
+    static constexpr double REGIME_BREAKOUT_ENTER = 1.95;   // Enter BREAKOUT if ratio rises above this
+    static constexpr double REGIME_BREAKOUT_EXIT = 1.55;    // Exit BREAKOUT to BUILDUP only if ratio falls below this
     
     // REGIME STABILITY - Minimum ticks before regime can change again
     static constexpr int MIN_REGIME_TICKS = 30;
@@ -43,7 +56,9 @@ struct TradingConfig {
     static constexpr int IMPULSE_MIN_SHORT_TICKS = 5;
     
     // TRADE STABILITY - Minimum ticks to hold position before allowing exit
-    static constexpr int MIN_HOLD_TICKS = 15;
+    // Raised from 15 to 50 after observing 30ms hold times = pure spread scalping
+    // This prevents exiting on microstructure noise before move develops
+    static constexpr int MIN_HOLD_TICKS = 50;
     
     
     // ------------------------------------------------------------------------
@@ -64,10 +79,40 @@ struct TradingConfig {
     
     // Rolling window sizes for volatility calculation
     static constexpr int SHORT_VOL_WINDOW = 20;    // Short volatility window (ticks)
-    static constexpr int LONG_VOL_WINDOW = 200;    // Long volatility window (ticks)
+    static constexpr int LONG_VOL_WINDOW = 200;    // Long volatility window (ticks) - DEPRECATED, using EMA now
+    
+    // EMA smoothing factor for long volatility baseline
+    // Alpha = 0.06 means ~17-tick half-life (20% faster than 0.05)
+    // Reduced lag helps catch early breakouts without suppressing them
+    // Was 0.05 (~20-tick) - slightly too laggy, causing early low_long_vol rejections
+    static constexpr double LONG_VOL_EMA_ALPHA = 0.06;
+    
+    // EMA smoothing factor for vol_ratio itself
+    // This reduces tick-to-tick noise in regime classification
+    // Alpha = 0.12 gives ~15-20 tick memory
+    static constexpr double VOL_RATIO_EMA_ALPHA = 0.12;
     
     // Minimum long_vol to avoid division by zero
     static constexpr double VOL_MIN_LONG = 1e-8;
+    
+    // ------------------------------------------------------------------------
+    // VOLATILITY FLOOR GATE - COST PREVENTION
+    // ------------------------------------------------------------------------
+    // This is the STRUCTURAL FILTER that prevents trading when market movement
+    // is smaller than transaction costs. If long_vol is too low, even perfect
+    // entries cannot beat the 2bp spread cost.
+    //
+    // This prevents trading in regimes where:
+    //   theoretical_move < slippage_cost (2bp)
+    //   → guarantees negative EV
+    //
+    // Raised from 0.000004 to 0.000010 after observing:
+    //   - Win rate 100% but still losing (1.83bp capture vs 2bp cost)
+    //   - Trading in microscopic vol regimes (0.000001-0.000003)
+    //   - Need 4-5bp moves minimum to beat costs
+    //
+    // This is NOT vol_ratio. This is absolute volatility floor.
+    static constexpr double MIN_LONG_VOL_FOR_TRADING = 0.000010;
     
     
     // ------------------------------------------------------------------------
@@ -75,7 +120,9 @@ struct TradingConfig {
     // ------------------------------------------------------------------------
     
     // Hard cutoff - reject if latency exceeds this
-    static constexpr double LATENCY_HARD_LIMIT_MS = 8.0;
+    // Raised to 35ms - realistic for Binance WS + VPS during burst conditions
+    // Your p95 latency is 24-26ms, don't choke valid breakouts during minor congestion
+    static constexpr double LATENCY_HARD_LIMIT_MS = 35.0;
     
     
     // ------------------------------------------------------------------------
@@ -97,7 +144,9 @@ struct TradingConfig {
     static constexpr double TRAIL_LONG_VOL_MULT = 0.75;
     
     // Minimum profit (in bp) before trailing stop activates
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP = 1.0;
+    // Raised from 1.0bp to 2.5bp - don't trail until we've beaten costs
+    // This prevents early exits on micro-moves that can't cover spread
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP = 2.5;
     
     
     // ------------------------------------------------------------------------

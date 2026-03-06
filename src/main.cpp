@@ -4,19 +4,21 @@
 #include <atomic>
 #include "live/BinanceWSFeed.hpp"
 #include "telemetry/TelemetrySpine.hpp"
-#include "telemetry/WsTelemetryServer.hpp"
+// REMOVED: #include "telemetry/WsTelemetryServer.hpp"
 #include "telemetry/DeskSnapshot.hpp"
 #include "execution/NetworkLatencySystem.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "core/SymbolIndex.hpp"
 #include "core/BalancedEngine.hpp"
+#include "core/EnhancedBalancedEngine.hpp"
+#include "core/TripleEngineBalancedEngine.hpp"
+#include "core/QuadEngineBalancedEngine.hpp"
 #include "engine/VolatilityExpansionEngine.hpp"
 #include "engine/LiquidityVacuumEngine.hpp"
 #include "engine/MultiSymbolAlignmentEngine.hpp"
 #include "logging/TradeLogger.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "core/SymbolIndex.hpp"
-#include "core/BalancedEngine.hpp"
 
 chimera::ExchangeLatencyEngine g_exchange_latency;
 
@@ -78,8 +80,8 @@ void signal_handler(int) {
 
 int main() {
     
-    // Ultra controller
-    chimera::BalancedEngine controller;
+    // Quad engine controller (Micro + Structural + Convex + Compression) + Regime Allocator
+    chimera::QuadEngineBalancedEngine controller;
     
     // Immediate rejection stats test
     std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -105,13 +107,13 @@ int main() {
     std::signal(SIGTERM, signal_handler);
 
     chimera::TelemetrySpine spine;
-    chimera::WsTelemetryServer ws_server(9001, spine, "");
-    ws_server.start();
     
-    // Wire BalancedEngine to broadcast to GUI
-    controller.set_gui_broadcast([&ws_server](const std::string& json_message) {
-        ws_server.broadcast(json_message);
-    });
+    // REMOVED: WebSocket server - GUI decoupled, logs only
+    // chimera::WsTelemetryServer ws_server(9001, spine, "");
+    // ws_server.start();
+    // controller.set_gui_broadcast([&ws_server](const std::string& json_message) {
+    //     ws_server.broadcast(json_message);
+    // });
 
     chimera::BinanceWSFeed feed;
     feed.add_symbol("btcusdt");
@@ -141,7 +143,7 @@ int main() {
         else if (tick.symbol == "ethusdt") sym_idx = 1;
         else if (tick.symbol == "solusdt") sym_idx = 2;
         
-        // Ultra controller
+        // Enhanced controller (micro + structural)
         auto id = chimera::symbol_to_id(tick.symbol);
         controller.on_tick(id, mid, now_ms, g_exchange_latency.p95());
         
@@ -247,8 +249,8 @@ int main() {
             
             spine.publish(&snapshot);
             
-            // Broadcast to WebSocket
-            ws_server.broadcast(spine.json());
+            // REMOVED: WebSocket broadcast - GUI decoupled
+            // ws_server.broadcast(spine.json());
             
             last_snapshot = now;
         }
@@ -257,7 +259,8 @@ int main() {
     }
 
     feed.stop();
-    ws_server.stop();
+    
+    // REMOVED: ws_server.stop();
     
     return 0;
 }

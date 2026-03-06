@@ -1,7 +1,0 @@
-    binance.set_callback([&](const chimera::MarketTick& tick) {
-        tick_count++;
-        
-        // Capture actual RTT
-        latency_sum.fetch_add(tick.rtt_ms);
-        latency_count.fetch_add(1);
-        last_latency_ms.store(tick.rtt_ms);

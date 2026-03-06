@@ -165,6 +165,18 @@ struct TradingConfig {
     
     // Print symbol state every N ticks  
     static constexpr int SYMBOL_STATE_INTERVAL = 500;
+
+    // ------------------------------------------------------------------------
+    // GRIND REVERSION SIGNAL PARAMETERS
+    // ------------------------------------------------------------------------
+    // Fires in GRIND regime using real order book imbalance from @bookTicker
+    //   book_imbalance = (bid_size - ask_size) / (bid_size + ask_size)
+    //   range: -1.0 to +1.0  |  0.35 = bids 2.1x asks = strong buy pressure
+    static constexpr double GRIND_IMBALANCE_THRESHOLD = 0.35;
+
+    // Reject if spread too wide (poor fill quality)
+    //   BTC normal: 0.1-0.5 bps | ETH: 0.2-1.0 bps | SOL: 0.5-2.0 bps
+    static constexpr double GRIND_MAX_SPREAD_BPS = 3.0;
 };
 
 } // namespace chimera

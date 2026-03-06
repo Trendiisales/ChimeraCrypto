@@ -347,7 +347,7 @@ void BinanceWSFeed::run() {
     }
 
     while (running_) {
-        lws_service(context_, 50);
+        lws_service(context_, 5);
     }
 
     lws_context_destroy(context_);

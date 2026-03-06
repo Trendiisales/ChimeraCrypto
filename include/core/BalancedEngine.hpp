@@ -97,6 +97,8 @@ struct SymbolState {
     int regime_ticks;            // Ticks since last regime change (for hysteresis)
     double regime_anchor_price;  // Price when regime last changed (for displacement confirmation)
 
+    MarketTick last_tick;   // Latest tick with real book data
+
     void reset() {
         last_price = 0;
         short_returns.clear();
@@ -205,6 +207,7 @@ public:
         
         // PHASE 2: Update microstructure engines
         update_market_data(id, tick, ts, latency_ms);
+        symbols_[id].last_tick = tick;   // Store for signal checks
         
         // Periodic reporting
         static int64_t last_report_ts = 0;
@@ -402,6 +405,7 @@ public:
         if (check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_expansion(id, price, ts, s, latency_ms)) return;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
+        if (check_grind_reversion(id, price, ts, s, latency_ms)) return;
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
@@ -716,6 +720,32 @@ private:
         return false;
     }
     
+    bool check_grind_reversion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + " GRIND";
+        if (latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
+            rejection_throttle_.record(key, "high_latency"); return false;
+        }
+        if (s.regime != REGIME_GRIND) {
+            rejection_throttle_.record(key, "not_grind_regime"); return false;
+        }
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) {
+            rejection_throttle_.record(key, "no_book_data"); return false;
+        }
+        if (t.spread_bps > TradingConfig::GRIND_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_too_wide"); return false;
+        }
+        double imbalance = t.book_imbalance;
+        if (std::abs(imbalance) < TradingConfig::GRIND_IMBALANCE_THRESHOLD) {
+            rejection_throttle_.record(key, "weak_imbalance"); return false;
+        }
+        if (imbalance < 0) {
+            rejection_throttle_.record(key, "short_not_implemented"); return false;
+        }
+        enter(id, price, ts, s, LAYER_MICRO);
+        return true;
+    }
+
     bool check_leadlag(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         if (ts < layer_lock_until_) return false;
         if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;

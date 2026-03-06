@@ -30,7 +30,7 @@ struct GovernorConfig {
     double low_vol_bps         = 12.0;
     double high_vol_bps        = 7.0;
 
-    double latency_soft_limit  = 20.0;
+    double latency_soft_limit  = 30.0;  // Tokyo VPS: normal WS p95 = 18-25ms
     double latency_hard_limit  = 50.0;
 
     int    loss_streak_limit   = 2;

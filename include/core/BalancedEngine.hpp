@@ -485,7 +485,7 @@ private:
         market_env_.spread_bps  = tick.spread_bps;
         market_env_.book_imbalance = tick.book_imbalance;
         market_env_.latency_ms  = latency_ms;
-        market_env_.net_clean   = (latency_ms < 8.0);
+        market_env_.net_clean   = (latency_ms < TradingConfig::LATENCY_NET_CLEAN_MS);
 
         // ---- AdaptiveAllocator ----
         AdaptiveAllocator::Environment alloc_env;
@@ -718,7 +718,7 @@ private:
     
     bool check_leadlag(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         if (ts < layer_lock_until_) return false;
-        if (latency_ms > 12.0) return false;
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
         return false;
     }
     

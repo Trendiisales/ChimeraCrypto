@@ -57,9 +57,14 @@ public:
 
 private:
     NetRegime classify(double p95) {
-        if (p95 <= 8.0)
+        // Calibrated to Tokyo VPS -> Binance AWS Tokyo:
+        // Normal WS p95 = 18-25ms, REST RTT = 36-38ms
+        // NET_CLEAN  : normal operation, full sizing
+        // NET_UNSTABLE: congestion spike, reduced sizing
+        // NET_BROKEN : network failure, no trading
+        if (p95 <= 30.0)
             return NET_CLEAN;
-        if (p95 <= 20.0)
+        if (p95 <= 60.0)
             return NET_UNSTABLE;
         return NET_BROKEN;
     }

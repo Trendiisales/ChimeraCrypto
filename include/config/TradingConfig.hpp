@@ -120,9 +120,16 @@ struct TradingConfig {
     // ------------------------------------------------------------------------
     
     // Hard cutoff - reject if latency exceeds this
-    // Raised to 35ms - realistic for Binance WS + VPS during burst conditions
-    // Your p95 latency is 24-26ms, don't choke valid breakouts during minor congestion
-    static constexpr double LATENCY_HARD_LIMIT_MS = 35.0;
+    // Calibrated: Tokyo VPS -> Binance AWS Tokyo
+    //   WS p95 = 18-25ms | REST RTT = 36-38ms | Clock offset ~18ms
+    //   HARD LIMIT = 50ms: normal + 2x buffer. Above = genuine congestion.
+    static constexpr double LATENCY_HARD_LIMIT_MS = 50.0;
+
+    // NET_CLEAN threshold: below = full size, above = reduced size
+    static constexpr double LATENCY_NET_CLEAN_MS  = 30.0;
+
+    // Lead-lag max: requires fast execution to capture BTC->ETH/SOL propagation
+    static constexpr double LATENCY_LEADLAG_MAX_MS = 35.0;
     
     
     // ------------------------------------------------------------------------

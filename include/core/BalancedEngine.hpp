@@ -1,4 +1,5 @@
 #pragma once
+#include "live/BinanceWSFeed.hpp"
 #include "config/TradingConfig.hpp"
 #include "LatencyGovernor.hpp"
 #include "RegimeTypes.hpp"
@@ -194,7 +195,8 @@ public:
         std::fflush(stdout);
     }
 
-    inline void on_tick(int id, double price, int64_t ts, double latency_ms) {
+    inline void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         stall_detector_.on_ws_receive();
         stall_detector_.on_eval_start();
         
@@ -202,7 +204,7 @@ public:
         rejection_telemetry_.recordEvaluation(my_symbol);
         
         // PHASE 2: Update microstructure engines
-        update_market_data(id, price, ts, latency_ms);
+        update_market_data(id, tick, ts, latency_ms);
         
         // Periodic reporting
         static int64_t last_report_ts = 0;
@@ -415,69 +417,83 @@ public:
     
 private:
     // PHASE 2: Market data update
-    void update_market_data(int id, double price, int64_t ts, double latency_ms) {
-        // Compute current volatilities
+    // tick carries REAL bid/ask/depth/trade data from the live feed.
+    // No fake constants. If a field is 0.0, the feed hasn't sent it yet —
+    // we use it as-is; the EMA-based engines self-initialise gracefully.
+    void update_market_data(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
         double short_vol = compute_volatility(symbols_[id].short_returns);
-        double long_vol = compute_volatility(symbols_[id].long_returns);
-        
-        // Update ToxicFlowDetector
+        double long_vol  = compute_volatility(symbols_[id].long_returns);
+
+        // ---- ToxicFlowDetector ----
+        // Needs: trade direction volumes, book depth, spread, vol ranges
         ToxicFlowDetector::TickInput toxic_input;
-        toxic_input.trade_volume = 1000.0;
-        toxic_input.aggressive_buy_volume = 500.0;
-        toxic_input.aggressive_sell_volume = 500.0;
-        toxic_input.bid_depth = 50000.0;
-        toxic_input.ask_depth = 50000.0;
-        toxic_input.spread_bps = 2.0;
-        toxic_input.short_range = short_vol;
-        toxic_input.long_range = long_vol;
-        toxic_flow_[id].update(toxic_input);
-        
-        // Update MicroEdgeEngine
+        toxic_input.trade_volume           = tick.trade_qty;
+        toxic_input.aggressive_buy_volume  = tick.agg_buy_volume;
+        toxic_input.aggressive_sell_volume = tick.agg_sell_volume;
+        toxic_input.bid_depth              = tick.bid_size;
+        toxic_input.ask_depth              = tick.ask_size;
+        toxic_input.spread_bps             = tick.spread_bps;
+        toxic_input.short_range            = short_vol;
+        toxic_input.long_range             = long_vol;
+        // Only update when we have real trade data (agg volumes non-zero)
+        if (tick.trade_qty > 0.0) {
+            toxic_flow_[id].update(toxic_input);
+        }
+
+        // ---- MicroEdgeEngine ----
+        // Needs: bid/ask depth, spread, mid, vol ranges, funding (spot = 0)
         MicroEdgeEngine::BookState micro_state;
-        micro_state.bid_depth = 50000.0;
-        micro_state.ask_depth = 50000.0;
-        micro_state.spread_bps = 2.0;
-        micro_state.mid_price = price;
-        micro_state.short_range = short_vol;
-        micro_state.long_range = long_vol;
-        micro_state.funding_rate = 0.0;
-        micro_state.latency_ms = latency_ms;
-        micro_edge_[id].update(micro_state);
-        
-        // Update HybridRegimeClassifier
+        micro_state.bid_depth    = tick.bid_size;
+        micro_state.ask_depth    = tick.ask_size;
+        micro_state.spread_bps   = tick.spread_bps;
+        micro_state.mid_price    = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
+        micro_state.short_range  = short_vol;
+        micro_state.long_range   = long_vol;
+        micro_state.funding_rate = 0.0;   // Spot market - no funding rate
+        micro_state.latency_ms   = latency_ms;
+        // Only update when we have real book data
+        if (tick.bid > 0.0 && tick.ask > 0.0) {
+            micro_edge_[id].update(micro_state);
+        }
+
+        // ---- HybridRegimeClassifier ----
+        // Needs: all of the above combined
         HybridRegimeClassifier::Input regime_input;
-        regime_input.short_range = short_vol;
-        regime_input.long_range = long_vol;
-        regime_input.trade_volume = 1000.0;
-        regime_input.aggressive_buy_volume = 500.0;
-        regime_input.aggressive_sell_volume = 500.0;
-        regime_input.bid_depth = 50000.0;
-        regime_input.ask_depth = 50000.0;
-        regime_input.spread_bps = 2.0;
-        regime_input.latency_ms = latency_ms;
+        regime_input.short_range             = short_vol;
+        regime_input.long_range              = long_vol;
+        regime_input.trade_volume            = tick.trade_qty;
+        regime_input.aggressive_buy_volume   = tick.agg_buy_volume;
+        regime_input.aggressive_sell_volume  = tick.agg_sell_volume;
+        regime_input.bid_depth               = tick.bid_size;
+        regime_input.ask_depth               = tick.ask_size;
+        regime_input.spread_bps              = tick.spread_bps;
+        regime_input.latency_ms              = latency_ms;
+        // Update on every tick (vol ranges always valid after warm-up)
         regime_classifiers_[id].update(regime_input);
-        
-        // Update MarketEnv
+
+        // ---- MarketEnv (cross-symbol aggregate) ----
         double vol0 = compute_volatility(symbols_[0].short_returns);
         double vol1 = compute_volatility(symbols_[1].short_returns);
         double vol2 = compute_volatility(symbols_[2].short_returns);
         market_env_.short_range = (vol0 + vol1 + vol2) / 3.0;
-        
+
         double lvol0 = compute_volatility(symbols_[0].long_returns);
         double lvol1 = compute_volatility(symbols_[1].long_returns);
         double lvol2 = compute_volatility(symbols_[2].long_returns);
-        market_env_.long_range = (lvol0 + lvol1 + lvol2) / 3.0;
-        market_env_.vol_ratio = market_env_.short_range / std::max(market_env_.long_range, 1e-6);
-        market_env_.latency_ms = latency_ms;
-        market_env_.net_clean = (latency_ms < 8.0);
-        
-        // Update AdaptiveAllocator
+        market_env_.long_range  = (lvol0 + lvol1 + lvol2) / 3.0;
+        market_env_.vol_ratio   = market_env_.short_range / std::max(market_env_.long_range, 1e-6);
+        market_env_.spread_bps  = tick.spread_bps;
+        market_env_.book_imbalance = tick.book_imbalance;
+        market_env_.latency_ms  = latency_ms;
+        market_env_.net_clean   = (latency_ms < 8.0);
+
+        // ---- AdaptiveAllocator ----
         AdaptiveAllocator::Environment alloc_env;
         alloc_env.short_range = market_env_.short_range;
-        alloc_env.long_range = market_env_.long_range;
-        alloc_env.spread_bps = 2.0;
-        alloc_env.latency_ms = latency_ms;
-        alloc_env.net_clean = market_env_.net_clean;
+        alloc_env.long_range  = market_env_.long_range;
+        alloc_env.spread_bps  = tick.spread_bps;
+        alloc_env.latency_ms  = latency_ms;
+        alloc_env.net_clean   = market_env_.net_clean;
         adaptive_allocator_.tick(alloc_env);
     }
     

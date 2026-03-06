@@ -121,21 +121,20 @@ int main() {
     feed.add_symbol("solusdt");
 
     feed.set_callback([&](const chimera::MarketTick& tick) {
-        if (tick.symbol == "btcusdt") price_cache.set_btc(tick.last_price);
-        else if (tick.symbol == "ethusdt") price_cache.set_eth(tick.last_price);
-        else if (tick.symbol == "solusdt") price_cache.set_sol(tick.last_price);
-        
-        // engine.update_book(tick.symbol, tick.bid, tick.ask, tick.bid_size, tick.ask_size);
-        // engine.tick(tick.symbol);
-        
-        // Call engines
+        // Derive mid: use real book mid when available, else last trade price
+        double mid = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
+
+        // Update GUI price display (real mid price)
+        if (tick.symbol == "btcusdt") price_cache.set_btc(mid);
+        else if (tick.symbol == "ethusdt") price_cache.set_eth(mid);
+        else if (tick.symbol == "solusdt") price_cache.set_sol(mid);
+
+        // Wait until exchange latency is established before trading
         if (!g_exchange_latency.ready()) return;
-        
+
         auto now = std::chrono::system_clock::now();
         int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now.time_since_epoch()).count();
-        
-        double mid = (tick.bid + tick.ask) * 0.5;
         
         // Map symbol to index
         int sym_idx = -1;
@@ -145,7 +144,7 @@ int main() {
         
         // Enhanced controller (micro + structural)
         auto id = chimera::symbol_to_id(tick.symbol);
-        controller.on_tick(id, mid, now_ms, g_exchange_latency.p95());
+        controller.on_tick(id, tick, now_ms, g_exchange_latency.p95());
         
         static int tick_count = 0;
         tick_count++;

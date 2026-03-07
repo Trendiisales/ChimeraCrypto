@@ -9,6 +9,9 @@
 #include <sstream>
 #include <iomanip>
 #include <vector>
+#include <deque>
+#include <mutex>
+#include <chrono>
 
 namespace chimera {
 
@@ -76,11 +79,14 @@ public:
     }
     
     void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        last_latency_ms_ = latency_ms;
         // Derive scalar price for engines that don't need full tick
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
 
         // 1. Run original BalancedEngine (micro) - passes full tick for real data
         balanced_.on_tick(id, tick, ts, latency_ms);
+        // Detect new trade completions and log them
+        check_new_trades(id);
         
         // 2. Update market state
         update_market_state(id, price, ts);
@@ -184,6 +190,7 @@ public:
     int get_open_positions() const { return balanced_.get_open_positions(); }
     void set_funding_fetcher(chimera::FundingRateFetcher* f) { balanced_.set_funding_fetcher(f); }
     void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
+    void set_latency(double ms) { last_latency_ms_ = ms; }
     
     std::string generate_state_json() {
         std::ostringstream json;
@@ -197,7 +204,24 @@ public:
         json << "\"realized_pnl\":" << balanced_.get_realized_pnl() << ",";
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
-        
+        json << "\"latency_p95\":" << last_latency_ms_ << ",";
+
+        // Trade log JSON array
+        {
+            std::lock_guard<std::mutex> lk(trade_log_mutex_);
+            json << "\"trade_log\":[";
+            bool first_t = true;
+            for (auto& tr : trade_log_) {
+                if (!first_t) json << ",";
+                json << "{\"t\":\"" << tr.time << "\","
+                     << "\"s\":\"" << tr.symbol << "\","
+                     << "\"e\":\"" << tr.engine << "\","
+                     << "\"p\":" << std::setprecision(2) << tr.pnl_bp << "}";
+                first_t = false;
+            }
+            json << "],";
+        }
+
         const char* symbols[] = {"btcusdt", "ethusdt", "solusdt"};
         for (int i = 0; i < 3; i++) {
             auto structural_stats = structural_[i].get_stats();
@@ -220,14 +244,18 @@ public:
             // Structural
             json << "\"structural_active\":" << (structural_stats.active ? "true" : "false") << ",";
             json << "\"structural_size_R\":" << structural_stats.size_R << ",";
+            json << "\"structural_entry_price\":" << structural_stats.entry_price << ",";
             json << "\"structural_mfe_bp\":" << structural_stats.mfe_bp << ",";
+            json << "\"structural_win_rate\":" << structural_stats.win_rate << ",";
             json << "\"structural_total_pnl_bp\":" << structural_stats.total_pnl_bp << ",";
             json << "\"structural_total_trades\":" << structural_stats.total_trades << ",";
             
             // Convex
             json << "\"convex_active\":" << (convex_stats.active ? "true" : "false") << ",";
             json << "\"convex_size_R\":" << convex_stats.size_R << ",";
+            json << "\"convex_entry_price\":" << convex_stats.entry_price << ",";
             json << "\"convex_mfe_bp\":" << convex_stats.mfe_bp << ",";
+            json << "\"convex_win_rate\":" << convex_stats.win_rate << ",";
             json << "\"convex_total_pnl_bp\":" << convex_stats.total_pnl_bp << ",";
             json << "\"convex_total_trades\":" << convex_stats.total_trades << ",";
             
@@ -235,6 +263,8 @@ public:
             json << "\"compression_active\":" << (compression_stats.active ? "true" : "false") << ",";
             json << "\"compression_size_R\":" << compression_stats.size_R << ",";
             json << "\"compression_mfe_bp\":" << compression_stats.mfe_bp << ",";
+            json << "\"compression_entry_price\":" << compression_stats.entry_price << ",";
+            json << "\"compression_win_rate\":" << compression_stats.win_rate << ",";
             json << "\"compression_total_pnl_bp\":" << compression_stats.total_pnl_bp << ",";
             json << "\"compression_total_trades\":" << compression_stats.total_trades << ",";
             json << "\"compression_ticks\":" << compression_stats.compression_ticks << ",";
@@ -278,6 +308,69 @@ private:
     CompressionBreakoutEngine compression_[3];
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
+
+    double last_latency_ms_ = 0.0;
+
+    // Trade log ring buffer
+    struct TradeRecord {
+        std::string time;
+        std::string symbol;
+        std::string engine;
+        double pnl_bp;
+        double entry_price;
+        double exit_price;
+    };
+    std::deque<TradeRecord> trade_log_;
+    std::mutex trade_log_mutex_;
+
+    // Previous trade counts to detect new completions
+    int prev_structural_trades_[3] = {0,0,0};
+    int prev_convex_trades_[3]     = {0,0,0};
+    int prev_compression_trades_[3]= {0,0,0};
+
+    void check_new_trades(int id) {
+        const char* syms[] = {"BTC","ETH","SOL"};
+        auto ss = structural_[id].get_stats();
+        auto cs = convex_[id].get_stats();
+        auto xs = compression_[id].get_stats();
+
+        auto now_str = []() -> std::string {
+            auto t = std::time(nullptr);
+            char buf[16];
+            std::strftime(buf, sizeof(buf), "%H:%M:%S", std::gmtime(&t));
+            return std::string(buf);
+        };
+
+        if (ss.total_trades > prev_structural_trades_[id]) {
+            std::lock_guard<std::mutex> lk(trade_log_mutex_);
+            double last_pnl = ss.total_pnl_bp - (trade_log_.empty() ? 0 :
+                [&]{ double s=0; for(auto& t:trade_log_) if(t.symbol==syms[id]&&t.engine=="STRUCT") s+=t.pnl_bp; return s; }());
+            TradeRecord r; r.time=now_str(); r.symbol=syms[id]; r.engine="STRUCT";
+            r.pnl_bp = ss.total_trades>0 ? ss.total_pnl_bp/ss.total_trades : 0;
+            r.entry_price = ss.entry_price; r.exit_price = 0;
+            trade_log_.push_front(r);
+            if (trade_log_.size() > 50) trade_log_.pop_back();
+            prev_structural_trades_[id] = ss.total_trades;
+        }
+        if (cs.total_trades > prev_convex_trades_[id]) {
+            std::lock_guard<std::mutex> lk(trade_log_mutex_);
+            TradeRecord r; r.time=now_str(); r.symbol=syms[id]; r.engine="CONVEX";
+            r.pnl_bp = cs.total_trades>0 ? cs.total_pnl_bp/cs.total_trades : 0;
+            r.entry_price = cs.entry_price; r.exit_price = 0;
+            trade_log_.push_front(r);
+            if (trade_log_.size() > 50) trade_log_.pop_back();
+            prev_convex_trades_[id] = cs.total_trades;
+        }
+        if (xs.total_trades > prev_compression_trades_[id]) {
+            std::lock_guard<std::mutex> lk(trade_log_mutex_);
+            TradeRecord r; r.time=now_str(); r.symbol=syms[id]; r.engine="COMP";
+            r.pnl_bp = xs.total_trades>0 ? xs.total_pnl_bp/xs.total_trades : 0;
+            r.entry_price = xs.entry_price; r.exit_price = 0;
+            trade_log_.push_front(r);
+            if (trade_log_.size() > 50) trade_log_.pop_back();
+            prev_compression_trades_[id] = xs.total_trades;
+        }
+    }
     
     struct SimpleMarketState {
         double last_price = 0.0;

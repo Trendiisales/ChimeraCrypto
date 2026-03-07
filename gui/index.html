@@ -8,62 +8,73 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Oswald:wght@300;500;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#080c0f;--surface:#0d1117;--border:#1a2332;--border2:#243040;--text:#c8d8e8;--muted:#4a6070;--accent:#00e5ff;--green:#00e676;--red:#ff1744;--yellow:#ffd600;--orange:#ff6d00;--dim:#1e2d3a;--font-mono:'JetBrains Mono',monospace;--font-head:'Oswald',sans-serif}
+:root{--bg:#080c0f;--surface:#0d1117;--border:#1a2332;--border2:#243040;--text:#c8d8e8;--muted:#4a6070;--accent:#00e5ff;--green:#00e676;--red:#ff1744;--yellow:#ffd600;--orange:#ff6d00;--dim:#1e2d3a;--fm:'JetBrains Mono',monospace;--fh:'Oswald',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:var(--font-mono);font-size:12px;min-height:100vh;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:var(--fm);font-size:12px;min-height:100vh;overflow-x:hidden}
 body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);pointer-events:none;z-index:9999}
+
+/* TOP BAR */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
-.topbar-left{display:flex;align-items:baseline;gap:12px}
-.logo{font-family:var(--font-head);font-size:22px;font-weight:700;letter-spacing:6px;color:var(--accent);text-shadow:0 0 20px rgba(0,229,255,.4)}
+.topbar-left{display:flex;align-items:baseline;gap:10px}
+.logo{font-family:var(--fh);font-size:22px;font-weight:700;letter-spacing:5px;color:var(--accent);text-shadow:0 0 20px rgba(0,229,255,.5)}
+.logo-omega{font-family:serif;font-size:26px;vertical-align:middle;margin-right:2px}
 .logo-sub{font-size:10px;color:var(--muted);letter-spacing:3px;text-transform:uppercase}
-.topbar-center{display:flex;gap:24px;align-items:center}
+.topbar-center{display:flex;gap:20px;align-items:center}
 .tb-stat{text-align:center}
 .tb-label{display:block;font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
-.tb-val{font-size:14px;font-weight:700;color:var(--text)}
+.tb-val{font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 .tb-val.pos{color:var(--green)}.tb-val.neg{color:var(--red)}.tb-val.accent{color:var(--accent)}
-.topbar-right{display:flex;gap:12px;align-items:center}
+.topbar-right{display:flex;gap:10px;align-items:center}
 .badge{padding:3px 10px;border-radius:2px;font-size:10px;font-weight:700;letter-spacing:2px;border:1px solid}
 .badge-shadow{background:rgba(255,109,0,.1);color:var(--orange);border-color:var(--orange)}
-.badge-live{background:rgba(0,230,118,.1);color:var(--green);border-color:var(--green);animation:pulse-badge 2s infinite}
 .badge-conn{background:rgba(0,229,255,.1);color:var(--accent);border-color:var(--accent)}
 .badge-disc{background:rgba(255,23,68,.1);color:var(--red);border-color:var(--red)}
-@keyframes pulse-badge{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.3)}50%{box-shadow:0 0 0 4px rgba(0,230,118,0)}}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.5s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
-.main{display:grid;grid-template-columns:1fr 300px;gap:0;height:calc(100vh - 45px);overflow:hidden}
+
+/* LAYOUT */
+.main{display:grid;grid-template-columns:1fr 295px;height:calc(100vh - 45px);overflow:hidden}
 .left-panel{overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
 .right-panel{border-left:1px solid var(--border);overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
+
+/* SYMBOL BLOCK */
 .sym-block{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.sym-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(90deg,rgba(0,229,255,.05),transparent);border-bottom:1px solid var(--border)}
-.sym-name{font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent);letter-spacing:2px}
+.sym-head{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:linear-gradient(90deg,rgba(0,229,255,.06),transparent);border-bottom:1px solid var(--border)}
+.sym-name{font-family:var(--fh);font-size:16px;font-weight:700;color:var(--accent);letter-spacing:2px;min-width:100px}
 .sym-price{font-size:20px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}
-.sym-price.up{color:var(--green);text-shadow:0 0 12px rgba(0,230,118,.3)}.sym-price.down{color:var(--red)}
+.sym-price.up{color:var(--green);text-shadow:0 0 12px rgba(0,230,118,.4)}.sym-price.down{color:var(--red)}
 .sym-meta{display:flex;gap:14px;font-size:10px}
 .sym-meta span{color:var(--muted)}.sym-meta strong{color:var(--text)}
+
+/* ENGINE GRID */
 .eng-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border)}
-.eng-cell{background:var(--bg);padding:10px;position:relative}
+
+/* ENGINE CELL - contains signal column on the left */
+.eng-cell{background:var(--bg);display:flex;position:relative;overflow:hidden}
+
+/* SIGNAL COLUMN - animated vertical charge bar on left edge */
+.signal-col{width:6px;flex-shrink:0;background:#1a3a5c;transition:box-shadow .3s;border-right:1px solid rgba(0,0,0,.4)}
+
+/* ENGINE CONTENT */
+.eng-content{flex:1;padding:9px;min-width:0}
 .eng-cell.active-pos{background:rgba(0,230,118,.03)}
-.eng-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.eng-name{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+
+.eng-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
+.eng-name{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
 .eng-badge{font-size:8px;font-weight:700;letter-spacing:1px;padding:1px 6px;border-radius:2px}
 .eng-badge.active{background:rgba(0,230,118,.15);color:var(--green)}
-.eng-badge.armed{background:rgba(255,214,0,.15);color:var(--yellow);animation:pulse-armed 1s infinite}
-.eng-badge.watch{background:rgba(0,229,255,.10);color:var(--accent)}
+.eng-badge.armed{background:rgba(255,214,0,.15);color:var(--yellow);animation:pulse-arm 1s infinite}
 .eng-badge.off{background:rgba(255,255,255,.04);color:var(--muted)}
-@keyframes pulse-armed{0%,100%{opacity:1}50%{opacity:.5}}
-.eng-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+@keyframes pulse-arm{0%,100%{opacity:1}50%{opacity:.5}}
+
+.eng-stats{display:grid;grid-template-columns:1fr 1fr;gap:3px}
 .est-label{font-size:8px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase}
 .est-val{font-size:11px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 .est-val.pos{color:var(--green)}.est-val.neg{color:var(--red)}.est-val.dim{color:var(--muted)}
-.readiness-row{margin-top:8px;padding-top:6px;border-top:1px solid var(--border)}
-.rbar-label{display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:3px;letter-spacing:.5px}
-.rbar-pct{color:var(--accent);font-weight:700}
-.rbar-track{height:3px;background:var(--dim);border-radius:1px;overflow:hidden}
-.rbar-fill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.4,0,.2,1),background .5s;background:var(--muted)}
-.rbar-fill.r-low{background:var(--muted)}.rbar-fill.r-mid{background:var(--yellow);box-shadow:0 0 4px var(--yellow)}
-.rbar-fill.r-high{background:var(--orange);box-shadow:0 0 6px var(--orange)}.rbar-fill.r-ready{background:var(--green);box-shadow:0 0 8px var(--green)}
-.rpanel-section{border:1px solid var(--border);border-radius:4px;overflow:hidden}
+
+/* RIGHT PANEL */
+.rp-sec{border:1px solid var(--border);border-radius:4px;overflow:hidden}
 .rp-head{padding:6px 10px;background:var(--dim);font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)}
 .rp-body{padding:8px 10px}
 .regime-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px}
@@ -72,44 +83,51 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
 .regime-state{font-weight:700;padding:1px 6px;border-radius:2px;font-size:9px;letter-spacing:1px}
 .rs-neutral{background:rgba(74,96,112,.3);color:var(--muted)}.rs-trending{background:rgba(0,229,255,.15);color:var(--accent)}
 .rs-burst{background:rgba(0,230,118,.15);color:var(--green)}.rs-compression{background:rgba(255,214,0,.15);color:var(--yellow)}
-.rs-dead{background:rgba(255,23,68,.10);color:var(--red)}
-.regime-mult{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums;min-width:36px;text-align:right}
+.rs-dead{background:rgba(255,23,68,.1);color:var(--red)}
+.regime-mult{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
 .regime-mult.hi{color:var(--green)}.regime-mult.lo{color:var(--red)}
 .cond-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:9px;border-bottom:1px solid rgba(26,35,50,.4)}
 .cond-row:last-child{border-bottom:none}
-.cond-label{color:var(--muted);letter-spacing:.3px}
+.cond-label{color:var(--muted)}
 .cond-val{font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;flex:1;text-align:right;padding-right:6px}
 .cond-check{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.cond-check.met{background:var(--green);box-shadow:0 0 4px var(--green)}.cond-check.near{background:var(--yellow)}.cond-check.off{background:var(--dim);border:1px solid var(--border2)}
+.cond-check.met{background:var(--green);box-shadow:0 0 5px var(--green)}.cond-check.near{background:var(--yellow)}.cond-check.off{background:var(--dim);border:1px solid var(--border2)}
 .stat-row{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;border-bottom:1px solid rgba(26,35,50,.5)}
 .stat-row:last-child{border-bottom:none}
 .sr-label{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px}
 .sr-val{font-weight:700;font-size:11px;color:var(--text);font-variant-numeric:tabular-nums}
 .sr-val.pos{color:var(--green)}.sr-val.neg{color:var(--red)}.sr-val.accent{color:var(--accent)}
-.trade-entry{display:flex;gap:4px;align-items:baseline;padding:3px 0;border-bottom:1px solid rgba(26,35,50,.5);font-size:10px}
-.te-time{color:var(--muted);min-width:52px}.te-sym{color:var(--accent);font-weight:700;min-width:30px}
-.te-layer{color:var(--muted);font-size:9px;min-width:36px}
+.trade-entry{display:flex;gap:4px;align-items:baseline;padding:3px 0;border-bottom:1px solid rgba(26,35,50,.4);font-size:10px}
+.trade-entry:last-child{border-bottom:none}
+.te-time{color:var(--muted);min-width:52px}.te-sym{color:var(--accent);font-weight:700;min-width:28px}
+.te-layer{color:var(--muted);font-size:9px;min-width:40px}
 .te-pnl{font-weight:700;margin-left:auto}.te-pnl.pos{color:var(--green)}.te-pnl.neg{color:var(--red)}
-#win-flash{display:none;position:fixed;top:45px;left:0;right:0;padding:10px;text-align:center;font-family:var(--font-head);font-size:18px;font-weight:700;letter-spacing:4px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200;animation:none}
+
+/* WIN FLASH */
+#win-flash{display:none;position:fixed;top:45px;left:0;right:0;padding:10px;text-align:center;font-family:var(--fh);font-size:20px;font-weight:700;letter-spacing:4px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200}
 #win-flash.show{display:block;animation:slidedown .3s ease}
 @keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+
+.cond-sect{font-size:9px;color:var(--muted);margin:7px 0 4px;letter-spacing:1px;text-transform:uppercase;opacity:.7}
+
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 </style>
 </head>
 <body>
 <div id="win-flash">✓ WIN</div>
+
 <div class="topbar">
   <div class="topbar-left">
-    <span class="logo"><span style="font-family:serif;font-size:26px;margin-right:4px;vertical-align:middle;text-shadow:0 0 20px rgba(0,229,255,.6)">Ω</span>CHIMERA</span>
+    <span class="logo"><span class="logo-omega">Ω</span>CHIMERA</span>
     <span class="logo-sub">Quad Engine · Live Stream</span>
   </div>
   <div class="topbar-center">
     <div class="tb-stat"><span class="tb-label">Equity</span><span id="tb-equity" class="tb-val">$10,000</span></div>
-    <div class="tb-stat"><span class="tb-label">Day P&L</span><span id="tb-pnl" class="tb-val">0.00bp</span></div>
+    <div class="tb-stat"><span class="tb-label">Day P&L</span><span id="tb-pnl" class="tb-val">+0.00bp</span></div>
     <div class="tb-stat"><span class="tb-label">Trades</span><span id="tb-trades" class="tb-val accent">0</span></div>
     <div class="tb-stat"><span class="tb-label">Positions</span><span id="tb-positions" class="tb-val">0</span></div>
     <div class="tb-stat"><span class="tb-label">Latency p95</span><span id="tb-latency" class="tb-val accent">--ms</span></div>
-    <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="font-size:12px;color:var(--muted)">00:00:00</span></div>
+    <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
   </div>
   <div class="topbar-right">
     <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
@@ -117,189 +135,250 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
     <div id="live-dot" class="dot"></div>
   </div>
 </div>
+
 <div class="main">
-  <div class="left-panel">
-    <!-- BTC -->
-    <div class="sym-block">
-      <div class="sym-head">
-        <span class="sym-name">BTC/USDT</span>
-        <span id="px-btc" class="sym-price">--</span>
-        <div class="sym-meta">
-          <span>Vol: <strong id="vr-btc">--</strong></span>
-          <span>Disp: <strong id="dp-btc">-- bp</strong></span>
-          <span>Regime: <strong id="reg-btc">--</strong></span>
-          <span>Cap: <strong id="cap-btc">--</strong>R</span>
-        </div>
-      </div>
-      <div class="eng-grid">
-        <div class="eng-cell" id="ec-btc-micro">
-          <div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-btc-micro">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-btc-micro">0bp</div></div>
-            <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-micro">0</div></div>
-          </div>
-        </div>
-        <div class="eng-cell" id="ec-btc-structural">
-          <div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-btc-structural">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-btc-structural">0bp</div></div>
-            <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-structural">0</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>READINESS</span><span class="rbar-pct" id="rpct-btc-structural">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-btc-structural" style="width:0%"></div></div></div>
-        </div>
-        <div class="eng-cell" id="ec-btc-convex">
-          <div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-btc-convex">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-btc-convex">0bp</div></div>
-            <div><div class="est-label">Accel</div><div class="est-val dim" id="accel-btc">--bp</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>READINESS</span><span class="rbar-pct" id="rpct-btc-convex">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-btc-convex" style="width:0%"></div></div></div>
-        </div>
-        <div class="eng-cell" id="ec-btc-compression">
-          <div class="eng-cell-head"><span class="eng-name">COMPRESSION</span><span class="eng-badge off" id="eb-btc-compression">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-btc-compression">0bp</div></div>
-            <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-btc">0/100</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>QUIET PERIOD</span><span class="rbar-pct" id="rpct-btc-compression">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-btc-compression" style="width:0%"></div></div></div>
-        </div>
-      </div>
-    </div>
-    <!-- ETH -->
-    <div class="sym-block">
-      <div class="sym-head">
-        <span class="sym-name">ETH/USDT</span>
-        <span id="px-eth" class="sym-price">--</span>
-        <div class="sym-meta">
-          <span>Vol: <strong id="vr-eth">--</strong></span>
-          <span>Disp: <strong id="dp-eth">-- bp</strong></span>
-          <span>Regime: <strong id="reg-eth">--</strong></span>
-          <span>Cap: <strong id="cap-eth">--</strong>R</span>
-        </div>
-      </div>
-      <div class="eng-grid">
-        <div class="eng-cell" id="ec-eth-micro">
-          <div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-eth-micro">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-eth-micro">0bp</div></div>
-            <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-micro">0</div></div>
-          </div>
-        </div>
-        <div class="eng-cell" id="ec-eth-structural">
-          <div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-eth-structural">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-eth-structural">0bp</div></div>
-            <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-structural">0</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>READINESS</span><span class="rbar-pct" id="rpct-eth-structural">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-eth-structural" style="width:0%"></div></div></div>
-        </div>
-        <div class="eng-cell" id="ec-eth-convex">
-          <div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-eth-convex">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-eth-convex">0bp</div></div>
-            <div><div class="est-label">Accel</div><div class="est-val dim" id="accel-eth">--bp</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>READINESS</span><span class="rbar-pct" id="rpct-eth-convex">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-eth-convex" style="width:0%"></div></div></div>
-        </div>
-        <div class="eng-cell" id="ec-eth-compression">
-          <div class="eng-cell-head"><span class="eng-name">COMPRESSION</span><span class="eng-badge off" id="eb-eth-compression">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-eth-compression">0bp</div></div>
-            <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-eth">0/100</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>QUIET PERIOD</span><span class="rbar-pct" id="rpct-eth-compression">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-eth-compression" style="width:0%"></div></div></div>
-        </div>
-      </div>
-    </div>
-    <!-- SOL -->
-    <div class="sym-block">
-      <div class="sym-head">
-        <span class="sym-name">SOL/USDT</span>
-        <span id="px-sol" class="sym-price">--</span>
-        <div class="sym-meta">
-          <span>Vol: <strong id="vr-sol">--</strong></span>
-          <span>Disp: <strong id="dp-sol">-- bp</strong></span>
-          <span>Regime: <strong id="reg-sol">--</strong></span>
-          <span>Cap: <strong id="cap-sol">--</strong>R</span>
-        </div>
-      </div>
-      <div class="eng-grid">
-        <div class="eng-cell" id="ec-sol-micro">
-          <div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-sol-micro">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-sol-micro">0bp</div></div>
-            <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-micro">0</div></div>
-          </div>
-        </div>
-        <div class="eng-cell" id="ec-sol-structural">
-          <div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-sol-structural">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-sol-structural">0bp</div></div>
-            <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-structural">0</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>READINESS</span><span class="rbar-pct" id="rpct-sol-structural">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-sol-structural" style="width:0%"></div></div></div>
-        </div>
-        <div class="eng-cell" id="ec-sol-convex">
-          <div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-sol-convex">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-sol-convex">0bp</div></div>
-            <div><div class="est-label">Accel</div><div class="est-val dim" id="accel-sol">--bp</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>READINESS</span><span class="rbar-pct" id="rpct-sol-convex">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-sol-convex" style="width:0%"></div></div></div>
-        </div>
-        <div class="eng-cell" id="ec-sol-compression">
-          <div class="eng-cell-head"><span class="eng-name">COMPRESSION</span><span class="eng-badge off" id="eb-sol-compression">OFF</span></div>
-          <div class="eng-stats">
-            <div><div class="est-label">P&L</div><div class="est-val" id="pnl-sol-compression">0bp</div></div>
-            <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-sol">0/100</div></div>
-          </div>
-          <div class="readiness-row"><div class="rbar-label"><span>QUIET PERIOD</span><span class="rbar-pct" id="rpct-sol-compression">0%</span></div><div class="rbar-track"><div class="rbar-fill" id="rfill-sol-compression" style="width:0%"></div></div></div>
-        </div>
-      </div>
+<div class="left-panel">
+
+<!-- MACRO to generate symbol block -->
+<!-- BTC -->
+<div class="sym-block">
+  <div class="sym-head">
+    <span class="sym-name">BTC/USDT</span>
+    <span id="px-btc" class="sym-price">--</span>
+    <div class="sym-meta">
+      <span>Vol: <strong id="vr-btc">--</strong></span>
+      <span>Disp: <strong id="dp-btc">--bp</strong></span>
+      <span>Regime: <strong id="reg-btc">--</strong></span>
+      <span>Cap: <strong id="cap-btc">--</strong>R</span>
     </div>
   </div>
-  <!-- RIGHT -->
-  <div class="right-panel">
-    <div class="rpanel-section">
-      <div class="rp-head">Regime Allocator</div>
-      <div class="rp-body">
-        <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">×1.0</span></div>
-        <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">×1.0</span></div>
-        <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">×1.0</span></div>
+  <div class="eng-grid">
+    <!-- MICRO -->
+    <div class="eng-cell" id="ec-btc-micro">
+      <div class="signal-col" id="sc-btc-micro"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-btc-micro">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-micro">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-micro">0</div></div>
+        </div>
       </div>
     </div>
-    <div class="rpanel-section">
-      <div class="rp-head">Signal Conditions</div>
-      <div class="rp-body">
-        <div style="font-size:9px;color:var(--muted);margin-bottom:6px;letter-spacing:1px">BTC — STRUCTURAL needs: vol≥1.4 · disp≥20bp · build≥40</div>
-        <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
-        <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">-- bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
-        <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
-        <div style="font-size:9px;color:var(--muted);margin:8px 0 4px;letter-spacing:1px">CONVEX needs: vol≥1.8 · disp≥30bp · accel≥15bp</div>
-        <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">-- bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
-        <div style="font-size:9px;color:var(--muted);margin:8px 0 4px;letter-spacing:1px">COMPRESSION needs: 100 quiet ticks</div>
-        <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>
+    <!-- STRUCTURAL -->
+    <div class="eng-cell" id="ec-btc-structural">
+      <div class="signal-col" id="sc-btc-structural"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-btc-structural">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-structural">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-structural">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-structural">--%</div></div>
+          <div><div class="est-label">Entry</div><div class="est-val dim" id="ep-btc-structural">--</div></div>
+        </div>
       </div>
     </div>
-    <div class="rpanel-section">
-      <div class="rp-head">Session Stats</div>
-      <div class="rp-body">
-        <div class="stat-row"><span class="sr-label">Total P&L</span><span class="sr-val" id="st-pnl">0.00bp</span></div>
-        <div class="stat-row"><span class="sr-label">Total Trades</span><span class="sr-val accent" id="st-trades">0</span></div>
-        <div class="stat-row"><span class="sr-label">Win Rate</span><span class="sr-val" id="st-wr">--%</span></div>
-        <div class="stat-row"><span class="sr-label">Open Positions</span><span class="sr-val" id="st-pos">0</span></div>
-        <div class="stat-row"><span class="sr-label">Latency p95</span><span class="sr-val accent" id="st-lat">--ms</span></div>
-        <div class="stat-row"><span class="sr-label">Uptime</span><span class="sr-val" id="st-uptime">--</span></div>
+    <!-- CONVEX -->
+    <div class="eng-cell" id="ec-btc-convex">
+      <div class="signal-col" id="sc-btc-convex"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-btc-convex">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-convex">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-convex">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-convex">--%</div></div>
+          <div><div class="est-label">Accel</div><div class="est-val dim" id="accel-btc">--bp</div></div>
+        </div>
       </div>
     </div>
-    <div class="rpanel-section" style="flex:1">
-      <div class="rp-head">Trade Log</div>
-      <div class="rp-body" id="trade-log" style="overflow-y:auto;max-height:300px">
-        <div style="color:var(--muted);font-size:10px;text-align:center;padding:20px 0">Waiting for first trade...</div>
+    <!-- COMPRESSION -->
+    <div class="eng-cell" id="ec-btc-compression">
+      <div class="signal-col" id="sc-btc-compression"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-btc-compression">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-compression">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-compression">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-compression">--%</div></div>
+          <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-btc">0/100</div></div>
+        </div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- ETH -->
+<div class="sym-block">
+  <div class="sym-head">
+    <span class="sym-name">ETH/USDT</span>
+    <span id="px-eth" class="sym-price">--</span>
+    <div class="sym-meta">
+      <span>Vol: <strong id="vr-eth">--</strong></span>
+      <span>Disp: <strong id="dp-eth">--bp</strong></span>
+      <span>Regime: <strong id="reg-eth">--</strong></span>
+      <span>Cap: <strong id="cap-eth">--</strong>R</span>
+    </div>
+  </div>
+  <div class="eng-grid">
+    <div class="eng-cell" id="ec-eth-micro">
+      <div class="signal-col" id="sc-eth-micro"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-eth-micro">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-micro">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-micro">0</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="eng-cell" id="ec-eth-structural">
+      <div class="signal-col" id="sc-eth-structural"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-eth-structural">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-structural">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-structural">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-structural">--%</div></div>
+          <div><div class="est-label">Entry</div><div class="est-val dim" id="ep-eth-structural">--</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="eng-cell" id="ec-eth-convex">
+      <div class="signal-col" id="sc-eth-convex"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-eth-convex">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-convex">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-convex">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-convex">--%</div></div>
+          <div><div class="est-label">Accel</div><div class="est-val dim" id="accel-eth">--bp</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="eng-cell" id="ec-eth-compression">
+      <div class="signal-col" id="sc-eth-compression"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-eth-compression">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-compression">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-compression">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-compression">--%</div></div>
+          <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-eth">0/100</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SOL -->
+<div class="sym-block">
+  <div class="sym-head">
+    <span class="sym-name">SOL/USDT</span>
+    <span id="px-sol" class="sym-price">--</span>
+    <div class="sym-meta">
+      <span>Vol: <strong id="vr-sol">--</strong></span>
+      <span>Disp: <strong id="dp-sol">--bp</strong></span>
+      <span>Regime: <strong id="reg-sol">--</strong></span>
+      <span>Cap: <strong id="cap-sol">--</strong>R</span>
+    </div>
+  </div>
+  <div class="eng-grid">
+    <div class="eng-cell" id="ec-sol-micro">
+      <div class="signal-col" id="sc-sol-micro"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-sol-micro">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-micro">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-micro">0</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="eng-cell" id="ec-sol-structural">
+      <div class="signal-col" id="sc-sol-structural"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-sol-structural">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-structural">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-structural">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-structural">--%</div></div>
+          <div><div class="est-label">Entry</div><div class="est-val dim" id="ep-sol-structural">--</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="eng-cell" id="ec-sol-convex">
+      <div class="signal-col" id="sc-sol-convex"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-sol-convex">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-convex">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-convex">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-convex">--%</div></div>
+          <div><div class="est-label">Accel</div><div class="est-val dim" id="accel-sol">--bp</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="eng-cell" id="ec-sol-compression">
+      <div class="signal-col" id="sc-sol-compression"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-sol-compression">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-compression">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-compression">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-compression">--%</div></div>
+          <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-sol">0/100</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /left-panel -->
+
+<!-- RIGHT PANEL -->
+<div class="right-panel">
+
+  <div class="rp-sec">
+    <div class="rp-head">Regime Allocator</div>
+    <div class="rp-body">
+      <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">×1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">×1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">×1.00</span></div>
+    </div>
+  </div>
+
+  <div class="rp-sec">
+    <div class="rp-head">Signal Conditions — BTC</div>
+    <div class="rp-body">
+      <div class="cond-sect">STRUCTURAL  vol≥1.4 · disp≥20bp · build≥40t</div>
+      <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
+      <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">--bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
+      <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
+      <div class="cond-sect">CONVEX  vol≥1.8 · disp≥30bp · accel≥15bp</div>
+      <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">--bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
+      <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
+      <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>
+    </div>
+  </div>
+
+  <div class="rp-sec">
+    <div class="rp-head">Session Stats</div>
+    <div class="rp-body">
+      <div class="stat-row"><span class="sr-label">Total P&L</span><span class="sr-val" id="st-pnl">+0.00bp</span></div>
+      <div class="stat-row"><span class="sr-label">Total Trades</span><span class="sr-val accent" id="st-trades">0</span></div>
+      <div class="stat-row"><span class="sr-label">Win Rate</span><span class="sr-val" id="st-wr">--%</span></div>
+      <div class="stat-row"><span class="sr-label">Open Positions</span><span class="sr-val" id="st-pos">0</span></div>
+      <div class="stat-row"><span class="sr-label">Latency p95</span><span class="sr-val accent" id="st-lat">--ms</span></div>
+      <div class="stat-row"><span class="sr-label">Uptime</span><span class="sr-val" id="st-uptime">--</span></div>
+    </div>
+  </div>
+
+  <div class="rp-sec" style="flex:1;min-height:0">
+    <div class="rp-head">Trade Log</div>
+    <div class="rp-body" id="trade-log" style="overflow-y:auto;max-height:320px">
+      <div style="color:var(--muted);font-size:10px;text-align:center;padding:20px 0">Waiting for first trade...</div>
+    </div>
+  </div>
+
+</div><!-- /right-panel -->
+</div><!-- /main -->
 <script src="/app.js"></script>
 </body>
 </html>

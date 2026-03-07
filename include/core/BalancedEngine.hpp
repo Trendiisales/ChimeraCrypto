@@ -22,6 +22,7 @@
 #include "allocation/CapitalControlLayer.hpp"
 #include "execution/ExecutionOptimizer.hpp"
 #include "reinforcement/AdaptiveReinforcementLayer.hpp"
+#include "market_data/FundingRateFetcher.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -32,6 +33,7 @@
 #include <deque>
 #include <sstream>
 #include <iomanip>
+#include "logging/ShadowLogger.hpp"
 
 namespace chimera {
 
@@ -98,6 +100,13 @@ struct SymbolState {
     double regime_anchor_price;  // Price when regime last changed (for displacement confirmation)
 
     MarketTick last_tick;   // Latest tick with real book data
+
+    // Entry context for shadow logger — captured at entry, written at exit
+    double entry_imbalance  = 0.0;
+    double entry_flow_ratio = 0.0;
+    double entry_spread_bps = 0.0;
+    double entry_btc_move   = 0.0;
+    double entry_latency_ms = 0.0;
 
     void reset() {
         last_price = 0;
@@ -410,6 +419,7 @@ public:
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
+    void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     double get_total_pnl() const { return total_pnl_; }
     double get_realized_pnl() const { return realized_pnl_; }
     int get_total_trades() const { return total_trades_; }
@@ -648,6 +658,27 @@ private:
     }
     
     // ======================================================================
+    // flow_ratio — directional order flow confirmation
+    // ======================================================================
+    // Uses real agg_buy_volume / agg_sell_volume from @aggTrade stream.
+    // Returns fraction of recent volume that was aggressive buy: 0.5 = neutral
+    // > 0.6 = buy pressure confirming a long signal
+    // < 0.4 = sell pressure — do not enter long
+    //
+    // This is FREE information already in our feed that most systems ignore.
+    // A breakout with 70% buy flow is far more reliable than one with 40%.
+    // ======================================================================
+    double compute_flow_ratio(int id) const {
+        // Use the most recent tick's agg volumes
+        const MarketTick& t = symbols_[id].last_tick;
+        double buy  = t.agg_buy_volume;
+        double sell = t.agg_sell_volume;
+        double total = buy + sell;
+        if (total < 1e-9) return 0.5; // no data — neutral
+        return buy / total;
+    }
+
+    // ======================================================================
     // IMPULSE — fires in BREAKOUT regime
     // Latency requirement: < 50ms (hard limit)
     // Edge: genuine vol expansion, price displaced from regime anchor
@@ -679,6 +710,15 @@ private:
         double displacement = std::abs(price - s.regime_anchor_price);
         if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
             rejection_throttle_.record(key, "insufficient_displacement");
+            return false;
+        }
+
+        // ORDER FLOW CONFIRMATION
+        // Require majority of recent volume to be in the signal direction.
+        // Breakout with opposing flow = likely false breakout / stop hunt.
+        double flow = compute_flow_ratio(id);
+        if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
+            rejection_throttle_.record(key, "weak_flow");
             return false;
         }
 
@@ -725,6 +765,13 @@ private:
         double displacement = std::abs(price - s.regime_anchor_price);
         if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
             rejection_throttle_.record(key, "insufficient_displacement");
+            return false;
+        }
+
+        // ORDER FLOW CONFIRMATION
+        double flow = compute_flow_ratio(id);
+        if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
+            rejection_throttle_.record(key, "weak_flow");
             return false;
         }
 
@@ -1014,6 +1061,17 @@ private:
         if (consecutive_losses_ >= 2) {
             legacy_size_mult *= 0.6;
         }
+
+        // FUNDING RATE ADJUSTMENT — reduce long size when longs are crowded
+        // High positive funding = overcrowded longs = lower expected edge
+        if (funding_ && funding_->ready()) {
+            double fund_mult = funding_->long_size_multiplier();
+            if (fund_mult != 1.0) {
+                std::printf("[FUNDING-ADJ] size_mult %.2f -> %.2f (funding=%.5f%%)\n", legacy_size_mult, legacy_size_mult * fund_mult, funding_->rate() * 100.0);
+                std::fflush(stdout);
+            }
+            legacy_size_mult *= fund_mult;
+        }
         
         s.pos.state = POS_OPEN;
         s.pos.entry_price = price;
@@ -1023,6 +1081,13 @@ private:
         s.pos.peak_price = price;  // Initialize peak for trailing
         s.pos.mfe = 0.0;
         s.pos.mae = 0.0;
+
+        // Capture entry context for shadow log
+        s.entry_imbalance  = s.last_tick.book_imbalance;
+        s.entry_flow_ratio = compute_flow_ratio(id);
+        s.entry_spread_bps = s.last_tick.spread_bps;
+        s.entry_btc_move   = leadlag_.btc_move_bp();
+        s.entry_latency_ms = market_env_.latency_ms;
         
         if (layer == LAYER_EXPANSION) {
             expand_state_[id] = 1;
@@ -1061,9 +1126,43 @@ private:
         total_pnl_ = realized_pnl_;
         total_trades_++;
         
-        std::printf("[EXIT] %s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n", 
-            sym, pnl, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
+        // Determine reason for P&L sign
+        const char* layer_label = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
+                                  (s.pos.layer == LAYER_LEADLAG)   ? "LEADLAG" :
+                                  (s.pos.layer == LAYER_IMPULSE)   ? "IMPULSE" : "EXPAND";
+        const char* win_str = pnl > 0 ? "WIN" : "LOSS";
+
+        std::printf("[EXIT] %s | %s | %s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
+            sym, layer_label, win_str,
+            pnl, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
         std::fflush(stdout);
+
+        // Shadow log — structured CSV for edge measurement
+        {
+            ShadowEntry se;
+            se.ts_enter      = s.pos.entry_ts;
+            se.ts_exit       = ts;
+            std::strncpy(se.symbol, sym, sizeof(se.symbol)-1);
+            std::strncpy(se.layer,  layer_label, sizeof(se.layer)-1);
+            std::strncpy(se.regime,
+                (s.regime == REGIME_GRIND)    ? "GRIND"    :
+                (s.regime == REGIME_BUILDUP)  ? "BUILDUP"  :
+                (s.regime == REGIME_BREAKOUT) ? "BREAKOUT" : "DEAD",
+                sizeof(se.regime)-1);
+            se.entry_px      = s.pos.entry_price;
+            se.exit_px       = s.pos.entry_price * (1.0 + pnl / 10000.0);
+            se.pnl_bp        = pnl;
+            se.mfe_bp        = s.pos.mfe;
+            se.mae_bp        = s.pos.mae;
+            se.hold_ms       = hold_time_ms;
+            se.latency_ms    = current_latency;
+            se.imbalance     = s.entry_imbalance;
+            se.flow_ratio    = s.entry_flow_ratio;
+            se.spread_bps    = s.entry_spread_bps;
+            se.btc_move_bp   = s.entry_btc_move;
+            se.win           = (pnl > 0) ? 1 : 0;
+            shadow_log_.record(se);
+        }
         
         // Broadcast exit to GUI with complete trade details
         const char* layer_str = (s.pos.layer == LAYER_MICRO) ? "MICRO" : 
@@ -1122,7 +1221,13 @@ private:
         
         if (loss_streak_ >= 3) kill_until_ = ts + 5000;
         
-        s.cooldown_until = ts + 500;
+        // Scale cooldown with consecutive losses — back off faster after streak
+        // 0 losses: 500ms | 1 loss: 1000ms | 2: 2000ms | 3+: 5000ms
+        int64_t cooldown_ms = 500;
+        if (consecutive_losses_ >= 3) cooldown_ms = 5000;
+        else if (consecutive_losses_ >= 2) cooldown_ms = 2000;
+        else if (consecutive_losses_ >= 1) cooldown_ms = 1000;
+        s.cooldown_until = ts + cooldown_ms;
         
         if (s.pos.layer == LAYER_EXPANSION) {
             expand_state_[id] = 0;
@@ -1141,6 +1246,8 @@ private:
     SymbolState symbols_[3];
     LatencyGovernor latency_gov_;
     LeadLagEngine leadlag_;
+    ShadowLogger shadow_log_;
+    FundingRateFetcher* funding_ = nullptr;  // optional — set from main()
     VolatilityScoring vol_scoring_[3];
     StatefulGovernor governor_;
     MultiSymbolAllocator allocator_;

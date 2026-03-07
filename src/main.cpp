@@ -19,8 +19,10 @@
 #include "logging/TradeLogger.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "core/SymbolIndex.hpp"
+#include "core/market_data/FundingRateFetcher.hpp"
 
 chimera::ExchangeLatencyEngine g_exchange_latency;
+chimera::FundingRateFetcher g_funding;
 
 
 
@@ -85,6 +87,14 @@ int main() {
     
     std::printf("[STARTUP] Chimera engine starting...\n");
     std::fflush(stdout);
+
+    // Fetch BTC perpetual funding rate — regime filter for crowded longs
+    // Runs in background, takes ~1s. Engine starts trading immediately.
+    std::thread funding_thread([&]() {
+        g_funding.fetch();
+        controller.set_funding_fetcher(&g_funding);
+    });
+    funding_thread.detach();
     
     // Per-symbol engine instances (disabled)
     chimera::VEConfig ve_cfg{7.0, 15.0, 9.0, 28.0, 1.8, 12.0, 500, 5000};

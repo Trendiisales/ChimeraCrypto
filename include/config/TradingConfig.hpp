@@ -205,6 +205,25 @@ struct TradingConfig {
 
 
     // -------------------------------------------------------------------------
+    // ORDER FLOW CONFIRMATION
+    // -------------------------------------------------------------------------
+    // agg_buy_volume / (agg_buy + agg_sell) must exceed this to confirm a long.
+    // 0.55 = slight buy majority. 0.60 = clear buy pressure.
+    // Filters breakouts where smart money is actually selling into retail buyers.
+    // Set to 0.0 to disable (useful when testing new signals).
+    static constexpr double FLOW_CONFIRM_THRESHOLD = 0.55;
+
+    // -------------------------------------------------------------------------
+    // MAKER ORDER MODE
+    // -------------------------------------------------------------------------
+    // true  = post limit orders at mid-price (collect maker rebate ~1bp/side)
+    //         Round-trip cost drops from ~10bp to ~4bp. Needs fill confirmation.
+    //         Risk: order may not fill if price moves away immediately.
+    // false = market orders (taker fee ~4bp/side). Always fills.
+    //         Current mode until limit order fill tracking is implemented.
+    static constexpr bool MAKER_MODE = false;
+
+    // -------------------------------------------------------------------------
     // DIAGNOSTIC OUTPUT
     // -------------------------------------------------------------------------
     static constexpr int REGIME_DIAG_INTERVAL     = 500;

@@ -187,6 +187,22 @@ struct RejectionThrottle {
 class BalancedEngine {
 public:
     using GuiBroadcastCallback = std::function<void(const std::string&)>;
+
+    // Called after every completed trade — for QuadEngine to log full trade data
+    struct TradeExitData {
+        std::string symbol;   // "BTC" / "ETH" / "SOL"
+        std::string engine;   // "EXPAND" / "LEADLAG" etc.
+        double pnl_bp;
+        double entry_price;
+        double exit_price;
+        double mfe_bp;
+        double mae_bp;
+        int64_t hold_ms;
+        std::string reason;   // "TP" / "SL" / "TRAIL" / "TIMEOUT"
+    };
+    using TradeExitCallback = std::function<void(const TradeExitData&)>;
+
+    void set_trade_exit_callback(TradeExitCallback cb) { trade_exit_cb_ = std::move(cb); }
     
     BalancedEngine() : governor_(GovernorConfig()), allocator_(AllocatorConfig()), gui_broadcast_(nullptr) {
         for (int i = 0; i < 3; ++i)
@@ -1127,12 +1143,17 @@ private:
                 (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" : "IMPULSE",
                 move_bp, tp_bp);
             std::fflush(stdout);
+            pending_exit_reason_ = "TP";
             exit(id, move_bp, ts, s);
             return;
         }
 
         // Hard stop loss
         if (move_bp <= -sl_bp) {
+            std::printf("[SL-HIT] %s | move=%.2fbp <= -%.2fbp\n",
+                (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL", move_bp, sl_bp);
+            std::fflush(stdout);
+            pending_exit_reason_ = "SL";
             exit(id, move_bp, ts, s);
             return;
         }
@@ -1146,6 +1167,11 @@ private:
         if (s.pos.layer == LAYER_IMPULSE || s.pos.layer == LAYER_EXPANSION) {
             if (peak_profit_bp >= TradingConfig::MIN_PROFIT_TO_TRAIL_BP) {
                 if (price < s.pos.peak_price - trail_distance) {
+                    std::printf("[TRAIL-STOP] %s | peak=%.2fbp trail_dist=%.4f move=%.2fbp\n",
+                        (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                        peak_profit_bp, trail_distance / price * 10000.0, move_bp);
+                    std::fflush(stdout);
+                    pending_exit_reason_ = "TRAIL";
                     exit(id, move_bp, ts, s);
                     return;
                 }
@@ -1154,6 +1180,11 @@ private:
 
         // Time-based forced exit
         if (ts - s.pos.entry_ts > max_hold) {
+            std::printf("[MAX-HOLD] %s | hold=%ldms > %ldms\n",
+                (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                (long)(ts - s.pos.entry_ts), (long)max_hold);
+            std::fflush(stdout);
+            pending_exit_reason_ = "TIMEOUT";
             exit(id, move_bp, ts, s);
             return;
         }
@@ -1531,10 +1562,27 @@ private:
                                   (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   : "EXPAND";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
-        std::printf("[EXIT] %s | %s | %s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
+        std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
             sym, layer_label, win_str,
+            pending_exit_reason_.empty() ? "?" : pending_exit_reason_.c_str(),
             pnl, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
         std::fflush(stdout);
+
+        // Fire trade exit callback so QuadEngine can log full trade data
+        if (trade_exit_cb_) {
+            TradeExitData td;
+            td.symbol      = sym;
+            td.engine      = layer_label;
+            td.pnl_bp      = pnl;
+            td.entry_price = s.pos.entry_price;
+            td.exit_price  = price;
+            td.mfe_bp      = s.pos.mfe;
+            td.mae_bp      = s.pos.mae;
+            td.hold_ms     = hold_time_ms;
+            td.reason      = pending_exit_reason_.empty() ? (pnl >= 0 ? "TP" : "SL") : pending_exit_reason_;
+            trade_exit_cb_(td);
+        }
+        pending_exit_reason_.clear();
 
         // Shadow log — structured CSV for edge measurement
         {
@@ -1692,6 +1740,8 @@ private:
     int total_trades_;
     
     GuiBroadcastCallback gui_broadcast_;
+    TradeExitCallback    trade_exit_cb_;
+    std::string          pending_exit_reason_;  // Set before each exit() call
     
     // PHASE 2: Microstructure and capital allocation
     BookState book_states_[3];

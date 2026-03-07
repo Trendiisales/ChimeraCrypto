@@ -47,15 +47,21 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
 .ts-stat.pos strong{color:var(--green)}.ts-stat.neg strong{color:var(--red)}
 .trade-strip-body{flex:1;overflow-x:auto;overflow-y:hidden;padding:6px 10px}
 .trade-row-list{display:flex;gap:6px;align-items:stretch;height:100%}
-.trade-card{flex-shrink:0;width:130px;border:1px solid var(--border);border-radius:3px;padding:6px 8px;display:flex;flex-direction:column;gap:2px;background:var(--bg);font-size:9px}
-.trade-card.win{border-color:rgba(0,230,118,.3);background:rgba(0,230,118,.03)}
-.trade-card.loss{border-color:rgba(255,23,68,.2);background:rgba(255,23,68,.02)}
+.trade-card{flex-shrink:0;width:190px;border:1px solid var(--border);border-radius:3px;padding:7px 9px;display:flex;flex-direction:column;gap:3px;background:var(--bg);font-size:9px}
+.trade-card.win{border-color:rgba(0,230,118,.35);background:rgba(0,230,118,.03)}
+.trade-card.loss{border-color:rgba(255,23,68,.25);background:rgba(255,23,68,.03)}
 .tc-header{display:flex;justify-content:space-between;align-items:center}
 .tc-sym{font-weight:700;color:var(--accent);font-size:10px;letter-spacing:1px}
-.tc-pnl{font-weight:700;font-size:11px}.tc-pnl.pos{color:var(--green)}.tc-pnl.neg{color:var(--red)}
-.tc-layer{color:var(--muted);font-size:8px;letter-spacing:.5px}
-.tc-time{color:var(--muted);font-size:8px}
-.tc-bell{font-size:11px}
+.tc-pnl{font-weight:700;font-size:12px}.tc-pnl.pos{color:var(--green)}.tc-pnl.neg{color:var(--red)}
+.tc-row{display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(26,35,50,.6);padding-top:2px;margin-top:1px}
+.tc-lbl{color:var(--muted);font-size:8px;letter-spacing:.3px}
+.tc-v{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.tc-v.pos{color:var(--green)}.tc-v.neg{color:var(--red)}.tc-v.dim{color:var(--muted)}
+.tc-reason{font-size:8px;font-weight:700;letter-spacing:1px;padding:1px 5px;border-radius:2px}
+.tc-reason.tp{background:rgba(0,230,118,.15);color:var(--green)}
+.tc-reason.sl{background:rgba(255,23,68,.15);color:var(--red)}
+.tc-reason.trail{background:rgba(0,229,255,.15);color:var(--accent)}
+.tc-reason.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
 
 /* SYMBOL BLOCK */
 .sym-block{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
@@ -480,6 +486,7 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
       <span class="ts-stat">Trades: <strong id="ts-count">0</strong></span>
       <span class="ts-stat" id="ts-pnl-wrap">P&amp;L: <strong id="ts-pnl">+0.00bp</strong></span>
       <span class="ts-stat">Win Rate: <strong id="ts-wr">--%</strong></span>
+      <button onclick="clearTrades()" style="background:rgba(255,23,68,.1);color:var(--red);border:1px solid rgba(255,23,68,.3);padding:2px 8px;border-radius:2px;font-size:8px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:8px">CLEAR</button>
     </div>
   </div>
   <div class="trade-strip-body">

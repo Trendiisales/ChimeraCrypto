@@ -27,6 +27,13 @@ class QuadEngineBalancedEngine {
 public:
     QuadEngineBalancedEngine() : http_server_(8080) {
         load_trades_from_disk();
+
+        // Wire BalancedEngine exit callback → our trade log
+        balanced_.set_trade_exit_callback([this](const BalancedEngine::TradeExitData& td) {
+            push_trade(td.symbol, td.engine, td.pnl_bp,
+                       td.entry_price, td.exit_price,
+                       td.mfe_bp, td.mae_bp, td.hold_ms, td.reason);
+        });
         // Initialize signal engines
         structural_[0] = StructuralEngine("btcusdt");
         structural_[1] = StructuralEngine("ethusdt");
@@ -219,9 +226,13 @@ public:
                 json << "{\"t\":\"" << tr.time << "\","
                      << "\"s\":\"" << tr.symbol << "\","
                      << "\"e\":\"" << tr.engine << "\","
-                     << "\"p\":" << std::fixed << std::setprecision(2) << tr.pnl_bp << ","
+                     << "\"p\":"  << std::fixed << std::setprecision(2) << tr.pnl_bp << ","
                      << "\"en\":" << std::setprecision(2) << tr.entry_price << ","
-                     << "\"ex\":" << std::setprecision(2) << tr.exit_price << "}";
+                     << "\"ex\":" << std::setprecision(2) << tr.exit_price << ","
+                     << "\"mfe\":" << std::setprecision(2) << tr.mfe_bp << ","
+                     << "\"mae\":" << std::setprecision(2) << tr.mae_bp << ","
+                     << "\"hold\":" << tr.hold_ms << ","
+                     << "\"why\":\"" << tr.reason << "\"}";
                 first_t = false;
             }
             json << "],";
@@ -324,6 +335,10 @@ private:
         double pnl_bp;
         double entry_price;
         double exit_price;
+        double mfe_bp     = 0.0;   // Max Favorable Excursion
+        double mae_bp     = 0.0;   // Max Adverse Excursion
+        int64_t hold_ms   = 0;     // Hold duration in ms
+        std::string reason;        // Exit reason: TP / SL / TRAIL / TIMEOUT
     };
     std::deque<TradeRecord> trade_log_;
     std::mutex trade_log_mutex_;
@@ -360,12 +375,13 @@ private:
                 auto end = line.find_first_of(",}", pos);
                 try { return std::stod(line.substr(pos, end-pos)); } catch(...) { return 0.0; }
             };
-            r.time = ex("t"); r.symbol = ex("s"); r.engine = ex("e");
+            r.time = ex("t"); r.symbol = ex("s"); r.engine = ex("e"); r.reason = ex("why");
             r.pnl_bp = exd("p"); r.entry_price = exd("en"); r.exit_price = exd("ex");
+            r.mfe_bp = exd("mfe"); r.mae_bp = exd("mae"); r.hold_ms = (int64_t)exd("hold");
             if (!r.time.empty() && !r.symbol.empty())
                 trade_log_.push_back(r);
         }
-        if (trade_log_.size() > 50) trade_log_.resize(50);
+        if (trade_log_.size() > 200) trade_log_.resize(200);
         std::printf("[TRADE_LOG] Loaded %zu trades from disk\n", trade_log_.size());
     }
 
@@ -378,9 +394,13 @@ private:
           << "{\"t\":\"" << r.time << "\","
           << "\"s\":\"" << r.symbol << "\","
           << "\"e\":\"" << r.engine << "\","
-          << "\"p\":" << r.pnl_bp << ","
+          << "\"p\":"  << r.pnl_bp << ","
           << "\"en\":" << r.entry_price << ","
-          << "\"ex\":" << r.exit_price << "}\n";
+          << "\"ex\":" << r.exit_price << ","
+          << "\"mfe\":" << r.mfe_bp << ","
+          << "\"mae\":" << r.mae_bp << ","
+          << "\"hold\":" << r.hold_ms << ","
+          << "\"why\":\"" << r.reason << "\"}\n";
     }
 
     static std::string now_hms() {
@@ -391,7 +411,9 @@ private:
     }
 
     void push_trade(const std::string& sym, const std::string& eng,
-                    double pnl_bp, double entry_px, double current_px) {
+                    double pnl_bp, double entry_px, double current_px,
+                    double mfe_bp = 0.0, double mae_bp = 0.0,
+                    int64_t hold_ms = 0, const std::string& reason = "") {
         TradeRecord r;
         r.time        = now_hms();
         r.symbol      = sym;
@@ -399,10 +421,14 @@ private:
         r.pnl_bp      = pnl_bp;
         r.entry_price = entry_px;
         r.exit_price  = current_px;
+        r.mfe_bp      = mfe_bp;
+        r.mae_bp      = mae_bp;
+        r.hold_ms     = hold_ms;
+        r.reason      = reason.empty() ? (pnl_bp >= 0 ? "TP" : "SL") : reason;
         save_trade_to_disk(r);
         std::lock_guard<std::mutex> lk(trade_log_mutex_);
         trade_log_.push_front(r);
-        if (trade_log_.size() > 50) trade_log_.pop_back();
+        if (trade_log_.size() > 200) trade_log_.pop_back();
     }
 
     void check_new_trades(int id) {

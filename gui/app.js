@@ -158,18 +158,33 @@ function setPrice(sym, val, dec) {
 }
 
 // ── TRADE LOG ─────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'chimera_trades_v3';
 let localTrades = [];
 let wins = 0, losses = 0;
 
+// Load persisted trades on boot
+(function loadPersistedTrades() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      localTrades = JSON.parse(raw) || [];
+      wins = localTrades.filter(t => +t.p > 0).length;
+      losses = localTrades.filter(t => +t.p < 0).length;
+    }
+  } catch(e) { localTrades = []; }
+})();
+
+function saveTrades() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localTrades.slice(0, 200))); } catch(e) {}
+}
+
 function mergeTrades(serverLog) {
-  // serverLog is array of {t, s, e, p}
   if (!serverLog || !serverLog.length) return;
   const before = localTrades.length;
-  // deduplicate by time+sym+engine
-  const existing = new Set(localTrades.map(t => `${t.t}${t.s}${t.e}`));
+  const existing = new Set(localTrades.map(t => `${t.t}|${t.s}|${t.e}|${t.p}`));
   let newCount = 0;
   serverLog.forEach(tr => {
-    const key = `${tr.t}${tr.s}${tr.e}`;
+    const key = `${tr.t}|${tr.s}|${tr.e}|${tr.p}`;
     if (!existing.has(key)) {
       localTrades.unshift(tr);
       existing.add(key);
@@ -179,10 +194,26 @@ function mergeTrades(serverLog) {
     }
   });
   if (newCount > 0 || before === 0) {
-    localTrades = localTrades.slice(0, 50);
+    localTrades = localTrades.slice(0, 200);
+    saveTrades();
     renderTradeLog();
     updateWinRate();
   }
+}
+
+function fmtHold(ms) {
+  if (!ms || ms <= 0) return '--';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return (ms / 60000).toFixed(1) + 'm';
+}
+
+function fmtPxCompact(v) {
+  if (!v || v <= 0) return '--';
+  const n = +v;
+  if (n > 10000) return '$' + n.toLocaleString('en-US', {maximumFractionDigits: 0});
+  if (n > 100) return '$' + n.toFixed(2);
+  return '$' + n.toFixed(3);
 }
 
 function renderTradeLog() {
@@ -191,20 +222,39 @@ function renderTradeLog() {
     list.innerHTML = '<div style="color:var(--muted);font-size:10px;display:flex;align-items:center;padding:0 10px">Waiting for first trade...</div>';
     return;
   }
-  // Show newest first, max 60 cards
-  const shown = localTrades.slice(-60).reverse();
+  const shown = localTrades.slice(0, 80);
   list.innerHTML = shown.map(tr => {
     const p = +tr.p, pos = p >= 0;
     const pnlStr = (pos ? '+' : '') + p.toFixed(2) + 'bp';
     const sym = (tr.s || '').replace('usdt','').replace('USDT','').toUpperCase();
-    const bell = pos ? '<span class="tc-bell">🔔</span>' : '';
+    const mfe = tr.mfe != null ? (+tr.mfe).toFixed(2) : '--';
+    const mae = tr.mae != null ? (+tr.mae).toFixed(2) : '--';
+    const hold = fmtHold(tr.hold);
+    const en = fmtPxCompact(tr.en);
+    const ex = fmtPxCompact(tr.ex);
+    const why = (tr.why || (pos ? 'TP' : 'SL')).toUpperCase();
+    const whyCls = why === 'TP' ? 'tp' : why === 'SL' ? 'sl' : why === 'TRAIL' ? 'trail' : 'timeout';
     return `<div class="trade-card ${pos ? 'win' : 'loss'}">
       <div class="tc-header">
         <span class="tc-sym">${sym}</span>
         <span class="tc-pnl ${pos ? 'pos' : 'neg'}">${pnlStr}${pos ? ' 🔔' : ''}</span>
       </div>
-      <div class="tc-layer">${tr.e || '--'}</div>
-      <div class="tc-time">${tr.t || '--'}</div>
+      <div class="tc-row">
+        <span class="tc-lbl">${tr.e || '--'}</span>
+        <span class="tc-reason ${whyCls}">${why}</span>
+      </div>
+      <div class="tc-row">
+        <span class="tc-lbl">Entry</span><span class="tc-v">${en}</span>
+        <span class="tc-lbl" style="margin-left:6px">Exit</span><span class="tc-v">${ex}</span>
+      </div>
+      <div class="tc-row">
+        <span class="tc-lbl">MFE</span><span class="tc-v pos">+${mfe}bp</span>
+        <span class="tc-lbl" style="margin-left:6px">MAE</span><span class="tc-v neg">${mae}bp</span>
+      </div>
+      <div class="tc-row">
+        <span class="tc-lbl">Hold</span><span class="tc-v dim">${hold}</span>
+        <span class="tc-lbl" style="margin-left:6px">${tr.t || '--'}</span>
+      </div>
     </div>`;
   }).join('');
 
@@ -213,7 +263,6 @@ function renderTradeLog() {
   const wr = total > 0 ? (wins / total * 100).toFixed(0) + '%' : '--%';
   const tc = $('ts-count'); if (tc) tc.textContent = total;
   const tw = $('ts-wr'); if (tw) { tw.textContent = wr; tw.className = wins >= losses ? 'strong pos' : 'strong neg'; }
-  // cumulative pnl
   const cumPnl = localTrades.reduce((a, t) => a + (+t.p || 0), 0);
   const tp = $('ts-pnl');
   if (tp) { tp.textContent = (cumPnl >= 0 ? '+' : '') + cumPnl.toFixed(2) + 'bp'; tp.className = cumPnl >= 0 ? 'pos' : 'neg'; }
@@ -226,6 +275,13 @@ function updateWinRate() {
   const el = $('st-wr');
   if (el) { el.textContent = wr; el.className = 'sr-val ' + (wins >= losses ? 'pos' : 'neg'); }
 }
+
+window.clearTrades = function() {
+  localTrades = []; wins = 0; losses = 0;
+  try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
+  renderTradeLog();
+  updateWinRate();
+};
 
 // ── MAIN UPDATE ───────────────────────────────────────────────────────────
 function updateAll(data) {

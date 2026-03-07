@@ -182,6 +182,7 @@ public:
     double get_realized_pnl() const { return balanced_.get_realized_pnl(); }
     int get_total_trades() const { return balanced_.get_total_trades(); }
     int get_open_positions() const { return balanced_.get_open_positions(); }
+    void set_funding_fetcher(chimera::FundingRateFetcher* f) { balanced_.set_funding_fetcher(f); }
     
     std::string generate_state_json() {
         std::ostringstream json;

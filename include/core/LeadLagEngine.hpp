@@ -46,11 +46,11 @@ public:
     static constexpr double MAX_LATENCY_MS        = 35.0;
 
     // BTC movement threshold to trigger lead-lag signal
-    // 12bp on BTC = $102 move on $85k — genuine institutional tick, not noise
-    static constexpr double BTC_MOVE_THRESHOLD_BP = 12.0;
+    // 8bp on BTC = $68 move on $85k — real move, tuned for current market conditions
+    static constexpr double BTC_MOVE_THRESHOLD_BP = 8.0;
 
-    // Target symbol max move: if ETH/SOL already moved 4bp, edge is consumed
-    static constexpr double TARGET_MOVED_MAX_BP   = 4.0;
+    // Target symbol max move: if ETH/SOL already moved 3bp, edge is consumed
+    static constexpr double TARGET_MOVED_MAX_BP   = 3.0;
 
     // Lookback window for detecting BTC's leading move
     // 100ms captures the initial impulse before propagation begins

@@ -228,7 +228,23 @@ public:
         
         // PHASE 2: Update microstructure engines
         update_market_data(id, tick, ts, latency_ms);
-        symbols_[id].last_tick = tick;   // Store for signal checks
+        // Only update last_tick when bookTicker data is present (bid > 0)
+        // aggTrade fires with bid=0 and would corrupt the stored book state
+        if (tick.bid > 0.0 && tick.ask > 0.0) {
+            symbols_[id].last_tick = tick;
+        } else if (symbols_[id].last_tick.bid > 0.0) {
+            // Merge: keep book state, update only trade flow fields
+            symbols_[id].last_tick.last_price     = tick.last_price;
+            symbols_[id].last_tick.trade_qty      = tick.trade_qty;
+            symbols_[id].last_tick.agg_buy_volume = tick.agg_buy_volume;
+            symbols_[id].last_tick.agg_sell_volume= tick.agg_sell_volume;
+            symbols_[id].last_tick.is_buyer_maker = tick.is_buyer_maker;
+            symbols_[id].last_tick.trade_time     = tick.trade_time;
+            symbols_[id].last_tick.timestamp      = tick.timestamp;
+            symbols_[id].last_tick.rtt_ms         = tick.rtt_ms;
+        } else {
+            symbols_[id].last_tick = tick; // no book yet, take whatever we have
+        }
         
         // Periodic reporting
         static int64_t last_report_ts = 0;

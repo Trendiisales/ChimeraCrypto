@@ -15,6 +15,7 @@
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "execution/NetworkLatencySystem.hpp"
 #include "core/SymbolIndex.hpp"
+#include "config/TradingConfig.hpp"
 
 chimera::ExchangeLatencyEngine g_exchange_latency;
 chimera::FundingRateFetcher    g_funding;
@@ -107,6 +108,15 @@ int main() {
 
     feed.start();
     std::printf("[STARTUP] Feed live. Calibrating latency...\n");
+    std::printf("[CONFIG] Regime thresholds: GRIND→BUILDUP=%.2f  BUILDUP→BREAKOUT=%.2f\n",
+        chimera::TradingConfig::REGIME_GRIND_EXIT_TO_BUILDUP,
+        chimera::TradingConfig::REGIME_BUILDUP_TO_BREAKOUT);
+    std::printf("[CONFIG] LeadLag BTC threshold: %.1fbp  Target max: %.1fbp\n",
+        chimera::TradingConfig::LEADLAG_BTC_THRESHOLD_BP,
+        chimera::TradingConfig::LEADLAG_TARGET_MAX_BP);
+    std::printf("[CONFIG] IMBAL threshold: %.2f  Spread max: %.1fbp\n",
+        chimera::TradingConfig::IMBALANCE_THRESHOLD,
+        chimera::TradingConfig::IMBALANCE_MAX_SPREAD_BPS);
     std::fflush(stdout);
 
     // ── 4. Main loop ──────────────────────────────────────────────────────────

@@ -79,10 +79,10 @@ struct TradingConfig {
     //   → Only fire when BTC move >= 12bp AND target hasn't moved yet
 
     // BTC must move at least this many bp in the lookback window to signal
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 12.0;
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 8.0;
 
     // Target already moved this much → edge consumed, don't enter
-    static constexpr double LEADLAG_TARGET_MAX_BP      = 4.0;
+    static constexpr double LEADLAG_TARGET_MAX_BP      = 3.0;
 
     // Take-profit for lead-lag trades (gross, before costs)
     // Net profit after 10bp costs = +4bp. Worth it if win rate > 70%.
@@ -155,12 +155,12 @@ struct TradingConfig {
     static constexpr double REGIME_DEAD_EXIT                = 0.90;
     static constexpr double REGIME_GRIND_ENTER_FROM_DEAD    = 0.90;
     static constexpr double REGIME_GRIND_EXIT_TO_DEAD       = 0.75;
-    static constexpr double REGIME_GRIND_EXIT_TO_BUILDUP    = 1.55;
-    static constexpr double REGIME_BUILDUP_ENTER            = 1.55;
+    static constexpr double REGIME_GRIND_EXIT_TO_BUILDUP    = 1.35;
+    static constexpr double REGIME_BUILDUP_ENTER            = 1.35;
     static constexpr double REGIME_BUILDUP_EXIT             = 0.95;
-    static constexpr double REGIME_BUILDUP_TO_BREAKOUT      = 1.95;
-    static constexpr double REGIME_BREAKOUT_ENTER           = 1.95;
-    static constexpr double REGIME_BREAKOUT_EXIT            = 1.55;
+    static constexpr double REGIME_BUILDUP_TO_BREAKOUT      = 1.65;
+    static constexpr double REGIME_BREAKOUT_ENTER           = 1.65;
+    static constexpr double REGIME_BREAKOUT_EXIT            = 1.35;
     static constexpr int    MIN_REGIME_TICKS                = 30;
     static constexpr double REGIME_MIN_LONG_AVG             = 0.004;
 

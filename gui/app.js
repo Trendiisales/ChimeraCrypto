@@ -289,9 +289,9 @@ function updateAll(data) {
         <div style="border-bottom:1px solid var(--border);padding:5px 0">
           <div style="display:flex;justify-content:space-between;margin-bottom:3px">
             <span style="color:var(--accent);font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:1px">${l.name}</span>
-            <span style="font-weight:700;font-size:13px;color:${l.pnl>=0?'var(--green)':'var(--red)'}">${l.pnl>=0?'+':''}${(+l.pnl).toFixed(2)}bp</span>
+            <span style="font-weight:700;font-size:16px;color:${l.pnl>=0?'var(--green)':'var(--red)'}">${l.pnl>=0?'+':''}${(+l.pnl).toFixed(2)}bp</span>
           </div>
-          <div style="display:flex;gap:10px;font-size:11px;color:var(--muted)">
+          <div style="display:flex;gap:10px;font-size:13px;color:var(--muted)">
             <span>${l.trades}T</span>
             <span style="color:${l.wr>=50?'var(--green)':'var(--red)'};font-weight:600">${(+l.wr).toFixed(0)}%WR</span>
             <span>avg ${l.avg_pnl>=0?'+':''}${(+l.avg_pnl).toFixed(1)}bp</span>
@@ -305,7 +305,7 @@ function updateAll(data) {
           </div>
         </div>`).join('');
     } else if (bl) {
-      bl.innerHTML = '<div style="color:var(--muted);font-size:11px">No trades yet</div>';
+      bl.innerHTML = '<div style="color:var(--muted);font-size:14px">No trades yet</div>';
     }
   }
 

@@ -194,6 +194,7 @@ public:
     
     // Delegate getters
     std::string get_rejection_stats() const { return balanced_.get_rejection_stats(); }
+    std::string get_session_stats_json() const { return balanced_.get_session_stats_json(); }
     double get_total_pnl() const { return balanced_.get_total_pnl(); }
     double get_realized_pnl() const { return balanced_.get_realized_pnl(); }
     int get_total_trades() const { return balanced_.get_total_trades(); }
@@ -215,6 +216,9 @@ public:
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         json << "\"latency_p95\":" << last_latency_ms_ << ",";
+
+        // Full session stats — per-layer wins/losses/tp/sl/trail/timeout
+        json << balanced_.get_session_stats_json() << ",";
 
         // Trade log JSON array
         {

@@ -474,6 +474,23 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
     </div>
   </div>
 
+  <div class="rp-sec">
+    <div class="rp-head">Exit Breakdown</div>
+    <div class="rp-body">
+      <div class="stat-row"><span class="sr-label" style="color:var(--green)">TP Hits</span><span class="sr-val pos" id="st-tp">0</span></div>
+      <div class="stat-row"><span class="sr-label" style="color:var(--red)">SL Hits</span><span class="sr-val neg" id="st-sl">0</span></div>
+      <div class="stat-row"><span class="sr-label" style="color:var(--accent)">Trail Stops</span><span class="sr-val accent" id="st-trail">0</span></div>
+      <div class="stat-row"><span class="sr-label" style="color:var(--yellow)">Timeouts</span><span class="sr-val" style="color:var(--yellow)" id="st-timeout">0</span></div>
+    </div>
+  </div>
+
+  <div class="rp-sec">
+    <div class="rp-head">By Engine</div>
+    <div class="rp-body" id="st-by-layer" style="padding:4px 6px">
+      <div style="color:var(--muted);font-size:9px">No trades yet</div>
+    </div>
+  </div>
+
 
 </div><!-- /right-panel -->
 </div><!-- /main -->

@@ -529,10 +529,66 @@ public:
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
-    double get_total_pnl() const { return total_pnl_; }
-    double get_realized_pnl() const { return realized_pnl_; }
-    int get_total_trades() const { return total_trades_; }
-    int get_open_positions() const { return open_positions_; }
+    double get_total_pnl()      const { return total_pnl_; }
+    double get_realized_pnl()   const { return realized_pnl_; }
+    int    get_total_trades()   const { return total_trades_; }
+    int    get_open_positions() const { return open_positions_; }
+
+    // Full session breakdown — auto-maintained on every exit, no grep needed
+    std::string get_session_stats_json() const {
+        static const char* LAYER_NAMES[] = {
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP"
+        };
+        std::ostringstream j;
+        j << std::fixed << std::setprecision(2);
+        int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
+        double total_pnl=0.0;
+        for (int i=1;i<8;i++){
+            total_wins    += layer_stats_[i].wins;
+            total_losses  += layer_stats_[i].losses;
+            total_tp      += layer_stats_[i].tp_exits;
+            total_sl      += layer_stats_[i].sl_exits;
+            total_trail   += layer_stats_[i].trail_exits;
+            total_timeout += layer_stats_[i].timeout_exits;
+            total_pnl     += layer_stats_[i].total_pnl_bp;
+        }
+        int total = total_wins + total_losses;
+        j << "\"session\":{"
+          << "\"total_trades\":"  << total << ","
+          << "\"wins\":"          << total_wins << ","
+          << "\"losses\":"        << total_losses << ","
+          << "\"win_rate\":"      << (total>0?(double)total_wins/total*100.0:0.0) << ","
+          << "\"total_pnl_bp\":"  << total_pnl << ","
+          << "\"tp_exits\":"      << total_tp << ","
+          << "\"sl_exits\":"      << total_sl << ","
+          << "\"trail_exits\":"   << total_trail << ","
+          << "\"timeout_exits\":" << total_timeout << ","
+          << "\"by_layer\":[";
+        bool first=true;
+        for (int i=1;i<8;i++){
+            const auto& ls=layer_stats_[i];
+            if (ls.total()==0) continue;
+            if (!first) j << ",";
+            first=false;
+            j << "{\"name\":\"" << LAYER_NAMES[i] << "\","
+              << "\"trades\":"  << ls.total() << ","
+              << "\"wins\":"    << ls.wins << ","
+              << "\"losses\":"  << ls.losses << ","
+              << "\"wr\":"      << ls.win_rate() << ","
+              << "\"pnl\":"     << ls.total_pnl_bp << ","
+              << "\"avg_pnl\":" << ls.avg_pnl() << ","
+              << "\"best\":"    << ls.best_trade << ","
+              << "\"worst\":"   << ls.worst_trade << ","
+              << "\"avg_mfe\":" << ls.avg_mfe() << ","
+              << "\"avg_mae\":" << ls.avg_mae() << ","
+              << "\"tp\":"      << ls.tp_exits << ","
+              << "\"sl\":"      << ls.sl_exits << ","
+              << "\"trail\":"   << ls.trail_exits << ","
+              << "\"timeout\":" << ls.timeout_exits << "}";
+        }
+        j << "]}";
+        return j.str();
+    }
     
     void set_gui_broadcast(GuiBroadcastCallback callback) {
         // DISABLED - GUI decoupled, logs only
@@ -1585,6 +1641,9 @@ private:
         }
         pending_exit_reason_.clear();
 
+        // Record per-layer session stats (visible in GUI Session Stats panel)
+        stats_for(s.pos.layer).record(pnl, td.reason, s.pos.mfe, s.pos.mae);
+
         // Shadow log — structured CSV for edge measurement
         {
             ShadowEntry se;
@@ -1735,10 +1794,51 @@ private:
     double expand_peak_price_[3];
     int consecutive_losses_;
     int64_t last_loss_ts_;
-    
+
     double total_pnl_;
     double realized_pnl_;
     int total_trades_;
+
+    // ── PER-LAYER SESSION STATS ───────────────────────────────────────────────
+    // Automatically updated in exit() — queried by GUI via get_session_stats_json()
+    struct LayerStats {
+        int wins          = 0;
+        int losses        = 0;
+        int tp_exits      = 0;
+        int sl_exits      = 0;
+        int trail_exits   = 0;
+        int timeout_exits = 0;
+        double total_pnl_bp = 0.0;
+        double best_trade   = 0.0;
+        double worst_trade  = 0.0;
+        double sum_mfe      = 0.0;
+        double sum_mae      = 0.0;
+
+        void record(double pnl, const std::string& reason, double mfe, double mae) {
+            if (pnl > 0) wins++; else losses++;
+            total_pnl_bp += pnl;
+            int n = wins + losses;
+            if (n == 1 || pnl > best_trade)  best_trade  = pnl;
+            if (n == 1 || pnl < worst_trade) worst_trade = pnl;
+            sum_mfe += mfe;
+            sum_mae += mae;
+            if      (reason == "TP")      tp_exits++;
+            else if (reason == "SL")      sl_exits++;
+            else if (reason == "TRAIL")   trail_exits++;
+            else if (reason == "TIMEOUT") timeout_exits++;
+        }
+        int    total()    const { return wins + losses; }
+        double win_rate() const { return total() > 0 ? (double)wins / total() * 100.0 : 0.0; }
+        double avg_pnl()  const { return total() > 0 ? total_pnl_bp / total() : 0.0; }
+        double avg_mfe()  const { return total() > 0 ? sum_mfe / total() : 0.0; }
+        double avg_mae()  const { return total() > 0 ? sum_mae / total() : 0.0; }
+    };
+    LayerStats layer_stats_[8];  // indexed by LayerMode enum value
+
+    LayerStats& stats_for(LayerMode m) {
+        int idx = (int)m;
+        return layer_stats_[(idx >= 0 && idx < 8) ? idx : 0];
+    }
     
     GuiBroadcastCallback gui_broadcast_;
     TradeExitCallback    trade_exit_cb_;

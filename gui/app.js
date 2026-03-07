@@ -309,6 +309,46 @@ function updateAll(data) {
   const spos = $('st-pos'); if (spos) spos.textContent = data.open_positions || 0;
   const slat = $('st-lat'); if (slat) slat.textContent = lat > 0 ? lat.toFixed(1) + 'ms' : '--ms';
 
+  // Exit breakdown from session stats
+  if (data.session) {
+    const s = data.session;
+    const tp = $('st-tp'); if (tp) tp.textContent = s.tp_exits || 0;
+    const sl = $('st-sl'); if (sl) sl.textContent = s.sl_exits || 0;
+    const tr = $('st-trail'); if (tr) tr.textContent = s.trail_exits || 0;
+    const to = $('st-timeout'); if (to) to.textContent = s.timeout_exits || 0;
+
+    // Win rate from live C++ stats (authoritative)
+    const wr = s.total_trades > 0 ? s.win_rate.toFixed(0) + '%' : '--%';
+    const el = $('st-wr');
+    if (el) { el.textContent = wr; el.className = 'sr-val ' + (s.wins >= s.losses ? 'pos' : 'neg'); }
+
+    // Per-layer breakdown table
+    const bl = $('st-by-layer');
+    if (bl && s.by_layer && s.by_layer.length) {
+      bl.innerHTML = s.by_layer.map(l => `
+        <div style="border-bottom:1px solid var(--border);padding:4px 0;font-size:9px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+            <span style="color:var(--accent);font-weight:700;letter-spacing:1px">${l.name}</span>
+            <span style="font-weight:700;color:${l.pnl>=0?'var(--green)':'var(--red)'}">${l.pnl>=0?'+':''}${(+l.pnl).toFixed(2)}bp</span>
+          </div>
+          <div style="display:flex;gap:8px;color:var(--muted)">
+            <span>${l.trades}T</span>
+            <span style="color:${l.wr>=50?'var(--green)':'var(--red)'}">${l.wr.toFixed(0)}%WR</span>
+            <span>avg ${l.avg_pnl>=0?'+':''}${(+l.avg_pnl).toFixed(1)}bp</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:2px;font-size:8px">
+            <span style="color:var(--green)">TP:${l.tp}</span>
+            <span style="color:var(--red)">SL:${l.sl}</span>
+            <span style="color:var(--accent)">TR:${l.trail}</span>
+            <span style="color:var(--yellow)">TO:${l.timeout}</span>
+            <span style="color:var(--muted);margin-left:auto">MFE:+${(+l.avg_mfe).toFixed(1)} MAE:${(+l.avg_mae).toFixed(1)}</span>
+          </div>
+        </div>`).join('');
+    } else if (bl) {
+      bl.innerHTML = '<div style="color:var(--muted);font-size:9px">No trades yet</div>';
+    }
+  }
+
   // Trade log from server
   if (data.trade_log) mergeTrades(data.trade_log);
 

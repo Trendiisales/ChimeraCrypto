@@ -60,22 +60,28 @@ public:
             (t.aggressive_buy_volume - t.aggressive_sell_volume)
             / std::max(t.trade_volume, 1e-6);
 
-        double depth_ratio =
-            total_depth;
-
         double vol_ratio =
             t.short_range / std::max(t.long_range, 1e-6);
 
         volume_ema_     = ema(volume_ema_, t.trade_volume, 0.05);
         imbalance_ema_  = ema(imbalance_ema_, imbalance, 0.1);
-        depth_ema_      = ema(depth_ema_, depth_ratio, 0.05);
+        // depth_ema_ tracks the baseline depth level (absolute units)
+        // depth_collapse = how much depth has SHRUNK vs its own baseline
+        // If depth_ema_ is uninitialized (0), seed it first tick
+        if (depth_ema_ < 1e-9) depth_ema_ = total_depth;
+        else depth_ema_ = ema(depth_ema_, total_depth, 0.05);
         volatility_ema_ = ema(volatility_ema_, vol_ratio, 0.05);
 
         double aggressive_pressure =
             clamp(std::abs(imbalance_ema_), 0.0, 1.0);
 
+        // depth_collapse: 0 = depth is normal or growing, 1 = depth totally gone
+        // Use ratio: how much below baseline is current depth?
+        double depth_ratio_vs_baseline = (depth_ema_ > 1e-9)
+            ? total_depth / depth_ema_
+            : 1.0;
         double depth_collapse =
-            clamp(1.0 - depth_ema_, 0.0, 1.0);
+            clamp(1.0 - depth_ratio_vs_baseline, 0.0, 1.0);
 
         double vol_expansion =
             clamp(volatility_ema_ - 1.1, 0.0, 3.0);

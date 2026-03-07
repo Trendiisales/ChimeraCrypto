@@ -110,8 +110,9 @@ struct TradingConfig {
     //   → Only fire when spread < 1.5bp (tight market = good fills)
 
     // Minimum |book_imbalance| to fire: (bid_size - ask_size)/(bid_size + ask_size)
-    // 0.45 = bids must be 2.6x asks. Very strong pressure. Filters noise well.
-    static constexpr double IMBALANCE_THRESHOLD        = 0.45;
+    // 0.30 = bids must be 1.86x asks. Strong pressure with more trade frequency.
+    // Was 0.45 (2.6x) which was too tight for normal market conditions.
+    static constexpr double IMBALANCE_THRESHOLD        = 0.30;
 
     // Reject if spread too wide — wide spread means fills are poor
     // BTC normal spread: 0.1-0.5bp. Above 1.5bp = unusually wide, skip.

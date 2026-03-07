@@ -92,48 +92,35 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 .sr-val{font-weight:700;font-size:22px;color:var(--text);font-variant-numeric:tabular-nums}
 .sr-val.pos{color:var(--green)}.sr-val.neg{color:var(--red)}.sr-val.accent{color:var(--accent)}
 
-.trade-log-block{background:var(--surface);border:1px solid var(--border2);border-radius:4px;overflow:hidden;flex:1;min-height:200px;display:flex;flex-direction:column}
-
-/* Header strip */
-.trade-log-head{display:flex;align-items:center;gap:20px;padding:10px 18px;border-bottom:1px solid var(--border2);flex-shrink:0}
-.trade-log-title{font-family:var(--fh);font-size:14px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
-.trade-log-stats{display:flex;gap:24px;margin-left:auto;align-items:center}
-.ts-stat{font-size:13px;color:var(--muted)}.ts-stat strong{color:var(--text);font-size:18px;font-weight:700}
+.trade-log-inner{border-top:2px solid var(--border2);background:var(--bg);display:flex;flex-direction:column}
+.tli-head{display:flex;align-items:center;gap:24px;padding:12px 18px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
+.tli-title{font-family:var(--fh);font-size:18px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#7ab0c8}
+.ts-stat{font-size:15px;color:var(--muted)}.ts-stat strong{color:#ffffff;font-size:22px;font-weight:800}
 .ts-stat.pos strong{color:var(--green)}.ts-stat.neg strong{color:var(--red)}
-
-/* Column header row */
-.tl-cols{display:grid;grid-template-columns:46px 60px 90px 100px 80px 80px 80px 70px 1fr;align-items:center;padding:5px 14px;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0}
-.tl-col-hdr{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#3d5a6e}
-
-/* Scrollable rows */
-.tl-body{overflow-y:auto;overflow-x:hidden;flex:1;min-height:0}
-.tl-body::-webkit-scrollbar{width:4px}
-.tl-body::-webkit-scrollbar-track{background:var(--bg)}
-.tl-body::-webkit-scrollbar-thumb{background:var(--border2)}
-
-/* Each trade row */
-.tl-row{display:grid;grid-template-columns:46px 60px 90px 100px 80px 80px 80px 70px 1fr;align-items:center;padding:7px 14px;border-bottom:1px solid rgba(255,255,255,.03);transition:background .15s}
-.tl-row:hover{background:rgba(255,255,255,.03)}
-.tl-row.win{border-left:3px solid var(--green)}
-.tl-row.loss{border-left:3px solid var(--red)}
-
-/* Row cells */
-.tl-tag{font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:1px}
+.tli-cols{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:6px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.tlic{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#3d5a6e}
+.tli-body{overflow-y:auto;overflow-x:hidden;max-height:280px}
+.tli-body::-webkit-scrollbar{width:4px}
+.tli-body::-webkit-scrollbar-thumb{background:var(--border2)}
+.tl-row{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:9px 18px;border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s}
+.tl-row:hover{background:rgba(255,255,255,.04)}
+.tl-row.win{border-left:4px solid var(--green);background:rgba(0,230,118,.035)}
+.tl-row.loss{border-left:4px solid var(--red);background:rgba(255,61,87,.035)}
+.tl-tag{font-family:var(--fh);font-size:14px;font-weight:800;letter-spacing:1px}
 .tl-tag.win{color:var(--green)}.tl-tag.loss{color:var(--red)}
-.tl-sym{font-family:var(--fh);font-size:15px;font-weight:700;color:#c8e0ec}
-.tl-pnl{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.tl-sym{font-family:var(--fh);font-size:18px;font-weight:800;color:#d4e8f0}
+.tl-pnl{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
 .tl-pnl.pos{color:var(--green)}.tl-pnl.neg{color:var(--red)}
-.tl-eng{font-family:var(--fh);font-size:12px;font-weight:700;color:#7ab0c8;letter-spacing:.5px}
-.tl-val{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:#9ab8cc}
+.tl-eng{font-family:var(--fh);font-size:14px;font-weight:700;color:#7ab0c8}
+.tl-val{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;color:#9ab8cc}
 .tl-val.pos{color:var(--green)}.tl-val.neg{color:var(--red)}
-.tl-reason{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:2px;display:inline-block}
-.tl-reason.tp{background:rgba(0,230,118,.15);color:var(--green)}
-.tl-reason.sl{background:rgba(255,61,87,.15);color:var(--red)}
-.tl-reason.trail{background:rgba(0,212,255,.12);color:var(--accent)}
-.tl-reason.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
-.tl-time{font-size:12px;color:#3d5a6e;font-variant-numeric:tabular-nums}
-.tl-empty{padding:20px 18px;color:var(--muted);font-size:13px;opacity:.6}
-
+.tl-reason{font-family:var(--fh);font-size:13px;font-weight:800;letter-spacing:1px;padding:3px 10px;border-radius:2px;display:inline-block}
+.tl-reason.tp{background:rgba(0,230,118,.18);color:var(--green)}
+.tl-reason.sl{background:rgba(255,61,87,.18);color:var(--red)}
+.tl-reason.trail{background:rgba(0,212,255,.15);color:var(--accent)}
+.tl-reason.timeout{background:rgba(255,214,0,.12);color:var(--yellow)}
+.tl-time{font-size:13px;color:#4d6878;font-variant-numeric:tabular-nums}
+.tli-empty{padding:18px;color:var(--muted);font-size:15px;opacity:.6}
 
 /* Per-symbol trade rows under engine grid */
 .sym-trades{border-top:1px solid var(--border2)}
@@ -255,32 +242,29 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     </div>
     <div id="str-sol" class="sym-trades-empty">No trades yet</div>
   </div>
-</div>
-
-<!-- TRADE LOG — directly under SOL -->
-<div class="trade-log-block">
-  <div class="trade-log-head">
-    <span class="trade-log-title">🔔 Trade Log</span>
-    <div class="trade-log-stats">
+  <!-- ALL-SYMBOL TRADE LOG — embedded inside SOL block -->
+  <div class="trade-log-inner">
+    <div class="tli-head">
+      <span class="tli-title">📋 ALL TRADES</span>
       <span class="ts-stat">Trades: <strong id="ts-count">0</strong></span>
       <span class="ts-stat" id="ts-pnl-wrap">P&L: <strong id="ts-pnl">+0.00bp</strong></span>
       <span class="ts-stat">Win Rate: <strong id="ts-wr">--%</strong></span>
-      <button onclick="clearTrades()" style="background:rgba(255,61,87,.12);color:var(--red);border:1px solid rgba(255,61,87,.3);padding:4px 12px;border-radius:2px;font-size:11px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:8px">CLEAR</button>
+      <button onclick="clearTrades()" style="background:rgba(255,61,87,.12);color:var(--red);border:1px solid rgba(255,61,87,.3);padding:3px 10px;border-radius:2px;font-size:11px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto">CLEAR</button>
     </div>
-  </div>
-  <div class="tl-cols">
-    <span class="tl-col-hdr"></span>
-    <span class="tl-col-hdr">Sym</span>
-    <span class="tl-col-hdr">P&amp;L</span>
-    <span class="tl-col-hdr">Engine</span>
-    <span class="tl-col-hdr">Entry</span>
-    <span class="tl-col-hdr">Exit</span>
-    <span class="tl-col-hdr">MFE / MAE</span>
-    <span class="tl-col-hdr">Hold</span>
-    <span class="tl-col-hdr">Exit</span>
-  </div>
-  <div class="tl-body" id="trade-table-body">
-    <div class="tl-empty">Waiting for first trade...</div>
+    <div class="tli-cols">
+      <span class="tlic"></span>
+      <span class="tlic">Sym</span>
+      <span class="tlic">P&amp;L bp</span>
+      <span class="tlic">P&amp;L $</span>
+      <span class="tlic">Engine</span>
+      <span class="tlic">Entry → Exit</span>
+      <span class="tlic">Hold</span>
+      <span class="tlic">Exit</span>
+      <span class="tlic">Time</span>
+    </div>
+    <div class="tli-body" id="trade-table-body">
+      <div class="tli-empty">Waiting for first trade...</div>
+    </div>
   </div>
 </div>
 

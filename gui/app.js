@@ -241,7 +241,6 @@ function renderTradeLog() {
   const body = $('trade-table-body');
   if (!body) return;
 
-  // Stats header
   let totalPnl = 0;
   localTrades.forEach(t => totalPnl += (+t.p || 0));
   set('ts-count', localTrades.length);
@@ -249,11 +248,9 @@ function renderTradeLog() {
   if (tspnl) { tspnl.textContent = fmtPnl(totalPnl); tspnl.className = +totalPnl >= 0 ? 'pos' : 'neg'; }
 
   if (!localTrades.length) {
-    body.innerHTML = '<div class="tl-empty">Waiting for first trade...</div>';
+    body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>';
     return;
   }
-
-  // Newest first — wins and losses interleaved in time order so you see what just happened
   body.innerHTML = localTrades.slice(0, 80).map(makeRow).join('');
 }
 

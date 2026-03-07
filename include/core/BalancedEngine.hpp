@@ -64,6 +64,7 @@ struct Position {
     double entry_price;
     int64_t entry_ts;
     LayerMode layer;
+    bool is_long = true;     // Trade direction: true=LONG, false=SHORT
     int open_ticks;      // Ticks since position opened (for minimum hold time)
     double peak_price;   // Highest favorable price since entry (for trailing)
     
@@ -757,7 +758,7 @@ private:
             return false;
         }
 
-        enter(id, price, ts, s, LAYER_IMPULSE);
+        enter(id, price, ts, s, LAYER_IMPULSE, true);
         return true;
     }
 
@@ -810,12 +811,9 @@ private:
             return false;
         }
 
-        enter(id, price, ts, s, LAYER_EXPANSION);
+        enter(id, price, ts, s, LAYER_EXPANSION, true);
         return true;
-    }
-
-    // ======================================================================
-    // IMBALANCE — fires in GRIND regime on strong book pressure
+    } — fires in GRIND regime on strong book pressure
     // Latency requirement: < 25ms (tighter than hard limit — needs fresh data)
     // Edge: bid/ask imbalance predicts 1-3 tick direction
     //
@@ -855,13 +853,9 @@ private:
             rejection_throttle_.record(key, "weak_imbalance");
             return false;
         }
-        // Long-only for now (short requires margin/perps)
-        if (imbalance < 0) {
-            rejection_throttle_.record(key, "short_not_supported");
-            return false;
-        }
 
-        enter(id, price, ts, s, LAYER_MICRO);
+        bool is_long = (imbalance > 0);  // P1 fix: both sides enabled
+        enter(id, price, ts, s, LAYER_MICRO, is_long);
         return true;
     }
 
@@ -904,20 +898,17 @@ private:
             return false;
         }
 
-        // Long-only for now
-        if (direction < 0) {
-            rejection_throttle_.record(key, "short_not_supported");
-            return false;
-        }
+        // P3 fix: both directions enabled — BTC leads ETH/SOL on short side too
+        bool is_long = (direction > 0);
 
         // Don't enter if already in a position on this symbol
         if (s.pos.state == POS_OPEN) return false;
 
-        std::printf("[LEADLAG] %s | btc_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
-                    sym, leadlag_.btc_move_bp(), latency_ms);
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | latency=%.1fms | ENTERING %s\n",
+                    sym, leadlag_.btc_move_bp(), latency_ms, is_long ? "LONG" : "SHORT");
         std::fflush(stdout);
 
-        enter(id, price, ts, s, LAYER_LEADLAG);
+        enter(id, price, ts, s, LAYER_LEADLAG, is_long);
         return true;
     }
     
@@ -1065,7 +1056,7 @@ private:
         }
     }
     
-    void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer) {
+    void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
         Signal sig;
         sig.symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
@@ -1187,6 +1178,7 @@ private:
 
             s.pos.state         = POS_PENDING;
             s.pos.pending_layer = layer;
+            s.pos.is_long       = is_long;
             open_positions_++;  // Reserve — decremented if cancelled
 
             if (layer == LAYER_EXPANSION) {
@@ -1205,6 +1197,7 @@ private:
             s.pos.entry_price = price;
             s.pos.entry_ts    = ts;
             s.pos.layer       = layer;
+            s.pos.is_long     = is_long;
             s.pos.open_ticks  = 0;
             s.pos.peak_price  = price;
             s.pos.mfe         = 0.0;
@@ -1225,14 +1218,14 @@ private:
 
             open_positions_++;
 
-            std::printf("[ENTER] %s | %s | regime=%s | px=%.4f | weight=%.3f | mult=%.2f\n",
-                sym, mode, regime_name(s.regime), price, final_weight, legacy_size_mult);
+            std::printf("[ENTER] %s | %s | %s | regime=%s | px=%.4f | weight=%.3f | mult=%.2f\n",
+                sym, mode, is_long ? "LONG" : "SHORT", regime_name(s.regime), price, final_weight, legacy_size_mult);
             std::fflush(stdout);
 
             // Execute order (shadow or live — determined by executor config)
             if (executor_) {
                 double qty = (final_size * legacy_size_mult) / std::max(price, 1.0);
-                executor_->execute(sym_lower(id), true /*buy*/, qty, price);
+                executor_->execute(sym_lower(id), is_long, qty, price);
             }
 
             std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
@@ -1301,9 +1294,8 @@ private:
                 ? (capital_control_.compute_final_size(0.5,
                       CapitalControlLayer::MarketEnv{}, 0.0, 0.0) / s.pos.entry_price)
                 : 0.0;
-            // Use the same qty that was entered (approximate via entry_price)
-            // For shadow mode this just logs the close
-            executor_->execute(sym, false /*sell*/, qty, exit_px);
+            // Close in opposite direction: sell longs, buy-back shorts
+            executor_->execute(sym, !s.pos.is_long, qty, exit_px);
         }
         
         // Broadcast exit to GUI with complete trade details

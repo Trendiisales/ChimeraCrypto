@@ -164,6 +164,12 @@ struct TradingConfig {
     static constexpr int    MIN_REGIME_TICKS                = 30;
     static constexpr double REGIME_MIN_LONG_AVG             = 0.004;
 
+    // Aliases used by RegimeClassifier::classify_regime()
+    // Maps to the hysteresis enter thresholds above
+    static constexpr double REGIME_DEAD_THRESHOLD           = REGIME_DEAD_EXIT;           // 0.90
+    static constexpr double REGIME_GRIND_THRESHOLD          = REGIME_GRIND_EXIT_TO_BUILDUP; // 1.35
+    static constexpr double REGIME_BUILDUP_THRESHOLD        = REGIME_BUILDUP_TO_BREAKOUT; // 1.65
+
 
     // -------------------------------------------------------------------------
     // VOLATILITY CALCULATION

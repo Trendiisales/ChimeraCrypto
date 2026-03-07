@@ -34,9 +34,28 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* LAYOUT */
-.main{display:grid;grid-template-columns:1fr 295px;height:calc(100vh - 45px);overflow:hidden}
+.main{display:grid;grid-template-columns:1fr 295px;height:calc(100vh - 45px - 160px);overflow:hidden}
 .left-panel{overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
 .right-panel{border-left:1px solid var(--border);overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
+
+/* TRADE STRIP — full width below main grid */
+.trade-strip{height:160px;border-top:2px solid var(--border2);background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.trade-strip-head{display:flex;align-items:center;gap:10px;padding:5px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+.trade-strip-title{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+.trade-strip-stats{display:flex;gap:16px;margin-left:auto}
+.ts-stat{font-size:9px;color:var(--muted)}.ts-stat strong{color:var(--text)}
+.ts-stat.pos strong{color:var(--green)}.ts-stat.neg strong{color:var(--red)}
+.trade-strip-body{flex:1;overflow-x:auto;overflow-y:hidden;padding:6px 10px}
+.trade-row-list{display:flex;gap:6px;align-items:stretch;height:100%}
+.trade-card{flex-shrink:0;width:130px;border:1px solid var(--border);border-radius:3px;padding:6px 8px;display:flex;flex-direction:column;gap:2px;background:var(--bg);font-size:9px}
+.trade-card.win{border-color:rgba(0,230,118,.3);background:rgba(0,230,118,.03)}
+.trade-card.loss{border-color:rgba(255,23,68,.2);background:rgba(255,23,68,.02)}
+.tc-header{display:flex;justify-content:space-between;align-items:center}
+.tc-sym{font-weight:700;color:var(--accent);font-size:10px;letter-spacing:1px}
+.tc-pnl{font-weight:700;font-size:11px}.tc-pnl.pos{color:var(--green)}.tc-pnl.neg{color:var(--red)}
+.tc-layer{color:var(--muted);font-size:8px;letter-spacing:.5px}
+.tc-time{color:var(--muted);font-size:8px}
+.tc-bell{font-size:11px}
 
 /* SYMBOL BLOCK */
 .sym-block{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
@@ -371,15 +390,26 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
     </div>
   </div>
 
-  <div class="rp-sec" style="flex:1;min-height:0">
-    <div class="rp-head">Trade Log</div>
-    <div class="rp-body" id="trade-log" style="overflow-y:auto;max-height:320px">
-      <div style="color:var(--muted);font-size:10px;text-align:center;padding:20px 0">Waiting for first trade...</div>
-    </div>
-  </div>
 
 </div><!-- /right-panel -->
 </div><!-- /main -->
+
+<!-- TRADE STRIP — full width below main panels -->
+<div class="trade-strip">
+  <div class="trade-strip-head">
+    <span class="trade-strip-title">🔔 Trade Log</span>
+    <div class="trade-strip-stats">
+      <span class="ts-stat">Trades: <strong id="ts-count">0</strong></span>
+      <span class="ts-stat" id="ts-pnl-wrap">P&amp;L: <strong id="ts-pnl">+0.00bp</strong></span>
+      <span class="ts-stat">Win Rate: <strong id="ts-wr">--%</strong></span>
+    </div>
+  </div>
+  <div class="trade-strip-body">
+    <div class="trade-row-list" id="trade-card-list">
+      <div style="color:var(--muted);font-size:10px;display:flex;align-items:center;padding:0 10px">Waiting for first trade...</div>
+    </div>
+  </div>
+</div>
 <script src="/app.js"></script>
 </body>
 </html>

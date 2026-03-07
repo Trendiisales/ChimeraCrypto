@@ -49,7 +49,7 @@ function playWin() {
 // ── WIN FLASH ─────────────────────────────────────────────────────────────
 function flashWin(sym, pnl) {
   const el = $('win-flash'); if (!el) return;
-  el.textContent = `✓ WIN  ${sym.replace('USDT', '')}  +${(+pnl).toFixed(2)}bp`;
+  el.textContent = `🔔 WIN  ${sym.replace('usdt','').replace('USDT','')}  +${(+pnl).toFixed(2)}bp`;
   el.style.display = 'block'; el.classList.add('show');
   setTimeout(() => { el.classList.remove('show'); el.style.display = 'none'; }, 2800);
 }
@@ -186,25 +186,38 @@ function mergeTrades(serverLog) {
 }
 
 function renderTradeLog() {
-  const el = $('trade-log'); if (!el) return;
+  const list = $('trade-card-list'); if (!list) return;
   if (!localTrades.length) {
-    el.innerHTML = '<div style="color:var(--muted);font-size:10px;text-align:center;padding:20px 0">Waiting for first trade...</div>';
+    list.innerHTML = '<div style="color:var(--muted);font-size:10px;display:flex;align-items:center;padding:0 10px">Waiting for first trade...</div>';
     return;
   }
-  el.innerHTML = localTrades.map(tr => {
+  // Show newest first, max 60 cards
+  const shown = localTrades.slice(-60).reverse();
+  list.innerHTML = shown.map(tr => {
     const p = +tr.p, pos = p >= 0;
     const pnlStr = (pos ? '+' : '') + p.toFixed(2) + 'bp';
-    const enPx = +tr.en > 0 ? '$' + (+tr.en).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
-    const exPx = +tr.ex > 0 ? '$' + (+tr.ex).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
-    const priceStr = enPx && exPx ? `<span style="color:var(--muted);font-size:9px"> ${enPx}→${exPx}</span>` : '';
-    return `<div class="trade-entry">
-      <span class="te-time">${tr.t}</span>
-      <span class="te-sym">${tr.s}</span>
-      <span class="te-layer">${tr.e}</span>
-      ${priceStr}
-      <span class="te-pnl ${pos ? 'pos' : 'neg'}">${pnlStr}</span>
+    const sym = (tr.s || '').replace('usdt','').replace('USDT','').toUpperCase();
+    const bell = pos ? '<span class="tc-bell">🔔</span>' : '';
+    return `<div class="trade-card ${pos ? 'win' : 'loss'}">
+      <div class="tc-header">
+        <span class="tc-sym">${sym}</span>
+        <span class="tc-pnl ${pos ? 'pos' : 'neg'}">${pnlStr}${pos ? ' 🔔' : ''}</span>
+      </div>
+      <div class="tc-layer">${tr.e || '--'}</div>
+      <div class="tc-time">${tr.t || '--'}</div>
     </div>`;
   }).join('');
+
+  // Update strip header stats
+  const total = wins + losses;
+  const wr = total > 0 ? (wins / total * 100).toFixed(0) + '%' : '--%';
+  const tc = $('ts-count'); if (tc) tc.textContent = total;
+  const tw = $('ts-wr'); if (tw) { tw.textContent = wr; tw.className = wins >= losses ? 'strong pos' : 'strong neg'; }
+  // cumulative pnl
+  const cumPnl = localTrades.reduce((a, t) => a + (+t.p || 0), 0);
+  const tp = $('ts-pnl');
+  if (tp) { tp.textContent = (cumPnl >= 0 ? '+' : '') + cumPnl.toFixed(2) + 'bp'; tp.className = cumPnl >= 0 ? 'pos' : 'neg'; }
+  const tw2 = $('ts-pnl-wrap'); if (tw2) tw2.className = 'ts-stat ' + (cumPnl >= 0 ? 'pos' : 'neg');
 }
 
 function updateWinRate() {

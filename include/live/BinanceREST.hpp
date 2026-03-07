@@ -421,10 +421,14 @@ private:
     // Minimal JSON parsers (no third-party lib)
     // -----------------------------------------------------------------------
     static std::string extract_json_string(const std::string& s, const std::string& key) {
-        std::string needle = "\"" + key + "\":\"";
+        std::string needle = "\"" + key + "\"";
         auto pos = s.find(needle);
         if (pos == std::string::npos) return "";
         pos += needle.size();
+        // skip whitespace and colon
+        while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == ':')) pos++;
+        if (pos >= s.size() || s[pos] != '"') return "";
+        pos++; // skip opening quote
         auto end = s.find('"', pos);
         if (end == std::string::npos) return "";
         return s.substr(pos, end - pos);

@@ -171,57 +171,48 @@ function reasonClass(r) {
   return 'timeout';
 }
 
-function makeCard(tr) {
-  const pnl = +tr.p || 0;
+function makeRow(tr) {
+  const pnl  = +tr.p || 0;
   const isWin = pnl >= 0;
-  const rc = reasonClass(tr.why || tr.reason || '');
-  const sym = (tr.s || '').replace('USDT', '');
-  const mfe = tr.mfe != null ? '+' + (+tr.mfe).toFixed(1) + 'bp' : '--';
-  const mae = tr.mae != null ? (+tr.mae).toFixed(1) + 'bp' : '--';
-  return `<div class="trade-card ${isWin ? 'win' : 'loss'}">
-    <div class="tc-header">
-      <span class="tc-sym ${isWin ? 'win' : 'loss'}">${sym}</span>
-      <span class="tc-pnl ${isWin ? 'pos' : 'neg'}">${fmtPnl(pnl)}</span>
-    </div>
-    <div class="tc-eng-row">
-      <span class="tc-engine">${tr.e || '--'}</span>
-      <span class="tc-reason ${rc}">${(tr.why || tr.reason || 'EXIT').toUpperCase()}</span>
-    </div>
-    <div class="tc-grid">
-      <div class="tc-cell"><span class="tc-lbl">Entry</span><span class="tc-v dim">${tr.en ? fmtPrice(tr.en, sym) : '--'}</span></div>
-      <div class="tc-cell"><span class="tc-lbl">Exit</span><span class="tc-v dim">${tr.ex ? fmtPrice(tr.ex, sym) : '--'}</span></div>
-      <div class="tc-cell"><span class="tc-lbl">MFE</span><span class="tc-v pos">${mfe}</span></div>
-      <div class="tc-cell"><span class="tc-lbl">MAE</span><span class="tc-v neg">${mae}</span></div>
-      <div class="tc-cell"><span class="tc-lbl">Hold</span><span class="tc-v dim">${fmtHold(tr.hold)}</span></div>
-      <div class="tc-cell"><span class="tc-lbl">Time</span><span class="tc-v dim">${tr.t ? tr.t.substring(11,19) : '--'}</span></div>
-    </div>
+  const rc   = reasonClass(tr.why || tr.reason || '');
+  const sym  = (tr.s || '').replace('USDT', '');
+  const mfe  = tr.mfe != null ? `<span class="tl-val pos">+${(+tr.mfe).toFixed(1)}bp</span>` : '<span class="tl-val">--</span>';
+  const mae  = tr.mae != null ? `<span class="tl-val neg">${(+tr.mae).toFixed(1)}bp</span>` : '<span class="tl-val">--</span>';
+  const en   = tr.en  ? fmtPrice(tr.en,  sym) : '--';
+  const ex   = tr.ex  ? fmtPrice(tr.ex,  sym) : '--';
+  const why  = (tr.why || tr.reason || '?').toUpperCase();
+  const time = tr.t   ? tr.t.substring(11,19) : '--';
+  return `<div class="tl-row ${isWin ? 'win' : 'loss'}">
+    <span class="tl-tag ${isWin ? 'win' : 'loss'}">${isWin ? 'WIN' : 'LOSS'}</span>
+    <span class="tl-sym">${sym}</span>
+    <span class="tl-pnl ${isWin ? 'pos' : 'neg'}">${fmtPnl(pnl)}</span>
+    <span class="tl-eng">${tr.e || '--'}</span>
+    <span class="tl-val">${en}</span>
+    <span class="tl-val">${ex}</span>
+    <span style="display:flex;gap:6px;align-items:center">${mfe}<span style="color:#3d5a6e">/</span>${mae}</span>
+    <span class="tl-val">${fmtHold(tr.hold)}</span>
+    <span style="display:flex;align-items:center;gap:8px"><span class="tl-reason ${rc}">${why}</span><span class="tl-time">${time}</span></span>
   </div>`;
 }
 
 function renderTradeLog() {
-  const winsLane   = $('wins-lane');
-  const lossesLane = $('losses-lane');
-  if (!winsLane || !lossesLane) return;
+  const body = $('trade-table-body');
+  if (!body) return;
 
-  // Stats header totals
+  // Stats header
   let totalPnl = 0;
   localTrades.forEach(t => totalPnl += (+t.p || 0));
   set('ts-count', localTrades.length);
   const tspnl = $('ts-pnl');
   if (tspnl) { tspnl.textContent = fmtPnl(totalPnl); tspnl.className = +totalPnl >= 0 ? 'pos' : 'neg'; }
 
-  const winTrades  = localTrades.filter(t => +t.p >= 0);
-  const lossTrades = localTrades.filter(t => +t.p <  0);
+  if (!localTrades.length) {
+    body.innerHTML = '<div class="tl-empty">Waiting for first trade...</div>';
+    return;
+  }
 
-  // Wins lane — newest first, green cards
-  winsLane.innerHTML = winTrades.length
-    ? winTrades.slice(0, 60).map(makeCard).join('')
-    : '<div class="lane-empty">No wins yet</div>';
-
-  // Losses lane — newest first, red cards
-  lossesLane.innerHTML = lossTrades.length
-    ? lossTrades.slice(0, 60).map(makeCard).join('')
-    : '<div class="lane-empty">No losses yet</div>';
+  // Newest first — wins and losses interleaved in time order so you see what just happened
+  body.innerHTML = localTrades.slice(0, 80).map(makeRow).join('');
 }
 
 // ── REGIME STATE ──────────────────────────────────────────────────────────────

@@ -79,10 +79,13 @@ struct TradingConfig {
     //   → Only fire when BTC move >= 12bp AND target hasn't moved yet
 
     // BTC must move at least this many bp in the lookback window to signal
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 8.0;
+    // Raised 8→10bp: at 8bp too many weak moves were triggering. 10bp filters
+    // for genuine momentum that ETH/SOL reliably follows.
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 10.0;
 
     // Target already moved this much → edge consumed, don't enter
-    static constexpr double LEADLAG_TARGET_MAX_BP      = 3.0;
+    // Tightened 3→2bp: if target already moved 2bp the propagation is done
+    static constexpr double LEADLAG_TARGET_MAX_BP      = 2.0;
 
     // Take-profit for lead-lag trades (gross, before costs)
     // Net profit after 10bp costs = +4bp. Worth it if win rate > 70%.
@@ -119,9 +122,9 @@ struct TradingConfig {
     //   → Only fire when spread < 1.5bp (tight market = good fills)
 
     // Minimum |book_imbalance| to fire: (bid_size - ask_size)/(bid_size + ask_size)
-    // 0.30 = bids must be 1.86x asks. Strong pressure with more trade frequency.
-    // Was 0.45 (2.6x) which was too tight for normal market conditions.
-    static constexpr double IMBALANCE_THRESHOLD        = 0.30;
+    // 0.42 = bids must be 2.45x asks. Restored toward original 0.45 — at 0.30 the
+    // signal fired on noise and WR dropped to ~50%. Need 79%+ WR at this TP/SL.
+    static constexpr double IMBALANCE_THRESHOLD        = 0.42;
 
     // Reject if spread too wide — wide spread means fills are poor
     // BTC normal spread: 0.1-0.5bp. Above 1.5bp = unusually wide, skip.
@@ -132,8 +135,9 @@ struct TradingConfig {
     static constexpr double IMBALANCE_TP_BP            = 12.0;
 
     // Stop loss for imbalance trades
-    // Wrong-side imbalance reverses fast. Get out at -3bp.
-    static constexpr double IMBALANCE_SL_BP            = 3.0;
+    // 3bp was too tight — getting stopped by tick noise. 4bp gives trade more room
+    // while still exiting genuine reversals quickly.
+    static constexpr double IMBALANCE_SL_BP            = 4.0;
 
     // Max hold time for imbalance trade
     static constexpr int64_t IMBALANCE_MAX_HOLD_MS     = 8000;

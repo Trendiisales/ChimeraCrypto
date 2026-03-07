@@ -35,6 +35,13 @@ void BinanceWSFeed::start() {
 
 void BinanceWSFeed::stop() {
     running_ = false;
+    // Wake lws_service() immediately so the WS thread sees running_=false
+    // without waiting for the next 5ms poll cycle to complete.
+    // Without this, thread_.join() can hang for up to 5ms per iteration
+    // plus whatever libwebsockets is doing internally mid-poll.
+    if (context_) {
+        lws_cancel_service(context_);
+    }
     if (thread_.joinable()) thread_.join();
 }
 

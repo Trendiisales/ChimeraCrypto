@@ -83,9 +83,7 @@ int main() {
     // Quad engine controller (Micro + Structural + Convex + Compression) + Regime Allocator
     chimera::QuadEngineBalancedEngine controller;
     
-    // Immediate rejection stats test
-    std::this_thread::sleep_for(std::chrono::seconds(3));
-    std::printf("[IMMEDIATE-REJECTION-TEST] %s\n", controller.get_rejection_stats().c_str());
+    std::printf("[STARTUP] Chimera engine starting...\n");
     std::fflush(stdout);
     
     // Per-symbol engine instances (disabled)
@@ -257,9 +255,10 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
+    std::printf("[SHUTDOWN] Stopping feed...\n");
+    std::fflush(stdout);
     feed.stop();
-    
-    // REMOVED: ws_server.stop();
-    
+    std::printf("[SHUTDOWN] Clean exit.\n");
+    std::fflush(stdout);
     return 0;
 }

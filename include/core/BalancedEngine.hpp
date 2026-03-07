@@ -813,7 +813,10 @@ private:
 
         enter(id, price, ts, s, LAYER_EXPANSION, true);
         return true;
-    } — fires in GRIND regime on strong book pressure
+    }
+
+    // ======================================================================
+    // IMBALANCE — fires in GRIND regime on strong book pressure
     // Latency requirement: < 25ms (tighter than hard limit — needs fresh data)
     // Edge: bid/ask imbalance predicts 1-3 tick direction
     //

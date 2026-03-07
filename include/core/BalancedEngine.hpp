@@ -944,6 +944,12 @@ private:
             return false;
         }
 
+        // LATENCY GUARD — expansion edge decays fast, stale data = bad entry
+        if (latency_ms > TradingConfig::LATENCY_NET_CLEAN_MS) {
+            rejection_throttle_.record(key, "latency_too_high");
+            return false;
+        }
+
         // ORDER FLOW CONFIRMATION
         double flow = compute_flow_ratio(id);
         if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
@@ -1277,7 +1283,8 @@ private:
             rejection_throttle_.record(key, "layer_locked");
             return false;
         }
-        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) {
+        // ETH→SOL window is tighter than BTC→ETH — use imbalance limit (20ms)
+        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
@@ -1441,6 +1448,13 @@ private:
                            (layer == LAYER_IMPULSE)            ? TradingConfig::IMPULSE_TP_BP :
                                                                  TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
+
+        // HARD LATENCY BACKSTOP — never enter on stale data regardless of engine
+        if (market_env_.latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
+            std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + " ENTER";
+            rejection_throttle_.record(key, "latency_hard_block");
+            return;
+        }
 
         // COST FLOOR GATE
         // Taker: 10bp floor | Maker: 4bp floor (rebate ~1bp/side, spread=0)

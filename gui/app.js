@@ -213,27 +213,28 @@ function reasonClass(r) {
 }
 
 function makeRow(tr) {
-  const pnl  = +tr.p || 0;
+  const pnl   = +tr.p || 0;
   const isWin = pnl >= 0;
-  const usd  = bpToUsd(pnl);
-  const rc   = reasonClass(tr.why || tr.reason || '');
-  const sym  = (tr.s || '').replace('USDT', '');
-  const mfe  = tr.mfe != null ? `<span class="tl-val pos">+${(+tr.mfe).toFixed(1)}bp</span>` : '<span class="tl-val">--</span>';
-  const mae  = tr.mae != null ? `<span class="tl-val neg">${(+tr.mae).toFixed(1)}bp</span>` : '<span class="tl-val">--</span>';
-  const en   = tr.en  ? fmtPrice(tr.en,  sym) : '--';
-  const ex   = tr.ex  ? fmtPrice(tr.ex,  sym) : '--';
-  const why  = (tr.why || tr.reason || '?').toUpperCase();
-  const time = tr.t   ? tr.t.substring(11,19) : '--';
-  return `<div class="tl-row ${isWin ? 'win' : 'loss'}">
-    <span class="tl-tag ${isWin ? 'win' : 'loss'}">${isWin ? 'WIN' : 'LOSS'}</span>
+  const usd   = bpToUsd(pnl);
+  const rc    = reasonClass(tr.why || tr.reason || '');
+  const sym   = (tr.s || '').replace('USDT', '');
+  const en    = tr.en ? fmtPrice(tr.en, sym) : '--';
+  const ex    = tr.ex ? fmtPrice(tr.ex, sym) : '--';
+  const why   = (tr.why || tr.reason || '?').toUpperCase();
+  const time  = tr.t  ? tr.t.substring(11,19) : '--';
+  const mfe   = tr.mfe != null ? `+${(+tr.mfe).toFixed(1)}` : '--';
+  const mae   = tr.mae != null ? `${(+tr.mae).toFixed(1)}`  : '--';
+  // 9 cols: tag | sym | bp | $ | engine | entry | exit | reason | time
+  return `<div class="tl-row ${isWin?'win':'loss'}">
+    <span class="tl-tag ${isWin?'win':'loss'}">${isWin?'W':'L'}</span>
     <span class="tl-sym">${sym}</span>
-    <span class="tl-pnl ${isWin ? 'pos' : 'neg'}">${fmtPnl(pnl)}</span>
-    <span class="tl-pnl ${isWin ? 'pos' : 'neg'}" style="font-size:14px">${fmtUsd(usd)}</span>
-    <span class="tl-eng">${tr.e || '--'}</span>
+    <span class="tl-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
+    <span class="tl-pnl ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
+    <span class="tl-eng">${tr.e||'--'}</span>
     <span class="tl-val">${en}</span>
     <span class="tl-val">${ex}</span>
-    <span style="display:flex;gap:6px;align-items:center">${mfe}<span style="color:#3d5a6e">/</span>${mae}</span>
-    <span style="display:flex;align-items:center;gap:8px"><span class="tl-reason ${rc}">${why}</span><span class="tl-time">${time}</span></span>
+    <span class="tl-reason ${rc}">${why}</span>
+    <span class="tl-time">${time}</span>
   </div>`;
 }
 

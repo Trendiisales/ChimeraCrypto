@@ -17,7 +17,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html{font-size:16px}
 body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;overflow:hidden}
-body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.04) 3px,rgba(0,0,0,.04) 4px);pointer-events:none;z-index:9999}
+/* scanlines removed */
 
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:var(--surface);border-bottom:2px solid var(--border2);position:relative;z-index:100;flex-shrink:0}
 .topbar-left{display:flex;align-items:baseline;gap:16px}
@@ -93,34 +93,33 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 .sr-val.pos{color:var(--green)}.sr-val.neg{color:var(--red)}.sr-val.accent{color:var(--accent)}
 
 .trade-log-inner{border-top:2px solid var(--border2);background:var(--bg);display:flex;flex-direction:column}
-.tli-head{display:flex;align-items:center;gap:24px;padding:12px 18px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
-.tli-title{font-family:var(--fh);font-size:20px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#90c4d8}
-.ts-stat{font-size:16px;color:var(--muted)}.ts-stat strong{color:#ffffff;font-size:24px;font-weight:800}
+.tli-head{display:flex;align-items:center;gap:20px;padding:9px 16px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0}
+.tli-title{font-family:var(--fh);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#5a8090;margin-right:4px}
+.ts-stat{font-size:13px;color:var(--muted)}.ts-stat strong{color:#d4e8f0;font-size:16px;font-weight:700}
 .ts-stat.pos strong{color:var(--green)}.ts-stat.neg strong{color:var(--red)}
-.tli-cols{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:6px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
-.tlic{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#3d5a6e}
-.tli-body{overflow-y:auto;overflow-x:hidden;max-height:400px;min-height:80px}
-.tli-body::-webkit-scrollbar{width:4px}
+.tli-cols{display:grid;grid-template-columns:42px 46px 76px 72px 88px 88px 72px 60px 72px;align-items:center;padding:4px 14px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.3);flex-shrink:0}
+.tlic{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#2d4558}
+.tli-body{overflow-y:auto;overflow-x:hidden;max-height:320px;min-height:60px}
+.tli-body::-webkit-scrollbar{width:3px}
 .tli-body::-webkit-scrollbar-thumb{background:var(--border2)}
-.tl-row{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s}
-.tl-row:hover{background:rgba(255,255,255,.04)}
-.tl-row.win{border-left:4px solid var(--green);background:rgba(0,230,118,.035)}
-.tl-row.loss{border-left:4px solid var(--red);background:rgba(255,61,87,.035)}
-.tl-tag{font-family:var(--fh);font-size:15px;font-weight:800;letter-spacing:1px}
+.tl-row{display:grid;grid-template-columns:42px 46px 76px 72px 88px 88px 72px 60px 72px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,.03)}
+.tl-row.win{border-left:3px solid rgba(0,230,118,.6);background:rgba(0,230,118,.025)}
+.tl-row.loss{border-left:3px solid rgba(255,61,87,.6);background:rgba(255,61,87,.025)}
+.tl-tag{font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.5px}
 .tl-tag.win{color:var(--green)}.tl-tag.loss{color:var(--red)}
-.tl-sym{font-family:var(--fh);font-size:20px;font-weight:800;color:#d4e8f0}
-.tl-pnl{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
+.tl-sym{font-family:var(--fh);font-size:14px;font-weight:700;color:#c0d8e8}
+.tl-pnl{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
 .tl-pnl.pos{color:var(--green)}.tl-pnl.neg{color:var(--red)}
-.tl-eng{font-family:var(--fh);font-size:15px;font-weight:700;color:#7ab0c8}
-.tl-val{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:#9ab8cc}
+.tl-eng{font-family:var(--fh);font-size:12px;font-weight:600;color:#5a8090}
+.tl-val{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:#6a8fa8}
 .tl-val.pos{color:var(--green)}.tl-val.neg{color:var(--red)}
-.tl-reason{font-family:var(--fh);font-size:14px;font-weight:800;letter-spacing:1px;padding:4px 11px;border-radius:2px;display:inline-block}
-.tl-reason.tp{background:rgba(0,230,118,.18);color:var(--green)}
-.tl-reason.sl{background:rgba(255,61,87,.18);color:var(--red)}
-.tl-reason.trail{background:rgba(0,212,255,.15);color:var(--accent)}
-.tl-reason.timeout{background:rgba(255,214,0,.12);color:var(--yellow)}
-.tl-time{font-size:14px;color:#5a7a90;font-variant-numeric:tabular-nums}
-.tli-empty{padding:18px;color:var(--muted);font-size:15px;opacity:.6}
+.tl-reason{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:2px;display:inline-block}
+.tl-reason.tp{background:rgba(0,230,118,.15);color:#00e676}
+.tl-reason.sl{background:rgba(255,61,87,.15);color:#ff3d57}
+.tl-reason.trail{background:rgba(0,212,255,.12);color:#00d4ff}
+.tl-reason.timeout{background:rgba(255,214,0,.1);color:#ffd600}
+.tl-time{font-size:11px;color:#2d4558;font-variant-numeric:tabular-nums}
+.tli-empty{padding:14px 16px;color:var(--muted);font-size:13px;opacity:.5}
 
 /* Per-symbol trade rows under engine grid */
 .sym-trades{border-top:1px solid var(--border2)}
@@ -238,12 +237,12 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     <div class="tli-cols">
       <span class="tlic"></span>
       <span class="tlic">Sym</span>
-      <span class="tlic">P&amp;L bp</span>
-      <span class="tlic">P&amp;L $</span>
+      <span class="tlic">P&amp;L</span>
+      <span class="tlic">USD</span>
       <span class="tlic">Engine</span>
-      <span class="tlic">Entry → Exit</span>
-      <span class="tlic">Hold</span>
+      <span class="tlic">Entry</span>
       <span class="tlic">Exit</span>
+      <span class="tlic">Result</span>
       <span class="tlic">Time</span>
     </div>
     <div class="tli-body" id="trade-table-body">

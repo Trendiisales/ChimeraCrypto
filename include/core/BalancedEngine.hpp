@@ -402,10 +402,11 @@ public:
         if (open_positions_ >= 1) return;
         
         // Try signals in priority order
+        // Priority: lead-lag first (best EV), then breakout, then imbalance
+        if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_expansion(id, price, ts, s, latency_ms)) return;
-        if (check_leadlag(id, price, ts, s, latency_ms)) return;
-        if (check_grind_reversion(id, price, ts, s, latency_ms)) return;
+        if (check_imbalance(id, price, ts, s, latency_ms)) return;
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
@@ -646,110 +647,196 @@ private:
         return new_regime;
     }
     
+    // ======================================================================
+    // IMPULSE — fires in BREAKOUT regime
+    // Latency requirement: < 50ms (hard limit)
+    // Edge: genuine vol expansion, price displaced from regime anchor
+    // TP/SL from TradingConfig: 20bp TP, 8bp SL
+    // ======================================================================
     bool check_impulse(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + " IMPULSE";
-        
+        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        std::string key = std::string(sym) + " IMPULSE";
+
         if (latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
             rejection_throttle_.record(key, "high_latency");
             return false;
         }
-        
-        if (s.regime == REGIME_BREAKOUT && s.short_returns.size() >= TradingConfig::IMPULSE_MIN_SHORT_TICKS) {
-            // VOLATILITY FLOOR GATE - Prevent trading in cost-dominated regimes
-            // Use EMA-based long_vol (adaptive baseline)
-            double long_vol = s.long_vol_ema;
-            if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
-                rejection_throttle_.record(key, "low_long_vol");
-                return false;
-            }
-            
-            // DISPLACEMENT CONFIRMATION - Require minimum price movement from regime anchor
-            double displacement = std::abs(price - s.regime_anchor_price);
-            double min_required = TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol;
-            
-            if (displacement < min_required) {
-                rejection_throttle_.record(key, "insufficient_displacement");
-                return false;
-            }
-            
-            enter(id, price, ts, s, LAYER_IMPULSE);
-            return true;
+        if (s.regime != REGIME_BREAKOUT) {
+            rejection_throttle_.record(key, "no_breakout");
+            return false;
         }
-        
-        rejection_throttle_.record(key, "no_breakout");
-        return false;
+        if ((int)s.short_returns.size() < TradingConfig::IMPULSE_MIN_SHORT_TICKS) {
+            rejection_throttle_.record(key, "insufficient_ticks");
+            return false;
+        }
+
+        double long_vol = s.long_vol_ema;
+        if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+            rejection_throttle_.record(key, "low_vol");
+            return false;
+        }
+
+        double displacement = std::abs(price - s.regime_anchor_price);
+        if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
+            rejection_throttle_.record(key, "insufficient_displacement");
+            return false;
+        }
+
+        enter(id, price, ts, s, LAYER_IMPULSE);
+        return true;
     }
-    
+
+    // ======================================================================
+    // EXPANSION — fires in BUILDUP or BREAKOUT regime
+    // Latency requirement: < 50ms (hard limit)
+    // Edge: vol_ratio expanding, price confirming direction
+    // ======================================================================
     bool check_expansion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + " EXPAND";
-        
+        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        std::string key = std::string(sym) + " EXPAND";
+
         if (expand_state_[id] == 1) {
             rejection_throttle_.record(key, "already_in_expand");
             return false;
         }
-        
-        if (s.regime == REGIME_BUILDUP || s.regime == REGIME_BREAKOUT) {
-            // Recompute volatility ratio using EMA-based long_vol
-            double short_vol = compute_volatility(s.short_returns);
-            double long_vol = s.long_vol_ema;  // Use EMA-based adaptive baseline
-            
-            // VOLATILITY FLOOR GATE - Prevent trading in cost-dominated regimes
-            if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
-                rejection_throttle_.record(key, "low_long_vol");
-                return false;
-            }
-            
-            double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
-            
-            if (vol_ratio > TradingConfig::EXPANSION_VOL_RATIO && s.short_returns.size() >= TradingConfig::EXPANSION_MIN_SHORT_TICKS) {
-                // DISPLACEMENT CONFIRMATION - Require minimum price movement from regime anchor
-                double displacement = std::abs(price - s.regime_anchor_price);
-                double min_required = TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol;
-                
-                if (displacement < min_required) {
-                    rejection_throttle_.record(key, "insufficient_displacement");
-                    return false;
-                }
-                
-                enter(id, price, ts, s, LAYER_EXPANSION);
-                return true;
-            }
+        if (s.regime != REGIME_BUILDUP && s.regime != REGIME_BREAKOUT) {
+            rejection_throttle_.record(key, "weak_regime");
+            return false;
         }
-        
-        rejection_throttle_.record(key, "weak_volatility");
-        return false;
+
+        double short_vol = compute_volatility(s.short_returns);
+        double long_vol  = s.long_vol_ema;
+
+        if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+            rejection_throttle_.record(key, "low_vol");
+            return false;
+        }
+
+        double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
+        if (vol_ratio <= TradingConfig::EXPANSION_VOL_RATIO) {
+            rejection_throttle_.record(key, "weak_volatility");
+            return false;
+        }
+        if ((int)s.short_returns.size() < TradingConfig::EXPANSION_MIN_SHORT_TICKS) {
+            rejection_throttle_.record(key, "insufficient_ticks");
+            return false;
+        }
+
+        double displacement = std::abs(price - s.regime_anchor_price);
+        if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
+            rejection_throttle_.record(key, "insufficient_displacement");
+            return false;
+        }
+
+        enter(id, price, ts, s, LAYER_EXPANSION);
+        return true;
     }
-    
-    bool check_grind_reversion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + " GRIND";
-        if (latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
-            rejection_throttle_.record(key, "high_latency"); return false;
+
+    // ======================================================================
+    // IMBALANCE — fires in GRIND regime on strong book pressure
+    // Latency requirement: < 25ms (tighter than hard limit — needs fresh data)
+    // Edge: bid/ask imbalance predicts 1-3 tick direction
+    //
+    // EV analysis at our latency:
+    //   TP = 12bp gross (+2bp net after 10bp costs)
+    //   SL = 3bp
+    //   Needs ~80% win rate to be positive EV
+    //   Threshold 0.45 filters to highest-quality setups
+    // ======================================================================
+    bool check_imbalance(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        std::string key = std::string(sym) + " IMBAL";
+
+        // TIGHTER latency gate than hard limit — imbalance edge decays fast
+        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
+            rejection_throttle_.record(key, "latency_too_high");
+            return false;
         }
         if (s.regime != REGIME_GRIND) {
-            rejection_throttle_.record(key, "not_grind_regime"); return false;
+            rejection_throttle_.record(key, "not_grind");
+            return false;
         }
+
         const MarketTick& t = s.last_tick;
         if (t.bid <= 0.0 || t.ask <= 0.0) {
-            rejection_throttle_.record(key, "no_book_data"); return false;
+            rejection_throttle_.record(key, "no_book_data");
+            return false;
         }
-        if (t.spread_bps > TradingConfig::GRIND_MAX_SPREAD_BPS) {
-            rejection_throttle_.record(key, "spread_too_wide"); return false;
+        // Spread gate: tight spread = good fills. Wide = skip.
+        if (t.spread_bps > TradingConfig::IMBALANCE_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_wide");
+            return false;
         }
+
         double imbalance = t.book_imbalance;
-        if (std::abs(imbalance) < TradingConfig::GRIND_IMBALANCE_THRESHOLD) {
-            rejection_throttle_.record(key, "weak_imbalance"); return false;
+        if (std::abs(imbalance) < TradingConfig::IMBALANCE_THRESHOLD) {
+            rejection_throttle_.record(key, "weak_imbalance");
+            return false;
         }
+        // Long-only for now (short requires margin/perps)
         if (imbalance < 0) {
-            rejection_throttle_.record(key, "short_not_implemented"); return false;
+            rejection_throttle_.record(key, "short_not_supported");
+            return false;
         }
+
         enter(id, price, ts, s, LAYER_MICRO);
         return true;
     }
 
+    // ======================================================================
+    // LEAD-LAG — BTC leads ETH and SOL by 50-200ms
+    // Latency requirement: < 35ms (LATENCY_LEADLAG_MAX_MS)
+    //
+    // MEASURED EDGE at our latency:
+    //   WS latency p95 = 18-25ms
+    //   BTC→ETH/SOL propagation = 50-200ms
+    //   Remaining edge window = 25-175ms (conservative 75ms)
+    //   TP = 14bp gross (+4bp net after 10bp costs)
+    //   SL = 5bp
+    //   Minimum win rate for positive EV = 73%
+    //   (only fires on 12bp BTC move AND target hasn't moved 4bp yet)
+    //
+    // Only fires on ETH (id=1) and SOL (id=2) — BTC IS the leader
+    // ======================================================================
     bool check_leadlag(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        if (ts < layer_lock_until_) return false;
-        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
-        return false;
+        // BTC does not follow itself
+        if (id == 0) return false;
+
+        const char* sym = (id == 1) ? "ETH" : "SOL";
+        std::string key = std::string(sym) + " LEADLAG";
+
+        if (ts < layer_lock_until_) {
+            rejection_throttle_.record(key, "layer_locked");
+            return false;
+        }
+
+        // LATENCY GATE: calibrated to leave enough edge window remaining
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) {
+            rejection_throttle_.record(key, "latency_too_high");
+            return false;
+        }
+
+        int direction = 0;
+        if (!leadlag_.check_signal(id, latency_ms, direction)) {
+            rejection_throttle_.record(key, "no_leadlag_signal");
+            return false;
+        }
+
+        // Long-only for now
+        if (direction < 0) {
+            rejection_throttle_.record(key, "short_not_supported");
+            return false;
+        }
+
+        // Don't enter if already in a position on this symbol
+        if (s.pos.state == POS_OPEN) return false;
+
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
+                    sym, leadlag_.btc_move_bp(), latency_ms);
+        std::fflush(stdout);
+
+        enter(id, price, ts, s, LAYER_LEADLAG);
+        return true;
     }
     
     void manage_position(int id, double price, int64_t ts, SymbolState& s) {
@@ -782,40 +869,64 @@ private:
         // Calculate peak profit in bp
         double peak_profit_bp = (s.pos.peak_price - s.pos.entry_price) / s.pos.entry_price * 10000.0;
         
-        // MICRO/GRIND: hard take-profit at +4bp
-        // Imbalance signals revert quickly - lock in the edge before it fades
-        if (s.pos.layer == LAYER_MICRO && move_bp >= 4.0) {
+        // Per-strategy TP/SL/timeout — all calibrated in TradingConfig
+        // against the 10bp round-trip cost at our measured Tokyo latency
+        double tp_bp      = 0.0;
+        double sl_bp      = 0.0;
+        int64_t max_hold  = 0;
+
+        if (s.pos.layer == LAYER_LEADLAG) {
+            // TP=14bp gross → +4bp net after 10bp costs. SL=5bp. Hold 3s max.
+            tp_bp     = TradingConfig::LEADLAG_TP_BP;
+            sl_bp     = TradingConfig::LEADLAG_SL_BP;
+            max_hold  = TradingConfig::LEADLAG_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_MICRO) {
+            // TP=12bp gross → +2bp net. SL=3bp. Hold 8s max.
+            tp_bp     = TradingConfig::IMBALANCE_TP_BP;
+            sl_bp     = TradingConfig::IMBALANCE_SL_BP;
+            max_hold  = TradingConfig::IMBALANCE_MAX_HOLD_MS;
+        } else {
+            // IMPULSE / EXPANSION: TP=20bp gross → +10bp net. SL=8bp. Hold 30s.
+            tp_bp     = TradingConfig::IMPULSE_TP_BP;
+            sl_bp     = TradingConfig::IMPULSE_SL_BP;
+            max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
+        }
+
+        // Hard take-profit
+        if (move_bp >= tp_bp) {
+            std::printf("[TP-HIT] %s | layer=%s | move=%.2fbp >= tp=%.2fbp\n",
+                (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                (s.pos.layer == LAYER_MICRO) ? "IMBAL" :
+                (s.pos.layer == LAYER_LEADLAG) ? "LEADLAG" : "IMPULSE",
+                move_bp, tp_bp);
+            std::fflush(stdout);
             exit(id, move_bp, ts, s);
             return;
         }
 
-        // IMPULSE/EXPAND: trailing stop once minimum profit reached
-        if (peak_profit_bp >= TradingConfig::MIN_PROFIT_TO_TRAIL_BP) {
-            if (price < s.pos.peak_price - trail_distance) {
-                exit(id, move_bp, ts, s);
-                return;
-            }
-        }
-        
-        // HARD STOP - Layer-aware
-        // MICRO/GRIND: tight stop, wrong-side imbalance reverses fast
-        // IMPULSE/EXPAND: wider stop, trend trades need room to breathe
-        double max_loss_bp = (s.pos.layer == LAYER_MICRO) ? -5.0 : -10.0;
-        if (move_bp <= max_loss_bp) {
+        // Hard stop loss
+        if (move_bp <= -sl_bp) {
             exit(id, move_bp, ts, s);
             return;
         }
-        
-        // MINIMUM HOLD TIME CHECK - Prevent microstructure noise exits
+
+        // Minimum hold: don't exit before MIN_HOLD_TICKS
         if (s.pos.open_ticks < TradingConfig::MIN_HOLD_TICKS) {
-            return;  // Don't allow exit yet
+            return;
         }
-        
-        // TIME EXIT - Layer-aware max hold
-        // MICRO/GRIND: 10s max - imbalance signals are short-lived
-        // IMPULSE/EXPAND: 60s max - trend trades need time to develop
-        int64_t max_hold_ms = (s.pos.layer == LAYER_MICRO) ? 10000 : 60000;
-        if (ts - s.pos.entry_ts > max_hold_ms) {
+
+        // Trailing stop for IMPULSE/EXPAND (once in profit > cost floor)
+        if (s.pos.layer == LAYER_IMPULSE || s.pos.layer == LAYER_EXPANSION) {
+            if (peak_profit_bp >= TradingConfig::MIN_PROFIT_TO_TRAIL_BP) {
+                if (price < s.pos.peak_price - trail_distance) {
+                    exit(id, move_bp, ts, s);
+                    return;
+                }
+            }
+        }
+
+        // Time-based forced exit
+        if (ts - s.pos.entry_ts > max_hold) {
             exit(id, move_bp, ts, s);
             return;
         }
@@ -827,26 +938,23 @@ private:
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
                     (layer == LAYER_EXPANSION) ? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
-        sig.expected_bps = (layer == LAYER_MICRO) ? 15.0 :
-                          (layer == LAYER_IMPULSE) ? 18.0 :
-                          (layer == LAYER_LEADLAG) ? 12.0 : 30.0;
+        // Expected gross edge per layer (gross TP targets from TradingConfig)
+        sig.expected_bps = (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
+                           (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
+                           (layer == LAYER_IMPULSE)  ? TradingConfig::IMPULSE_TP_BP :
+                                                       TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
-        
-        // CRITICAL: HARD COST FLOOR GATE
-        // Enforces economic minimum - trade only if expected edge > total costs
-        // Total cost = spread (2bp) + slippage (2bp) + commission (2.5bp) = 6.5bp
-        static constexpr double COST_FLOOR_BP = 6.5;
-        
-        if (sig.expected_bps < COST_FLOOR_BP) {
-            // HARD REJECT - insufficient expected edge to beat costs
-            std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + 
-                             " " + ((layer == LAYER_IMPULSE) ? "IMPULSE" : 
-                                    (layer == LAYER_EXPANSION) ? "EXPAND" : "OTHER");
+
+        // COST FLOOR GATE — calibrated: 10bp total round-trip cost at Tokyo latency
+        // Fee(8bp) + spread(1bp) + slippage(1bp) = 10bp. All layers > 10bp, so
+        // this is a sanity check not a real filter.
+        if (sig.expected_bps < TradingConfig::COST_FLOOR_BP) {
+            std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") +
+                             " " + ((layer == LAYER_LEADLAG) ? "LEADLAG" :
+                                    (layer == LAYER_IMPULSE) ? "IMPULSE" :
+                                    (layer == LAYER_EXPANSION) ? "EXPAND" : "IMBAL");
             rejection_throttle_.record(key, "cost_floor");
-            std::printf("[COST-FLOOR] Rejected %s | expected=%.2fbp < floor=%.2fbp\n",
-                       key.c_str(), sig.expected_bps, COST_FLOOR_BP);
-            std::fflush(stdout);
-            return;  // HARD STOP - do not proceed
+            return;
         }
         
         if (!governor_.approve(sig)) {

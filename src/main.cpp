@@ -80,6 +80,7 @@ chimera::FundingRateFetcher    g_funding;
 Chimera::NetworkLatencySystem  g_network_latency;
 
 static std::atomic<bool> g_running{true};
+static std::atomic<int>  g_sig_count{0};
 
 struct PriceCache {
     std::atomic<uint64_t> bits[3] = {};
@@ -93,7 +94,19 @@ struct PriceCache {
     }
 } price_cache;
 
-void signal_handler(int) { g_running = false; }
+void signal_handler(int sig) {
+    int n = g_sig_count.fetch_add(1) + 1;
+    g_running = false;
+    if (n == 1) {
+        // First Ctrl+C — request clean shutdown
+        std::fprintf(stderr, "\n[SHUTDOWN] Signal %d — stopping cleanly (Ctrl+C again to force kill)\n", sig);
+    } else {
+        // Second Ctrl+C — something is hanging, force exit immediately
+        std::fprintf(stderr, "\n[SHUTDOWN] Forced exit.\n");
+        release_instance_lock();
+        std::_Exit(0);
+    }
+}
 
 int main() {
     // ── 0. Single-instance lock — must be first ───────────────────────────────
@@ -186,9 +199,24 @@ int main() {
     }
 
     // ── 5. Shutdown ───────────────────────────────────────────────────────────
-    std::printf("\n[SHUTDOWN] Stopping...\n");
+    std::printf("\n[SHUTDOWN] Stopping feed...\n");
     std::fflush(stdout);
+
+    // Watchdog: if feed.stop() hangs for >3s, force exit
+    std::atomic<bool> shutdown_done{false};
+    std::thread watchdog([&](){
+        for (int i = 0; i < 30; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (shutdown_done) return;
+        }
+        std::fprintf(stderr, "[SHUTDOWN] Feed stop timeout — forcing exit\n");
+        release_instance_lock();
+        std::_Exit(0);
+    });
+
     feed.stop();
+    shutdown_done = true;
+    if (watchdog.joinable()) watchdog.join();
     std::printf("[SHUTDOWN] fills=%d errors=%d trades=%d pnl=%.2fbp\n",
                 executor_ok ? executor.fills()  : 0,
                 executor_ok ? executor.errors() : 0,

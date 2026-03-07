@@ -1203,6 +1203,7 @@ private:
 
         const char* sym = "SOL";
         std::string key = "SOL LL-ETH-SOL";
+        (void)sym;  // used in printf below
 
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
@@ -1575,7 +1576,7 @@ private:
             td.engine      = layer_label;
             td.pnl_bp      = pnl;
             td.entry_price = s.pos.entry_price;
-            td.exit_price  = price;
+            td.exit_price  = s.pos.entry_price * (1.0 + pnl / 10000.0);
             td.mfe_bp      = s.pos.mfe;
             td.mae_bp      = s.pos.mae;
             td.hold_ms     = hold_time_ms;

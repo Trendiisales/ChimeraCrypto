@@ -183,6 +183,7 @@ public:
     int get_total_trades() const { return balanced_.get_total_trades(); }
     int get_open_positions() const { return balanced_.get_open_positions(); }
     void set_funding_fetcher(chimera::FundingRateFetcher* f) { balanced_.set_funding_fetcher(f); }
+    void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
     
     std::string generate_state_json() {
         std::ostringstream json;

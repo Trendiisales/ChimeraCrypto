@@ -1,273 +1,174 @@
+// ============================================================================
+// Chimera — main entry point
+//
+// Shadow mode (default): Live Binance WebSocket feed, real API keys loaded +
+// validated, all orders signed and logged as [SHADOW-ORDER], nothing POSTed.
+// Set shadow_mode=false in config/binance_credentials.json for live trading.
+// ============================================================================
 #include <thread>
 #include <chrono>
 #include <csignal>
 #include <atomic>
+
 #include "live/BinanceWSFeed.hpp"
-#include "telemetry/TelemetrySpine.hpp"
-// REMOVED: #include "telemetry/WsTelemetryServer.hpp"
-#include "telemetry/DeskSnapshot.hpp"
-#include "execution/NetworkLatencySystem.hpp"
-#include "execution/ExchangeLatencyEngine.hpp"
-#include "core/SymbolIndex.hpp"
-#include "core/BalancedEngine.hpp"
-#include "core/EnhancedBalancedEngine.hpp"
-#include "core/TripleEngineBalancedEngine.hpp"
+#include "live/SpotExecutor.hpp"
 #include "core/QuadEngineBalancedEngine.hpp"
-#include "engine/VolatilityExpansionEngine.hpp"
-#include "engine/LiquidityVacuumEngine.hpp"
-#include "engine/MultiSymbolAlignmentEngine.hpp"
-#include "logging/TradeLogger.hpp"
-#include "execution/ExchangeLatencyEngine.hpp"
-#include "core/SymbolIndex.hpp"
 #include "core/market_data/FundingRateFetcher.hpp"
+#include "execution/ExchangeLatencyEngine.hpp"
+#include "execution/NetworkLatencySystem.hpp"
+#include "telemetry/TelemetrySpine.hpp"
+#include "telemetry/DeskSnapshot.hpp"
+#include "telemetry/SimpleHttpServer.hpp"
+#include "core/SymbolIndex.hpp"
 
 chimera::ExchangeLatencyEngine g_exchange_latency;
-chimera::FundingRateFetcher g_funding;
-
-
-
-
-Chimera::NetworkLatencySystem g_network_latency;
+chimera::FundingRateFetcher    g_funding;
+Chimera::NetworkLatencySystem  g_network_latency;
 
 static std::atomic<bool> g_running{true};
 
 struct PriceCache {
-    std::atomic<uint64_t> btc_bits{0};
-    std::atomic<uint64_t> eth_bits{0};
-    std::atomic<uint64_t> sol_bits{0};
-    
-    void set_btc(double val) {
-        uint64_t bits;
-        __builtin_memcpy(&bits, &val, sizeof(double));
-        btc_bits.store(bits, std::memory_order_relaxed);
+    std::atomic<uint64_t> bits[3] = {};
+    void set(int id, double v) {
+        uint64_t b; __builtin_memcpy(&b, &v, 8);
+        bits[id].store(b, std::memory_order_relaxed);
     }
-    
-    void set_eth(double val) {
-        uint64_t bits;
-        __builtin_memcpy(&bits, &val, sizeof(double));
-        eth_bits.store(bits, std::memory_order_relaxed);
-    }
-    
-    void set_sol(double val) {
-        uint64_t bits;
-        __builtin_memcpy(&bits, &val, sizeof(double));
-        sol_bits.store(bits, std::memory_order_relaxed);
-    }
-    
-    double get_btc() const {
-        uint64_t bits = btc_bits.load(std::memory_order_relaxed);
-        double val;
-        __builtin_memcpy(&val, &bits, sizeof(double));
-        return val;
-    }
-    
-    double get_eth() const {
-        uint64_t bits = eth_bits.load(std::memory_order_relaxed);
-        double val;
-        __builtin_memcpy(&val, &bits, sizeof(double));
-        return val;
-    }
-    
-    double get_sol() const {
-        uint64_t bits = sol_bits.load(std::memory_order_relaxed);
-        double val;
-        __builtin_memcpy(&val, &bits, sizeof(double));
-        return val;
+    double get(int id) const {
+        uint64_t b = bits[id].load(std::memory_order_relaxed);
+        double v; __builtin_memcpy(&v, &b, 8); return v;
     }
 } price_cache;
 
-void signal_handler(int) {
-    g_running = false;
-}
+void signal_handler(int) { g_running = false; }
 
 int main() {
-    
-    // Quad engine controller (Micro + Structural + Convex + Compression) + Regime Allocator
-    chimera::QuadEngineBalancedEngine controller;
-    
-    std::printf("[STARTUP] Chimera engine starting...\n");
-    std::fflush(stdout);
-
-    // Fetch BTC perpetual funding rate — regime filter for crowded longs
-    // Runs in background, takes ~1s. Engine starts trading immediately.
-    std::thread funding_thread([&]() {
-        g_funding.fetch();
-        controller.set_funding_fetcher(&g_funding);
-    });
-    funding_thread.detach();
-    
-    // Per-symbol engine instances (disabled)
-    chimera::VEConfig ve_cfg{7.0, 15.0, 9.0, 28.0, 1.8, 12.0, 500, 5000};
-    chimera::LVConfig lv_cfg{7.0, 14.0, 8.0, 26.0, 14.0, 2.4, 0.30, 3.0, 64, 800};
-    chimera::MSAConfig msa_cfg{7.0, 16.0, 10.0, 34.0, 18.0, 10.0, 64, 1200};
-    
-    std::unordered_map<std::string, chimera::VolatilityExpansionEngine> ve_engines;
-    std::unordered_map<std::string, chimera::LiquidityVacuumEngine> lv_engines;
-    
-    for (const auto& s : {"btcusdt", "ethusdt", "solusdt"}) {
-        ve_engines.emplace(s, chimera::VolatilityExpansionEngine(ve_cfg));
-        lv_engines.emplace(s, chimera::LiquidityVacuumEngine(lv_cfg));
-    }
-    
-    chimera::MultiSymbolAlignmentEngine msa_engine(msa_cfg);
-
-    std::signal(SIGINT, signal_handler);
+    std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    chimera::TelemetrySpine spine;
-    
-    // REMOVED: WebSocket server - GUI decoupled, logs only
-    // chimera::WsTelemetryServer ws_server(9001, spine, "");
-    // ws_server.start();
-    // controller.set_gui_broadcast([&ws_server](const std::string& json_message) {
-    //     ws_server.broadcast(json_message);
-    // });
+    std::printf("╔══════════════════════════════════════════════════════════════╗\n");
+    std::printf("║              CHIMERA CRYPTO — STARTING                      ║\n");
+    std::printf("╚══════════════════════════════════════════════════════════════╝\n");
+    std::fflush(stdout);
 
+    // ── 1. Executor / API keys ───────────────────────────────────────────────
+    chimera::SpotExecutor executor;
+    bool executor_ok = executor.init("config/binance_credentials.json");
+    if (!executor_ok) {
+        std::fprintf(stderr,
+            "[STARTUP] WARNING: executor init failed — orders will be skipped.\n"
+            "[STARTUP] Edit config/binance_credentials.json with real api_key/api_secret.\n");
+    }
+
+    // ── 2. Engine ────────────────────────────────────────────────────────────
+    chimera::QuadEngineBalancedEngine controller;
+    if (executor_ok) {
+        controller.set_executor(&executor);
+        std::printf("[STARTUP] Executor wired | shadow=%s\n",
+                    executor.is_shadow() ? "YES (paper)" : "NO — LIVE");
+        std::fflush(stdout);
+    }
+
+    // Funding rate background fetch
+    std::thread([&]() {
+        g_funding.fetch();
+        controller.set_funding_fetcher(&g_funding);
+    }).detach();
+
+    // ── 3. GUI HTTP server ────────────────────────────────────────────────────
+    chimera::TelemetrySpine   spine;
+    chimera::DeskSnapshot     snapshot;
+    chimera::SimpleHttpServer http_server(8080);
+    http_server.set_state_callback([&]() -> std::string {
+        return std::string(snapshot.to_json());
+    });
+    if (!http_server.start()) {
+        std::fprintf(stderr, "[STARTUP] HTTP server failed on port 8080\n");
+    }
+
+    // ── 4. WebSocket feed ─────────────────────────────────────────────────────
     chimera::BinanceWSFeed feed;
     feed.add_symbol("btcusdt");
     feed.add_symbol("ethusdt");
     feed.add_symbol("solusdt");
 
     feed.set_callback([&](const chimera::MarketTick& tick) {
-        // Derive mid: use real book mid when available, else last trade price
+        int id = -1;
+        if      (tick.symbol == "btcusdt") id = 0;
+        else if (tick.symbol == "ethusdt") id = 1;
+        else if (tick.symbol == "solusdt") id = 2;
+        if (id < 0) return;
+
         double mid = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
+        price_cache.set(id, mid);
 
-        // Update GUI price display (real mid price)
-        if (tick.symbol == "btcusdt") price_cache.set_btc(mid);
-        else if (tick.symbol == "ethusdt") price_cache.set_eth(mid);
-        else if (tick.symbol == "solusdt") price_cache.set_sol(mid);
+        // Record latency from exchange timestamp
+        if (tick.trade_time > 0) {
+            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            g_exchange_latency.record(now_ms, tick.trade_time);
+        }
 
-        // Wait until exchange latency is established before trading
         if (!g_exchange_latency.ready()) return;
 
-        auto now = std::chrono::system_clock::now();
-        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()).count();
-        
-        // Map symbol to index
-        int sym_idx = -1;
-        if (tick.symbol == "btcusdt") sym_idx = 0;
-        else if (tick.symbol == "ethusdt") sym_idx = 1;
-        else if (tick.symbol == "solusdt") sym_idx = 2;
-        
-        // Enhanced controller (micro + structural)
-        auto id = chimera::symbol_to_id(tick.symbol);
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
         controller.on_tick(id, tick, now_ms, g_exchange_latency.p95());
-        
-        static int tick_count = 0;
-        tick_count++;
-        if (tick_count % 500 == 0) {
-            std::printf("[DEBUG] %s | ticks=%d | px=%.2f | lat_p95=%.2fms\n",
-                tick.symbol.c_str(), tick_count, mid, g_exchange_latency.p95());
+
+        static std::atomic<int> tc{0};
+        int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n % 1000 == 0) {
+            std::printf("[TICK] n=%d | %s px=%.2f | lat_p95=%.2fms | fills=%d\n",
+                n, tick.symbol.c_str(), mid,
+                g_exchange_latency.p95(),
+                executor_ok ? executor.fills() : 0);
             std::fflush(stdout);
         }
-        
-        // Old engines (disabled)
-        /*        // Get per-symbol engines
-        auto ve_it = ve_engines.find(tick.symbol);
-        auto lv_it = lv_engines.find(tick.symbol);
-        
-        if (ve_it == ve_engines.end() || lv_it == lv_engines.end()) return;
-        
-        auto& ve = ve_it->second;
-        auto& lv = lv_it->second;
-        
-        // Call engines
-        if (sym_idx >= 0) {
-            msa_engine.on_tick(sym_idx, mid, now_ms, g_exchange_latency.p95());
-        }
-        
-        static int debug_count = 0;
-        debug_count++;
-        
-        ve.on_tick(mid, now_ms, g_exchange_latency.p95());
-        lv.on_book(tick.bid, tick.bid_size, tick.ask, tick.ask_size, now_ms, g_exchange_latency.p95());
-        
-        if (debug_count % 500 == 0) {
-            std::printf("[DEBUG] %s | ticks=%d | px=%.2f | lat_p95=%.2fms\n",
-                tick.symbol.c_str(), debug_count, mid, g_exchange_latency.p95());
-            std::fflush(stdout);
-        }
-        
-        // Check VE signals
-        if (ve.has_signal()) {
-            std::printf("[VE] ENTRY | %s | LONG=%d | px=%.2f\n", 
-                tick.symbol.c_str(), ve.is_long() ? 1 : 0, ve.entry_price());
-            std::fflush(stdout);
-        }
-        
-        if (ve.exit_ready()) {
-            std::printf("[VE] EXIT | %s | px=%.2f\n", 
-                tick.symbol.c_str(), ve.exit_price());
-            std::fflush(stdout);
-        }
-        
-        // Check LV signals
-        if (lv.enter_signal()) {
-            std::printf("[LV] ENTRY | %s | LONG=%d | px=%.2f\n",
-                tick.symbol.c_str(), lv.is_long() ? 1 : 0, lv.entry_price());
-            std::fflush(stdout);
-        }
-        
-        if (lv.exit_signal()) {
-            std::printf("[LV] EXIT | %s | px=%.2f\n", 
-                tick.symbol.c_str(), lv.exit_price());
-            std::fflush(stdout);
-        }
-        
-        if (msa_engine.enter_signal()) {
-            std::printf("[MSA] ENTRY | sym=%d | LONG=%d | px=%.2f\n",
-                msa_engine.symbol(), msa_engine.is_long() ? 1 : 0, msa_engine.entry_price());
-            std::fflush(stdout);
-        }
-        
-        if (msa_engine.exit_signal()) {
-            std::printf("[MSA] EXIT | px=%.2f\n", msa_engine.exit_price());
-            std::fflush(stdout);
-        }
-        */
     });
 
     feed.start();
+    std::printf("[STARTUP] Feed live. Calibrating latency...\n");
+    std::fflush(stdout);
 
-    auto last_snapshot = std::chrono::steady_clock::now();
-    chimera::DeskSnapshot snapshot;
+    // ── 5. Main loop — 1Hz snapshot ──────────────────────────────────────────
+    auto t0       = std::chrono::steady_clock::now();
+    auto last_snap = t0;
 
     while (g_running) {
         auto now = std::chrono::steady_clock::now();
-        
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_snapshot).count() >= 1) {
-            
-            snapshot.btc_price = price_cache.get_btc();
-            snapshot.eth_price = price_cache.get_eth();
-            snapshot.sol_price = price_cache.get_sol();
-            
-            snapshot.equity = 10000.0 + controller.get_total_pnl();
-            snapshot.pnl = controller.get_realized_pnl();
-            snapshot.unrealized_pnl = 0.0;
-            snapshot.day_pnl = controller.get_total_pnl();
-            snapshot.latency_ms = g_exchange_latency.p95();
-            snapshot.orders_sent = controller.get_total_trades();
-            snapshot.fills_received = controller.get_total_trades();
-            snapshot.positions = controller.get_open_positions();
-            snapshot.orders_blocked = 0;
-            snapshot.governor = 0;
-            snapshot.kill_switch = false;
-            
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_snap).count() >= 1) {
+            double uptime_s = std::chrono::duration<double>(now - t0).count();
+            snapshot.btc_price      = price_cache.get(0);
+            snapshot.eth_price      = price_cache.get(1);
+            snapshot.sol_price      = price_cache.get(2);
+            snapshot.equity         = 10000.0 + controller.get_total_pnl();
+            snapshot.pnl            = controller.get_realized_pnl();
+            snapshot.day_pnl        = controller.get_total_pnl();
+            snapshot.latency_ms     = g_exchange_latency.ready() ? g_exchange_latency.p95() : 0.0;
+            snapshot.orders_sent    = executor_ok ? executor.fills() : 0;
+            snapshot.fills_received = executor_ok ? executor.fills() : 0;
+            snapshot.positions      = controller.get_open_positions();
+            snapshot.governor       = "ACTIVE";
+            snapshot.kill_switch    = false;
+            snapshot.uptime_hours   = uptime_s / 3600.0;
+            snapshot.mode           = (executor_ok && !executor.is_shadow()) ? "LIVE" : "SHADOW";
+            snapshot.healthy        = true;
             spine.publish(&snapshot);
-            
-            // REMOVED: WebSocket broadcast - GUI decoupled
-            // ws_server.broadcast(spine.json());
-            
-            last_snapshot = now;
+            last_snap = now;
         }
-        
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    std::printf("[SHUTDOWN] Stopping feed...\n");
+    // ── 6. Shutdown ───────────────────────────────────────────────────────────
+    std::printf("\n[SHUTDOWN] Stopping...\n");
     std::fflush(stdout);
     feed.stop();
+    http_server.stop();
+    std::printf("[SHUTDOWN] fills=%d errors=%d trades=%d pnl=%.2fbp\n",
+                executor_ok ? executor.fills()  : 0,
+                executor_ok ? executor.errors() : 0,
+                controller.get_total_trades(),
+                controller.get_total_pnl());
     std::printf("[SHUTDOWN] Clean exit.\n");
     std::fflush(stdout);
     return 0;

@@ -1,3 +1,5 @@
 build/
 logs/
 *.log
+config/binance_credentials.json
+/tmp/chimera_*

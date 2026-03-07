@@ -1,5 +1,6 @@
 #pragma once
 #include "live/BinanceWSFeed.hpp"
+#include "live/SpotExecutor.hpp"
 #include "config/TradingConfig.hpp"
 #include "LatencyGovernor.hpp"
 #include "RegimeTypes.hpp"
@@ -220,6 +221,11 @@ public:
         std::string my_symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
         rejection_telemetry_.recordEvaluation(my_symbol);
         
+        // Update depth baseline for real queue_density in cap_env
+        double depth = tick.bid_size + tick.ask_size;
+        if (depth_baseline_[id] < 1e-9) depth_baseline_[id] = depth;
+        else depth_baseline_[id] = depth_baseline_[id] * 0.995 + depth * 0.005;
+        
         // PHASE 2: Update microstructure engines
         update_market_data(id, tick, ts, latency_ms);
         symbols_[id].last_tick = tick;   // Store for signal checks
@@ -432,6 +438,7 @@ public:
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
+    void set_executor(SpotExecutor* e)              { executor_ = e; }
     double get_total_pnl() const { return total_pnl_; }
     double get_realized_pnl() const { return realized_pnl_; }
     int get_total_trades() const { return total_trades_; }
@@ -1099,16 +1106,21 @@ private:
         
         double final_weight = base_weight * micro_bias * regime_mult;
         
-        // Compute final size via CapitalControlLayer
+        // Compute final size via CapitalControlLayer — use real live values
         CapitalControlLayer::MarketEnv cap_env;
-        cap_env.short_range = market_env_.short_range;
-        cap_env.long_range = market_env_.long_range;
-        cap_env.spread_bps = 2.0;
-        cap_env.book_imbalance = 0.0;
-        cap_env.queue_density = 1.0;
-        cap_env.funding_rate = 0.0;
-        cap_env.latency_ms = market_env_.latency_ms;
-        cap_env.net_clean = market_env_.net_clean;
+        cap_env.short_range    = market_env_.short_range;
+        cap_env.long_range     = market_env_.long_range;
+        cap_env.spread_bps     = market_env_.spread_bps;          // real tick spread
+        cap_env.book_imbalance = market_env_.book_imbalance;      // real book pressure
+        // queue_density: normalise bid+ask depth vs recent baseline
+        {
+            const MarketTick& lt = symbols_[id].last_tick;
+            double depth = lt.bid_size + lt.ask_size;
+            cap_env.queue_density = std::min(1.0, depth / std::max(depth_baseline_[id], 1e-6));
+        }
+        cap_env.funding_rate   = (funding_ && funding_->ready()) ? funding_->rate() : 0.0;
+        cap_env.latency_ms     = market_env_.latency_ms;
+        cap_env.net_clean      = market_env_.net_clean;
         
         double unrealized_bp = 0.0;
         double drawdown_bp = 0.0;
@@ -1201,6 +1213,12 @@ private:
                 sym, mode, regime_name(s.regime), price, final_weight, legacy_size_mult);
             std::fflush(stdout);
 
+            // Execute order (shadow or live — determined by executor config)
+            if (executor_) {
+                double qty = (final_size * legacy_size_mult) / std::max(price, 1.0);
+                executor_->execute(sym_lower(id), true /*buy*/, qty, price);
+            }
+
             std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
             broadcast_to_gui(GuiMessageBuilder::position_enter(
                 symbol_full, mode, price, (int)s.regime, final_weight
@@ -1258,6 +1276,18 @@ private:
             se.btc_move_bp   = s.entry_btc_move;
             se.win           = (pnl > 0) ? 1 : 0;
             shadow_log_.record(se);
+        }
+
+        // Execute closing order (shadow or live)
+        if (executor_) {
+            double exit_px = s.pos.entry_price * (1.0 + pnl / 10000.0);
+            double qty = (s.pos.entry_price > 0.0)
+                ? (capital_control_.compute_final_size(0.5,
+                      CapitalControlLayer::MarketEnv{}, 0.0, 0.0) / s.pos.entry_price)
+                : 0.0;
+            // Use the same qty that was entered (approximate via entry_price)
+            // For shadow mode this just logs the close
+            executor_->execute(sym, false /*sell*/, qty, exit_px);
         }
         
         // Broadcast exit to GUI with complete trade details
@@ -1386,6 +1416,18 @@ private:
     CapitalControlLayer capital_control_;
     ExecutionOptimizer execution_optimizer_;
     AdaptiveReinforcementLayer reinforcement_;
+
+    // Depth baseline per symbol — used for real queue_density in cap_env
+    double depth_baseline_[3] = {0.0, 0.0, 0.0};
+
+    // Spot executor — wired at startup via set_executor()
+    SpotExecutor* executor_ = nullptr;
+
+    static const char* sym_lower(int id) {
+        if (id == 0) return "btcusdt";
+        if (id == 1) return "ethusdt";
+        return "solusdt";
+    }
 };
 
 }

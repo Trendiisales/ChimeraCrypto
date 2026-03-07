@@ -89,14 +89,16 @@ struct TradingConfig {
 
     // Take-profit for lead-lag trades (gross, before costs)
     // Net profit after 10bp costs = +4bp. Worth it if win rate > 70%.
-    // -------------------------------------------------------------------------
     // ETH → SOL LEAD-LAG
     // ETH leads SOL by ~30-80ms. Smaller move threshold than BTC→ETH/SOL.
     // Long-only, spot-valid. Fires on SOL only.
-    // -------------------------------------------------------------------------
-    static constexpr double LEADLAG_ETH_SOL_TP_BP       = 12.0;
-    static constexpr double LEADLAG_ETH_SOL_SL_BP       = 5.0;
-    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS = 2500;
+    // Raised ETH threshold 8→12bp: at 8bp too many small ETH moves that SOL ignores.
+    // Hold tightened 2500→1500ms: if SOL hasn't moved in 1.5s, the propagation is done.
+    // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
+    static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 12.0; // min ETH move to signal
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 12.0;
+    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 4.0;  // was 5.0 — tighter, cut faster
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 1500; // was 2500
 
     static constexpr double LEADLAG_TP_BP              = 14.0;
 
@@ -151,8 +153,14 @@ struct TradingConfig {
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
     static constexpr double IMPULSE_TP_BP              = 20.0;
-    static constexpr double IMPULSE_SL_BP              = 8.0;
+    static constexpr double IMPULSE_SL_BP              = 7.0;   // was 8.0 — tighter to cut losers faster
     static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 30000;
+
+    // EXPANSION has own tighter parameters — weaker edge than IMPULSE
+    // SL tighter (5bp) to cut failed breakouts fast. Hold 12s max — if it hasn't moved by then it won't.
+    static constexpr double EXPANSION_TP_BP             = 18.0;  // was shared with IMPULSE at 20bp
+    static constexpr double EXPANSION_SL_BP             = 5.0;   // was 8bp — way too loose for this engine
+    static constexpr int64_t EXPANSION_MAX_HOLD_MS      = 12000; // was 30s — cut dead trades at 12s
 
     // Minimum ticks in short window before impulse fires
     static constexpr int IMPULSE_MIN_SHORT_TICKS       = 5;
@@ -227,9 +235,12 @@ struct TradingConfig {
 
     // -------------------------------------------------------------------------
     // EXPANSION LAYER
+    // Raised vol_ratio 1.125→1.55: at 1.125 fires on weak BUILDUP noise.
+    // 1.55 = genuine expansion, not just minor vol uptick.
+    // BREAKOUT-only enforced in check_expansion (removed BUILDUP).
     // -------------------------------------------------------------------------
-    static constexpr double EXPANSION_VOL_RATIO       = 1.125;
-    static constexpr int    EXPANSION_MIN_SHORT_TICKS = 8;
+    static constexpr double EXPANSION_VOL_RATIO       = 1.55;
+    static constexpr int    EXPANSION_MIN_SHORT_TICKS = 12;  // was 8 — need more confirmation ticks
 
 
     // -------------------------------------------------------------------------

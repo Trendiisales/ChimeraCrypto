@@ -913,7 +913,9 @@ private:
             rejection_throttle_.record(key, "already_in_expand");
             return false;
         }
-        if (s.regime != REGIME_BUILDUP && s.regime != REGIME_BREAKOUT) {
+        if (s.regime != REGIME_BREAKOUT) {
+            // Was: BUILDUP || BREAKOUT — BUILDUP entries were failing too often.
+            // BREAKOUT-only: vol_ratio already > 1.65, genuine expansion confirmed.
             rejection_throttle_.record(key, "weak_regime");
             return false;
         }
@@ -1184,8 +1186,13 @@ private:
             tp_bp     = TradingConfig::VWAP_TP_BP;
             sl_bp     = TradingConfig::VWAP_SL_BP;
             max_hold  = TradingConfig::VWAP_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_EXPANSION) {
+            // EXPANSION: own tighter params. Cut losers fast at 12s/5bp SL.
+            tp_bp    = TradingConfig::EXPANSION_TP_BP;
+            sl_bp    = TradingConfig::EXPANSION_SL_BP;
+            max_hold = TradingConfig::EXPANSION_MAX_HOLD_MS;
         } else {
-            // IMPULSE / EXPANSION: TP=20bp gross → +10bp net. SL=8bp. Hold 30s.
+            // IMPULSE: TP=20bp gross → +10bp net. SL=7bp. Hold 30s.
             tp_bp     = TradingConfig::IMPULSE_TP_BP;
             sl_bp     = TradingConfig::IMPULSE_SL_BP;
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
@@ -1286,8 +1293,16 @@ private:
             return false;
         }
 
-        std::printf("[LL-ETH-SOL] SOL | eth_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
-                    leadlag_.eth_move_bp(), latency_ms);
+        // ORDER FLOW CONFIRMATION — ETH led, but SOL must also have buy pressure
+        // If SOL order flow is weak, ETH move is already absorbed, skip entry
+        double flow = compute_flow_ratio(id);
+        if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
+            rejection_throttle_.record(key, "weak_sol_flow");
+            return false;
+        }
+
+        std::printf("[LL-ETH-SOL] SOL | eth_move=%.2fbp | flow=%.2f | latency=%.1fms | ENTERING LONG\n",
+                    leadlag_.eth_move_bp(), flow, latency_ms);
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_LEADLAG_ETH_SOL, true);

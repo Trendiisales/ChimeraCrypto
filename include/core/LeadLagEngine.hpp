@@ -174,8 +174,8 @@ public:
         double eth_now   = eth.back().price;
         double eth_delta = (eth_now - eth_ref) / eth_ref * 10000.0;
 
-        // ETH must have moved at least 6bp (smaller cap, smaller moves)
-        static constexpr double ETH_MOVE_THRESHOLD_BP = 6.0;
+        // ETH must have moved at least 10bp (raised from 6bp — 6bp fires on noise, SOL doesn't follow)
+        static constexpr double ETH_MOVE_THRESHOLD_BP = 10.0;
         if (std::fabs(eth_delta) < ETH_MOVE_THRESHOLD_BP) return false;
 
         // SOL must not have already moved 3bp in same direction

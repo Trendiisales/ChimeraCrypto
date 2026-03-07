@@ -7,6 +7,11 @@
 #include <chrono>
 #include <csignal>
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <sys/file.h>   // flock()
+#include <fcntl.h>      // open()
+#include <unistd.h>     // getpid(), write(), close()
 
 #include "live/BinanceWSFeed.hpp"
 #include "live/SpotExecutor.hpp"
@@ -16,6 +21,59 @@
 #include "execution/NetworkLatencySystem.hpp"
 #include "core/SymbolIndex.hpp"
 #include "config/TradingConfig.hpp"
+
+// ── SINGLE-INSTANCE LOCK ─────────────────────────────────────────────────────
+// Uses an advisory flock() on a PID file.
+// The lock is automatically released by the OS if the process crashes or exits.
+static constexpr const char* PID_LOCK_FILE = "/tmp/chimera.lock";
+static int g_lock_fd = -1;
+
+void acquire_instance_lock() {
+    g_lock_fd = ::open(PID_LOCK_FILE, O_CREAT | O_RDWR, 0644);
+    if (g_lock_fd < 0) {
+        std::fprintf(stderr, "[FATAL] Cannot open lock file %s\n", PID_LOCK_FILE);
+        std::exit(1);
+    }
+
+    // Non-blocking exclusive lock — fails immediately if another instance holds it
+    if (::flock(g_lock_fd, LOCK_EX | LOCK_NB) != 0) {
+        // Read the PID of the existing instance from the file
+        char buf[32] = {};
+        ::read(g_lock_fd, buf, sizeof(buf) - 1);
+        ::close(g_lock_fd);
+        std::fprintf(stderr,
+            "\n╔══════════════════════════════════════════════════╗\n"
+            "║  CHIMERA ALREADY RUNNING — SECOND INSTANCE BLOCKED  ║\n"
+            "╠══════════════════════════════════════════════════╣\n"
+            "║  Existing PID: %-35s║\n"
+            "║  Lock file:    %-35s║\n"
+            "║  To stop the running instance: kill %s       ║\n"
+            "║  Or: pkill chimera                               ║\n"
+            "╚══════════════════════════════════════════════════╝\n",
+            buf, PID_LOCK_FILE, buf);
+        std::exit(1);
+    }
+
+    // Write our PID into the lock file for diagnostics
+    ::ftruncate(g_lock_fd, 0);
+    char pidbuf[32];
+    int len = std::snprintf(pidbuf, sizeof(pidbuf), "%d\n", (int)::getpid());
+    ::write(g_lock_fd, pidbuf, len);
+    ::fsync(g_lock_fd);
+    // Note: g_lock_fd intentionally left open — closing it releases the flock
+    std::printf("[STARTUP] Instance lock acquired | PID=%d | lock=%s\n",
+                (int)::getpid(), PID_LOCK_FILE);
+}
+
+void release_instance_lock() {
+    if (g_lock_fd >= 0) {
+        ::flock(g_lock_fd, LOCK_UN);
+        ::close(g_lock_fd);
+        ::unlink(PID_LOCK_FILE);
+        g_lock_fd = -1;
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 chimera::ExchangeLatencyEngine g_exchange_latency;
 chimera::FundingRateFetcher    g_funding;
@@ -38,6 +96,9 @@ struct PriceCache {
 void signal_handler(int) { g_running = false; }
 
 int main() {
+    // ── 0. Single-instance lock — must be first ───────────────────────────────
+    acquire_instance_lock();
+
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
@@ -135,5 +196,6 @@ int main() {
                 controller.get_total_pnl());
     std::printf("[SHUTDOWN] Clean exit.\n");
     std::fflush(stdout);
+    release_instance_lock();
     return 0;
 }

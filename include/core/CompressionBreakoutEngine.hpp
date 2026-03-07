@@ -54,6 +54,8 @@ public:
     double total_pnl_bp = 0.0;
     int total_trades = 0;
     int winning_trades = 0;
+    double last_trade_entry_px = 0.0;
+    double last_trade_pnl_bp   = 0.0;
 
     explicit CompressionBreakoutEngine(const std::string& sym = "")
         : symbol(sym) {}

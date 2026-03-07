@@ -130,8 +130,6 @@ public:
         // Use passed acceleration_bp instead of calculating
         double accel_bp = acceleration_bp;
         
-        const int REGIME_BUILDUP = 2;
-
         tick_cooldown();
 
         // =========================================================

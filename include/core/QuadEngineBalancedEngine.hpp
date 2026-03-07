@@ -371,7 +371,7 @@ private:
 
     void save_trade_to_disk(const TradeRecord& r) {
         // Ensure data dir exists
-        ::system("mkdir -p data");
+        { int _r = ::system("mkdir -p data"); (void)_r; }
         std::ofstream f(TRADE_LOG_FILE, std::ios::app);
         if (!f.is_open()) return;
         f << std::fixed << std::setprecision(2)

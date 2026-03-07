@@ -216,7 +216,9 @@ public:
                 json << "{\"t\":\"" << tr.time << "\","
                      << "\"s\":\"" << tr.symbol << "\","
                      << "\"e\":\"" << tr.engine << "\","
-                     << "\"p\":" << std::setprecision(2) << tr.pnl_bp << "}";
+                     << "\"p\":" << std::fixed << std::setprecision(2) << tr.pnl_bp << ","
+                     << "\"en\":" << std::setprecision(2) << tr.entry_price << ","
+                     << "\"ex\":" << std::setprecision(2) << tr.exit_price << "}";
                 first_t = false;
             }
             json << "],";
@@ -323,52 +325,65 @@ private:
     std::deque<TradeRecord> trade_log_;
     std::mutex trade_log_mutex_;
 
-    // Previous trade counts to detect new completions
-    int prev_structural_trades_[3] = {0,0,0};
-    int prev_convex_trades_[3]     = {0,0,0};
-    int prev_compression_trades_[3]= {0,0,0};
+    // Previous trade counts + cumulative pnl to compute per-trade pnl delta
+    int    prev_structural_trades_[3]  = {0,0,0};
+    double prev_structural_pnl_[3]     = {0,0,0};
+    int    prev_convex_trades_[3]      = {0,0,0};
+    double prev_convex_pnl_[3]         = {0,0,0};
+    int    prev_compression_trades_[3] = {0,0,0};
+    double prev_compression_pnl_[3]    = {0,0,0};
+
+    static std::string now_hms() {
+        auto t = std::time(nullptr);
+        char buf[16];
+        std::strftime(buf, sizeof(buf), "%H:%M:%S", std::gmtime(&t));
+        return std::string(buf);
+    }
+
+    void push_trade(const std::string& sym, const std::string& eng,
+                    double pnl_bp, double entry_px, double current_px) {
+        TradeRecord r;
+        r.time        = now_hms();
+        r.symbol      = sym;
+        r.engine      = eng;
+        r.pnl_bp      = pnl_bp;
+        r.entry_price = entry_px;
+        r.exit_price  = current_px;
+        std::lock_guard<std::mutex> lk(trade_log_mutex_);
+        trade_log_.push_front(r);
+        if (trade_log_.size() > 50) trade_log_.pop_back();
+    }
 
     void check_new_trades(int id) {
         const char* syms[] = {"BTC","ETH","SOL"};
+        const double px = market_state_[id].last_price;
+
         auto ss = structural_[id].get_stats();
         auto cs = convex_[id].get_stats();
         auto xs = compression_[id].get_stats();
 
-        auto now_str = []() -> std::string {
-            auto t = std::time(nullptr);
-            char buf[16];
-            std::strftime(buf, sizeof(buf), "%H:%M:%S", std::gmtime(&t));
-            return std::string(buf);
-        };
-
+        // Structural exit detected
         if (ss.total_trades > prev_structural_trades_[id]) {
-            std::lock_guard<std::mutex> lk(trade_log_mutex_);
-            double last_pnl = ss.total_pnl_bp - (trade_log_.empty() ? 0 :
-                [&]{ double s=0; for(auto& t:trade_log_) if(t.symbol==syms[id]&&t.engine=="STRUCT") s+=t.pnl_bp; return s; }());
-            TradeRecord r; r.time=now_str(); r.symbol=syms[id]; r.engine="STRUCT";
-            r.pnl_bp = ss.total_trades>0 ? ss.total_pnl_bp/ss.total_trades : 0;
-            r.entry_price = ss.entry_price; r.exit_price = 0;
-            trade_log_.push_front(r);
-            if (trade_log_.size() > 50) trade_log_.pop_back();
+            double trade_pnl = ss.total_pnl_bp - prev_structural_pnl_[id];
+            push_trade(syms[id], "STRUCT", trade_pnl, ss.entry_price, px);
             prev_structural_trades_[id] = ss.total_trades;
+            prev_structural_pnl_[id]    = ss.total_pnl_bp;
         }
+
+        // Convex exit detected
         if (cs.total_trades > prev_convex_trades_[id]) {
-            std::lock_guard<std::mutex> lk(trade_log_mutex_);
-            TradeRecord r; r.time=now_str(); r.symbol=syms[id]; r.engine="CONVEX";
-            r.pnl_bp = cs.total_trades>0 ? cs.total_pnl_bp/cs.total_trades : 0;
-            r.entry_price = cs.entry_price; r.exit_price = 0;
-            trade_log_.push_front(r);
-            if (trade_log_.size() > 50) trade_log_.pop_back();
+            double trade_pnl = cs.total_pnl_bp - prev_convex_pnl_[id];
+            push_trade(syms[id], "CONVEX", trade_pnl, cs.entry_price, px);
             prev_convex_trades_[id] = cs.total_trades;
+            prev_convex_pnl_[id]    = cs.total_pnl_bp;
         }
+
+        // Compression exit detected
         if (xs.total_trades > prev_compression_trades_[id]) {
-            std::lock_guard<std::mutex> lk(trade_log_mutex_);
-            TradeRecord r; r.time=now_str(); r.symbol=syms[id]; r.engine="COMP";
-            r.pnl_bp = xs.total_trades>0 ? xs.total_pnl_bp/xs.total_trades : 0;
-            r.entry_price = xs.entry_price; r.exit_price = 0;
-            trade_log_.push_front(r);
-            if (trade_log_.size() > 50) trade_log_.pop_back();
+            double trade_pnl = xs.total_pnl_bp - prev_compression_pnl_[id];
+            push_trade(syms[id], "COMP", trade_pnl, xs.entry_price, px);
             prev_compression_trades_[id] = xs.total_trades;
+            prev_compression_pnl_[id]    = xs.total_pnl_bp;
         }
     }
     

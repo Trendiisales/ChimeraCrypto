@@ -173,11 +173,16 @@ function renderTradeLog() {
   }
   el.innerHTML = localTrades.map(tr => {
     const p = +tr.p, pos = p >= 0;
+    const pnlStr = (pos ? '+' : '') + p.toFixed(2) + 'bp';
+    const enPx = +tr.en > 0 ? '$' + (+tr.en).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
+    const exPx = +tr.ex > 0 ? '$' + (+tr.ex).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
+    const priceStr = enPx && exPx ? `<span style="color:var(--muted);font-size:9px"> ${enPx}→${exPx}</span>` : '';
     return `<div class="trade-entry">
       <span class="te-time">${tr.t}</span>
       <span class="te-sym">${tr.s}</span>
       <span class="te-layer">${tr.e}</span>
-      <span class="te-pnl ${pos ? 'pos' : 'neg'}">${pos ? '+' : ''}${p.toFixed(2)}bp</span>
+      ${priceStr}
+      <span class="te-pnl ${pos ? 'pos' : 'neg'}">${pnlStr}</span>
     </div>`;
   }).join('');
 }

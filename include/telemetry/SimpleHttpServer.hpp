@@ -122,6 +122,8 @@ private:
             serve_file(client_fd, "app.js", "application/javascript");
         } else if (path == "/style.css") {
             serve_file(client_fd, "style.css", "text/css");
+        } else if (path == "/favicon.svg") {
+            serve_file(client_fd, "favicon.svg", "image/svg+xml");
         } else if (path == "/api/state") {
             serve_state(client_fd);
         } else {

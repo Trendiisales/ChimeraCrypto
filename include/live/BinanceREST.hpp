@@ -74,6 +74,12 @@ public:
 
         api_key_    = extract_json_string(content, "api_key");
         api_secret_ = extract_json_string(content, "api_secret");
+        if (api_secret_.empty())
+            api_secret_ = extract_json_string(content, "secret_key");
+
+        std::printf("[REST] Key loaded: ...%s | Secret loaded: %s\n",
+            api_key_.size() > 8 ? api_key_.substr(api_key_.size()-8).c_str() : "??",
+            api_secret_.empty() ? "NO" : "YES");
 
         // Parse shadow_mode — default true for safety
         shadow_mode_ = true;
@@ -92,7 +98,8 @@ public:
             std::fprintf(stderr, "[REST] No API key set in %s\n", path.c_str());
             return false;
         }
-        if (api_secret_.empty() || api_secret_ == "YOUR_BINANCE_API_SECRET_HERE") {
+        if (api_secret_.empty() || api_secret_ == "YOUR_BINANCE_API_SECRET_HERE"
+                                 || api_secret_ == "YOUR_BINANCE_SECRET_KEY_HERE") {
             std::fprintf(stderr, "[REST] No API secret set in %s\n", path.c_str());
             return false;
         }

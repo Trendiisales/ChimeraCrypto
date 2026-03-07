@@ -35,8 +35,9 @@ function flashWin(sym, pnl) {
   const el = $('win-flash');
   if (!el) return;
   el.textContent = `✓ WIN  ${sym.toUpperCase().replace('USDT','')}  +${Number(pnl).toFixed(2)}bp`;
+  el.style.display = 'block';
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => { el.classList.remove('show'); el.style.display = 'none'; }, 2500);
 }
 
 // ── UPTIME ─────────────────────────────────────────────────────────────────

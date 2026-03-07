@@ -601,6 +601,9 @@ private:
     // No fake constants. If a field is 0.0, the feed hasn't sent it yet —
     // we use it as-is; the EMA-based engines self-initialise gracefully.
     void update_market_data(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        // Keep snapshot latency current so exit() can log it correctly
+        snapshots_[id].lat_p95_ms = latency_ms;
+
         double short_vol = compute_volatility(symbols_[id].short_returns);
         double long_vol  = compute_volatility(symbols_[id].long_returns);
 

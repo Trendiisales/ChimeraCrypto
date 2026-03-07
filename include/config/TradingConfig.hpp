@@ -241,8 +241,11 @@ struct TradingConfig {
     // At BTC=$85k, long_vol=0.0003: trail = 2.5 * 0.0003 * 85000 = $63.75 = ~7.5bp
     static constexpr double TRAIL_LONG_VOL_MULT        = 2.5;
 
-    // Minimum profit before trailing stop activates (don't trail below costs)
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 5.0;
+    // Minimum profit before trailing stop activates
+    // Lowered 5.0→2.5bp: at 5bp we were holding through full reversals on small wins.
+    // ETH example: peaked +0.50bp, reversed to -3.86bp mae because trail never armed.
+    // At 2.5bp the trail arms sooner and protects partial gains.
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 2.5;
 
     // Minimum ticks to hold before any exit allowed (prevent instant exits)
     static constexpr int    MIN_HOLD_TICKS             = 3;

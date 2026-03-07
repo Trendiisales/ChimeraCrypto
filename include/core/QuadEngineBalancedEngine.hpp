@@ -261,8 +261,7 @@ public:
             json << "\"vol_ratio\":"        << ms.vol_ratio << ",";
             json << "\"displacement_bp\":"  << ms.displacement_bp << ",";
             json << "\"acceleration_bp\":"  << ms.acceleration_bp << ",";
-            json << "\"buildup_ticks\":"     << ms.buildup_ticks << ",";
-            json << "\"regime_state_name\":";            json << "\"\" << allocator_[i].get_state_name() << "\"";
+            json << "\"buildup_ticks\":"     << ms.buildup_ticks;
             
             json << "}";
             if (i < 2) json << ",";

@@ -45,6 +45,7 @@ enum LayerMode {
     LAYER_IMPULSE,
     LAYER_EXPANSION,
     LAYER_LEADLAG,
+    LAYER_LEADLAG_ETH_SOL,  // ETH leads SOL — secondary correlation
     LAYER_VACUUM,   // Liquidity Vacuum — ask-side drain breakout
     LAYER_VWAP      // VWAP Reversion — buy dip back to session VWAP
 };
@@ -227,7 +228,10 @@ public:
         std::printf("║ Capital Control Layer: ENABLED                                ║\n");
         std::printf("║ Execution Optimizer: ENABLED                                  ║\n");
         std::printf("║ Reinforcement Layer: ENABLED                                  ║\n");
-        std::printf("║ MICRO Layer: PARKED (measurement only)                        ║\n");
+        std::printf("║ Engines: LEADLAG BTC→ETH/SOL | ETH→SOL | IMPULSE | EXPAND    ║\n");
+        std::printf("║          VACUUM | VWAP-REV | IMBAL (6 engines, long-only)     ║\n");
+        std::printf("║ Multi-position: UP TO 3 (1 per symbol)                        ║\n");
+        std::printf("║ Dead zone (20-23 UTC): max 1 pos, raised thresholds           ║\n");
         std::printf("╚════════════════════════════════════════════════════════════════╝\n");
         std::fflush(stdout);
     }
@@ -485,11 +489,20 @@ public:
         // Signal evaluation
         if (ts < kill_until_) return;
         if (ts < s.cooldown_until) return;
-        if (open_positions_ >= 1) return;
+        // Per-symbol guard: don't enter if this symbol already has a position
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return;
+
+        // Time-of-day session gating
+        int utc_hour = (int)((ts / 3600000LL) % 24);
+        bool dead_zone = (utc_hour >= TradingConfig::SESSION_DEAD_START_UTC &&
+                          utc_hour <  TradingConfig::SESSION_DEAD_END_UTC);
+        int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : 3;
+        if (open_positions_ >= max_pos) return;
         
         // Try signals in priority order
         // Priority: lead-lag first (best EV), then breakout, then microstructure
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
+        if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_expansion(id, price, ts, s, latency_ms)) return;
         if (check_vacuum(id, price, ts, s, latency_ms)) return;
@@ -768,6 +781,9 @@ private:
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string key = std::string(sym) + " IMPULSE";
 
+        // Per-symbol guard: don't enter if this symbol already has a position
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
         if (latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
             rejection_throttle_.record(key, "high_latency");
             return false;
@@ -814,6 +830,9 @@ private:
     bool check_expansion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string key = std::string(sym) + " EXPAND";
+
+        // Per-symbol guard
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
         if (expand_state_[id] == 1) {
             rejection_throttle_.record(key, "already_in_expand");
@@ -874,6 +893,9 @@ private:
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string key = std::string(sym) + " IMBAL";
 
+        // Per-symbol guard
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
         // TIGHTER latency gate than hard limit — imbalance edge decays fast
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
             rejection_throttle_.record(key, "latency_too_high");
@@ -896,7 +918,13 @@ private:
         }
 
         double imbalance = t.book_imbalance;
-        if (std::abs(imbalance) < TradingConfig::IMBALANCE_THRESHOLD) {
+        // Dead zone (20-23 UTC): raise threshold to filter noise in thin markets
+        int utc_hour_imbal = (int)((ts / 3600000LL) % 24);
+        bool dead_imbal = (utc_hour_imbal >= TradingConfig::SESSION_DEAD_START_UTC &&
+                           utc_hour_imbal <  TradingConfig::SESSION_DEAD_END_UTC);
+        double imbal_thresh = TradingConfig::IMBALANCE_THRESHOLD *
+                              (dead_imbal ? TradingConfig::DEAD_ZONE_IMBAL_MULT : 1.0);
+        if (std::abs(imbalance) < imbal_thresh) {
             rejection_throttle_.record(key, "weak_imbalance");
             return false;
         }
@@ -992,9 +1020,10 @@ private:
             const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
             const char* mode = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
                                (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
-                               (s.pos.layer == LAYER_VACUUM)   ? "VACUUM"  :
-                               (s.pos.layer == LAYER_VWAP)     ? "VWAP"    :
-                               (s.pos.layer == LAYER_IMPULSE)  ? "IMPULSE" : "EXPAND";
+                               (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
+                               (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
+                               (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
+                               (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1060,6 +1089,11 @@ private:
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_SL_BP;
             max_hold  = TradingConfig::LEADLAG_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_LEADLAG_ETH_SOL) {
+            // ETH→SOL: TP=12bp, SL=5bp, hold 2.5s (tighter window)
+            tp_bp     = TradingConfig::LEADLAG_ETH_SOL_TP_BP;
+            sl_bp     = TradingConfig::LEADLAG_ETH_SOL_SL_BP;
+            max_hold  = TradingConfig::LEADLAG_ETH_SOL_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_MICRO) {
             // TP=12bp gross → +2bp net. SL=3bp. Hold 8s max.
             tp_bp     = TradingConfig::IMBALANCE_TP_BP;
@@ -1088,8 +1122,9 @@ private:
                 (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
                 (s.pos.layer == LAYER_MICRO)   ? "IMBAL"   :
                 (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
-                (s.pos.layer == LAYER_VACUUM)   ? "VACUUM"  :
-                (s.pos.layer == LAYER_VWAP)     ? "VWAP"    : "IMPULSE",
+                (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
+                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
+                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" : "IMPULSE",
                 move_bp, tp_bp);
             std::fflush(stdout);
             exit(id, move_bp, ts, s);
@@ -1125,7 +1160,48 @@ private:
     }
 
     // ======================================================================
-    // LIQUIDITY VACUUM — spot-only long
+    // LEAD-LAG ETH → SOL
+    // ETH leads SOL by ~30-80ms (smaller correlation window than BTC→ETH/SOL)
+    // Only fires on SOL (id=2). Long-only, spot-valid.
+    // ETH needs 6bp move; SOL must not have moved 3bp yet.
+    // TP=12bp, SL=5bp — slightly tighter than BTC→ETH/SOL due to smaller edge
+    // ======================================================================
+    bool check_leadlag_eth_sol(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Only SOL follows ETH
+        if (id != 2) return false;
+
+        const char* sym = "SOL";
+        std::string key = "SOL LL-ETH-SOL";
+
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
+        if (ts < layer_lock_until_) {
+            rejection_throttle_.record(key, "layer_locked");
+            return false;
+        }
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) {
+            rejection_throttle_.record(key, "latency_too_high");
+            return false;
+        }
+
+        int direction = 0;
+        if (!leadlag_.check_signal_eth_sol(latency_ms, direction)) {
+            rejection_throttle_.record(key, "no_eth_sol_signal");
+            return false;
+        }
+        // Long-only spot
+        if (direction < 0) {
+            rejection_throttle_.record(key, "spot_long_only");
+            return false;
+        }
+
+        std::printf("[LL-ETH-SOL] SOL | eth_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
+                    leadlag_.eth_move_bp(), latency_ms);
+        std::fflush(stdout);
+
+        enter(id, price, ts, s, LAYER_LEADLAG_ETH_SOL, true);
+        return true;
+    }
     // Edge: ask-side depth drains >40% vs EMA baseline without price moving.
     // When the ask wall disappears, price gaps up through the vacuum.
     // Fires in GRIND or BUILDUP — best in calmer regimes where a sudden
@@ -1135,6 +1211,9 @@ private:
     bool check_vacuum(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string key = std::string(sym) + " VACUUM";
+
+        // Per-symbol guard
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
         if (latency_ms > TradingConfig::LATENCY_VACUUM_MAX_MS) {
             rejection_throttle_.record(key, "latency_too_high");
@@ -1192,6 +1271,9 @@ private:
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string key = std::string(sym) + " VWAP";
 
+        // Per-symbol guard
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
         if (latency_ms > TradingConfig::LATENCY_VWAP_MAX_MS) {
             rejection_throttle_.record(key, "latency_too_high");
             return false;
@@ -1247,10 +1329,11 @@ private:
         // Expected gross edge per layer (gross TP targets from TradingConfig)
         sig.expected_bps = (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
                            (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
-                           (layer == LAYER_VACUUM)  ? TradingConfig::VACUUM_TP_BP :
-                           (layer == LAYER_VWAP)    ? TradingConfig::VWAP_TP_BP :
-                           (layer == LAYER_IMPULSE) ? TradingConfig::IMPULSE_TP_BP :
-                                                      TradingConfig::IMPULSE_TP_BP;
+                           (layer == LAYER_VACUUM)          ? TradingConfig::VACUUM_TP_BP :
+                           (layer == LAYER_VWAP)              ? TradingConfig::VWAP_TP_BP :
+                           (layer == LAYER_LEADLAG_ETH_SOL)   ? TradingConfig::LEADLAG_ETH_SOL_TP_BP :
+                           (layer == LAYER_IMPULSE)            ? TradingConfig::IMPULSE_TP_BP :
+                                                                 TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
 
         // COST FLOOR GATE
@@ -1263,8 +1346,9 @@ private:
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
                                     (layer == LAYER_IMPULSE)   ? "IMPULSE" :
                                     (layer == LAYER_EXPANSION) ? "EXPAND"  :
-                                    (layer == LAYER_VACUUM)    ? "VACUUM"  :
-                                    (layer == LAYER_VWAP)      ? "VWAP"    : "IMBAL");
+                                    (layer == LAYER_VACUUM)          ? "VACUUM"    :
+                                    (layer == LAYER_VWAP)              ? "VWAP"      :
+                                    (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" : "IMBAL");
             rejection_throttle_.record(key, "cost_floor");
             return;
         }
@@ -1347,8 +1431,9 @@ private:
         const char* mode = (layer == LAYER_MICRO)    ? "IMBAL"   :
                            (layer == LAYER_IMPULSE)  ? "IMPULSE" :
                            (layer == LAYER_LEADLAG)  ? "LEADLAG" :
-                           (layer == LAYER_VACUUM)   ? "VACUUM"  :
-                           (layer == LAYER_VWAP)     ? "VWAP"    : "EXPAND";
+                           (layer == LAYER_VACUUM)          ? "VACUUM"    :
+                           (layer == LAYER_VWAP)              ? "VWAP"      :
+                           (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             // ── MAKER MODE: post limit order ──────────────────────────────
@@ -1440,9 +1525,10 @@ private:
         // Determine reason for P&L sign
         const char* layer_label = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
                                   (s.pos.layer == LAYER_LEADLAG)   ? "LEADLAG" :
-                                  (s.pos.layer == LAYER_VACUUM)    ? "VACUUM"  :
-                                  (s.pos.layer == LAYER_VWAP)      ? "VWAP"    :
-                                  (s.pos.layer == LAYER_IMPULSE)   ? "IMPULSE" : "EXPAND";
+                                  (s.pos.layer == LAYER_VACUUM)         ? "VACUUM"    :
+                                  (s.pos.layer == LAYER_VWAP)           ? "VWAP"      :
+                                  (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
+                                  (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   : "EXPAND";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -1492,8 +1578,9 @@ private:
         const char* layer_str = (s.pos.layer == LAYER_MICRO)   ? "MICRO"   :
                                (s.pos.layer == LAYER_IMPULSE)  ? "IMPULSE" :
                                (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
-                               (s.pos.layer == LAYER_VACUUM)   ? "VACUUM"  :
-                               (s.pos.layer == LAYER_VWAP)     ? "VWAP"    : "EXPAND";
+                               (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
+                               (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
+                               (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" : "EXPAND";
         broadcast_to_gui(GuiMessageBuilder::position_exit(
             symbol_full, layer_str, pnl, hold_time_ms, current_latency
         ));

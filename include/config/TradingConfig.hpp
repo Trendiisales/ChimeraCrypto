@@ -86,6 +86,15 @@ struct TradingConfig {
 
     // Take-profit for lead-lag trades (gross, before costs)
     // Net profit after 10bp costs = +4bp. Worth it if win rate > 70%.
+    // -------------------------------------------------------------------------
+    // ETH → SOL LEAD-LAG
+    // ETH leads SOL by ~30-80ms. Smaller move threshold than BTC→ETH/SOL.
+    // Long-only, spot-valid. Fires on SOL only.
+    // -------------------------------------------------------------------------
+    static constexpr double LEADLAG_ETH_SOL_TP_BP       = 12.0;
+    static constexpr double LEADLAG_ETH_SOL_SL_BP       = 5.0;
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS = 2500;
+
     static constexpr double LEADLAG_TP_BP              = 14.0;
 
     // Stop loss for lead-lag trades
@@ -283,6 +292,24 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     static constexpr int REGIME_DIAG_INTERVAL     = 500;
     static constexpr int SYMBOL_STATE_INTERVAL    = 500;
+
+    // -------------------------------------------------------------------------
+    // TIME-OF-DAY SESSION GATING (UTC hours)
+    // Prime sessions: EU open 07:00-09:00, US open 13:00-16:00, Asia 00:00-02:00
+    // Dead zone: 20:00-23:00 UTC (low volume, high spread, poor fill quality)
+    // During dead zone: raise thresholds, reduce max positions to 1
+    // -------------------------------------------------------------------------
+    static constexpr int SESSION_EU_OPEN_UTC      =  7;
+    static constexpr int SESSION_EU_CLOSE_UTC     =  9;
+    static constexpr int SESSION_US_OPEN_UTC      = 13;
+    static constexpr int SESSION_US_CLOSE_UTC     = 16;
+    static constexpr int SESSION_ASIA_OPEN_UTC    =  0;
+    static constexpr int SESSION_ASIA_CLOSE_UTC   =  2;
+    static constexpr int SESSION_DEAD_START_UTC   = 20;
+    static constexpr int SESSION_DEAD_END_UTC     = 23;
+    // In dead zone: max 1 position, raise imbalance threshold by this factor
+    static constexpr double DEAD_ZONE_IMBAL_MULT  = 1.5;
+    static constexpr int    DEAD_ZONE_MAX_POS     = 1;
 };
 
 } // namespace chimera

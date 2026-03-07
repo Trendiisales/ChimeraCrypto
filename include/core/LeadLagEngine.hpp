@@ -142,6 +142,73 @@ public:
         return (btc.back().price - ref) / ref * 10000.0;
     }
 
+    // -----------------------------------------------------------------------
+    // check_signal_eth_sol
+    //
+    // ETH leads SOL by ~30-80ms (smaller window than BTC→ETH/SOL).
+    // Only fires on SOL (id=2). Long-only (spot).
+    // Uses a tighter threshold: ETH only needs 6bp move (smaller cap vs BTC).
+    // -----------------------------------------------------------------------
+    bool check_signal_eth_sol(double latency_ms, int& direction) const {
+        if (latency_ms > MAX_LATENCY_MS) return false;
+
+        const auto& eth = buffers_[1];
+        const auto& sol = buffers_[2];
+
+        if (eth.empty() || sol.empty()) return false;
+        if ((int)eth.size() < MIN_BTC_SAMPLES) return false;
+
+        int64_t now_ms = eth.back().ts_ms;
+
+        // ETH move in lookback window (tighter: 80ms)
+        static constexpr int64_t ETH_SOL_LOOKBACK_MS = 80;
+        double eth_ref = 0.0;
+        int eth_count = 0;
+        for (auto it = eth.rbegin(); it != eth.rend(); ++it) {
+            if (now_ms - it->ts_ms > ETH_SOL_LOOKBACK_MS) break;
+            eth_ref = it->price;
+            eth_count++;
+        }
+        if (eth_count < MIN_BTC_SAMPLES || eth_ref == 0.0) return false;
+
+        double eth_now   = eth.back().price;
+        double eth_delta = (eth_now - eth_ref) / eth_ref * 10000.0;
+
+        // ETH must have moved at least 6bp (smaller cap, smaller moves)
+        static constexpr double ETH_MOVE_THRESHOLD_BP = 6.0;
+        if (std::fabs(eth_delta) < ETH_MOVE_THRESHOLD_BP) return false;
+
+        // SOL must not have already moved 3bp in same direction
+        double sol_ref = 0.0;
+        for (auto it = sol.rbegin(); it != sol.rend(); ++it) {
+            if (now_ms - it->ts_ms > ETH_SOL_LOOKBACK_MS) break;
+            sol_ref = it->price;
+        }
+        if (sol_ref == 0.0) return false;
+
+        double sol_now   = sol.back().price;
+        double sol_delta = (sol_now - sol_ref) / sol_ref * 10000.0;
+
+        bool same_direction = (eth_delta > 0) == (sol_delta > 0);
+        if (same_direction && std::fabs(sol_delta) >= TARGET_MOVED_MAX_BP) return false;
+
+        direction = (eth_delta > 0) ? 1 : -1;
+        return true;
+    }
+
+    double eth_move_bp() const {
+        const auto& eth = buffers_[1];
+        if (eth.size() < 2) return 0.0;
+        int64_t now_ms = eth.back().ts_ms;
+        double ref = 0.0;
+        for (auto it = eth.rbegin(); it != eth.rend(); ++it) {
+            if (now_ms - it->ts_ms > 80) break;
+            ref = it->price;
+        }
+        if (ref == 0.0) return 0.0;
+        return (eth.back().price - ref) / ref * 10000.0;
+    }
+
 private:
     // Ring buffers: [0]=BTC, [1]=ETH, [2]=SOL
     std::deque<PricePoint> buffers_[3];

@@ -4,6 +4,8 @@
 #include <sstream>
 #include <thread>
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -38,7 +40,12 @@ public:
         
         int opt = 1;
         setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-        
+        setsockopt(server_fd_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+
+        // 1s accept timeout so stop() wakes the thread without hanging
+        struct timeval tv{ 1, 0 };
+        setsockopt(server_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
         sockaddr_in address;
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = INADDR_ANY;
@@ -84,9 +91,9 @@ private:
             
             int client_fd = accept(server_fd_, (struct sockaddr*)&client_addr, &client_len);
             if (client_fd < 0) {
-                if (running_) {
-                    std::cerr << "[HTTP] Accept failed\n";
-                }
+                // EAGAIN/EWOULDBLOCK = timeout, loop and check running_ again
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
+                if (running_) std::cerr << "[HTTP] Accept error: " << strerror(errno) << "\n";
                 continue;
             }
             

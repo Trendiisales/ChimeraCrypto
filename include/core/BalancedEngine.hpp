@@ -34,6 +34,7 @@
 #include <sstream>
 #include <iomanip>
 #include "logging/ShadowLogger.hpp"
+#include "core/LimitOrderManager.hpp"
 
 namespace chimera {
 
@@ -47,6 +48,7 @@ enum LayerMode {
 
 enum PosState {
     POS_FLAT,
+    POS_PENDING,  // Limit order posted, waiting for fill
     POS_OPEN
 };
 
@@ -68,6 +70,9 @@ struct Position {
     double mfe;
     double mae;
 
+    // Maker limit order fields
+    LayerMode pending_layer = LAYER_NONE;  // layer that triggered the limit
+
     void reset() {
         state = POS_FLAT;
         entry_price = 0.0;
@@ -77,6 +82,7 @@ struct Position {
         peak_price = 0.0;
         mfe = 0.0;
         mae = 0.0;
+        pending_layer = LAYER_NONE;
     }
 };
 
@@ -395,6 +401,12 @@ public:
         }
         
         // Position management
+        // PENDING: limit order posted, check for fill or cancellation
+        if (s.pos.state == POS_PENDING) {
+            manage_pending(id, price, ts, s);
+            return;
+        }
+
         if (s.pos.state == POS_OPEN) {
             // Track MFE/MAE
             double move = (price - s.pos.entry_price) / s.pos.entry_price * 10000.0;
@@ -886,6 +898,57 @@ private:
         return true;
     }
     
+    // -----------------------------------------------------------------------
+    // manage_pending — checks limit order fill status each tick
+    // Called when pos.state == POS_PENDING
+    // -----------------------------------------------------------------------
+    void manage_pending(int id, double price, int64_t ts, SymbolState& s) {
+        const MarketTick& t = s.last_tick;
+        double ask = t.ask > 0.0 ? t.ask : price;
+        double bid = t.bid > 0.0 ? t.bid : price;
+
+        LimitStatus status = limit_orders_[id].update(ask, bid, ts);
+
+        if (status == LimitStatus::FILLED) {
+            // Limit filled — transition to open position
+            double fill_px = limit_orders_[id].fill_price();
+            s.pos.state      = POS_OPEN;
+            s.pos.entry_price = fill_px;
+            s.pos.entry_ts   = ts;
+            s.pos.layer      = s.pos.pending_layer;
+            s.pos.open_ticks = 0;
+            s.pos.peak_price = fill_px;
+            s.pos.mfe        = 0.0;
+            s.pos.mae        = 0.0;
+
+            const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+            const char* mode = (s.pos.layer == LAYER_MICRO)   ? "IMBAL"   :
+                               (s.pos.layer == LAYER_LEADLAG) ? "LEADLAG" :
+                               (s.pos.layer == LAYER_IMPULSE) ? "IMPULSE" : "EXPAND";
+
+            std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
+                sym, mode, fill_px);
+            std::fflush(stdout);
+
+            // Capture entry context for shadow log
+            s.entry_imbalance  = s.last_tick.book_imbalance;
+            s.entry_flow_ratio = compute_flow_ratio(id);
+            s.entry_spread_bps = s.last_tick.spread_bps;
+            s.entry_btc_move   = leadlag_.btc_move_bp();
+            s.entry_latency_ms = market_env_.latency_ms;
+
+            limit_orders_[id].reset();
+
+        } else if (status == LimitStatus::CANCELLED) {
+            // Limit timed out or price moved away — abandon
+            s.pos.state = POS_FLAT;
+            s.pos.reset();
+            limit_orders_[id].reset();
+            open_positions_--;  // Undo the reserve from enter_pending
+        }
+        // PENDING: nothing to do, wait for next tick
+    }
+
     void manage_position(int id, double price, int64_t ts, SymbolState& s) {
         // Increment hold time
         s.pos.open_ticks++;
@@ -992,10 +1055,12 @@ private:
                                                        TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
 
-        // COST FLOOR GATE — calibrated: 10bp total round-trip cost at Tokyo latency
-        // Fee(8bp) + spread(1bp) + slippage(1bp) = 10bp. All layers > 10bp, so
-        // this is a sanity check not a real filter.
-        if (sig.expected_bps < TradingConfig::COST_FLOOR_BP) {
+        // COST FLOOR GATE
+        // Taker: 10bp floor | Maker: 4bp floor (rebate ~1bp/side, spread=0)
+        double cost_floor = TradingConfig::MAKER_MODE
+            ? TradingConfig::MAKER_COST_FLOOR_BP
+            : TradingConfig::COST_FLOOR_BP;
+        if (sig.expected_bps < cost_floor) {
             std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") +
                              " " + ((layer == LAYER_LEADLAG) ? "LEADLAG" :
                                     (layer == LAYER_IMPULSE) ? "IMPULSE" :
@@ -1073,43 +1138,74 @@ private:
             legacy_size_mult *= fund_mult;
         }
         
-        s.pos.state = POS_OPEN;
-        s.pos.entry_price = price;
-        s.pos.entry_ts = ts;
-        s.pos.layer = layer;
-        s.pos.open_ticks = 0;
-        s.pos.peak_price = price;  // Initialize peak for trailing
-        s.pos.mfe = 0.0;
-        s.pos.mae = 0.0;
+        const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* mode = (layer == LAYER_MICRO)   ? "IMBAL"   :
+                           (layer == LAYER_IMPULSE) ? "IMPULSE" :
+                           (layer == LAYER_LEADLAG) ? "LEADLAG" : "EXPAND";
 
-        // Capture entry context for shadow log
-        s.entry_imbalance  = s.last_tick.book_imbalance;
-        s.entry_flow_ratio = compute_flow_ratio(id);
-        s.entry_spread_bps = s.last_tick.spread_bps;
-        s.entry_btc_move   = leadlag_.btc_move_bp();
-        s.entry_latency_ms = market_env_.latency_ms;
-        
-        if (layer == LAYER_EXPANSION) {
-            expand_state_[id] = 1;
-            expand_entry_price_[id] = price;
-            expand_peak_price_[id] = price;
+        if (TradingConfig::MAKER_MODE) {
+            // ── MAKER MODE: post limit order ──────────────────────────────
+            // Do NOT open position yet. Set state to PENDING.
+            // manage_pending() will open position when/if limit is filled.
+            double bid = s.last_tick.bid > 0.0 ? s.last_tick.bid : price;
+            double ask = s.last_tick.ask > 0.0 ? s.last_tick.ask : price * 1.0001;
+
+            // Map LayerMode to int id expected by LimitOrderManager
+            int layer_int = (layer == LAYER_MICRO)     ? 0 :
+                            (layer == LAYER_IMPULSE)   ? 1 :
+                            (layer == LAYER_EXPANSION) ? 2 : 3;  // LEADLAG=3
+
+            limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
+
+            s.pos.state         = POS_PENDING;
+            s.pos.pending_layer = layer;
+            open_positions_++;  // Reserve — decremented if cancelled
+
+            if (layer == LAYER_EXPANSION) {
+                expand_state_[id] = 1;
+                expand_entry_price_[id] = price;
+                expand_peak_price_[id]  = price;
+            }
+
+            std::printf("[ENTER-PENDING] %s | %s | regime=%s | signal_px=%.4f | bid=%.4f | weight=%.3f\n",
+                sym, mode, regime_name(s.regime), price, bid, final_weight);
+            std::fflush(stdout);
+
+        } else {
+            // ── TAKER MODE: open position immediately ─────────────────────
+            s.pos.state       = POS_OPEN;
+            s.pos.entry_price = price;
+            s.pos.entry_ts    = ts;
+            s.pos.layer       = layer;
+            s.pos.open_ticks  = 0;
+            s.pos.peak_price  = price;
+            s.pos.mfe         = 0.0;
+            s.pos.mae         = 0.0;
+
+            // Capture entry context for shadow log
+            s.entry_imbalance  = s.last_tick.book_imbalance;
+            s.entry_flow_ratio = compute_flow_ratio(id);
+            s.entry_spread_bps = s.last_tick.spread_bps;
+            s.entry_btc_move   = leadlag_.btc_move_bp();
+            s.entry_latency_ms = market_env_.latency_ms;
+
+            if (layer == LAYER_EXPANSION) {
+                expand_state_[id] = 1;
+                expand_entry_price_[id] = price;
+                expand_peak_price_[id]  = price;
+            }
+
+            open_positions_++;
+
+            std::printf("[ENTER] %s | %s | regime=%s | px=%.4f | weight=%.3f | mult=%.2f\n",
+                sym, mode, regime_name(s.regime), price, final_weight, legacy_size_mult);
+            std::fflush(stdout);
+
+            std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+            broadcast_to_gui(GuiMessageBuilder::position_enter(
+                symbol_full, mode, price, (int)s.regime, final_weight
+            ));
         }
-        
-        open_positions_++;
-        
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
-        const char* mode = (layer == LAYER_MICRO) ? "MICRO" : 
-                          (layer == LAYER_IMPULSE) ? "IMPULSE" : 
-                          (layer == LAYER_LEADLAG) ? "LEADLAG" : "EXPAND";
-        std::printf("[ENTER] %s | layer=%s | regime=%s | px=%.2f | weight=%.3f | legacy_mult=%.2f\n", 
-            sym, mode, regime_name(s.regime), price, final_weight, legacy_size_mult);
-        std::fflush(stdout);
-        
-        // Broadcast entry to GUI
-        std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
-        broadcast_to_gui(GuiMessageBuilder::position_enter(
-            symbol_full, mode, price, (int)s.regime, final_weight
-        ));
     }
     
     void exit(int id, double pnl, int64_t ts, SymbolState& s) {
@@ -1246,6 +1342,7 @@ private:
     SymbolState symbols_[3];
     LatencyGovernor latency_gov_;
     LeadLagEngine leadlag_;
+    LimitOrderManager limit_orders_[3];  // One per symbol
     ShadowLogger shadow_log_;
     FundingRateFetcher* funding_ = nullptr;  // optional — set from main()
     VolatilityScoring vol_scoring_[3];

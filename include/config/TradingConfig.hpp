@@ -216,12 +216,33 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // MAKER ORDER MODE
     // -------------------------------------------------------------------------
-    // true  = post limit orders at mid-price (collect maker rebate ~1bp/side)
-    //         Round-trip cost drops from ~10bp to ~4bp. Needs fill confirmation.
-    //         Risk: order may not fill if price moves away immediately.
-    // false = market orders (taker fee ~4bp/side). Always fills.
-    //         Current mode until limit order fill tracking is implemented.
-    static constexpr bool MAKER_MODE = false;
+    // true  = post limit orders (maker rebate ~1bp/side = ~4bp round trip)
+    // false = market orders    (taker fee  ~4bp/side = ~10bp round trip)
+    // Saving: ~6bp per trade. This is the single biggest lever available.
+    static constexpr bool MAKER_MODE = true;
+
+    // -------------------------------------------------------------------------
+    // MAKER LIMIT ORDER PARAMETERS
+    // -------------------------------------------------------------------------
+
+    // Cancel if ask rises this many bp above our limit (move happened without us)
+    static constexpr double MAKER_STALE_BP = 3.0;
+
+    // Timeouts per strategy — lead-lag has the tightest window
+    // IMBALANCE: 5s   — buy pressure can persist, patient fill is fine
+    // LEAD-LAG:  200ms — edge window is ~75ms remaining, must fill fast or skip
+    // IMPULSE:   500ms — breakout fills fast or not at all
+    static constexpr int64_t MAKER_IMBALANCE_TIMEOUT_MS = 5000;
+    static constexpr int64_t MAKER_LEADLAG_TIMEOUT_MS   =  200;
+    static constexpr int64_t MAKER_IMPULSE_TIMEOUT_MS   =  500;
+
+    // Cost floor recalibrated for maker fees:
+    // Maker fee: ~1bp/side rebate = -2bp total
+    // Spread: 0bp (we are the spread, not crossing it)
+    // Slippage: ~0.5bp (limit fills at our price, minimal slip)
+    // Total maker round-trip cost: ~3-4bp
+    // Use 4bp as conservative floor.
+    static constexpr double MAKER_COST_FLOOR_BP = 4.0;
 
     // -------------------------------------------------------------------------
     // DIAGNOSTIC OUTPUT

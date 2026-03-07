@@ -100,8 +100,8 @@ public:
 
 private:
     std::string symbol;
-    VolState state = VolState::DEAD;
-    double multiplier = 0.0;
+    VolState state = VolState::COMPRESSION;  // Start COMPRESSION not DEAD - prevents blocking all engines at boot
+    double multiplier = 0.5;                 // Match COMPRESSION multiplier
     
     // Smoothing and hysteresis
     double smoothed_vol = 0.0;

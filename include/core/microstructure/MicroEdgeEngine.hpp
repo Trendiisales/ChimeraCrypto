@@ -35,6 +35,7 @@ private:
     double imbalance_score_ = 0.0;
     double funding_score_ = 0.0;
     double vol_ratio_prev_ = 1.0;
+    double depth_baseline_ = 0.0;  // EMA baseline for depth_collapse ratio
 
     static double clamp(double v, double lo, double hi) {
         return std::max(lo, std::min(v, hi));
@@ -57,7 +58,14 @@ public:
         double vol_accel = vol_ratio - vol_ratio_prev_;
         vol_ratio_prev_ = vol_ratio;
 
-        double depth_collapse = clamp(1.0 - total_depth, 0.0, 1.0);
+        // Seed baseline on first tick
+        if (depth_baseline_ < 1e-9) depth_baseline_ = total_depth;
+        else depth_baseline_ = ema(depth_baseline_, total_depth, 0.05);
+
+        // depth_collapse: ratio vs own baseline, not absolute value
+        double depth_ratio_vs_baseline = (depth_baseline_ > 1e-9)
+            ? total_depth / depth_baseline_ : 1.0;
+        double depth_collapse = clamp(1.0 - depth_ratio_vs_baseline, 0.0, 1.0);
 
         double spread_expand = clamp(s.spread_bps / 5.0, 0.0, 2.0);
 

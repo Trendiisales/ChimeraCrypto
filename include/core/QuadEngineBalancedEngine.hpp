@@ -270,6 +270,10 @@ private:
         std::deque<double> returns;
         std::deque<double> price_deltas;
         int buildup_ticks = 0;
+
+        // Per-symbol anchor for displacement (was incorrectly static/shared)
+        double anchor_price = 0.0;
+        int tick_counter = 0;
     };
     
     SimpleMarketState market_state_[3];
@@ -312,17 +316,14 @@ private:
                 ms.buildup_ticks = 0;
             }
             
-            static double anchor_price[3] = {0, 0, 0};
-            static int tick_counter = 0;
-            tick_counter++;
-            
-            if (tick_counter % 20 == 0) anchor_price[id] = price;
-            if (anchor_price[id] > 0) {
-                ms.displacement_bp = (price - anchor_price[id]) / anchor_price[id] * 10000.0;
+            if (ms.tick_counter % 20 == 0) ms.anchor_price = price;
+            if (ms.anchor_price > 0) {
+                ms.displacement_bp = (price - ms.anchor_price) / ms.anchor_price * 10000.0;
             }
         }
         
         ms.last_price = price;
+        ms.tick_counter++;
         ms.micro_active = (balanced_.get_open_positions() > 0);
     }
     

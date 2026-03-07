@@ -70,7 +70,9 @@ public:
         vol_ema_      = ema(vol_ema_, vol_ratio, 0.05);
         imbalance_ema_ = ema(imbalance_ema_, imbalance, 0.1);
         volume_ema_   = ema(volume_ema_, in.trade_volume, 0.05);
-        depth_ema_    = ema(depth_ema_, total_depth, 0.05);
+        // Seed depth_ema_ on first tick to avoid depth_collapse=1.0 at startup
+        if (depth_ema_ < 1e-9) depth_ema_ = total_depth;
+        else depth_ema_ = ema(depth_ema_, total_depth, 0.05);
 
         double vol_expansion =
             clamp(vol_ema_ - 1.15, 0.0, 3.0);
@@ -78,8 +80,11 @@ public:
         double aggressive_pressure =
             clamp(std::abs(imbalance_ema_), 0.0, 1.0);
 
+        // depth_collapse: ratio vs own baseline, not absolute value
+        double depth_ratio_vs_baseline = (depth_ema_ > 1e-9)
+            ? total_depth / depth_ema_ : 1.0;
         double depth_collapse =
-            clamp(1.0 - depth_ema_, 0.0, 1.0);
+            clamp(1.0 - depth_ratio_vs_baseline, 0.0, 1.0);
 
         double spread_expansion =
             clamp(in.spread_bps / 5.0, 0.0, 2.0);

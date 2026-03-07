@@ -26,7 +26,7 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 .topbar-center{display:flex;gap:36px;align-items:center}
 .tb-stat{text-align:center;min-width:100px}
 .tb-label{display:block;font-size:11px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;font-family:var(--fh);margin-bottom:3px}
-.tb-val{font-size:28px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1}
+.tb-val{font-size:22px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1}
 .tb-val.pos{color:var(--green)}.tb-val.neg{color:var(--red)}.tb-val.accent{color:var(--accent)}
 .topbar-right{display:flex;gap:12px;align-items:center}
 .badge{padding:6px 16px;border-radius:2px;font-size:13px;font-weight:700;letter-spacing:2px;border:1px solid;font-family:var(--fh)}
@@ -43,8 +43,8 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 
 .sym-block{background:var(--surface);border:1px solid var(--border2);border-radius:4px;overflow:hidden;flex-shrink:0}
 .sym-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:linear-gradient(90deg,rgba(0,212,255,.08),transparent);border-bottom:1px solid var(--border2)}
-.sym-name{font-family:var(--fh);font-size:30px;font-weight:800;color:var(--accent);letter-spacing:2px;min-width:150px}
-.sym-price{font-size:42px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-0.5px}
+.sym-name{font-family:var(--fh);font-size:34px;font-weight:800;color:var(--accent);letter-spacing:2px;min-width:150px}
+.sym-price{font-size:48px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-0.5px}
 .sym-price.up{color:var(--green);text-shadow:0 0 20px rgba(0,230,118,.4)}
 .sym-price.down{color:var(--red);text-shadow:0 0 20px rgba(255,61,87,.3)}
 .sym-meta{display:flex;gap:22px;font-size:14px}
@@ -56,15 +56,15 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 .signal-col{width:7px;flex-shrink:0;background:#0d2030;transition:all .3s;border-right:1px solid rgba(0,0,0,.5)}
 .eng-content{flex:1;padding:14px 16px;min-width:0}
 .eng-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.eng-name{font-family:var(--fh);font-size:17px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#6a8fa8}
+.eng-name{font-family:var(--fh);font-size:18px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#7ab0c8}
 .eng-badge{font-family:var(--fh);font-size:12px;font-weight:700;letter-spacing:1px;padding:3px 10px;border-radius:2px}
 .eng-badge.active{background:rgba(0,230,118,.18);color:var(--green)}
 .eng-badge.armed{background:rgba(255,214,0,.15);color:var(--yellow);animation:pulse-arm 1s infinite}
 .eng-badge.off{background:rgba(255,255,255,.04);color:var(--muted)}
 @keyframes pulse-arm{0%,100%{opacity:1}50%{opacity:.4}}
 .eng-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
-.est-label{font-size:12px;color:#5a7a90;letter-spacing:1px;text-transform:uppercase;font-weight:600}
-.est-val{font-size:22px;font-weight:700;color:#ffffff;font-variant-numeric:tabular-nums;line-height:1.2}
+.est-label{font-size:13px;color:#6a8fa8;letter-spacing:1px;text-transform:uppercase;font-weight:600}
+.est-val{font-size:24px;font-weight:700;color:#ffffff;font-variant-numeric:tabular-nums;line-height:1.2}
 .est-val.pos{color:var(--green)}.est-val.neg{color:var(--red)}.est-val.dim{color:#7ab0c8}
 
 .rp-sec{border:1px solid var(--border);border-radius:4px;overflow:hidden}
@@ -134,6 +134,31 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 .tl-time{font-size:12px;color:#3d5a6e;font-variant-numeric:tabular-nums}
 .tl-empty{padding:20px 18px;color:var(--muted);font-size:13px;opacity:.6}
 
+
+/* Per-symbol trade rows under engine grid */
+.sym-trades{border-top:1px solid var(--border2)}
+.sym-trade-row{display:grid;grid-template-columns:44px 54px 90px 80px 80px 64px 60px 1fr;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,.025);font-variant-numeric:tabular-nums}
+.sym-trade-row:last-child{border-bottom:none}
+.sym-trade-row.win{border-left:3px solid var(--green);background:rgba(0,230,118,.03)}
+.sym-trade-row.loss{border-left:3px solid var(--red);background:rgba(255,61,87,.03)}
+.str-tag{font-family:var(--fh);font-size:12px;font-weight:800;letter-spacing:1px}
+.str-tag.win{color:var(--green)}.str-tag.loss{color:var(--red)}
+.str-pnl{font-size:16px;font-weight:800}
+.str-pnl.pos{color:var(--green)}.str-pnl.neg{color:var(--red)}
+.str-usd{font-size:13px;font-weight:700}
+.str-usd.pos{color:rgba(0,230,118,.7)}.str-usd.neg{color:rgba(255,61,87,.7)}
+.str-eng{font-family:var(--fh);font-size:12px;font-weight:700;color:#7ab0c8}
+.str-val{font-size:13px;color:#8aafc4;font-weight:600}
+.str-badge{font-family:var(--fh);font-size:11px;font-weight:700;padding:2px 7px;border-radius:2px}
+.str-badge.tp{background:rgba(0,230,118,.15);color:var(--green)}
+.str-badge.sl{background:rgba(255,61,87,.15);color:var(--red)}
+.str-badge.trail{background:rgba(0,212,255,.12);color:var(--accent)}
+.str-badge.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
+.str-time{font-size:11px;color:#3d5a6e}
+.sym-trades-empty{padding:8px 14px;font-size:12px;color:#3d5a6e;font-style:italic}
+.sym-trades-hdr{display:grid;grid-template-columns:44px 54px 90px 80px 80px 64px 60px 1fr;padding:4px 14px;background:var(--bg);border-bottom:1px solid var(--border)}
+.sth{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#2d4558}
+
 #win-flash{display:none;position:fixed;top:0;left:0;right:0;padding:20px;text-align:center;font-family:var(--fh);font-size:36px;font-weight:800;letter-spacing:10px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200}
 #win-flash.show{display:block;animation:slidedown .25s ease}
 @keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
@@ -178,6 +203,14 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     <div class="eng-cell" id="ec-btc-vacuum"><div class="signal-col" id="sc-btc-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-btc-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-btc-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-btc">0%</div></div></div></div></div>
     <div class="eng-cell" id="ec-btc-vwap"><div class="signal-col" id="sc-btc-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-btc-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-btc-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-btc">0bp</div></div></div></div></div>
   </div>
+  <div class="sym-trades">
+    <div class="sym-trades-hdr">
+      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
+      <span class="sth">Engine</span><span class="sth">Entry→Exit</span>
+      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
+    </div>
+    <div id="str-btc" class="sym-trades-empty">No trades yet</div>
+  </div>
 </div>
 
 <div class="sym-block">
@@ -192,6 +225,14 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     <div class="eng-cell" id="ec-eth-vacuum"><div class="signal-col" id="sc-eth-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-eth-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-eth-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-eth">0%</div></div></div></div></div>
     <div class="eng-cell" id="ec-eth-vwap"><div class="signal-col" id="sc-eth-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-eth-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-eth-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-eth">0bp</div></div></div></div></div>
   </div>
+  <div class="sym-trades">
+    <div class="sym-trades-hdr">
+      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
+      <span class="sth">Engine</span><span class="sth">Entry→Exit</span>
+      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
+    </div>
+    <div id="str-eth" class="sym-trades-empty">No trades yet</div>
+  </div>
 </div>
 
 <div class="sym-block">
@@ -205,6 +246,14 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     <div class="eng-cell" id="ec-sol-compression"><div class="signal-col" id="sc-sol-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-sol-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-sol-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-sol">0/100</div></div></div></div></div>
     <div class="eng-cell" id="ec-sol-vacuum"><div class="signal-col" id="sc-sol-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-sol-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-sol-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-sol">0%</div></div></div></div></div>
     <div class="eng-cell" id="ec-sol-vwap"><div class="signal-col" id="sc-sol-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-sol-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-sol-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-sol">0bp</div></div></div></div></div>
+  </div>
+  <div class="sym-trades">
+    <div class="sym-trades-hdr">
+      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
+      <span class="sth">Engine</span><span class="sth">Entry→Exit</span>
+      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
+    </div>
+    <div id="str-sol" class="sym-trades-empty">No trades yet</div>
   </div>
 </div>
 

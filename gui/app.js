@@ -122,6 +122,7 @@ function mergeTrades(serverLog, isBootLoad) {
     localTrades = localTrades.slice(0, 200);
     saveTrades();
     renderTradeLog();
+    renderSymbolTrades();
     updateWinRate();
   }
 }
@@ -132,11 +133,51 @@ const set = (id, val, cls) => { const el = $(id); if (!el) return; el.textConten
 const fmtPnl = v => (v >= 0 ? '+' : '') + (+v).toFixed(2) + 'bp';
 const pnlCls = (base, v) => base + ' ' + (+v > 0 ? 'pos' : +v < 0 ? 'neg' : '');
 
+// Convert bp to dollars: $10,000 account, 1bp = $1
+const ACCOUNT_SIZE = 10000;
+const bpToUsd = bp => (bp / 10000) * ACCOUNT_SIZE;
+const fmtUsd = v => (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2);
+
 function fmtHold(ms) {
   if (!ms || ms <= 0) return '--';
   if (ms < 1000) return ms + 'ms';
   if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
   return Math.floor(ms / 60000) + 'm' + Math.floor((ms % 60000) / 1000) + 's';
+}
+
+function renderSymbolTrades() {
+  const syms = ['BTC','ETH','SOL'];
+  syms.forEach(sym => {
+    const el = $('str-' + sym.toLowerCase());
+    if (!el) return;
+    const trades = localTrades.filter(t => (t.s||'').replace('USDT','') === sym).slice(0, 8);
+    if (!trades.length) {
+      el.className = 'sym-trades-empty';
+      el.innerHTML = 'No trades yet';
+      return;
+    }
+    el.className = '';
+    el.innerHTML = trades.map(tr => {
+      const pnl   = +tr.p || 0;
+      const isWin = pnl >= 0;
+      const usd   = bpToUsd(pnl);
+      const rc    = reasonClass(tr.why || tr.reason || '');
+      const en    = tr.en  ? fmtPrice(tr.en,  sym) : '--';
+      const ex    = tr.ex  ? fmtPrice(tr.ex,  sym) : '--';
+      const why   = (tr.why || tr.reason || '?').toUpperCase();
+      const time  = tr.t   ? tr.t.substring(11,19) : '--';
+      return `<div class="sym-trade-row ${isWin?'win':'loss'}">
+        <span class="str-tag ${isWin?'win':'loss'}">${isWin?'WIN':'LOSS'}</span>
+        <span class="str-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
+        <span class="str-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
+        <span class="str-eng">${tr.e||'--'}</span>
+        <span class="str-val">${en}→${ex}</span>
+        <span class="str-val">${fmtHold(tr.hold)}</span>
+        <span class="str-badge ${rc}">${why}</span>
+        <span class="str-time">${time}</span>
+      </div>`;
+    }).join('');
+  });
 }
 
 function fmtPrice(p, sym) {
@@ -174,6 +215,7 @@ function reasonClass(r) {
 function makeRow(tr) {
   const pnl  = +tr.p || 0;
   const isWin = pnl >= 0;
+  const usd  = bpToUsd(pnl);
   const rc   = reasonClass(tr.why || tr.reason || '');
   const sym  = (tr.s || '').replace('USDT', '');
   const mfe  = tr.mfe != null ? `<span class="tl-val pos">+${(+tr.mfe).toFixed(1)}bp</span>` : '<span class="tl-val">--</span>';
@@ -186,11 +228,11 @@ function makeRow(tr) {
     <span class="tl-tag ${isWin ? 'win' : 'loss'}">${isWin ? 'WIN' : 'LOSS'}</span>
     <span class="tl-sym">${sym}</span>
     <span class="tl-pnl ${isWin ? 'pos' : 'neg'}">${fmtPnl(pnl)}</span>
+    <span class="tl-pnl ${isWin ? 'pos' : 'neg'}" style="font-size:14px">${fmtUsd(usd)}</span>
     <span class="tl-eng">${tr.e || '--'}</span>
     <span class="tl-val">${en}</span>
     <span class="tl-val">${ex}</span>
     <span style="display:flex;gap:6px;align-items:center">${mfe}<span style="color:#3d5a6e">/</span>${mae}</span>
-    <span class="tl-val">${fmtHold(tr.hold)}</span>
     <span style="display:flex;align-items:center;gap:8px"><span class="tl-reason ${rc}">${why}</span><span class="tl-time">${time}</span></span>
   </div>`;
 }

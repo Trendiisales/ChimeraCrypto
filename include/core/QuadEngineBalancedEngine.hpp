@@ -193,6 +193,10 @@ public:
         json << "\"btc_price\":" << market_state_[0].last_price << ",";
         json << "\"eth_price\":" << market_state_[1].last_price << ",";
         json << "\"sol_price\":" << market_state_[2].last_price << ",";
+        json << "\"pnl\":" << balanced_.get_total_pnl() << ",";
+        json << "\"realized_pnl\":" << balanced_.get_realized_pnl() << ",";
+        json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
+        json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         
         const char* symbols[] = {"btcusdt", "ethusdt", "solusdt"};
         for (int i = 0; i < 3; i++) {
@@ -238,7 +242,27 @@ public:
             // Portfolio
             double micro_R = ms.micro_active ? 1.0 : 0.0;
             double portfolio_R = micro_R + structural_stats.size_R + convex_stats.size_R + compression_stats.size_R;
-            json << "\"portfolio_R\":" << portfolio_R;
+            json << "\"portfolio_R\":"  << portfolio_R << ",";
+
+            // Signal readiness (0.0-1.0) for GUI "close to trading" display
+            double struct_disp_pct  = std::min(1.0, std::abs(ms.displacement_bp) / 20.0);
+            double struct_vol_pct   = std::min(1.0, std::max(0.0, (ms.vol_ratio - 1.0) / 0.4));
+            double struct_build_pct = std::min(1.0, ms.buildup_ticks / 40.0);
+            json << "\"structural_readiness\":"  << (struct_disp_pct*0.4 + struct_vol_pct*0.4 + struct_build_pct*0.2) << ",";
+
+            double convex_disp_pct  = std::min(1.0, std::abs(ms.displacement_bp) / 30.0);
+            double convex_accel_pct = std::min(1.0, std::abs(ms.acceleration_bp) / 15.0);
+            double convex_vol_pct   = std::min(1.0, std::max(0.0, (ms.vol_ratio - 1.0) / 0.8));
+            json << "\"convex_readiness\":"      << (convex_disp_pct*0.4 + convex_accel_pct*0.4 + convex_vol_pct*0.2) << ",";
+
+            double comp_pct = std::min(1.0, compression_stats.compression_ticks / 100.0);
+            json << "\"compression_readiness\":"  << comp_pct << ",";
+
+            json << "\"vol_ratio\":"        << ms.vol_ratio << ",";
+            json << "\"displacement_bp\":"  << ms.displacement_bp << ",";
+            json << "\"acceleration_bp\":"  << ms.acceleration_bp << ",";
+            json << "\"buildup_ticks\":"     << ms.buildup_ticks << ",";
+            json << "\"regime_state_name\":";            json << "\"\" << allocator_[i].get_state_name() << "\"";
             
             json << "}";
             if (i < 2) json << ",";

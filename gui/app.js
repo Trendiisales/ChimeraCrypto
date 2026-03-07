@@ -1,362 +1,280 @@
 (function() {
-    'use strict';
+'use strict';
 
-    const $ = (id) => document.getElementById(id);
-    const fmt = (v, d = 2) => (v == null || v === '--') ? '--' : Number(v).toFixed(d);
+const $ = id => document.getElementById(id);
+const fmt = (v, d=2) => (v == null || isNaN(v)) ? '--' : Number(v).toFixed(d);
+const fmtPx = (v, sym) => {
+  if (!v || v <= 0) return '--';
+  if (sym === 'btc') return '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (sym === 'eth') return '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return '$' + Number(v).toFixed(3);
+};
 
-    // ── WIN BELL ─────────────────────────────────────────────────────────────
-    // Synthesised using Web Audio API - no external files needed.
-    // Plays a warm two-tone chime on every winning trade.
-    let audioCtx = null;
+// ── AUDIO ──────────────────────────────────────────────────────────────────
+let audioCtx = null;
+function playWinBell() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    const tone = (freq, t, dur, gain) => {
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.connect(g); g.connect(ctx.destination);
+      osc.type = 'sine'; osc.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      osc.start(t); osc.stop(t + dur);
+    };
+    const t = ctx.currentTime;
+    tone(880, t, 0.6, 0.4); tone(1108, t+0.05, 0.5, 0.25); tone(659, t+0.15, 0.8, 0.2);
+  } catch(e) {}
+}
 
-    function playWinBell() {
-        try {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const ctx = audioCtx;
+// ── WIN FLASH ──────────────────────────────────────────────────────────────
+function flashWin(sym, pnl) {
+  const el = $('win-flash');
+  if (!el) return;
+  el.textContent = `✓ WIN  ${sym.toUpperCase().replace('USDT','')}  +${Number(pnl).toFixed(2)}bp`;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
 
-            function tone(freq, startTime, duration, gainPeak) {
-                const osc  = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(freq, startTime);
-                gain.gain.setValueAtTime(0, startTime);
-                gain.gain.linearRampToValueAtTime(gainPeak, startTime + 0.01);
-                gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-                osc.start(startTime);
-                osc.stop(startTime + duration);
-            }
+// ── UPTIME ─────────────────────────────────────────────────────────────────
+const startTime = Date.now();
+setInterval(() => {
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  const h = String(Math.floor(s/3600)).padStart(2,'0');
+  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  const str = `${h}:${m}:${ss}`;
+  const el1 = $('tb-uptime'); if (el1) el1.textContent = str;
+  const el2 = $('st-uptime'); if (el2) el2.textContent = str;
+}, 1000);
 
-            const t = ctx.currentTime;
-            tone(880, t,        0.6, 0.4);   // A5 - bright attack
-            tone(1108, t + 0.05, 0.5, 0.25); // C#6 - harmonic
-            tone(659,  t + 0.15, 0.8, 0.2);  // E5  - warm sustain
-        } catch(e) {
-            console.warn('Bell failed:', e);
-        }
-    }
+// ── READINESS BAR ──────────────────────────────────────────────────────────
+function setReadiness(sym, engine, pct) {
+  const fill = $(`rfill-${sym}-${engine}`);
+  const label = $(`rpct-${sym}-${engine}`);
+  if (!fill || !label) return;
+  const w = Math.min(100, Math.max(0, pct * 100));
+  fill.style.width = w + '%';
+  label.textContent = Math.round(w) + '%';
+  fill.className = 'rbar-fill ' +
+    (w >= 90 ? 'r-ready' : w >= 70 ? 'r-high' : w >= 40 ? 'r-mid' : 'r-low');
+}
 
-    // Flash a green WIN banner at top of screen
-    function flashWin(symbol, pnlBp) {
-        let banner = $('win-banner');
-        if (!banner) {
-            banner = document.createElement('div');
-            banner.id = 'win-banner';
-            banner.style.cssText = [
-                'position:fixed', 'top:0', 'left:0', 'right:0',
-                'background:linear-gradient(90deg,#00c853,#69f0ae)',
-                'color:#000', 'font-weight:700', 'font-size:18px',
-                'text-align:center', 'padding:10px',
-                'z-index:9999', 'display:none',
-                'letter-spacing:2px', 'box-shadow:0 2px 20px #00c85388'
-            ].join(';');
-            document.body.prepend(banner);
-        }
-        banner.textContent = `✅ WIN  ${symbol.toUpperCase()}  +${Number(pnlBp).toFixed(2)}bp`;
-        banner.style.display = 'block';
-        setTimeout(() => { banner.style.display = 'none'; }, 3000);
-    }
+// ── ENGINE BADGE ──────────────────────────────────────────────────────────
+function setEngBadge(id, active, armed) {
+  const el = $(id);
+  if (!el) return;
+  if (active)      { el.textContent = 'ACTIVE'; el.className = 'eng-badge active'; }
+  else if (armed)  { el.textContent = 'ARMED';  el.className = 'eng-badge armed';  }
+  else             { el.textContent = 'OFF';    el.className = 'eng-badge off';    }
+  const cell = el.closest('.eng-cell');
+  if (cell) cell.classList.toggle('active-pos', !!active);
+}
 
-    // ── CLOCK ─────────────────────────────────────────────────────────────────
-    setInterval(() => {
-        const el = $('system-time');
-        if (el) el.textContent = new Date().toLocaleTimeString('en-US', {hour12: false});
-    }, 1000);
+// ── PNL CELL ──────────────────────────────────────────────────────────────
+function setPnl(id, val) {
+  const el = $(id); if (!el) return;
+  const v = Number(val) || 0;
+  const sign = v >= 0 ? '+' : '';
+  el.textContent = sign + v.toFixed(2) + 'bp';
+  el.className = 'est-val ' + (v > 0 ? 'pos' : v < 0 ? 'neg' : 'dim');
+}
 
-    // ── PRICE UPDATE ──────────────────────────────────────────────────────────
-    function updatePrices(data) {
-        if (data.btc_price > 0) {
-            const el = $('btc-live-price');
-            if (el) el.textContent = '$' + fmt(data.btc_price, 2);
-        }
-        if (data.eth_price > 0) {
-            const el = $('eth-live-price');
-            if (el) el.textContent = '$' + fmt(data.eth_price, 2);
-        }
-        if (data.sol_price > 0) {
-            const el = $('sol-live-price');
-            if (el) el.textContent = '$' + fmt(data.sol_price, 2);
-        }
-    }
+// ── CONDITION CHECK ────────────────────────────────────────────────────────
+function setCond(id, met, near) {
+  const el = $(id); if (!el) return;
+  el.className = 'cond-check ' + (met ? 'met' : near ? 'near' : 'off');
+}
 
-    // ── ENGINE STATE UPDATE ───────────────────────────────────────────────────
-    function updateSymbolEngines(symbol, data) {
-        const prefix = symbol.substring(0, 3);
-        const el = (id) => $(prefix + '-' + id);
+// ── REGIME ────────────────────────────────────────────────────────────────
+const regimeClass = {
+  'NEUTRAL': 'rs-neutral', 'GRIND': 'rs-neutral',
+  'TRENDING': 'rs-trending', 'EXPANSION': 'rs-trending',
+  'BURST': 'rs-burst', 'BREAKOUT': 'rs-burst',
+  'COMPRESSION': 'rs-compression',
+  'DEAD': 'rs-dead'
+};
 
-        if (el('portfolio-r')) el('portfolio-r').textContent = `Portfolio: ${fmt(data.portfolio_R, 2)}R`;
+function setRegime(sym, state, mult) {
+  const rs = $(`rs-${sym}`);
+  const rm = $(`rm-${sym}`);
+  if (rs) {
+    rs.textContent = state || 'NEUTRAL';
+    rs.className = 'regime-state ' + (regimeClass[state] || 'rs-neutral');
+  }
+  if (rm) {
+    const m = Number(mult) || 1.0;
+    rm.textContent = '×' + m.toFixed(2);
+    rm.className = 'regime-mult ' + (m >= 1.4 ? 'hi' : m <= 0.6 ? 'lo' : '');
+  }
+}
 
-        // MICRO
-        const microStatus = el('micro-status');
-        if (microStatus) {
-            microStatus.textContent = data.micro_active ? 'ACTIVE' : 'INACTIVE';
-            microStatus.className = 'engine-status ' + (data.micro_active ? 'active' : 'inactive');
-        }
-        if (el('micro-size'))  el('micro-size').textContent  = data.micro_active ? '1.0R' : '0.00R';
-        if (el('micro-entry')) el('micro-entry').textContent = data.micro_entry_price > 0 ? fmt(data.micro_entry_price, 2) : '--';
-        if (el('micro-mfe')) {
-            el('micro-mfe').textContent = fmt(data.micro_mfe_bp, 2) + 'bp';
-            el('micro-mfe').className = 'engine-stat-value ' + (data.micro_mfe_bp > 0 ? 'positive' : '');
-        }
-        if (el('micro-pnl')) {
-            el('micro-pnl').textContent = fmt(data.micro_total_pnl_bp, 2) + 'bp';
-            el('micro-pnl').className = 'engine-stat-value ' + (data.micro_total_pnl_bp > 0 ? 'positive' : data.micro_total_pnl_bp < 0 ? 'negative' : '');
-        }
+// ── PRICE ─────────────────────────────────────────────────────────────────
+const lastPrices = {};
+function setPrice(sym, val) {
+  const el = $(`px-${sym}`); if (!el || !val || val <= 0) return;
+  const prev = lastPrices[sym] || val;
+  el.textContent = fmtPx(val, sym);
+  el.className = 'sym-price ' + (val > prev ? 'up' : val < prev ? 'down' : '');
+  lastPrices[sym] = val;
+}
 
-        // STRUCTURAL
-        const structStatus = el('structural-status');
-        if (structStatus) {
-            structStatus.textContent = data.structural_active ? 'ACTIVE' : 'INACTIVE';
-            structStatus.className = 'engine-status ' + (data.structural_active ? 'active' : 'inactive');
-        }
-        if (el('structural-size'))  el('structural-size').textContent  = fmt(data.structural_size_R, 2) + 'R';
-        if (el('structural-entry')) el('structural-entry').textContent = data.structural_entry_price > 0 ? fmt(data.structural_entry_price, 2) : '--';
-        if (el('structural-mfe')) {
-            el('structural-mfe').textContent = fmt(data.structural_mfe_bp, 2) + 'bp';
-            el('structural-mfe').className = 'engine-stat-value ' + (data.structural_mfe_bp > 0 ? 'positive' : '');
-        }
-        if (el('structural-pnl')) {
-            el('structural-pnl').textContent = fmt(data.structural_total_pnl_bp, 2) + 'bp';
-            el('structural-pnl').className = 'engine-stat-value ' + (data.structural_total_pnl_bp > 0 ? 'positive' : data.structural_total_pnl_bp < 0 ? 'negative' : '');
-        }
+// ── TRADE LOG ─────────────────────────────────────────────────────────────
+const trades = [];
+const tradeStats = { wins: 0, losses: 0, totalPnl: 0 };
 
-        // CONVEX
-        const convexStatus = el('convex-status');
-        if (convexStatus) {
-            convexStatus.textContent = data.convex_active ? 'ACTIVE' : 'INACTIVE';
-            convexStatus.className = 'engine-status ' + (data.convex_active ? 'active' : 'inactive');
-        }
-        if (el('convex-size'))  el('convex-size').textContent  = fmt(data.convex_size_R, 2) + 'R';
-        if (el('convex-entry')) el('convex-entry').textContent = data.convex_entry_price > 0 ? fmt(data.convex_entry_price, 2) : '--';
-        if (el('convex-mfe')) {
-            el('convex-mfe').textContent = fmt(data.convex_mfe_bp, 2) + 'bp';
-            el('convex-mfe').className = 'engine-stat-value ' + (data.convex_mfe_bp > 0 ? 'positive' : '');
-        }
-        if (el('convex-pnl')) {
-            el('convex-pnl').textContent = fmt(data.convex_total_pnl_bp, 2) + 'bp';
-            el('convex-pnl').className = 'engine-stat-value ' + (data.convex_total_pnl_bp > 0 ? 'positive' : data.convex_total_pnl_bp < 0 ? 'negative' : '');
-        }
+function addTrade(sym, layer, pnl) {
+  const v = Number(pnl) || 0;
+  trades.unshift({ time: new Date().toLocaleTimeString('en-US',{hour12:false}), sym, layer, pnl: v });
+  if (trades.length > 100) trades.pop();
+  if (v > 0) { tradeStats.wins++; playWinBell(); flashWin(sym, v); }
+  else if (v < 0) { tradeStats.losses++; }
+  tradeStats.totalPnl += v;
+  renderTradeLog();
+  updateWinRate();
+}
 
-        // COMPRESSION
-        const compressionStatus = el('compression-status');
-        if (compressionStatus) {
-            if (data.compression_active) {
-                compressionStatus.textContent = 'ACTIVE';
-                compressionStatus.className = 'engine-status active';
-            } else if (data.compression_ticks && data.compression_ticks > 50) {
-                compressionStatus.textContent = 'ARMED';
-                compressionStatus.className = 'engine-status active';
-            } else {
-                compressionStatus.textContent = 'INACTIVE';
-                compressionStatus.className = 'engine-status inactive';
-            }
-        }
-        if (el('compression-size'))  el('compression-size').textContent  = fmt(data.compression_size_R, 2) + 'R';
-        if (el('compression-entry')) el('compression-entry').textContent = data.compression_entry_price > 0 ? fmt(data.compression_entry_price, 2) : '--';
-        if (el('compression-mfe')) {
-            el('compression-mfe').textContent = fmt(data.compression_mfe_bp, 2) + 'bp';
-            el('compression-mfe').className = 'engine-stat-value ' + (data.compression_mfe_bp > 0 ? 'positive' : '');
-        }
-        if (el('compression-pnl')) {
-            el('compression-pnl').textContent = fmt(data.compression_total_pnl_bp, 2) + 'bp';
-            el('compression-pnl').className = 'engine-stat-value ' + (data.compression_total_pnl_bp > 0 ? 'positive' : data.compression_total_pnl_bp < 0 ? 'negative' : '');
-        }
-    }
+function renderTradeLog() {
+  const el = $('trade-log'); if (!el) return;
+  if (!trades.length) return;
+  el.innerHTML = trades.slice(0,40).map(t => {
+    const sign = t.pnl >= 0 ? '+' : '';
+    return `<div class="trade-entry">
+      <span class="te-time">${t.time}</span>
+      <span class="te-sym">${t.sym.replace('USDT','').toUpperCase()}</span>
+      <span class="te-layer">${t.layer||'?'}</span>
+      <span class="te-pnl ${t.pnl>0?'pos':'neg'}">${sign}${t.pnl.toFixed(2)}bp</span>
+    </div>`;
+  }).join('');
+}
 
-    function updateTelemetry(data) {
-        if (!data) return;
-        try {
-            updatePrices(data);
-            if (data.btcusdt) updateSymbolEngines('btcusdt', data.btcusdt);
-            if (data.ethusdt) updateSymbolEngines('ethusdt', data.ethusdt);
-            if (data.solusdt) updateSymbolEngines('solusdt', data.solusdt);
-            const health = $('health-indicator');
-            if (health) health.className = 'health-dot active';
-        } catch(e) {
-            console.error('Update error:', e);
-        }
-    }
+function updateWinRate() {
+  const total = tradeStats.wins + tradeStats.losses;
+  const wr = total > 0 ? (tradeStats.wins/total*100).toFixed(0) + '%' : '--%';
+  const el = $('st-wr'); if (el) { el.textContent = wr; el.className = 'sr-val ' + (tradeStats.wins > tradeStats.losses ? 'pos' : 'neg'); }
+}
 
-    // ── WEBSOCKET - real-time trade events ───────────────────────────────────
-    let ws = null;
-    let wsReconnectDelay = 1000;
+// ── MAIN UPDATE ───────────────────────────────────────────────────────────
+function updateAll(data) {
+  if (!data) return;
 
-    function connectWS() {
-        const host = window.location.hostname || '154.45.251.118';
-        const url  = `ws://${host}:9001`;
+  // Top bar
+  const pnl = Number(data.pnl) || 0;
+  const equity = 10000 + pnl;
+  const el_eq = $('tb-equity'); if (el_eq) el_eq.textContent = '$' + equity.toFixed(2);
+  const el_pnl = $('tb-pnl');
+  if (el_pnl) {
+    const sign = pnl >= 0 ? '+' : '';
+    el_pnl.textContent = sign + pnl.toFixed(2) + 'bp';
+    el_pnl.className = 'tb-val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '');
+  }
+  const el_tr = $('tb-trades'); if (el_tr) el_tr.textContent = data.total_trades || 0;
+  const el_pos = $('tb-positions'); if (el_pos) el_pos.textContent = data.open_positions || 0;
 
-        try {
-            ws = new WebSocket(url);
-        } catch(e) {
-            scheduleReconnect();
-            return;
-        }
+  // Stats panel
+  const el_sp = $('st-pnl'); if (el_sp) { el_sp.textContent = (pnl>=0?'+':'') + pnl.toFixed(2) + 'bp'; el_sp.className = 'sr-val ' + (pnl>0?'pos':pnl<0?'neg':''); }
+  const el_st = $('st-trades'); if (el_st) el_st.textContent = data.total_trades || 0;
+  const el_spos = $('st-pos'); if (el_spos) el_spos.textContent = data.open_positions || 0;
 
-        ws.onopen = () => {
-            console.log('[WS] Connected to chimera engine');
-            wsReconnectDelay = 1000;
-            const el = $('connection-status');
-            if (el) { el.textContent = 'Live'; el.className = 'footer-value connected'; }
-        };
+  // Prices
+  if (data.btc_price > 0) setPrice('btc', data.btc_price);
+  if (data.eth_price > 0) setPrice('eth', data.eth_price);
+  if (data.sol_price > 0) setPrice('sol', data.sol_price);
 
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                handleEngineMessage(msg);
-            } catch(e) {}
-        };
+  // Per-symbol
+  ['btcusdt','ethusdt','solusdt'].forEach(sym => {
+    const s = sym.substring(0,3); // btc/eth/sol
+    const d = data[sym];
+    if (!d) return;
 
-        ws.onclose = () => {
-            const el = $('connection-status');
-            if (el) { el.textContent = 'Reconnecting...'; el.className = 'footer-value disconnected'; }
-            scheduleReconnect();
-        };
+    // Vol ratio and displacement in header
+    const vr_el = $(`vr-${s}`); if (vr_el) { const vr = Number(d.vol_ratio)||1; vr_el.textContent = vr.toFixed(3); vr_el.style.color = vr > 1.4 ? 'var(--green)' : vr > 1.2 ? 'var(--yellow)' : 'var(--text)'; }
+    const dp_el = $(`dp-${s}`); if (dp_el) { const dp = Number(d.displacement_bp)||0; dp_el.textContent = (dp>=0?'+':'')+dp.toFixed(1)+'bp'; dp_el.style.color = Math.abs(dp) > 20 ? 'var(--yellow)' : 'var(--text)'; }
+    const cap_el = $(`cap-${s}`); if (cap_el) cap_el.textContent = Number(d.dynamic_cap_R||0).toFixed(2);
+    const reg_el = $(`reg-${s}`); if (reg_el) reg_el.textContent = d.regime_state || '--';
 
-        ws.onerror = () => { ws.close(); };
-    }
+    // Regime panel
+    setRegime(s, d.regime_state, d.regime_multiplier);
 
-    function scheduleReconnect() {
-        setTimeout(connectWS, wsReconnectDelay);
-        wsReconnectDelay = Math.min(wsReconnectDelay * 2, 10000);
-    }
+    // MICRO
+    setEngBadge(`eb-${s}-micro`, d.micro_active, false);
+    setPnl(`pnl-${s}-micro`, d.micro_total_pnl_bp);
+    const tr_m = $(`trades-${s}-micro`); if (tr_m) tr_m.textContent = d.micro_total_trades || 0;
 
-    // ── ENGINE MESSAGE HANDLER ────────────────────────────────────────────────
-    function handleEngineMessage(msg) {
-        if (!msg || !msg.type) return;
+    // STRUCTURAL
+    setEngBadge(`eb-${s}-structural`, d.structural_active, d.structural_readiness > 0.7);
+    setPnl(`pnl-${s}-structural`, d.structural_total_pnl_bp);
+    const tr_st = $(`trades-${s}-structural`); if (tr_st) tr_st.textContent = d.structural_total_trades || 0;
+    setReadiness(s, 'structural', d.structural_readiness || 0);
 
-        switch (msg.type) {
+    // CONVEX
+    setEngBadge(`eb-${s}-convex`, d.convex_active, d.convex_readiness > 0.7);
+    setPnl(`pnl-${s}-convex`, d.convex_total_pnl_bp);
+    const accel_el = $(`accel-${s}`); if (accel_el) { const a = Number(d.acceleration_bp)||0; accel_el.textContent = (a>=0?'+':'')+a.toFixed(1)+'bp'; accel_el.className = 'est-val ' + (Math.abs(a)>=15?'pos':'dim'); }
+    setReadiness(s, 'convex', d.convex_readiness || 0);
 
-            // Trade exit - check for win, fire bell
-            case 'position_exit':
-            case 'trade': {
-                const pnl = parseFloat(msg.pnl_bps || msg.last_order_conviction || 0);
-                const sym = msg.symbol || msg.last_order_symbol || '';
-                if (pnl > 0) {
-                    playWinBell();
-                    flashWin(sym, pnl);
-                }
-                updateTradeLog(msg, pnl);
-                break;
-            }
+    // COMPRESSION
+    const cticks = Number(d.compression_ticks) || 0;
+    setEngBadge(`eb-${s}-compression`, d.compression_active, cticks >= 80);
+    setPnl(`pnl-${s}-compression`, d.compression_total_pnl_bp);
+    const ct_el = $(`cticks-${s}`); if (ct_el) ct_el.textContent = cticks + '/100';
+    setReadiness(s, 'compression', d.compression_readiness || 0);
+  });
 
-            // Snapshot update
-            case 'snapshot':
-            case 'desk_snapshot': {
-                updateTelemetry(msg);
-                updateEquityBar(msg);
-                break;
-            }
+  // BTC signal conditions panel (right panel)
+  const bd = data.btcusdt;
+  if (bd) {
+    const vol = Number(bd.vol_ratio)||1;
+    const disp = Math.abs(Number(bd.displacement_bp)||0);
+    const build = Number(bd.buildup_ticks)||0;
+    const accel = Math.abs(Number(bd.acceleration_bp)||0);
+    const comp = Number(bd.compression_ticks)||0;
 
-            // Regime change
-            case 'regime_update': {
-                updateRegimeIndicator(msg);
-                break;
-            }
+    const cv_vol = $('cv-btc-vol'); if (cv_vol) cv_vol.textContent = vol.toFixed(3) + ' / 1.4';
+    setCond('cc-btc-vol', vol >= 1.4, vol >= 1.2);
 
-            // Performance
-            case 'performance_summary': {
-                updatePerformance(msg);
-                break;
-            }
-        }
-    }
+    const cv_disp = $('cv-btc-disp'); if (cv_disp) cv_disp.textContent = disp.toFixed(1) + ' / 20bp';
+    setCond('cc-btc-disp', disp >= 20, disp >= 12);
 
-    // ── TRADE LOG ─────────────────────────────────────────────────────────────
-    const tradeLog = [];
+    const cv_build = $('cv-btc-build'); if (cv_build) cv_build.textContent = build + ' / 40';
+    setCond('cc-btc-build', build >= 40, build >= 25);
 
-    function updateTradeLog(msg, pnl) {
-        const entry = {
-            time:   new Date().toLocaleTimeString('en-US', {hour12: false}),
-            symbol: (msg.symbol || msg.last_order_symbol || '???').toUpperCase().replace('USDT',''),
-            pnl:    pnl,
-            layer:  msg.layer || '?'
-        };
-        tradeLog.unshift(entry);
-        if (tradeLog.length > 50) tradeLog.pop();
+    const cv_accel = $('cv-btc-accel'); if (cv_accel) cv_accel.textContent = accel.toFixed(1) + ' / 15bp';
+    setCond('cc-btc-accel', accel >= 15, accel >= 8);
 
-        const container = $('trade-log');
-        if (!container) return;
+    const cv_comp = $('cv-btc-comp'); if (cv_comp) cv_comp.textContent = comp + ' / 100';
+    setCond('cc-btc-comp', comp >= 100, comp >= 70);
+  }
+}
 
-        const wins   = tradeLog.filter(t => t.pnl > 0).length;
-        const losses = tradeLog.filter(t => t.pnl < 0).length;
-        const total  = wins + losses;
-        const wr     = total > 0 ? (wins / total * 100).toFixed(0) : '--';
+// ── HTTP POLL ─────────────────────────────────────────────────────────────
+let pollFails = 0;
+function poll() {
+  fetch('/api/state')
+    .then(r => r.json())
+    .then(data => {
+      pollFails = 0;
+      updateAll(data);
+      const cb = $('conn-badge'); if (cb) { cb.textContent = 'LIVE'; cb.className = 'badge badge-conn'; }
+      const dot = $('live-dot'); if (dot) dot.className = 'dot live';
+    })
+    .catch(() => {
+      pollFails++;
+      if (pollFails > 3) {
+        const cb = $('conn-badge'); if (cb) { cb.textContent = 'OFFLINE'; cb.className = 'badge badge-disc'; }
+        const dot = $('live-dot'); if (dot) dot.className = 'dot';
+      }
+    });
+}
 
-        container.innerHTML =
-            `<div style="font-size:11px;color:#888;margin-bottom:6px">` +
-            `Recent Trades | W:${wins} L:${losses} | WR:${wr}%</div>` +
-            tradeLog.slice(0, 20).map(t => {
-                const color = t.pnl > 0 ? '#00c853' : '#ff5252';
-                const sign  = t.pnl > 0 ? '+' : '';
-                return `<div style="font-size:12px;padding:2px 0;border-bottom:1px solid #1a1a2e">` +
-                       `<span style="color:#888">${t.time}</span> ` +
-                       `<span style="color:#00d4ff">${t.symbol}</span> ` +
-                       `<span style="color:${color};font-weight:600">${sign}${t.pnl.toFixed(2)}bp</span> ` +
-                       `<span style="color:#555">${t.layer}</span></div>`;
-            }).join('');
-    }
+setInterval(poll, 1000);
+poll();
 
-    function updateEquityBar(msg) {
-        const equity = parseFloat(msg.equity || 0);
-        const pnl    = parseFloat(msg.day_pnl || msg.pnl || 0);
-        if (!equity) return;
-
-        const el = $('equity-value');
-        if (el) el.textContent = '$' + fmt(equity, 2);
-
-        const pnlEl = $('day-pnl');
-        if (pnlEl) {
-            const sign = pnl >= 0 ? '+' : '';
-            pnlEl.textContent   = sign + fmt(pnl, 2) + 'bp';
-            pnlEl.style.color   = pnl > 0 ? '#00c853' : pnl < 0 ? '#ff5252' : '#888';
-        }
-    }
-
-    function updateRegimeIndicator(msg) {
-        if (!msg.symbol) return;
-        const prefix = msg.symbol.substring(0, 3).toUpperCase();
-        const el = $('regime-' + prefix);
-        if (el) {
-            el.textContent = msg.regime_name || '?';
-            el.style.color = msg.regime_name === 'BURST' ? '#00c853' :
-                             msg.regime_name === 'REVERT' ? '#ff5252' : '#888';
-        }
-    }
-
-    function updatePerformance(msg) {
-        const el = $('total-pnl');
-        if (el && msg.total_pnl != null) {
-            const sign = msg.total_pnl >= 0 ? '+' : '';
-            el.textContent = sign + fmt(msg.total_pnl, 2) + 'bp';
-            el.style.color = msg.total_pnl > 0 ? '#00c853' : '#ff5252';
-        }
-    }
-
-    // ── HTTP POLL - fallback state ────────────────────────────────────────────
-    function pollState() {
-        fetch('/api/state')
-            .then(r => r.json())
-            .then(data => {
-                updateTelemetry(data);
-                // Only update connection status if WS not already connected
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    const el = $('connection-status');
-                    if (el) { el.textContent = 'HTTP'; el.className = 'footer-value connected'; }
-                }
-            })
-            .catch(() => {
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    const el = $('connection-status');
-                    if (el) { el.textContent = 'Offline'; el.className = 'footer-value disconnected'; }
-                }
-            });
-    }
-
-    setInterval(pollState, 1000);
-    pollState();
-
-    // Start WebSocket for real-time bells and trade events
-    connectWS();
+// ── HANDLE POSITION_EXIT events from log if WS available ──────────────────
+// The HTTP poll covers all state. But if future WS is added, hook here.
+window._chimera_trade = (sym, layer, pnl) => addTrade(sym, layer, pnl);
 
 })();

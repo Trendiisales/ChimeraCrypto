@@ -38,33 +38,33 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 
 .page-body{display:grid;grid-template-columns:1fr 420px;height:calc(100vh - 80px);overflow:hidden}
-.left-panel{overflow-y:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:14px}
+.left-panel{overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:14px}
 .right-panel{border-left:2px solid var(--border2);overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;background:var(--surface)}
 
-.sym-block{background:var(--surface);border:1px solid var(--border2);border-radius:4px;overflow:hidden;flex-shrink:0}
+.sym-block{background:var(--surface);border:1px solid var(--border2);border-radius:4px;overflow:visible;flex-shrink:0}
 .sym-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:linear-gradient(90deg,rgba(0,212,255,.08),transparent);border-bottom:1px solid var(--border2)}
 .sym-name{font-family:var(--fh);font-size:34px;font-weight:800;color:var(--accent);letter-spacing:2px;min-width:150px}
 .sym-price{font-size:48px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-0.5px}
 .sym-price.up{color:var(--green);text-shadow:0 0 20px rgba(0,230,118,.4)}
 .sym-price.down{color:var(--red);text-shadow:0 0 20px rgba(255,61,87,.3)}
-.sym-meta{display:flex;gap:22px;font-size:14px}
+.sym-meta{display:flex;gap:22px;font-size:16px}
 .sym-meta span{color:var(--muted)}.sym-meta strong{color:var(--text);font-size:15px}
 
 .eng-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--border)}
-.eng-cell{background:var(--bg);display:flex;position:relative;overflow:hidden;min-height:140px}
+.eng-cell{background:var(--bg);display:flex;position:relative;overflow:hidden;min-height:150px}
 .eng-cell.active-pos{background:rgba(0,230,118,.05)}
 .signal-col{width:7px;flex-shrink:0;background:#0d2030;transition:all .3s;border-right:1px solid rgba(0,0,0,.5)}
 .eng-content{flex:1;padding:14px 16px;min-width:0}
 .eng-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.eng-name{font-family:var(--fh);font-size:18px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#7ab0c8}
+.eng-name{font-family:var(--fh);font-size:20px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#90c4d8}
 .eng-badge{font-family:var(--fh);font-size:12px;font-weight:700;letter-spacing:1px;padding:3px 10px;border-radius:2px}
 .eng-badge.active{background:rgba(0,230,118,.18);color:var(--green)}
 .eng-badge.armed{background:rgba(255,214,0,.15);color:var(--yellow);animation:pulse-arm 1s infinite}
 .eng-badge.off{background:rgba(255,255,255,.04);color:var(--muted)}
 @keyframes pulse-arm{0%,100%{opacity:1}50%{opacity:.4}}
 .eng-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
-.est-label{font-size:13px;color:#6a8fa8;letter-spacing:1px;text-transform:uppercase;font-weight:600}
-.est-val{font-size:24px;font-weight:700;color:#ffffff;font-variant-numeric:tabular-nums;line-height:1.2}
+.est-label{font-size:14px;color:#7ab0c8;letter-spacing:1px;text-transform:uppercase;font-weight:700}
+.est-val{font-size:26px;font-weight:700;color:#ffffff;font-variant-numeric:tabular-nums;line-height:1.2}
 .est-val.pos{color:var(--green)}.est-val.neg{color:var(--red)}.est-val.dim{color:#7ab0c8}
 
 .rp-sec{border:1px solid var(--border);border-radius:4px;overflow:hidden}
@@ -94,32 +94,32 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
 
 .trade-log-inner{border-top:2px solid var(--border2);background:var(--bg);display:flex;flex-direction:column}
 .tli-head{display:flex;align-items:center;gap:24px;padding:12px 18px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
-.tli-title{font-family:var(--fh);font-size:18px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#7ab0c8}
-.ts-stat{font-size:15px;color:var(--muted)}.ts-stat strong{color:#ffffff;font-size:22px;font-weight:800}
+.tli-title{font-family:var(--fh);font-size:20px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#90c4d8}
+.ts-stat{font-size:16px;color:var(--muted)}.ts-stat strong{color:#ffffff;font-size:24px;font-weight:800}
 .ts-stat.pos strong{color:var(--green)}.ts-stat.neg strong{color:var(--red)}
 .tli-cols{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:6px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
 .tlic{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#3d5a6e}
-.tli-body{overflow-y:auto;overflow-x:hidden;max-height:280px}
+.tli-body{overflow-y:auto;overflow-x:hidden;max-height:400px;min-height:80px}
 .tli-body::-webkit-scrollbar{width:4px}
 .tli-body::-webkit-scrollbar-thumb{background:var(--border2)}
-.tl-row{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:9px 18px;border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s}
+.tl-row{display:grid;grid-template-columns:55px 60px 96px 88px 110px 130px 72px 80px 90px;align-items:center;padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s}
 .tl-row:hover{background:rgba(255,255,255,.04)}
 .tl-row.win{border-left:4px solid var(--green);background:rgba(0,230,118,.035)}
 .tl-row.loss{border-left:4px solid var(--red);background:rgba(255,61,87,.035)}
-.tl-tag{font-family:var(--fh);font-size:14px;font-weight:800;letter-spacing:1px}
+.tl-tag{font-family:var(--fh);font-size:15px;font-weight:800;letter-spacing:1px}
 .tl-tag.win{color:var(--green)}.tl-tag.loss{color:var(--red)}
-.tl-sym{font-family:var(--fh);font-size:18px;font-weight:800;color:#d4e8f0}
-.tl-pnl{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
+.tl-sym{font-family:var(--fh);font-size:20px;font-weight:800;color:#d4e8f0}
+.tl-pnl{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
 .tl-pnl.pos{color:var(--green)}.tl-pnl.neg{color:var(--red)}
-.tl-eng{font-family:var(--fh);font-size:14px;font-weight:700;color:#7ab0c8}
-.tl-val{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;color:#9ab8cc}
+.tl-eng{font-family:var(--fh);font-size:15px;font-weight:700;color:#7ab0c8}
+.tl-val{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:#9ab8cc}
 .tl-val.pos{color:var(--green)}.tl-val.neg{color:var(--red)}
-.tl-reason{font-family:var(--fh);font-size:13px;font-weight:800;letter-spacing:1px;padding:3px 10px;border-radius:2px;display:inline-block}
+.tl-reason{font-family:var(--fh);font-size:14px;font-weight:800;letter-spacing:1px;padding:4px 11px;border-radius:2px;display:inline-block}
 .tl-reason.tp{background:rgba(0,230,118,.18);color:var(--green)}
 .tl-reason.sl{background:rgba(255,61,87,.18);color:var(--red)}
 .tl-reason.trail{background:rgba(0,212,255,.15);color:var(--accent)}
 .tl-reason.timeout{background:rgba(255,214,0,.12);color:var(--yellow)}
-.tl-time{font-size:13px;color:#4d6878;font-variant-numeric:tabular-nums}
+.tl-time{font-size:14px;color:#5a7a90;font-variant-numeric:tabular-nums}
 .tli-empty{padding:18px;color:var(--muted);font-size:15px;opacity:.6}
 
 /* Per-symbol trade rows under engine grid */
@@ -190,14 +190,6 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     <div class="eng-cell" id="ec-btc-vacuum"><div class="signal-col" id="sc-btc-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-btc-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-btc-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-btc">0%</div></div></div></div></div>
     <div class="eng-cell" id="ec-btc-vwap"><div class="signal-col" id="sc-btc-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-btc-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-btc-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-btc">0bp</div></div></div></div></div>
   </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry→Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-btc" class="sym-trades-empty">No trades yet</div>
-  </div>
 </div>
 
 <div class="sym-block">
@@ -211,14 +203,6 @@ body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradie
     <div class="eng-cell" id="ec-eth-compression"><div class="signal-col" id="sc-eth-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-eth-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-eth-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-eth">0/100</div></div></div></div></div>
     <div class="eng-cell" id="ec-eth-vacuum"><div class="signal-col" id="sc-eth-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-eth-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-eth-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-eth">0%</div></div></div></div></div>
     <div class="eng-cell" id="ec-eth-vwap"><div class="signal-col" id="sc-eth-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-eth-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&L</div><div class="est-val dim" id="pnl-eth-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-eth">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry→Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-eth" class="sym-trades-empty">No trades yet</div>
   </div>
 </div>
 

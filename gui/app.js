@@ -311,6 +311,28 @@ function updateAll(data) {
     const wr_cp = $(`wr-${s}-compression`); if (wr_cp) wr_cp.textContent = d.compression_win_rate > 0 ? (d.compression_win_rate * 100).toFixed(0) + '%' : '--%';
     const ct_el = $(`cticks-${s}`); if (ct_el) ct_el.textContent = cticks + '/100';
     updateSignalColumn(`sc-${s}-compression`, comp_ready);
+
+    // VACUUM
+    const vac_active = !!d.vacuum_active;
+    const vac_drain = +d.vacuum_ask_drain_pct || 0;
+    setEngBadge(`eb-${s}-vacuum`, vac_active, vac_drain >= 30);
+    setPnl(`pnl-${s}-vacuum`, d.vacuum_total_pnl_bp);
+    const tr_vac = $(`trades-${s}-vacuum`); if (tr_vac) tr_vac.textContent = d.vacuum_total_trades || 0;
+    const wr_vac = $(`wr-${s}-vacuum`); if (wr_vac) wr_vac.textContent = d.vacuum_win_rate > 0 ? (d.vacuum_win_rate * 100).toFixed(0) + '%' : '--%';
+    const drain_el = $(`drain-${s}`);
+    if (drain_el) { drain_el.textContent = vac_drain.toFixed(0) + '%'; drain_el.className = 'est-val ' + (vac_drain >= 40 ? 'pos' : 'dim'); }
+    updateSignalColumn(`sc-${s}-vacuum`, vac_drain / 100);
+
+    // VWAP REVERSION
+    const vwap_active = !!d.vwap_active;
+    const vwap_dev = +d.vwap_deviation_bp || 0;
+    setEngBadge(`eb-${s}-vwap`, vwap_active, vwap_dev >= 20);
+    setPnl(`pnl-${s}-vwap`, d.vwap_total_pnl_bp);
+    const tr_vw = $(`trades-${s}-vwap`); if (tr_vw) tr_vw.textContent = d.vwap_total_trades || 0;
+    const wr_vw = $(`wr-${s}-vwap`); if (wr_vw) wr_vw.textContent = d.vwap_win_rate > 0 ? (d.vwap_win_rate * 100).toFixed(0) + '%' : '--%';
+    const dev_el = $(`vwapdev-${s}`);
+    if (dev_el) { dev_el.textContent = (vwap_dev >= 0 ? '-' : '+') + Math.abs(vwap_dev).toFixed(1) + 'bp'; dev_el.className = 'est-val ' + (vwap_dev >= 20 ? 'accent' : 'dim'); }
+    updateSignalColumn(`sc-${s}-vwap`, Math.min(1, vwap_dev / 40));
   });
 
   // BTC signal condition panel

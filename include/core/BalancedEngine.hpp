@@ -44,7 +44,9 @@ enum LayerMode {
     LAYER_MICRO,
     LAYER_IMPULSE,
     LAYER_EXPANSION,
-    LAYER_LEADLAG
+    LAYER_LEADLAG,
+    LAYER_VACUUM,   // Liquidity Vacuum — ask-side drain breakout
+    LAYER_VWAP      // VWAP Reversion — buy dip back to session VWAP
 };
 
 enum PosState {
@@ -116,6 +118,16 @@ struct SymbolState {
     double entry_btc_move   = 0.0;
     double entry_latency_ms = 0.0;
 
+    // Session VWAP tracking (reset each day / on first tick)
+    double vwap_cum_pv   = 0.0;   // cumulative price * volume
+    double vwap_cum_vol  = 0.0;   // cumulative volume
+    double session_vwap  = 0.0;   // current VWAP value
+    int64_t vwap_session_start = 0; // timestamp of session start
+
+    // Liquidity Vacuum: rolling ask depth baseline
+    double ask_depth_ema = 0.0;   // EMA of ask_size (baseline)
+    bool ask_depth_init  = false;
+
     void reset() {
         last_price = 0;
         short_returns.clear();
@@ -128,6 +140,12 @@ struct SymbolState {
         regime = REGIME_DEAD;
         regime_ticks = 0;
         regime_anchor_price = 0;
+        vwap_cum_pv = 0.0;
+        vwap_cum_vol = 0.0;
+        session_vwap = 0.0;
+        vwap_session_start = 0;
+        ask_depth_ema = 0.0;
+        ask_depth_init = false;
         pos.reset();
     }
 };
@@ -385,6 +403,30 @@ public:
             r = std::log(price / s.last_price);
         }
         s.last_price = price;
+
+        // ---- SESSION VWAP UPDATE ----
+        // Reset VWAP at UTC midnight (session boundary)
+        int64_t day_ms = ts % 86400000LL;
+        if (s.vwap_session_start == 0 || day_ms < 1000) {
+            s.vwap_cum_pv  = 0.0;
+            s.vwap_cum_vol = 0.0;
+            s.vwap_session_start = ts;
+        }
+        double vol_tick = (tick.trade_qty > 0.0) ? tick.trade_qty : 1.0;
+        s.vwap_cum_pv  += price * vol_tick;
+        s.vwap_cum_vol += vol_tick;
+        if (s.vwap_cum_vol > 0.0)
+            s.session_vwap = s.vwap_cum_pv / s.vwap_cum_vol;
+
+        // ---- ASK DEPTH EMA (for Liquidity Vacuum baseline) ----
+        if (tick.ask_size > 0.0) {
+            if (!s.ask_depth_init) {
+                s.ask_depth_ema = tick.ask_size;
+                s.ask_depth_init = true;
+            } else {
+                s.ask_depth_ema = 0.02 * tick.ask_size + 0.98 * s.ask_depth_ema;
+            }
+        }
         
         // Push into short window (rolling window for short-term volatility)
         s.short_returns.push_back(r);
@@ -446,11 +488,13 @@ public:
         if (open_positions_ >= 1) return;
         
         // Try signals in priority order
-        // Priority: lead-lag first (best EV), then breakout, then imbalance
+        // Priority: lead-lag first (best EV), then breakout, then microstructure
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_expansion(id, price, ts, s, latency_ms)) return;
+        if (check_vacuum(id, price, ts, s, latency_ms)) return;
         if (check_imbalance(id, price, ts, s, latency_ms)) return;
+        if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
@@ -856,9 +900,13 @@ private:
             rejection_throttle_.record(key, "weak_imbalance");
             return false;
         }
+        // Spot only — long side only (imbalance > 0 = bid pressure = buy signal)
+        if (imbalance < 0) {
+            rejection_throttle_.record(key, "short_not_supported_spot");
+            return false;
+        }
 
-        bool is_long = (imbalance > 0);  // P1 fix: both sides enabled
-        enter(id, price, ts, s, LAYER_MICRO, is_long);
+        enter(id, price, ts, s, LAYER_MICRO, true);
         return true;
     }
 
@@ -901,17 +949,20 @@ private:
             return false;
         }
 
-        // P3 fix: both directions enabled — BTC leads ETH/SOL on short side too
-        bool is_long = (direction > 0);
+        // Spot only — long side only
+        if (direction < 0) {
+            rejection_throttle_.record(key, "short_not_supported_spot");
+            return false;
+        }
 
         // Don't enter if already in a position on this symbol
         if (s.pos.state == POS_OPEN) return false;
 
-        std::printf("[LEADLAG] %s | btc_move=%.2fbp | latency=%.1fms | ENTERING %s\n",
-                    sym, leadlag_.btc_move_bp(), latency_ms, is_long ? "LONG" : "SHORT");
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
+                    sym, leadlag_.btc_move_bp(), latency_ms);
         std::fflush(stdout);
 
-        enter(id, price, ts, s, LAYER_LEADLAG, is_long);
+        enter(id, price, ts, s, LAYER_LEADLAG, true);
         return true;
     }
     
@@ -939,9 +990,11 @@ private:
             s.pos.mae        = 0.0;
 
             const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
-            const char* mode = (s.pos.layer == LAYER_MICRO)   ? "IMBAL"   :
-                               (s.pos.layer == LAYER_LEADLAG) ? "LEADLAG" :
-                               (s.pos.layer == LAYER_IMPULSE) ? "IMPULSE" : "EXPAND";
+            const char* mode = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
+                               (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
+                               (s.pos.layer == LAYER_VACUUM)   ? "VACUUM"  :
+                               (s.pos.layer == LAYER_VWAP)     ? "VWAP"    :
+                               (s.pos.layer == LAYER_IMPULSE)  ? "IMPULSE" : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1012,6 +1065,16 @@ private:
             tp_bp     = TradingConfig::IMBALANCE_TP_BP;
             sl_bp     = TradingConfig::IMBALANCE_SL_BP;
             max_hold  = TradingConfig::IMBALANCE_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_VACUUM) {
+            // TP=16bp gross → +6bp net. SL=6bp. Hold 12s max.
+            tp_bp     = TradingConfig::VACUUM_TP_BP;
+            sl_bp     = TradingConfig::VACUUM_SL_BP;
+            max_hold  = TradingConfig::VACUUM_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_VWAP) {
+            // TP=18bp gross → +8bp net. SL=7bp. Hold 45s max (slower reversion).
+            tp_bp     = TradingConfig::VWAP_TP_BP;
+            sl_bp     = TradingConfig::VWAP_SL_BP;
+            max_hold  = TradingConfig::VWAP_MAX_HOLD_MS;
         } else {
             // IMPULSE / EXPANSION: TP=20bp gross → +10bp net. SL=8bp. Hold 30s.
             tp_bp     = TradingConfig::IMPULSE_TP_BP;
@@ -1023,8 +1086,10 @@ private:
         if (move_bp >= tp_bp) {
             std::printf("[TP-HIT] %s | layer=%s | move=%.2fbp >= tp=%.2fbp\n",
                 (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
-                (s.pos.layer == LAYER_MICRO) ? "IMBAL" :
-                (s.pos.layer == LAYER_LEADLAG) ? "LEADLAG" : "IMPULSE",
+                (s.pos.layer == LAYER_MICRO)   ? "IMBAL"   :
+                (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
+                (s.pos.layer == LAYER_VACUUM)   ? "VACUUM"  :
+                (s.pos.layer == LAYER_VWAP)     ? "VWAP"    : "IMPULSE",
                 move_bp, tp_bp);
             std::fflush(stdout);
             exit(id, move_bp, ts, s);
@@ -1058,7 +1123,121 @@ private:
             return;
         }
     }
-    
+
+    // ======================================================================
+    // LIQUIDITY VACUUM — spot-only long
+    // Edge: ask-side depth drains >40% vs EMA baseline without price moving.
+    // When the ask wall disappears, price gaps up through the vacuum.
+    // Fires in GRIND or BUILDUP — best in calmer regimes where a sudden
+    // ask drain is structural, not just noise.
+    // EV: TP=16bp gross (+6bp net), SL=6bp, win rate target ~65%
+    // ======================================================================
+    bool check_vacuum(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        std::string key = std::string(sym) + " VACUUM";
+
+        if (latency_ms > TradingConfig::LATENCY_VACUUM_MAX_MS) {
+            rejection_throttle_.record(key, "latency_too_high");
+            return false;
+        }
+        // Only fires in GRIND or BUILDUP — BREAKOUT has own engines
+        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
+            rejection_throttle_.record(key, "wrong_regime");
+            return false;
+        }
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0 || t.ask_size <= 0.0) {
+            rejection_throttle_.record(key, "no_book_data");
+            return false;
+        }
+        if (t.spread_bps > TradingConfig::VACUUM_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_wide");
+            return false;
+        }
+        // Need established ask depth baseline
+        if (!s.ask_depth_init || s.ask_depth_ema <= 0.0) {
+            rejection_throttle_.record(key, "no_depth_baseline");
+            return false;
+        }
+        // Core signal: current ask depth is less than (1 - drain_ratio) * baseline
+        double drain_threshold = s.ask_depth_ema * (1.0 - TradingConfig::VACUUM_ASK_DRAIN_RATIO);
+        if (t.ask_size >= drain_threshold) {
+            rejection_throttle_.record(key, "ask_not_drained");
+            return false;
+        }
+        // Bid must still be present — confirms buyers are active, not just thin market
+        if (t.book_imbalance < TradingConfig::VACUUM_MIN_IMBALANCE) {
+            rejection_throttle_.record(key, "no_bid_confirmation");
+            return false;
+        }
+        std::printf("[VACUUM] %s | ask_size=%.2f vs baseline=%.2f (drain=%.0f%%) | imbal=%.2f | ENTERING LONG\n",
+                    sym, t.ask_size, s.ask_depth_ema,
+                    (1.0 - t.ask_size / s.ask_depth_ema) * 100.0,
+                    t.book_imbalance);
+        std::fflush(stdout);
+        enter(id, price, ts, s, LAYER_VACUUM, true);
+        return true;
+    }
+
+    // ======================================================================
+    // VWAP REVERSION — spot-only long
+    // Edge: in GRIND regime, price pulls >20bp below session VWAP with
+    // positive book imbalance = buy the mean reversion back toward VWAP.
+    // Classic institutional anchor — large players accumulate at VWAP
+    // discounts, pulling price back. Very high win rate in ranging markets.
+    // Not valid in BREAKOUT (trending away from VWAP is a feature, not a bug).
+    // EV: TP=18bp gross (+8bp net), SL=7bp, win rate target ~68%
+    // ======================================================================
+    bool check_vwap_reversion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        std::string key = std::string(sym) + " VWAP";
+
+        if (latency_ms > TradingConfig::LATENCY_VWAP_MAX_MS) {
+            rejection_throttle_.record(key, "latency_too_high");
+            return false;
+        }
+        // Only fires in GRIND — VWAP reversion fails in trending regimes
+        if (s.regime != REGIME_GRIND) {
+            rejection_throttle_.record(key, "not_grind");
+            return false;
+        }
+        // Need established VWAP
+        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) {
+            rejection_throttle_.record(key, "vwap_not_ready");
+            return false;
+        }
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) {
+            rejection_throttle_.record(key, "no_book_data");
+            return false;
+        }
+        if (t.spread_bps > TradingConfig::VWAP_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_wide");
+            return false;
+        }
+        // Core signal: price is below VWAP by entry deviation threshold
+        double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
+        if (deviation_bp < TradingConfig::VWAP_ENTRY_DEVIATION_BP) {
+            rejection_throttle_.record(key, "not_far_enough_below_vwap");
+            return false;
+        }
+        // Don't enter if too far below VWAP — that's a breakdown, not a dip
+        if (deviation_bp > TradingConfig::VWAP_MAX_DEVIATION_BP) {
+            rejection_throttle_.record(key, "too_far_below_vwap");
+            return false;
+        }
+        // Book must show bid pressure — buyers are stepping in
+        if (t.book_imbalance < TradingConfig::VWAP_MIN_IMBALANCE) {
+            rejection_throttle_.record(key, "no_bid_confirmation");
+            return false;
+        }
+        std::printf("[VWAP-REV] %s | price=%.4f | vwap=%.4f | dev=%.1fbp | imbal=%.2f | ENTERING LONG\n",
+                    sym, price, s.session_vwap, deviation_bp, t.book_imbalance);
+        std::fflush(stdout);
+        enter(id, price, ts, s, LAYER_VWAP, true);
+        return true;
+    }
+
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
         Signal sig;
         sig.symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
@@ -1068,8 +1247,10 @@ private:
         // Expected gross edge per layer (gross TP targets from TradingConfig)
         sig.expected_bps = (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
                            (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
-                           (layer == LAYER_IMPULSE)  ? TradingConfig::IMPULSE_TP_BP :
-                                                       TradingConfig::IMPULSE_TP_BP;
+                           (layer == LAYER_VACUUM)  ? TradingConfig::VACUUM_TP_BP :
+                           (layer == LAYER_VWAP)    ? TradingConfig::VWAP_TP_BP :
+                           (layer == LAYER_IMPULSE) ? TradingConfig::IMPULSE_TP_BP :
+                                                      TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
 
         // COST FLOOR GATE
@@ -1079,9 +1260,11 @@ private:
             : TradingConfig::COST_FLOOR_BP;
         if (sig.expected_bps < cost_floor) {
             std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") +
-                             " " + ((layer == LAYER_LEADLAG) ? "LEADLAG" :
-                                    (layer == LAYER_IMPULSE) ? "IMPULSE" :
-                                    (layer == LAYER_EXPANSION) ? "EXPAND" : "IMBAL");
+                             " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
+                                    (layer == LAYER_IMPULSE)   ? "IMPULSE" :
+                                    (layer == LAYER_EXPANSION) ? "EXPAND"  :
+                                    (layer == LAYER_VACUUM)    ? "VACUUM"  :
+                                    (layer == LAYER_VWAP)      ? "VWAP"    : "IMBAL");
             rejection_throttle_.record(key, "cost_floor");
             return;
         }
@@ -1161,9 +1344,11 @@ private:
         }
         
         const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
-        const char* mode = (layer == LAYER_MICRO)   ? "IMBAL"   :
-                           (layer == LAYER_IMPULSE) ? "IMPULSE" :
-                           (layer == LAYER_LEADLAG) ? "LEADLAG" : "EXPAND";
+        const char* mode = (layer == LAYER_MICRO)    ? "IMBAL"   :
+                           (layer == LAYER_IMPULSE)  ? "IMPULSE" :
+                           (layer == LAYER_LEADLAG)  ? "LEADLAG" :
+                           (layer == LAYER_VACUUM)   ? "VACUUM"  :
+                           (layer == LAYER_VWAP)     ? "VWAP"    : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             // ── MAKER MODE: post limit order ──────────────────────────────
@@ -1255,6 +1440,8 @@ private:
         // Determine reason for P&L sign
         const char* layer_label = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
                                   (s.pos.layer == LAYER_LEADLAG)   ? "LEADLAG" :
+                                  (s.pos.layer == LAYER_VACUUM)    ? "VACUUM"  :
+                                  (s.pos.layer == LAYER_VWAP)      ? "VWAP"    :
                                   (s.pos.layer == LAYER_IMPULSE)   ? "IMPULSE" : "EXPAND";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
@@ -1297,14 +1484,16 @@ private:
                 ? (capital_control_.compute_final_size(0.5,
                       CapitalControlLayer::MarketEnv{}, 0.0, 0.0) / s.pos.entry_price)
                 : 0.0;
-            // Close in opposite direction: sell longs, buy-back shorts
-            executor_->execute(sym, !s.pos.is_long, qty, exit_px);
+            // Spot long-only: always SELL to close
+            executor_->execute(sym, false /*sell*/, qty, exit_px);
         }
         
         // Broadcast exit to GUI with complete trade details
-        const char* layer_str = (s.pos.layer == LAYER_MICRO) ? "MICRO" : 
-                               (s.pos.layer == LAYER_IMPULSE) ? "IMPULSE" : 
-                               (s.pos.layer == LAYER_LEADLAG) ? "LEADLAG" : "EXPAND";
+        const char* layer_str = (s.pos.layer == LAYER_MICRO)   ? "MICRO"   :
+                               (s.pos.layer == LAYER_IMPULSE)  ? "IMPULSE" :
+                               (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
+                               (s.pos.layer == LAYER_VACUUM)   ? "VACUUM"  :
+                               (s.pos.layer == LAYER_VWAP)     ? "VWAP"    : "EXPAND";
         broadcast_to_gui(GuiMessageBuilder::position_exit(
             symbol_full, layer_str, pnl, hold_time_ms, current_latency
         ));

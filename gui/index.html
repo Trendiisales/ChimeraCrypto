@@ -67,7 +67,7 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
 .sym-meta span{color:var(--muted)}.sym-meta strong{color:var(--text)}
 
 /* ENGINE GRID */
-.eng-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border)}
+.eng-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--border)}
 
 /* ENGINE CELL - contains signal column on the left */
 .eng-cell{background:var(--bg);display:flex;position:relative;overflow:hidden}
@@ -223,6 +223,32 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
         </div>
       </div>
     </div>
+    <!-- VACUUM -->
+    <div class="eng-cell" id="ec-btc-vacuum">
+      <div class="signal-col" id="sc-btc-vacuum"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-btc-vacuum">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-vacuum">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vacuum">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vacuum">--%</div></div>
+          <div><div class="est-label">Drain</div><div class="est-val dim" id="drain-btc">0%</div></div>
+        </div>
+      </div>
+    </div>
+    <!-- VWAP REVERSION -->
+    <div class="eng-cell" id="ec-btc-vwap">
+      <div class="signal-col" id="sc-btc-vwap"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-btc-vwap">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-vwap">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vwap">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vwap">--%</div></div>
+          <div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-btc">0bp</div></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -285,6 +311,32 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
         </div>
       </div>
     </div>
+    <!-- VACUUM -->
+    <div class="eng-cell" id="ec-eth-vacuum">
+      <div class="signal-col" id="sc-eth-vacuum"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-eth-vacuum">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-vacuum">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vacuum">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vacuum">--%</div></div>
+          <div><div class="est-label">Drain</div><div class="est-val dim" id="drain-eth">0%</div></div>
+        </div>
+      </div>
+    </div>
+    <!-- VWAP REVERSION -->
+    <div class="eng-cell" id="ec-eth-vwap">
+      <div class="signal-col" id="sc-eth-vwap"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-eth-vwap">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-vwap">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vwap">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vwap">--%</div></div>
+          <div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-eth">0bp</div></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -344,6 +396,32 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
           <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-compression">0</div></div>
           <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-compression">--%</div></div>
           <div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-sol">0/100</div></div>
+        </div>
+      </div>
+    </div>
+    <!-- VACUUM -->
+    <div class="eng-cell" id="ec-sol-vacuum">
+      <div class="signal-col" id="sc-sol-vacuum"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-sol-vacuum">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-vacuum">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-vacuum">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-vacuum">--%</div></div>
+          <div><div class="est-label">Drain</div><div class="est-val dim" id="drain-sol">0%</div></div>
+        </div>
+      </div>
+    </div>
+    <!-- VWAP REVERSION -->
+    <div class="eng-cell" id="ec-sol-vwap">
+      <div class="signal-col" id="sc-sol-vwap"></div>
+      <div class="eng-content">
+        <div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-sol-vwap">OFF</span></div>
+        <div class="eng-stats">
+          <div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-vwap">0bp</div></div>
+          <div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-vwap">0</div></div>
+          <div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-vwap">--%</div></div>
+          <div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-sol">0bp</div></div>
         </div>
       </div>
     </div>

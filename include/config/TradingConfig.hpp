@@ -144,6 +144,33 @@ struct TradingConfig {
     // Minimum ticks in short window before impulse fires
     static constexpr int IMPULSE_MIN_SHORT_TICKS       = 5;
 
+    // -------------------------------------------------------------------------
+    // LIQUIDITY VACUUM ENGINE
+    // Edge: ask-side depth drains >40% in 2 ticks → price gaps up through vacuum
+    // Spot-only long: buy when ask wall disappears before price moves
+    // -------------------------------------------------------------------------
+    static constexpr double VACUUM_ASK_DRAIN_RATIO     = 0.40;  // ask depth drops 40%+
+    static constexpr double VACUUM_MIN_IMBALANCE       = 0.20;  // bid must be present
+    static constexpr double VACUUM_MAX_SPREAD_BPS      = 2.0;   // don't enter wide spreads
+    static constexpr double VACUUM_TP_BP               = 16.0;
+    static constexpr double VACUUM_SL_BP               = 6.0;
+    static constexpr int64_t VACUUM_MAX_HOLD_MS        = 12000;
+    static constexpr double LATENCY_VACUUM_MAX_MS      = 30.0;  // tight — edge decays fast
+
+    // -------------------------------------------------------------------------
+    // VWAP REVERSION ENGINE
+    // Edge: in GRIND regime, price >20bp below session VWAP + bid imbalance = buy
+    // Mean reversion back toward VWAP. High win rate in ranging markets.
+    // -------------------------------------------------------------------------
+    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 20.0;  // min distance below VWAP
+    static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
+    static constexpr double VWAP_MIN_IMBALANCE         = 0.15;  // bid pressure must confirm
+    static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
+    static constexpr double VWAP_TP_BP                 = 18.0;
+    static constexpr double VWAP_SL_BP                 = 7.0;
+    static constexpr int64_t VWAP_MAX_HOLD_MS          = 45000; // slower mean reversion
+    static constexpr double LATENCY_VWAP_MAX_MS        = 50.0;  // not latency sensitive
+
 
     // -------------------------------------------------------------------------
     // REGIME CLASSIFICATION THRESHOLDS

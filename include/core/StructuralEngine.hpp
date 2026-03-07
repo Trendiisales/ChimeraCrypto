@@ -50,6 +50,8 @@ public:
     double total_pnl_bp = 0.0;
     int total_trades = 0;
     int winning_trades = 0;
+    double last_trade_entry_px = 0.0;
+    double last_trade_pnl_bp   = 0.0;
 
     explicit StructuralEngine(const std::string& sym = "") : symbol(sym) {}
 
@@ -187,9 +189,10 @@ public:
             std::fflush(stdout);
             
             // Start cooldown for micro engine (45 ticks)
-            last_exit_direction = pos.dir;
-            cooldown_ticks = 45;
-            
+            last_exit_direction  = pos.dir;
+            cooldown_ticks       = 45;
+            last_trade_entry_px  = pos.entry_price;
+            last_trade_pnl_bp    = final_pnl;
             reset();
         }
     }
@@ -216,7 +219,7 @@ public:
         Stats s;
         s.active = active;
         s.size_R = pos.size_R;
-        s.entry_price = pos.entry_price;
+        s.entry_price = (pos.active) ? pos.entry_price : last_trade_entry_px;
         s.mfe_bp = pos.mfe_bp;
         s.mae_bp = pos.mae_bp;
         s.total_pnl_bp = total_pnl_bp;

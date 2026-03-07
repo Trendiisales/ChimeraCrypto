@@ -212,6 +212,8 @@ public:
             std::fflush(stdout);
 
             cooldown_ticks = 40;
+            last_trade_entry_px = pos.entry_price;
+            last_trade_pnl_bp   = final_pnl;
             pos.reset();
         }
     }
@@ -242,7 +244,7 @@ public:
         s.active = pos.active;
         s.dir = pos.dir;
         s.size_R = pos.size_R;
-        s.entry_price = pos.entry_price;
+        s.entry_price = pos.active ? pos.entry_price : last_trade_entry_px;
         s.mfe_bp = pos.mfe_bp;
         s.mae_bp = pos.mae_bp;
         s.total_pnl_bp = total_pnl_bp;

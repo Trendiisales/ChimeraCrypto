@@ -9,6 +9,26 @@ const fmtPx = (v, decimals) => v > 0
 
 // ── AUDIO ─────────────────────────────────────────────────────────────────
 let _ctx = null;
+let _audioUnlocked = false;
+
+function unlockAudio() {
+  if (_audioUnlocked) return;
+  try {
+    _ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // Play a silent buffer to unlock
+    const buf = _ctx.createBuffer(1, 1, 22050);
+    const src = _ctx.createBufferSource();
+    src.buffer = buf; src.connect(_ctx.destination); src.start(0);
+    _audioUnlocked = true;
+    const btn = document.getElementById('audio-unlock');
+    if (btn) { btn.style.display = 'none'; }
+  } catch(e) {}
+}
+
+// Unlock on any interaction
+document.addEventListener('click', unlockAudio, { once: true });
+document.addEventListener('keydown', unlockAudio, { once: true });
+
 function playWin() {
   try {
     if (!_ctx) _ctx = new (window.AudioContext || window.webkitAudioContext)();

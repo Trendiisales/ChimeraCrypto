@@ -12,6 +12,8 @@
 #include <deque>
 #include <mutex>
 #include <chrono>
+#include <fstream>
+#include <ctime>
 
 namespace chimera {
 
@@ -24,6 +26,7 @@ namespace chimera {
 class QuadEngineBalancedEngine {
 public:
     QuadEngineBalancedEngine() : http_server_(8080) {
+        load_trades_from_disk();
         // Initialize signal engines
         structural_[0] = StructuralEngine("btcusdt");
         structural_[1] = StructuralEngine("ethusdt");
@@ -333,6 +336,53 @@ private:
     int    prev_compression_trades_[3] = {0,0,0};
     double prev_compression_pnl_[3]    = {0,0,0};
 
+    static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
+
+    void load_trades_from_disk() {
+        std::ifstream f(TRADE_LOG_FILE);
+        if (!f.is_open()) return;
+        std::string line;
+        std::lock_guard<std::mutex> lk(trade_log_mutex_);
+        while (std::getline(f, line)) {
+            if (line.size() < 10) continue;
+            TradeRecord r;
+            auto ex = [&](const std::string& key) -> std::string {
+                auto pos = line.find("\"" + key + "\":\"");
+                if (pos == std::string::npos) return "";
+                pos += key.size() + 4;
+                auto end = line.find('"', pos);
+                return end != std::string::npos ? line.substr(pos, end-pos) : "";
+            };
+            auto exd = [&](const std::string& key) -> double {
+                auto pos = line.find("\"" + key + "\":");
+                if (pos == std::string::npos) return 0.0;
+                pos += key.size() + 3;
+                auto end = line.find_first_of(",}", pos);
+                try { return std::stod(line.substr(pos, end-pos)); } catch(...) { return 0.0; }
+            };
+            r.time = ex("t"); r.symbol = ex("s"); r.engine = ex("e");
+            r.pnl_bp = exd("p"); r.entry_price = exd("en"); r.exit_price = exd("ex");
+            if (!r.time.empty() && !r.symbol.empty())
+                trade_log_.push_back(r);
+        }
+        if (trade_log_.size() > 50) trade_log_.resize(50);
+        std::printf("[TRADE_LOG] Loaded %zu trades from disk\n", trade_log_.size());
+    }
+
+    void save_trade_to_disk(const TradeRecord& r) {
+        // Ensure data dir exists
+        ::system("mkdir -p data");
+        std::ofstream f(TRADE_LOG_FILE, std::ios::app);
+        if (!f.is_open()) return;
+        f << std::fixed << std::setprecision(2)
+          << "{\"t\":\"" << r.time << "\","
+          << "\"s\":\"" << r.symbol << "\","
+          << "\"e\":\"" << r.engine << "\","
+          << "\"p\":" << r.pnl_bp << ","
+          << "\"en\":" << r.entry_price << ","
+          << "\"ex\":" << r.exit_price << "}\n";
+    }
+
     static std::string now_hms() {
         auto t = std::time(nullptr);
         char buf[16];
@@ -349,6 +399,7 @@ private:
         r.pnl_bp      = pnl_bp;
         r.entry_price = entry_px;
         r.exit_price  = current_px;
+        save_trade_to_disk(r);
         std::lock_guard<std::mutex> lk(trade_log_mutex_);
         trade_log_.push_front(r);
         if (trade_log_.size() > 50) trade_log_.pop_back();

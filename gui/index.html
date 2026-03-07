@@ -130,6 +130,7 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
     <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
   </div>
   <div class="topbar-right">
+    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:3px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px">🔔 UNMUTE</button>
     <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
     <span id="conn-badge" class="badge badge-disc">OFFLINE</span>
     <div id="live-dot" class="dot"></div>

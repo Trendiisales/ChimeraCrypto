@@ -303,14 +303,15 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
 //   /stream?streams=btcusdt@bookTicker/btcusdt@aggTrade/ethusdt@bookTicker/...
 // ============================================================================
 void BinanceWSFeed::run() {
-    // Build combined stream path: one bookTicker + one aggTrade per symbol
-    std::string stream_path = "/stream?streams=";
+    // Build combined stream path into member so c_str() pointer stays valid
+    // for the entire lifetime of the lws connection
+    stream_path_ = "/stream?streams=";
     for (size_t i = 0; i < symbols_.size(); ++i) {
-        if (i > 0) stream_path += "/";
-        stream_path += symbols_[i] + "@bookTicker/" + symbols_[i] + "@aggTrade";
+        if (i > 0) stream_path_ += "/";
+        stream_path_ += symbols_[i] + "@bookTicker/" + symbols_[i] + "@aggTrade";
     }
 
-    std::printf("[WS] Subscribing: %s\n", stream_path.c_str());
+    std::printf("[WS] Subscribing: %s\n", stream_path_.c_str());
     std::fflush(stdout);
 
     static struct lws_protocols protocols[] = {
@@ -338,7 +339,7 @@ void BinanceWSFeed::run() {
     conn.context      = context_;
     conn.address      = "stream.binance.com";
     conn.port         = 9443;
-    conn.path         = stream_path.c_str();
+    conn.path         = stream_path_.c_str();
     conn.host         = conn.address;
     conn.origin       = conn.address;
     conn.ssl_connection = LCCSCF_USE_SSL;

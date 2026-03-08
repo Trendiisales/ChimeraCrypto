@@ -105,6 +105,12 @@ private:
     std::thread                                  thread_;
     std::atomic<bool>                            running_{false};
 
+    // stream_path must be a member — conn.path stores a raw c_str() pointer
+    // that must remain valid for the lifetime of the lws connection.
+    // Previously a local variable in run() — caused SEGV with 7 symbols
+    // when the heap-allocated string went out of scope before lws used it.
+    std::string stream_path_;
+
     struct lws_context *context_{nullptr};
     struct lws         *wsi_{nullptr};
 };

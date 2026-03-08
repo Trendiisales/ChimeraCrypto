@@ -166,9 +166,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 .sm-item strong { color: var(--text); font-size: 13px; }
 .sm-pnl.pos { color: var(--green); } .sm-pnl.neg { color: var(--red); }
 
+
+/* Poll error banner */
+#poll-error{display:none;position:fixed;bottom:0;left:0;right:0;z-index:300;background:rgba(255,61,87,.95);color:#fff;font-family:var(--fh);font-size:13px;font-weight:600;padding:8px 20px;display:flex;align-items:center;gap:16px;border-top:2px solid var(--red)}
+#poll-error.show{display:flex}
+#poll-error-msg{flex:1;letter-spacing:.5px}
+#poll-error-time{color:rgba(255,255,255,.7);font-size:12px;flex-shrink:0}
+#poll-error-count{background:rgba(0,0,0,.3);padding:2px 8px;border-radius:2px;font-size:12px;flex-shrink:0}
+/* Last-poll timestamp in topbar */
+#tb-last-poll{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+#tb-last-poll.stale{color:var(--red)}
 </style>
 </head>
 <body>
+<div id="poll-error"><span id="poll-error-count">ERR×0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
 <div id="win-flash">✓ WIN</div>
 <div class="topbar">
   <div class="topbar-left">
@@ -181,6 +192,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     <div class="tb-stat"><span class="tb-label">Trades</span><span id="tb-trades" class="tb-val accent">0</span></div>
     <div class="tb-stat"><span class="tb-label">Positions</span><span id="tb-positions" class="tb-val">0</span></div>
     <div class="tb-stat"><span class="tb-label">Latency p95</span><span id="tb-latency" class="tb-val accent">--ms</span></div>
+    <div class="tb-stat"><span class="tb-label">Last Poll</span><span id="tb-last-poll" class="tb-val" style="color:var(--muted)">--</span></div>
     <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
   </div>
   <div class="topbar-right">

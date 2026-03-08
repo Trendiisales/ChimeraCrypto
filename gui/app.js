@@ -405,26 +405,103 @@ function updateAll(data) {
 
 // ── POLL LOOP ─────────────────────────────────────────────────────────────────
 let connected = false;
+let pollErrors = 0;
+let lastPollOk = null;
+let lastPollErrorMsg = '';
 
-async function poll() {
-  try {
-    const res = await fetch('/api/state', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (!connected) {
-      connected = true;
-      const cb = $('conn-badge'); if (cb) { cb.textContent = 'LIVE'; cb.className = 'badge badge-conn'; }
-      const dot = $('live-dot'); if (dot) dot.className = 'dot live';
-    }
-    updateAll(data);
-  } catch(e) {
-    if (connected) {
-      connected = false;
-      const cb = $('conn-badge'); if (cb) { cb.textContent = 'OFFLINE'; cb.className = 'badge badge-disc'; }
-      const dot = $('live-dot'); if (dot) dot.className = 'dot';
-    }
+function fmtAgo(ts) {
+  if (!ts) return 'never';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return s + 's ago';
+  return Math.floor(s/60) + 'm' + (s%60) + 's ago';
+}
+
+function setPollOk() {
+  pollErrors = 0;
+  lastPollOk = Date.now();
+  const cb = $('conn-badge');
+  if (cb) { cb.textContent = 'LIVE'; cb.className = 'badge badge-conn'; }
+  const dot = $('live-dot');
+  if (dot) dot.className = 'dot live';
+  const banner = $('poll-error');
+  if (banner) banner.classList.remove('show');
+  const lp = $('tb-last-poll');
+  if (lp) { lp.textContent = 'now'; lp.className = 'tb-val'; }
+}
+
+function setPollError(reason) {
+  pollErrors++;
+  lastPollErrorMsg = reason;
+  connected = false;
+
+  // Badge
+  const cb = $('conn-badge');
+  if (cb) { cb.textContent = 'OFFLINE'; cb.className = 'badge badge-disc'; }
+  const dot = $('live-dot');
+  if (dot) dot.className = 'dot';
+
+  // Error banner — always visible with full detail
+  const banner = $('poll-error');
+  if (banner) banner.classList.add('show');
+  const msg = $('poll-error-msg');
+  if (msg) msg.textContent = reason;
+  const cnt = $('poll-error-count');
+  if (cnt) cnt.textContent = 'ERR×' + pollErrors;
+  const etime = $('poll-error-time');
+  if (etime) etime.textContent = 'last ok: ' + fmtAgo(lastPollOk);
+
+  // Last-poll indicator — goes red when stale
+  const lp = $('tb-last-poll');
+  if (lp) {
+    lp.textContent = fmtAgo(lastPollOk);
+    lp.className = 'tb-val stale';
   }
 }
+
+async function poll() {
+  let res;
+  try {
+    res = await fetch('/api/state', { cache: 'no-store', signal: AbortSignal.timeout(4000) });
+  } catch(e) {
+    // Network-level failure: timeout, DNS, connection refused etc
+    const reason = e.name === 'TimeoutError' ? 'Fetch timeout (>4s) — backend hung?' :
+                   e.name === 'TypeError'    ? 'Network error — backend down or unreachable' :
+                   'Fetch failed: ' + e.message;
+    setPollError(reason);
+    return;
+  }
+
+  if (!res.ok) {
+    setPollError('HTTP ' + res.status + ' ' + res.statusText + ' — backend returned error');
+    return;
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch(e) {
+    // Got a response but it wasn't valid JSON — backend probably crashed mid-write
+    let raw = '';
+    try { raw = await res.text(); } catch(_) {}
+    setPollError('JSON parse error — backend may have crashed. Preview: ' + raw.slice(0, 80));
+    return;
+  }
+
+  // All good
+  if (!connected) connected = true;
+  setPollOk();
+  updateAll(data);
+}
+
+// Update last-poll age every second so it counts up correctly when offline
+setInterval(() => {
+  if (pollErrors > 0) {
+    const etime = $('poll-error-time');
+    if (etime) etime.textContent = 'last ok: ' + fmtAgo(lastPollOk);
+    const lp = $('tb-last-poll');
+    if (lp) lp.textContent = fmtAgo(lastPollOk);
+  }
+}, 1000);
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 loadTrades(); renderTradeLog(); updateWinRate();

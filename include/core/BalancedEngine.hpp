@@ -1532,6 +1532,13 @@ private:
             latency_gov_.regime() == NET_CLEAN ? 5.0 : 15.0
         );
         
+        // PER-SYMBOL SIZE MULTIPLIER — data driven from log analysis
+        // SOL: 71% WR → boost. ETH: 50% WR → reduce. BTC: 66% WR → neutral.
+        double sym_mult = (id == 2) ? 1.4 :   // SOL — 71% WR, best performer
+                          (id == 1) ? 0.7 :   // ETH — 50% WR, weakest
+                                      1.0;    // BTC — 66% WR, neutral
+        legacy_size_mult *= sym_mult;
+
         if (consecutive_losses_ >= 2) {
             legacy_size_mult *= 0.6;
         }

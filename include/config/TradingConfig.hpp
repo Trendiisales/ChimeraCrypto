@@ -153,14 +153,14 @@ struct TradingConfig {
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
     static constexpr double IMPULSE_TP_BP              = 20.0;
-    static constexpr double IMPULSE_SL_BP              = 7.0;   // was 8.0 — tighter to cut losers faster
-    static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 30000;
+    static constexpr double IMPULSE_SL_BP              = 5.0;   // tightened from 7bp — cut losers faster
+    static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 15000; // cut from 30s — TIMEOUT losses running too long
 
     // EXPANSION has own tighter parameters — weaker edge than IMPULSE
     // SL tighter (5bp) to cut failed breakouts fast. Hold 12s max — if it hasn't moved by then it won't.
     static constexpr double EXPANSION_TP_BP             = 18.0;  // was shared with IMPULSE at 20bp
-    static constexpr double EXPANSION_SL_BP             = 5.0;   // was 8bp — way too loose for this engine
-    static constexpr int64_t EXPANSION_MAX_HOLD_MS      = 12000; // was 30s — cut dead trades at 12s
+    static constexpr double EXPANSION_SL_BP             = 4.0;   // tightened from 5bp — -6bp loss was exceeding SL
+    static constexpr int64_t EXPANSION_MAX_HOLD_MS      =  8000; // cut from 12s — dead trades should exit faster
 
     // Minimum ticks in short window before impulse fires
     static constexpr int IMPULSE_MIN_SHORT_TICKS       = 5;

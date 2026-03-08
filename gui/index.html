@@ -93,10 +93,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 .sr-val.pos{color:var(--green)}.sr-val.neg{color:var(--red)}.sr-val.accent{color:var(--accent)}
 
 .trade-log-inner{border-top:2px solid var(--border2);background:var(--bg);display:flex;flex-direction:column}
-.tli-head{display:flex;align-items:center;gap:20px;padding:9px 16px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0}
-.tli-title{font-family:var(--fh);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#5a8090;margin-right:4px}
-.ts-stat{font-size:13px;color:var(--muted)}.ts-stat strong{color:#d4e8f0;font-size:16px;font-weight:700}
-.ts-stat.pos strong{color:var(--green)}.ts-stat.neg strong{color:var(--red)}
+.tli-head{display:flex;align-items:center;gap:0;padding:7px 14px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto}
+.tli-title{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#2d4558;margin-right:12px;flex-shrink:0}
+.ts-block{display:flex;flex-direction:column;gap:1px;padding:0 12px;flex-shrink:0}
+.ts-sep{width:1px;height:30px;background:var(--border2);flex-shrink:0;margin:0 2px}
+.ts-label{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#2d4558;font-family:var(--fh)}
+.ts-val{font-size:15px;font-weight:700;color:#c0d8e8;font-variant-numeric:tabular-nums}
+.ts-val.ts-pos{color:var(--green)}.ts-val.ts-neg{color:var(--red)}
 .tli-cols{display:grid;grid-template-columns:42px 46px 76px 72px 88px 88px 72px 60px 72px;align-items:center;padding:4px 14px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.3);flex-shrink:0}
 .tlic{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#2d4558}
 .tli-body{overflow-y:auto;overflow-x:hidden;max-height:320px;min-height:60px}
@@ -228,11 +231,43 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
   <!-- ALL-SYMBOL TRADE LOG — embedded inside SOL block -->
   <div class="trade-log-inner">
     <div class="tli-head">
-      <span class="tli-title">📋 ALL TRADES</span>
-      <span class="ts-stat">Trades: <strong id="ts-count">0</strong></span>
-      <span class="ts-stat" id="ts-pnl-wrap">P&L: <strong id="ts-pnl">+0.00bp</strong></span>
-      <span class="ts-stat">Win Rate: <strong id="ts-wr">--%</strong></span>
-      <button onclick="clearTrades()" style="background:rgba(255,61,87,.12);color:var(--red);border:1px solid rgba(255,61,87,.3);padding:3px 10px;border-radius:2px;font-size:11px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto">CLEAR</button>
+      <span class="tli-title">ALL TRADES</span>
+      <div class="ts-block">
+        <div class="ts-label">TRADES</div>
+        <div class="ts-val" id="ts-count">0</div>
+      </div>
+      <div class="ts-sep"></div>
+      <div class="ts-block">
+        <div class="ts-label">WIN RATE</div>
+        <div class="ts-val" id="ts-wr">--%</div>
+      </div>
+      <div class="ts-block ts-sub">
+        <div class="ts-label">W / L</div>
+        <div class="ts-val"><span id="ts-wins" style="color:var(--green)">0</span><span style="color:var(--muted)"> / </span><span id="ts-losses" style="color:var(--red)">0</span></div>
+      </div>
+      <div class="ts-sep"></div>
+      <div class="ts-block">
+        <div class="ts-label">TOTAL P&amp;L</div>
+        <div class="ts-val" id="ts-pnl">+0.00bp</div>
+      </div>
+      <div class="ts-block ts-sub">
+        <div class="ts-label">USD</div>
+        <div class="ts-val" id="ts-usd">+$0.00</div>
+      </div>
+      <div class="ts-sep"></div>
+      <div class="ts-block">
+        <div class="ts-label">AVG WIN</div>
+        <div class="ts-val ts-pos" id="ts-avgwin">--</div>
+      </div>
+      <div class="ts-block">
+        <div class="ts-label">AVG LOSS</div>
+        <div class="ts-val ts-neg" id="ts-avgloss">--</div>
+      </div>
+      <div class="ts-block">
+        <div class="ts-label">EXPECTANCY</div>
+        <div class="ts-val" id="ts-exp">--</div>
+      </div>
+      <button onclick="clearTrades()" style="background:rgba(255,61,87,.1);color:var(--red);border:1px solid rgba(255,61,87,.25);padding:3px 10px;border-radius:2px;font-size:10px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto;flex-shrink:0">CLEAR</button>
     </div>
     <div class="tli-cols">
       <span class="tlic"></span>

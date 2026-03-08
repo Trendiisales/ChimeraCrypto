@@ -199,7 +199,61 @@ function updateWinRate() {
   const wr = t > 0 ? (wins / t * 100).toFixed(0) + '%' : '--%';
   set('ts-wr', wr);
   const tswr = $('ts-wr');
-  if (tswr) tswr.style.color = t > 0 ? (wins >= losses ? 'var(--green)' : 'var(--red)') : '';
+  if (tswr) tswr.className = 'ts-val ' + (t > 0 ? (wins >= losses ? 'ts-pos' : 'ts-neg') : '');
+}
+
+function renderTradeLog() {
+  const body = $('trade-table-body');
+  if (!body) return;
+
+  // Calculate all stats
+  let totalPnl = 0, winPnl = 0, lossPnl = 0, winCount = 0, lossCount = 0;
+  localTrades.forEach(t => {
+    const p = +t.p || 0;
+    totalPnl += p;
+    if (p >= 0) { winPnl += p; winCount++; }
+    else        { lossPnl += p; lossCount++; }
+  });
+
+  const avgWin  = winCount  > 0 ? winPnl  / winCount  : null;
+  const avgLoss = lossCount > 0 ? lossPnl / lossCount : null;
+  const total   = winCount + lossCount;
+  const wr      = total > 0 ? winCount / total : null;
+  // Expectancy = (WR × avgWin) + ((1-WR) × avgLoss)
+  const exp     = (wr !== null && avgWin !== null && avgLoss !== null)
+                  ? (wr * avgWin + (1 - wr) * avgLoss) : null;
+
+  // Populate
+  set('ts-count', total);
+  set('ts-wins',  winCount);
+  set('ts-losses', lossCount);
+
+  const pnlEl = $('ts-pnl');
+  if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.className = 'ts-val ' + (totalPnl >= 0 ? 'ts-pos' : 'ts-neg'); }
+
+  const usdEl = $('ts-usd');
+  if (usdEl) { usdEl.textContent = fmtUsd(bpToUsd(totalPnl)); usdEl.className = 'ts-val ' + (totalPnl >= 0 ? 'ts-pos' : 'ts-neg'); }
+
+  const wrEl = $('ts-wr');
+  if (wrEl) { wrEl.textContent = wr !== null ? (wr*100).toFixed(0)+'%' : '--%'; wrEl.className = 'ts-val ' + (wr !== null ? (wr >= 0.5 ? 'ts-pos' : 'ts-neg') : ''); }
+
+  const awEl = $('ts-avgwin');
+  if (awEl) { awEl.textContent = avgWin !== null ? '+' + avgWin.toFixed(2) + 'bp' : '--'; }
+
+  const alEl = $('ts-avgloss');
+  if (alEl) { alEl.textContent = avgLoss !== null ? avgLoss.toFixed(2) + 'bp' : '--'; }
+
+  const expEl = $('ts-exp');
+  if (expEl) {
+    expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--';
+    expEl.className = 'ts-val ' + (exp !== null ? (exp >= 0 ? 'ts-pos' : 'ts-neg') : '');
+  }
+
+  if (!localTrades.length) {
+    body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>';
+    return;
+  }
+  body.innerHTML = localTrades.slice(0, 80).map(makeRow).join('');
 }
 
 // ── TRADE CARDS ───────────────────────────────────────────────────────────────
@@ -222,9 +276,6 @@ function makeRow(tr) {
   const ex    = tr.ex ? fmtPrice(tr.ex, sym) : '--';
   const why   = (tr.why || tr.reason || '?').toUpperCase();
   const time  = tr.t  ? tr.t.substring(11,19) : '--';
-  const mfe   = tr.mfe != null ? `+${(+tr.mfe).toFixed(1)}` : '--';
-  const mae   = tr.mae != null ? `${(+tr.mae).toFixed(1)}`  : '--';
-  // 9 cols: tag | sym | bp | $ | engine | entry | exit | reason | time
   return `<div class="tl-row ${isWin?'win':'loss'}">
     <span class="tl-tag ${isWin?'win':'loss'}">${isWin?'W':'L'}</span>
     <span class="tl-sym">${sym}</span>
@@ -236,23 +287,6 @@ function makeRow(tr) {
     <span class="tl-reason ${rc}">${why}</span>
     <span class="tl-time">${time}</span>
   </div>`;
-}
-
-function renderTradeLog() {
-  const body = $('trade-table-body');
-  if (!body) return;
-
-  let totalPnl = 0;
-  localTrades.forEach(t => totalPnl += (+t.p || 0));
-  set('ts-count', localTrades.length);
-  const tspnl = $('ts-pnl');
-  if (tspnl) { tspnl.textContent = fmtPnl(totalPnl); tspnl.className = +totalPnl >= 0 ? 'pos' : 'neg'; }
-
-  if (!localTrades.length) {
-    body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>';
-    return;
-  }
-  body.innerHTML = localTrades.slice(0, 80).map(makeRow).join('');
 }
 
 // ── REGIME STATE ──────────────────────────────────────────────────────────────

@@ -96,11 +96,11 @@ struct TradingConfig {
     // Hold tightened 2500→1500ms: if SOL hasn't moved in 1.5s, the propagation is done.
     // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 12.0; // min ETH move to signal
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 20.0;  // raised: 12bp = zero net edge after costs
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 8.0;   // lowered: MFE shows 8bp reachable, 20bp was never hit
     static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;  // tightened: less loss when wrong
     static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 2500; // extended: need more time to reach 20bp TP
 
-    static constexpr double LEADLAG_TP_BP              = 20.0;  // raised: 14bp had no edge at 63% WR (net=2bp)
+    static constexpr double LEADLAG_TP_BP              = 10.0;  // lowered: MFE avg 8bp, 20bp unreachable — exits as TIMEOUT
 
     // Stop loss for lead-lag trades
     // Tight stop — if ETH/SOL doesn't follow BTC within 5s, exit
@@ -250,13 +250,13 @@ struct TradingConfig {
     // Trailing stop multiplier for non-micro strategies:
     // trail_distance = TRAIL_MULT * long_vol * price  (correct price units)
     // At BTC=$85k, long_vol=0.0003: trail = 2.5 * 0.0003 * 85000 = $63.75 = ~7.5bp
-    static constexpr double TRAIL_LONG_VOL_MULT        = 1.8;  // tighter trail — lock in more profit
+    static constexpr double TRAIL_LONG_VOL_MULT        = 3.0;  // loosened — was cutting 12bp winner at 4bp
 
     // Minimum profit before trailing stop activates
     // Lowered 5.0→2.5bp: at 5bp we were holding through full reversals on small wins.
     // ETH example: peaked +0.50bp, reversed to -3.86bp mae because trail never armed.
     // At 2.5bp the trail arms sooner and protects partial gains.
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 1.5;  // arm trail earlier (was 2.5)
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 1.5;  // arm at 1.5bp — protect small wins
 
     // Minimum ticks to hold before any exit allowed (prevent instant exits)
     static constexpr int    MIN_HOLD_TICKS             = 3;

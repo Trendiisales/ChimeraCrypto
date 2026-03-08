@@ -1551,6 +1551,12 @@ private:
                                       1.0;    // BTC — 66% WR, neutral
         legacy_size_mult *= sym_mult;
 
+        // PER-LAYER SIZE MULTIPLIER — LEADLAG 100% WR gets more capital
+        double layer_mult = (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL) ? 1.5 :  // 100% WR
+                            (layer == LAYER_EXPANSION) ? 0.8 :  // 62% WR, tighten
+                                                         1.0;
+        legacy_size_mult *= layer_mult;
+
         if (consecutive_losses_ >= 2) {
             legacy_size_mult *= 0.6;
         }

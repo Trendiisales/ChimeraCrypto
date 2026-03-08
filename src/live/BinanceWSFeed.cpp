@@ -49,12 +49,13 @@ void BinanceWSFeed::stop() {
 // get_or_create - fetch or initialise per-symbol state
 // ============================================================================
 BinanceWSFeed::SymbolState& BinanceWSFeed::get_or_create(const std::string& symbol) {
-    auto it = states_.find(symbol);
-    if (it == states_.end()) {
-        states_[symbol] = SymbolState{};
-        states_[symbol].tick.symbol = symbol;
-    }
-    return states_[symbol];
+    // emplace is a single operation — inserts only if key absent, returns
+    // iterator to existing-or-new element with no intermediate rehash.
+    // Previously: 3 separate operator[] calls, each could trigger rehash
+    // and invalidate references — caused SEGV with 7 symbols under rapid ticks.
+    auto [it, inserted] = states_.emplace(symbol, SymbolState{});
+    if (inserted) it->second.tick.symbol = symbol;
+    return it->second;
 }
 
 // ============================================================================
@@ -303,6 +304,15 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
 //   /stream?streams=btcusdt@bookTicker/btcusdt@aggTrade/ethusdt@bookTicker/...
 // ============================================================================
 void BinanceWSFeed::run() {
+    // Pre-populate all symbol states before connecting — ensures the map
+    // never rehashes during live tick processing, eliminating any rehash
+    // race between the WS callback thread and the map's internal state.
+    states_.reserve(symbols_.size() * 2);
+    for (const auto& sym : symbols_) {
+        auto& st = states_[sym];
+        st.tick.symbol = sym;
+    }
+
     // Build combined stream path into member so c_str() pointer stays valid
     // for the entire lifetime of the lws connection
     stream_path_ = "/stream?streams=";

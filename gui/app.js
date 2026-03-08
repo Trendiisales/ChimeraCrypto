@@ -33,17 +33,23 @@ function unlockAudio() {
 function playWin() {
   if (!audioUnlocked || !audioCtx) return;
   try {
-    // Rising two-tone chime — unmistakable win sound
     const now = audioCtx.currentTime;
-    [[880, 0, 0.12], [1320, 0.1, 0.18]].forEach(([freq, delay, dur]) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      osc.type = 'sine'; osc.frequency.setValueAtTime(freq, now + delay);
-      gain.gain.setValueAtTime(0, now + delay);
-      gain.gain.linearRampToValueAtTime(0.4, now + delay + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + delay + dur);
-      osc.start(now + delay); osc.stop(now + delay + dur + 0.05);
+    // Ding-ding: two sharp loud bell strikes, hard attack, long natural decay
+    [[0, 1400, 1480], [0.22, 1400, 1480]].forEach(([t, f1, f2]) => {
+      [f1, f2].forEach((freq, i) => {
+        const osc  = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const comp = audioCtx.createDynamicsCompressor();
+        comp.threshold.value = -6; comp.ratio.value = 3;
+        osc.connect(gain); gain.connect(comp); comp.connect(audioCtx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + t);
+        gain.gain.setValueAtTime(0, now + t);
+        gain.gain.linearRampToValueAtTime(i === 0 ? 1.2 : 0.6, now + t + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.3, now + t + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + t + 1.2);
+        osc.start(now + t); osc.stop(now + t + 1.3);
+      });
     });
   } catch(e) {}
 }

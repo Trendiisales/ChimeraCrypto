@@ -142,15 +142,12 @@ int main() {
 
     // ── 3. WebSocket feed ─────────────────────────────────────────────────────
     chimera::BinanceWSFeed feed;
-    feed.add_symbol("btcusdt");
-    feed.add_symbol("ethusdt");
-    feed.add_symbol("solusdt");
+    // Add all symbols — order must match SymbolIndex.hpp (BTC=0, ETH=1, SOL=2, ...)
+    for (int i = 0; i < chimera::MAX_SYMBOLS; ++i)
+        feed.add_symbol(chimera::sym_full(i));
 
     feed.set_callback([&](const chimera::MarketTick& tick) {
-        int id = -1;
-        if      (tick.symbol == "btcusdt") id = 0;
-        else if (tick.symbol == "ethusdt") id = 1;
-        else if (tick.symbol == "solusdt") id = 2;
+        int id = chimera::sym_id(tick.symbol);
         if (id < 0) return;
 
         double mid = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;

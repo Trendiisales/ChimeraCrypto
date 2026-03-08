@@ -36,22 +36,18 @@ public:
                        td.mfe_bp, td.mae_bp, td.hold_ms, td.reason);
         });
         // Initialize signal engines
-        structural_[0] = StructuralEngine("btcusdt");
-        structural_[1] = StructuralEngine("ethusdt");
-        structural_[2] = StructuralEngine("solusdt");
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            structural_[i] = StructuralEngine(sym_full(i));
         
-        convex_[0] = ConvexShockEngine("btcusdt");
-        convex_[1] = ConvexShockEngine("ethusdt");
-        convex_[2] = ConvexShockEngine("solusdt");
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            convex_[i] = ConvexShockEngine(sym_full(i));
         
-        compression_[0] = CompressionBreakoutEngine("btcusdt");
-        compression_[1] = CompressionBreakoutEngine("ethusdt");
-        compression_[2] = CompressionBreakoutEngine("solusdt");
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            compression_[i] = CompressionBreakoutEngine(sym_full(i));
         
         // Initialize capital allocators vector
-        allocator_.emplace_back("btcusdt");
-        allocator_.emplace_back("ethusdt");
-        allocator_.emplace_back("solusdt");
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            allocator_.emplace_back(sym_full(i));
         
         http_server_.set_state_callback([this]() {
             return generate_state_json();
@@ -243,8 +239,7 @@ public:
             json << "],";
         }
 
-        const char* symbols[] = {"btcusdt", "ethusdt", "solusdt"};
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < MAX_SYMBOLS; i++) {
             auto structural_stats = structural_[i].get_stats();
             auto convex_stats = convex_[i].get_stats();
             auto compression_stats = compression_[i].get_stats();
@@ -324,9 +319,9 @@ public:
 
 private:
     BalancedEngine balanced_;
-    StructuralEngine structural_[3];
-    ConvexShockEngine convex_[3];
-    CompressionBreakoutEngine compression_[3];
+    StructuralEngine structural_[MAX_SYMBOLS];
+    ConvexShockEngine convex_[MAX_SYMBOLS];
+    CompressionBreakoutEngine compression_[MAX_SYMBOLS];
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
 
@@ -349,12 +344,12 @@ private:
     std::mutex trade_log_mutex_;
 
     // Previous trade counts + cumulative pnl to compute per-trade pnl delta
-    int    prev_structural_trades_[3]  = {0,0,0};
-    double prev_structural_pnl_[3]     = {0,0,0};
-    int    prev_convex_trades_[3]      = {0,0,0};
-    double prev_convex_pnl_[3]         = {0,0,0};
-    int    prev_compression_trades_[3] = {0,0,0};
-    double prev_compression_pnl_[3]    = {0,0,0};
+    int    prev_structural_trades_[MAX_SYMBOLS]  = {};
+    double prev_structural_pnl_[MAX_SYMBOLS]     = {};
+    int    prev_convex_trades_[MAX_SYMBOLS]      = {};
+    double prev_convex_pnl_[MAX_SYMBOLS]         = {};
+    int    prev_compression_trades_[MAX_SYMBOLS] = {};
+    double prev_compression_pnl_[MAX_SYMBOLS]    = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
     std::string last_written_trade_key_;  // dedup guard — prevents double-writes
@@ -458,7 +453,7 @@ private:
     }
 
     void check_new_trades(int id) {
-        const char* syms[] = {"BTC","ETH","SOL"};
+        // sym_short(i) used directly below
         const double px = market_state_[id].last_price;
 
         auto ss = structural_[id].get_stats();
@@ -468,7 +463,7 @@ private:
         // Structural exit detected
         if (ss.total_trades > prev_structural_trades_[id]) {
             double trade_pnl = ss.total_pnl_bp - prev_structural_pnl_[id];
-            push_trade(syms[id], "STRUCT", trade_pnl, ss.entry_price, px);
+            push_trade(sym_short(id), "STRUCT", trade_pnl, ss.entry_price, px);
             prev_structural_trades_[id] = ss.total_trades;
             prev_structural_pnl_[id]    = ss.total_pnl_bp;
         }
@@ -476,7 +471,7 @@ private:
         // Convex exit detected
         if (cs.total_trades > prev_convex_trades_[id]) {
             double trade_pnl = cs.total_pnl_bp - prev_convex_pnl_[id];
-            push_trade(syms[id], "CONVEX", trade_pnl, cs.entry_price, px);
+            push_trade(sym_short(id), "CONVEX", trade_pnl, cs.entry_price, px);
             prev_convex_trades_[id] = cs.total_trades;
             prev_convex_pnl_[id]    = cs.total_pnl_bp;
         }
@@ -484,7 +479,7 @@ private:
         // Compression exit detected
         if (xs.total_trades > prev_compression_trades_[id]) {
             double trade_pnl = xs.total_pnl_bp - prev_compression_pnl_[id];
-            push_trade(syms[id], "COMP", trade_pnl, xs.entry_price, px);
+            push_trade(sym_short(id), "COMP", trade_pnl, xs.entry_price, px);
             prev_compression_trades_[id] = xs.total_trades;
             prev_compression_pnl_[id]    = xs.total_pnl_bp;
         }
@@ -511,7 +506,7 @@ private:
         int tick_counter = 0;
     };
     
-    SimpleMarketState market_state_[3];
+    SimpleMarketState market_state_[MAX_SYMBOLS];
     
     void update_market_state(int id, double price, int64_t ts) {
         auto& ms = market_state_[id];

@@ -205,7 +205,7 @@ public:
     void set_trade_exit_callback(TradeExitCallback cb) { trade_exit_cb_ = std::move(cb); }
     
     BalancedEngine() : governor_(GovernorConfig()), allocator_(AllocatorConfig()), gui_broadcast_(nullptr) {
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
             symbols_[i].reset();
         open_positions_ = 0;
         loss_streak_ = 0;
@@ -217,15 +217,15 @@ public:
         total_trades_ = 0;
         consecutive_losses_ = 0;
         last_loss_ts_ = 0;
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
             last_snapshot_update_[i] = 0;
             tick_count_[i] = 0;
             last_tick_count_reset_[i] = 0;
-            snapshots_[i].symbol = (i == 0) ? "btcusdt" : (i == 1) ? "ethusdt" : "solusdt";
+            snapshots_[i].symbol = sym_full(i);
             snapshots_[i].last_disable_time = std::chrono::steady_clock::now();
         }
         
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
             expand_state_[i] = 0;
             expand_entry_price_[i] = 0.0;
             expand_peak_price_[i] = 0.0;
@@ -257,7 +257,7 @@ public:
         stall_detector_.on_ws_receive();
         stall_detector_.on_eval_start();
         
-        std::string my_symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+        std::string my_symbol = sym_full(id);
         rejection_telemetry_.recordEvaluation(my_symbol);
         
         // Update depth baseline for real queue_density in cap_env
@@ -353,8 +353,8 @@ public:
                        open_positions_, system_state_, loss_streak_, 
                        (kill_until_ > ts ? (kill_until_ - ts) : 0));
             
-            for (int i = 0; i < 3; ++i) {
-                const char* sym = (i == 0) ? "BTC" : (i == 1) ? "ETH" : "SOL";
+            for (int i = 0; i < MAX_SYMBOLS; ++i) {
+                const char* sym = sym_short(i);
                 const char* regime_name_str = regime_classifiers_[i].regime_name();
                 std::printf("[SYMBOL-STATE] %s | regime=%s (score=%.2f) | pos=%s | toxicity=%.2f | short_n=%zu | long_n=%zu\n",
                            sym, regime_name_str, regime_classifiers_[i].regime_score(),
@@ -382,9 +382,9 @@ public:
                     curr_long_vol = std::sqrt(var / symbols_[i].long_returns.size());
                 }
                 
-                std::string sym_full = (i == 0) ? "btcusdt" : (i == 1) ? "ethusdt" : "solusdt";
+                std::string symbol_full_str = chimera::sym_full(i);
                 broadcast_to_gui(GuiMessageBuilder::regime_update(
-                    sym_full, symbols_[i].regime, symbols_[i].last_price,
+                    symbol_full_str, symbols_[i].regime, symbols_[i].last_price,
                     (int)symbols_[i].short_returns.size(), curr_short_vol, curr_long_vol
                 ));
             }
@@ -479,7 +479,7 @@ public:
         s.regime = classify_regime(id);
         
         if (s.regime != old_regime) {
-            const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+            const char* sym = sym_short(id);
             std::printf("[REGIME-CHANGE] %s: %s → %s\n", 
                        sym, regime_name(old_regime), regime_name(s.regime));
             std::fflush(stdout);
@@ -520,10 +520,10 @@ public:
         // Prevents entering a trending-against-us move (e.g. ETH crash 02:46-02:51)
         if (ts < sym_sl_cooldown_[id]) {
             // Only log once per 30 seconds to avoid spam
-            static int64_t last_cb_log_[3] = {0, 0, 0};
+            static int64_t last_cb_log_[MAX_SYMBOLS] = {};
             if (ts - last_cb_log_[id] > 30000) {
                 std::printf("[CIRCUIT-BREAK] %s | paused %.0fs remaining (SL streak=%d)\n",
-                    (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                    sym_short(id),
                     (sym_sl_cooldown_[id] - ts) / 1000.0, sym_consecutive_sl_[id]);
                 std::fflush(stdout);
                 last_cb_log_[id] = ts;
@@ -703,7 +703,7 @@ private:
                    adaptive_allocator_.maker_weight());
         
         for (int i = 0; i < 3; ++i) {
-            const char* sym = (i == 0) ? "BTC" : (i == 1) ? "ETH" : "SOL";
+            const char* sym = sym_short(i);
             std::printf("  %s: Regime=%s (%.2f) | Tox=%.2f | Imp=%.2f | Mkr=%.2f\n",
                        sym,
                        regime_classifiers_[i].regime_name(),
@@ -778,7 +778,7 @@ private:
         // INSTRUMENTATION - Print every 500 classifications
         static int diag_counter = 0;
         if (++diag_counter % TradingConfig::REGIME_DIAG_INTERVAL == 0) {
-            const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+            const char* sym = sym_short(id);
             std::printf("[REGIME-RAW] %s | short_vol=%.6f | long_vol_ema=%.6f | vol_ratio_smooth=%.3f | regime=%s | ticks=%d\n",
                        sym, short_vol, long_vol, vol_ratio, regime_name(s.regime), s.regime_ticks);
             std::fflush(stdout);
@@ -826,7 +826,7 @@ private:
         
         // If regime changed, reset tick counter and log
         if (new_regime != s.regime) {
-            const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+            const char* sym = sym_short(id);
             std::printf("[REGIME-CHANGE] %s: %s → %s (vol_ratio_smooth=%.3f after %d ticks)\n",
                        sym, regime_name(s.regime), regime_name(new_regime), vol_ratio, s.regime_ticks);
             std::fflush(stdout);
@@ -869,7 +869,7 @@ private:
     // TP/SL from TradingConfig: 20bp TP, 8bp SL
     // ======================================================================
     bool check_impulse(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMPULSE";
 
         // Per-symbol guard: don't enter if this symbol already has a position
@@ -919,7 +919,7 @@ private:
     // Edge: vol_ratio expanding, price confirming direction
     // ======================================================================
     bool check_expansion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
 
         // ETH EXPAND DISABLED — 85 trades, 42% WR, -69.38bp (session log 2026-03-08)
@@ -997,7 +997,7 @@ private:
     //   Threshold 0.45 filters to highest-quality setups
     // ======================================================================
     bool check_imbalance(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMBAL";
 
         // Per-symbol guard
@@ -1124,7 +1124,7 @@ private:
             s.pos.mfe        = 0.0;
             s.pos.mae        = 0.0;
 
-            const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+            const char* sym  = sym_short(id);
             const char* mode = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
                                (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
                                (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
@@ -1231,7 +1231,7 @@ private:
         // Hard take-profit
         if (move_bp >= tp_bp) {
             std::printf("[TP-HIT] %s | layer=%s | move=%.2fbp >= tp=%.2fbp\n",
-                (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                sym_short(id),
                 (s.pos.layer == LAYER_MICRO)   ? "IMBAL"   :
                 (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
                 (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
@@ -1247,7 +1247,7 @@ private:
         // Hard stop loss
         if (move_bp <= -sl_bp) {
             std::printf("[SL-HIT] %s | move=%.2fbp <= -%.2fbp\n",
-                (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL", move_bp, sl_bp);
+                sym_short(id), move_bp, sl_bp);
             std::fflush(stdout);
             pending_exit_reason_ = "SL";
             exit(id, move_bp, ts, s);
@@ -1264,7 +1264,7 @@ private:
             if (peak_profit_bp >= TradingConfig::MIN_PROFIT_TO_TRAIL_BP) {
                 if (price < s.pos.peak_price - trail_distance) {
                     std::printf("[TRAIL-STOP] %s | peak=%.2fbp trail_dist=%.4f move=%.2fbp\n",
-                        (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                        sym_short(id),
                         peak_profit_bp, trail_distance / price * 10000.0, move_bp);
                     std::fflush(stdout);
                     pending_exit_reason_ = "TRAIL";
@@ -1277,7 +1277,7 @@ private:
         // Time-based forced exit
         if (ts - s.pos.entry_ts > max_hold) {
             std::printf("[MAX-HOLD] %s | hold=%ldms > %ldms\n",
-                (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                sym_short(id),
                 (long)(ts - s.pos.entry_ts), (long)max_hold);
             std::fflush(stdout);
             pending_exit_reason_ = "TIMEOUT";
@@ -1346,7 +1346,7 @@ private:
     // EV: TP=16bp gross (+6bp net), SL=6bp, win rate target ~65%
     // ======================================================================
     bool check_vacuum(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* sym = sym_short(id);
         std::string key = std::string(sym) + " VACUUM";
 
         // Per-symbol guard
@@ -1405,7 +1405,7 @@ private:
     // EV: TP=18bp gross (+8bp net), SL=7bp, win rate target ~68%
     // ======================================================================
     bool check_vwap_reversion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* sym = sym_short(id);
         std::string key = std::string(sym) + " VWAP";
 
         // Per-symbol guard
@@ -1459,7 +1459,7 @@ private:
 
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
         Signal sig;
-        sig.symbol = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+        sig.symbol = sym_full(id);
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
                     (layer == LAYER_EXPANSION) ? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
@@ -1475,7 +1475,7 @@ private:
 
         // HARD LATENCY BACKSTOP — never enter on stale data regardless of engine
         if (market_env_.latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
-            std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") + " ENTER";
+            std::string key = std::string(sym_short(id)) + " ENTER";
             rejection_throttle_.record(key, "latency_hard_block");
             return;
         }
@@ -1486,7 +1486,7 @@ private:
             ? TradingConfig::MAKER_COST_FLOOR_BP
             : TradingConfig::COST_FLOOR_BP;
         if (sig.expected_bps < cost_floor) {
-            std::string key = std::string((id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL") +
+            std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
                                     (layer == LAYER_IMPULSE)   ? "IMPULSE" :
                                     (layer == LAYER_EXPANSION) ? "EXPAND"  :
@@ -1596,7 +1596,7 @@ private:
             legacy_size_mult *= fund_mult;
         }
         
-        const char* sym  = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+        const char* sym  = sym_short(id);
         const char* mode = (layer == LAYER_MICRO)    ? "IMBAL"   :
                            (layer == LAYER_IMPULSE)  ? "IMPULSE" :
                            (layer == LAYER_LEADLAG)  ? "LEADLAG" :
@@ -1670,7 +1670,7 @@ private:
                 executor_->execute(sym_lower(id), is_long, qty, price);
             }
 
-            std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+            std::string symbol_full = sym_full(id);
             broadcast_to_gui(GuiMessageBuilder::position_enter(
                 symbol_full, mode, price, (int)s.regime, final_weight
             ));
@@ -1678,8 +1678,8 @@ private:
     }
     
     void exit(int id, double pnl, int64_t ts, SymbolState& s) {
-        const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
-        std::string symbol_full = (id == 0) ? "btcusdt" : (id == 1) ? "ethusdt" : "solusdt";
+        const char* sym = sym_short(id);
+        std::string symbol_full = sym_full(id);
         
         int64_t hold_time_ms = ts - s.pos.entry_ts;  // ts is already milliseconds
         double current_latency = snapshots_[id].lat_p95_ms;
@@ -1825,7 +1825,7 @@ private:
                 sym_consecutive_sl_[id]++;
                 if (sym_consecutive_sl_[id] >= SYM_SL_STREAK_LIMIT) {
                     sym_sl_cooldown_[id] = ts + SYM_SL_PAUSE_MS;
-                    const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+                    const char* sym = sym_short(id);
                     std::printf("[CIRCUIT-BREAK-TRIGGER] %s | %d consecutive SLs — pausing 5min\n",
                         sym, sym_consecutive_sl_[id]);
                     std::fflush(stdout);
@@ -1865,13 +1865,13 @@ private:
         }
     }
     
-    SymbolState symbols_[3];
+    SymbolState symbols_[MAX_SYMBOLS];
     LatencyGovernor latency_gov_;
     LeadLagEngine leadlag_;
-    LimitOrderManager limit_orders_[3];  // One per symbol
+    LimitOrderManager limit_orders_[MAX_SYMBOLS];  // One per symbol
     ShadowLogger shadow_log_;
     FundingRateFetcher* funding_ = nullptr;  // optional — set from main()
-    VolatilityScoring vol_scoring_[3];
+    VolatilityScoring vol_scoring_[MAX_SYMBOLS];
     StatefulGovernor governor_;
     MultiSymbolAllocator allocator_;
     RejectionTelemetryAsync rejection_telemetry_;
@@ -1880,27 +1880,27 @@ private:
     EngineStallDetector stall_detector_;
     RejectionThrottle rejection_throttle_;
     
-    SymbolSnapshot snapshots_[3];
-    int64_t last_snapshot_update_[3];
-    int64_t tick_count_[3];
-    int64_t last_tick_count_reset_[3];
+    SymbolSnapshot snapshots_[MAX_SYMBOLS];
+    int64_t last_snapshot_update_[MAX_SYMBOLS];
+    int64_t tick_count_[MAX_SYMBOLS];
+    int64_t last_tick_count_reset_[MAX_SYMBOLS];
     int open_positions_;
     int loss_streak_;
     int64_t kill_until_;
     SystemState system_state_;
     int64_t layer_lock_until_;
     
-    int expand_state_[3];
-    double expand_entry_price_[3];
-    double expand_peak_price_[3];
+    int expand_state_[MAX_SYMBOLS];
+    double expand_entry_price_[MAX_SYMBOLS];
+    double expand_peak_price_[MAX_SYMBOLS];
     int consecutive_losses_;
     int64_t last_loss_ts_;
 
     // PER-SYMBOL CIRCUIT BREAKER — prevents entering a trending-against-us move
     // After 2 consecutive SL exits on the same symbol, pause that symbol 5 minutes
     // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
-    int     sym_consecutive_sl_[3]   = {0, 0, 0};
-    int64_t sym_sl_cooldown_[3]      = {0, 0, 0};
+    int     sym_consecutive_sl_[MAX_SYMBOLS];
+    int64_t sym_sl_cooldown_[MAX_SYMBOLS];
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
 
@@ -1954,27 +1954,23 @@ private:
     std::string          pending_exit_reason_;  // Set before each exit() call
     
     // PHASE 2: Microstructure and capital allocation
-    BookState book_states_[3];
+    BookState book_states_[MAX_SYMBOLS];
     MarketEnv market_env_;
-    ToxicFlowDetector toxic_flow_[3];
-    MicroEdgeEngine micro_edge_[3];
-    HybridRegimeClassifier regime_classifiers_[3];
+    ToxicFlowDetector toxic_flow_[MAX_SYMBOLS];
+    MicroEdgeEngine micro_edge_[MAX_SYMBOLS];
+    HybridRegimeClassifier regime_classifiers_[MAX_SYMBOLS];
     AdaptiveAllocator adaptive_allocator_;
     CapitalControlLayer capital_control_;
     ExecutionOptimizer execution_optimizer_;
     AdaptiveReinforcementLayer reinforcement_;
 
     // Depth baseline per symbol — used for real queue_density in cap_env
-    double depth_baseline_[3] = {0.0, 0.0, 0.0};
+    double depth_baseline_[MAX_SYMBOLS];
 
     // Spot executor — wired at startup via set_executor()
     SpotExecutor* executor_ = nullptr;
 
-    static const char* sym_lower(int id) {
-        if (id == 0) return "btcusdt";
-        if (id == 1) return "ethusdt";
-        return "solusdt";
-    }
+    static const char* sym_lower(int id) { return sym_full(id); }
 };
 
 }

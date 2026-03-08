@@ -81,7 +81,7 @@ struct TradingConfig {
     // BTC must move at least this many bp in the lookback window to signal
     // Raised 8→10bp: at 8bp too many weak moves were triggering. 10bp filters
     // for genuine momentum that ETH/SOL reliably follows.
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 10.0;
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 8.0;   // lowered from 10bp — catch more valid moves, sustain filter handles fakes
 
     // Target already moved this much → edge consumed, don't enter
     // Tightened 3→2bp: if target already moved 2bp the propagation is done

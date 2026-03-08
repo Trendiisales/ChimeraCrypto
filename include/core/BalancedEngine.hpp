@@ -1067,7 +1067,7 @@ private:
         // BTC does not follow itself
         if (id == 0) return false;
 
-        const char* sym = (id == 1) ? "ETH" : "SOL";
+        const char* sym = sym_short(id);  // was hardcoded ETH/SOL — now works for all 7 symbols
         std::string key = std::string(sym) + " LEADLAG";
 
         if (ts < layer_lock_until_) {
@@ -1093,11 +1093,22 @@ private:
             return false;
         }
 
+        // SUSTAIN FILTER — reject fake BTC spikes that reverse immediately.
+        // Require BTC move to still be >= 60% of threshold at entry time.
+        // Real moves sustain. Fake moves are already reversing by the time
+        // we check. Eliminates most SL hits on LEADLAG.
+        double btc_now_bp = leadlag_.btc_move_bp();
+        double sustain_threshold = TradingConfig::LEADLAG_BTC_THRESHOLD_BP * 0.6;
+        if (std::fabs(btc_now_bp) < sustain_threshold) {
+            rejection_throttle_.record(key, "btc_move_not_sustained");
+            return false;
+        }
+
         // Don't enter if already in a position on this symbol
         if (s.pos.state == POS_OPEN) return false;
 
-        std::printf("[LEADLAG] %s | btc_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
-                    sym, leadlag_.btc_move_bp(), latency_ms);
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | latency=%.1fms | ENTERING LONG\n",
+                    sym, leadlag_.btc_move_bp(), btc_now_bp, latency_ms);
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_LEADLAG, true);

@@ -357,6 +357,7 @@ private:
     double prev_compression_pnl_[3]    = {0,0,0};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
+    std::string last_written_trade_key_;  // dedup guard — prevents double-writes
 
     void load_trades_from_disk() {
         std::ifstream f(TRADE_LOG_FILE);
@@ -393,6 +394,18 @@ private:
     void save_trade_to_disk(const TradeRecord& r) {
         // Ensure data dir exists
         { int _r = ::system("mkdir -p data"); (void)_r; }
+
+        // DEDUP GUARD — prevent double-writes when two processes run simultaneously
+        // or when the callback fires twice for the same trade (e.g. after a restart)
+        std::string dedup_key = r.time + "|" + r.symbol + "|" + r.engine + "|" +
+                                std::to_string((int)(r.pnl_bp * 100));
+        if (dedup_key == last_written_trade_key_) {
+            std::printf("[TRADE-LOG-DEDUP] skipped duplicate: %s\n", dedup_key.c_str());
+            std::fflush(stdout);
+            return;
+        }
+        last_written_trade_key_ = dedup_key;
+
         std::ofstream f(TRADE_LOG_FILE, std::ios::app);
         if (!f.is_open()) return;
         f << std::fixed << std::setprecision(2)

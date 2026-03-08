@@ -515,6 +515,22 @@ public:
         int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : 3;
         if (open_positions_ >= max_pos) return;
         
+        // PER-SYMBOL CIRCUIT BREAKER — block entry if symbol is in SL cooldown
+        // Fires after SYM_SL_STREAK_LIMIT (2) consecutive SL losses on this symbol
+        // Prevents entering a trending-against-us move (e.g. ETH crash 02:46-02:51)
+        if (ts < sym_sl_cooldown_[id]) {
+            // Only log once per 30 seconds to avoid spam
+            static int64_t last_cb_log_[3] = {0, 0, 0};
+            if (ts - last_cb_log_[id] > 30000) {
+                std::printf("[CIRCUIT-BREAK] %s | paused %.0fs remaining (SL streak=%d)\n",
+                    (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL",
+                    (sym_sl_cooldown_[id] - ts) / 1000.0, sym_consecutive_sl_[id]);
+                std::fflush(stdout);
+                last_cb_log_[id] = ts;
+            }
+            return;
+        }
+
         // Try signals in priority order
         // Priority: lead-lag first (best EV), then breakout, then microstructure
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
@@ -1791,10 +1807,26 @@ private:
             last_loss_ts_ = ts;
             snapshots_[id].loss_streak++;
             snapshots_[id].last_disable_time = std::chrono::steady_clock::now();
+
+            // PER-SYMBOL CIRCUIT BREAKER — track SL streak per symbol
+            if (td.reason == "SL") {
+                sym_consecutive_sl_[id]++;
+                if (sym_consecutive_sl_[id] >= SYM_SL_STREAK_LIMIT) {
+                    sym_sl_cooldown_[id] = ts + SYM_SL_PAUSE_MS;
+                    const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
+                    std::printf("[CIRCUIT-BREAK-TRIGGER] %s | %d consecutive SLs — pausing 5min\n",
+                        sym, sym_consecutive_sl_[id]);
+                    std::fflush(stdout);
+                }
+            } else {
+                // TIMEOUT/other loss resets SL streak but NOT the full cooldown
+                sym_consecutive_sl_[id] = 0;
+            }
         } else {
             loss_streak_ = 0;
             consecutive_losses_ = 0;
             snapshots_[id].loss_streak = 0;
+            sym_consecutive_sl_[id] = 0;  // win resets the SL streak for this symbol
         }
         
         if (loss_streak_ >= 3) kill_until_ = ts + 5000;
@@ -1851,6 +1883,14 @@ private:
     double expand_peak_price_[3];
     int consecutive_losses_;
     int64_t last_loss_ts_;
+
+    // PER-SYMBOL CIRCUIT BREAKER — prevents entering a trending-against-us move
+    // After 2 consecutive SL exits on the same symbol, pause that symbol 5 minutes
+    // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
+    int     sym_consecutive_sl_[3]   = {0, 0, 0};
+    int64_t sym_sl_cooldown_[3]      = {0, 0, 0};
+    static constexpr int     SYM_SL_STREAK_LIMIT = 2;
+    static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
 
     double total_pnl_;
     double realized_pnl_;

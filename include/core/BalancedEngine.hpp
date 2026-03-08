@@ -1698,6 +1698,10 @@ private:
             pnl, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
         std::fflush(stdout);
 
+        // Compute exit reason before the callback block so it's in scope for
+        // both stats_for() and the per-symbol circuit breaker below
+        std::string exit_reason = pending_exit_reason_.empty() ? (pnl >= 0 ? "TP" : "SL") : pending_exit_reason_;
+
         // Fire trade exit callback so QuadEngine can log full trade data
         if (trade_exit_cb_) {
             TradeExitData td;
@@ -1709,13 +1713,13 @@ private:
             td.mfe_bp      = s.pos.mfe;
             td.mae_bp      = s.pos.mae;
             td.hold_ms     = hold_time_ms;
-            td.reason      = pending_exit_reason_.empty() ? (pnl >= 0 ? "TP" : "SL") : pending_exit_reason_;
+            td.reason      = exit_reason;
             trade_exit_cb_(td);
         }
         pending_exit_reason_.clear();
 
         // Record per-layer session stats (visible in GUI Session Stats panel)
-        stats_for(s.pos.layer).record(pnl, td.reason, s.pos.mfe, s.pos.mae);
+        stats_for(s.pos.layer).record(pnl, exit_reason, s.pos.mfe, s.pos.mae);
 
         // Shadow log — structured CSV for edge measurement
         {
@@ -1809,7 +1813,7 @@ private:
             snapshots_[id].last_disable_time = std::chrono::steady_clock::now();
 
             // PER-SYMBOL CIRCUIT BREAKER — track SL streak per symbol
-            if (td.reason == "SL") {
+            if (exit_reason == "SL") {
                 sym_consecutive_sl_[id]++;
                 if (sym_consecutive_sl_[id] >= SYM_SL_STREAK_LIMIT) {
                     sym_sl_cooldown_[id] = ts + SYM_SL_PAUSE_MS;

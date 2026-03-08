@@ -61,7 +61,7 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Taker fees (8bp) + spread (1bp) + slippage (1bp) = ~10bp per round trip.
     // Any signal with expected edge below this is a guaranteed loser.
-    static constexpr double COST_FLOOR_BP = 10.0;
+    static constexpr double COST_FLOOR_BP = 12.0;  // raised from 10 — kills zero P&L entries (25% of trades)
 
 
     // -------------------------------------------------------------------------
@@ -250,13 +250,13 @@ struct TradingConfig {
     // Trailing stop multiplier for non-micro strategies:
     // trail_distance = TRAIL_MULT * long_vol * price  (correct price units)
     // At BTC=$85k, long_vol=0.0003: trail = 2.5 * 0.0003 * 85000 = $63.75 = ~7.5bp
-    static constexpr double TRAIL_LONG_VOL_MULT        = 2.5;
+    static constexpr double TRAIL_LONG_VOL_MULT        = 1.8;  // tighter trail — lock in more profit
 
     // Minimum profit before trailing stop activates
     // Lowered 5.0→2.5bp: at 5bp we were holding through full reversals on small wins.
     // ETH example: peaked +0.50bp, reversed to -3.86bp mae because trail never armed.
     // At 2.5bp the trail arms sooner and protects partial gains.
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 2.5;
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 1.5;  // arm trail earlier (was 2.5)
 
     // Minimum ticks to hold before any exit allowed (prevent instant exits)
     static constexpr int    MIN_HOLD_TICKS             = 3;

@@ -343,6 +343,15 @@ function updateAll(data) {
     const rmEl = $(`rm-${sym}`);
     if (rmEl) { rmEl.textContent = '×' + mult.toFixed(2); rmEl.className = 'regime-mult ' + (mult > 1.1 ? 'hi' : mult < 0.9 ? 'lo' : ''); }
 
+    // Mini summary (shown when block is collapsed)
+    const miniPnl = $(`mini-pnl-${sym}`);
+    const microPnl = d.micro_total_pnl_bp || 0;
+    const microT   = d.micro_total_trades || 0;
+    if (miniPnl) { miniPnl.textContent = (microPnl >= 0 ? '+' : '') + microPnl.toFixed(2) + 'bp'; miniPnl.className = 'sm-pnl ' + (microPnl > 0 ? 'pos' : microPnl < 0 ? 'neg' : ''); }
+    set(`mini-t-${sym}`, microT);
+    // Auto-expand if micro engine goes active
+    autoExpandIfActive(sym, d.micro_active);
+
     set(`vr-${sym}`,  d.vol_ratio      ? d.vol_ratio.toFixed(2)       : '--');
     set(`dp-${sym}`,  d.displacement_bp != null ? d.displacement_bp.toFixed(1) + 'bp' : '--bp');
     set(`reg-${sym}`, state);
@@ -425,3 +434,19 @@ updateWinRate();
 poll();
 setInterval(poll, 1000);
 setInterval(updateUptime, 1000);
+
+// ── COLLAPSIBLE SYM-BLOCKS ────────────────────────────────────────────────────
+function toggleBlock(sl) {
+  const block = document.getElementById('sb-' + sl);
+  if (!block) return;
+  block.classList.toggle('collapsed');
+}
+
+// Auto-expand a block when it has an active trade
+function autoExpandIfActive(sl, isActive) {
+  const block = document.getElementById('sb-' + sl);
+  if (!block) return;
+  if (isActive && block.classList.contains('collapsed')) {
+    block.classList.remove('collapsed');
+  }
+}

@@ -152,6 +152,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 #win-flash.show{display:block;animation:slidedown .25s ease}
 @keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* Collapsible sym-blocks for new symbols */
+.sym-block.collapsed .eng-grid { display: none; }
+.sym-block.collapsed .sym-trades { display: none; }
+.sym-head { cursor: pointer; user-select: none; }
+.sym-head:hover { background: linear-gradient(90deg,rgba(0,212,255,.13),transparent); }
+.collapse-arrow { font-size: 14px; color: var(--muted); margin-left: 10px; transition: transform 0.2s; flex-shrink: 0; }
+.sym-block.collapsed .collapse-arrow { transform: rotate(-90deg); }
+.sym-mini { display: none; gap: 20px; font-size: 12px; align-items: center; flex-wrap: wrap; }
+.sym-block.collapsed .sym-mini { display: flex; }
+.sm-item { color: var(--muted); }
+.sm-item strong { color: var(--text); font-size: 13px; }
+.sm-pnl.pos { color: var(--green); } .sm-pnl.neg { color: var(--red); }
+
 </style>
 </head>
 <body>
@@ -180,10 +194,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="page-body">
 <div class="left-panel">
 
-<div class="sym-block">
+<div class="sym-block" id="sb-btc" onclick="toggleBlock('btc')">
   <div class="sym-head"><span class="sym-name">BTC/USDT</span><span id="px-btc" class="sym-price">--</span>
     <div class="sym-meta"><span>Vol: <strong id="vr-btc">--</strong></span><span>Disp: <strong id="dp-btc">--bp</strong></span><span>Regime: <strong id="reg-btc">--</strong></span><span>Cap: <strong id="cap-btc">--</strong>R</span></div>
-  </div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-btc-micro"><div class="signal-col" id="sc-btc-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-btc-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-btc-structural"><div class="signal-col" id="sc-btc-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-btc-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-btc-structural">--</div></div></div></div></div>
@@ -200,12 +214,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-btc" class="sym-trades-empty">No trades yet</div>
   </div>
-
 </div>
-<div class="sym-block">
+
+<div class="sym-block" id="sb-eth" onclick="toggleBlock('eth')">
   <div class="sym-head"><span class="sym-name">ETH/USDT</span><span id="px-eth" class="sym-price">--</span>
     <div class="sym-meta"><span>Vol: <strong id="vr-eth">--</strong></span><span>Disp: <strong id="dp-eth">--bp</strong></span><span>Regime: <strong id="reg-eth">--</strong></span><span>Cap: <strong id="cap-eth">--</strong>R</span></div>
-  </div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-eth-micro"><div class="signal-col" id="sc-eth-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-eth-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-eth-structural"><div class="signal-col" id="sc-eth-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-eth-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-eth-structural">--</div></div></div></div></div>
@@ -222,12 +236,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-eth" class="sym-trades-empty">No trades yet</div>
   </div>
-
 </div>
-<div class="sym-block">
+
+<div class="sym-block" id="sb-sol" onclick="toggleBlock('sol')">
   <div class="sym-head"><span class="sym-name">SOL/USDT</span><span id="px-sol" class="sym-price">--</span>
     <div class="sym-meta"><span>Vol: <strong id="vr-sol">--</strong></span><span>Disp: <strong id="dp-sol">--bp</strong></span><span>Regime: <strong id="reg-sol">--</strong></span><span>Cap: <strong id="cap-sol">--</strong>R</span></div>
-  </div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-sol-micro"><div class="signal-col" id="sc-sol-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-sol-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-sol-structural"><div class="signal-col" id="sc-sol-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-sol-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-sol-structural">--</div></div></div></div></div>
@@ -244,12 +258,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-sol" class="sym-trades-empty">No trades yet</div>
   </div>
-
 </div>
-<div class="sym-block">
+
+<div class="sym-block collapsed" id="sb-bnb" onclick="toggleBlock('bnb')">
   <div class="sym-head"><span class="sym-name">BNB/USDT</span><span id="px-bnb" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-bnb">--</strong></span><span>Disp: <strong id="dp-bnb">--bp</strong></span><span>Regime: <strong id="reg-bnb">--</strong></span><span>Cap: <strong id="cap-bnb">--</strong>R</span></div>
-  </div>
+    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-bnb">--</strong></span><span class="sm-item">Regime: <strong id="reg-bnb">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-bnb">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-bnb">0</strong></span></div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-bnb-micro"><div class="signal-col" id="sc-bnb-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-bnb-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-bnb-structural"><div class="signal-col" id="sc-bnb-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-bnb-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-bnb-structural">--</div></div></div></div></div>
@@ -266,12 +280,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-bnb" class="sym-trades-empty">No trades yet</div>
   </div>
-
 </div>
-<div class="sym-block">
+
+<div class="sym-block collapsed" id="sb-avax" onclick="toggleBlock('avax')">
   <div class="sym-head"><span class="sym-name">AVAX/USDT</span><span id="px-avax" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-avax">--</strong></span><span>Disp: <strong id="dp-avax">--bp</strong></span><span>Regime: <strong id="reg-avax">--</strong></span><span>Cap: <strong id="cap-avax">--</strong>R</span></div>
-  </div>
+    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-avax">--</strong></span><span class="sm-item">Regime: <strong id="reg-avax">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-avax">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-avax">0</strong></span></div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-avax-micro"><div class="signal-col" id="sc-avax-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-avax-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-avax-structural"><div class="signal-col" id="sc-avax-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-avax-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-avax-structural">--</div></div></div></div></div>
@@ -288,12 +302,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-avax" class="sym-trades-empty">No trades yet</div>
   </div>
-
 </div>
-<div class="sym-block">
+
+<div class="sym-block collapsed" id="sb-link" onclick="toggleBlock('link')">
   <div class="sym-head"><span class="sym-name">LINK/USDT</span><span id="px-link" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-link">--</strong></span><span>Disp: <strong id="dp-link">--bp</strong></span><span>Regime: <strong id="reg-link">--</strong></span><span>Cap: <strong id="cap-link">--</strong>R</span></div>
-  </div>
+    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-link">--</strong></span><span class="sm-item">Regime: <strong id="reg-link">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-link">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-link">0</strong></span></div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-link-micro"><div class="signal-col" id="sc-link-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-link-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-link-structural"><div class="signal-col" id="sc-link-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-link-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-link-structural">--</div></div></div></div></div>
@@ -310,12 +324,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-link" class="sym-trades-empty">No trades yet</div>
   </div>
-
 </div>
-<div class="sym-block">
+
+<div class="sym-block collapsed" id="sb-pol" onclick="toggleBlock('pol')">
   <div class="sym-head"><span class="sym-name">POL/USDT</span><span id="px-pol" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-pol">--</strong></span><span>Disp: <strong id="dp-pol">--bp</strong></span><span>Regime: <strong id="reg-pol">--</strong></span><span>Cap: <strong id="cap-pol">--</strong>R</span></div>
-  </div>
+    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-pol">--</strong></span><span class="sm-item">Regime: <strong id="reg-pol">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-pol">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-pol">0</strong></span></div>
+    <span class="collapse-arrow">▼</span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-pol-micro"><div class="signal-col" id="sc-pol-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-pol-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-pol-structural"><div class="signal-col" id="sc-pol-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-pol-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-pol-structural">--</div></div></div></div></div>
@@ -332,6 +346,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     </div>
     <div id="str-pol" class="sym-trades-empty">No trades yet</div>
   </div>
+</div>
+
+<div class="sym-block">
   <!-- ALL-SYMBOL TRADE LOG -->
   <div class="trade-log-inner">
     <div class="tli-head">
@@ -357,6 +374,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     <div class="tli-body" id="trade-table-body"><div class="tli-empty">Waiting for first trade...</div></div>
   </div>
 </div>
+
 </div><!-- /left-panel -->
 
 <div class="right-panel">

@@ -1559,30 +1559,26 @@ private:
             latency_gov_.regime() == NET_CLEAN ? 5.0 : 15.0
         );
         
-        // ENGINE SIZE MULTIPLIER — based on EV analysis at 63% WR
-        // IMPULSE: +3.19bp EV → max size | EXPAND: +2.30bp EV → full size
-        // LEADLAG: -0.59bp EV → half size until TP raised trades prove edge
-        // VACUUM: +0.30bp EV → normal | VWAP: +1.19bp EV → normal
-        double eng_mult = (layer == LAYER_IMPULSE)          ? 1.5 :  // best EV engine
-                          (layer == LAYER_EXPANSION)        ? 1.3 :  // strong EV
-                          (layer == LAYER_LEADLAG)          ? 0.6 :  // EV marginal — reduced
-                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 0.5 :  // zero net edge — minimal
-                          (layer == LAYER_VWAP)             ? 1.1 :  // decent EV
-                                                              1.0;   // VACUUM normal
+        // ── POSITION SIZING MULTIPLIERS ──────────────────────────────────────
+        // Single consolidated block — net multiplier per engine/symbol combo.
+        // Based on session data: LEADLAG 80%+ WR +3.8bp avg, IMPULSE 70% WR,
+        // EXPAND marginal, ETH weakest performer across all engines.
+
+        // Per-engine multiplier
+        double eng_mult = (layer == LAYER_LEADLAG)          ? 2.0 :  // 80%+ WR proven — full size
+                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
+                          (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
+                          (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal — neutral size
+                          (layer == LAYER_VWAP)             ? 1.1 :
+                                                              1.0;
         legacy_size_mult *= eng_mult;
 
-        // PER-SYMBOL SIZE MULTIPLIER — data driven from log analysis
-        // SOL: 71% WR → boost. ETH: 50% WR → reduce. BTC: 66% WR → neutral.
-        double sym_mult = (id == 2) ? 1.4 :   // SOL — 71% WR, best performer
-                          (id == 1) ? 0.7 :   // ETH — 50% WR, weakest
-                                      1.0;    // BTC — 66% WR, neutral
+        // Per-symbol multiplier — data driven
+        // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.
+        double sym_mult = (id == 2) ? 1.4 :   // SOL — consistently best WR
+                          (id == 1) ? 0.7 :   // ETH — weakest, EXPAND disabled
+                                      1.0;    // BTC + new symbols — neutral
         legacy_size_mult *= sym_mult;
-
-        // PER-LAYER SIZE MULTIPLIER — LEADLAG 100% WR gets more capital
-        double layer_mult = (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL) ? 1.5 :  // 100% WR
-                            (layer == LAYER_EXPANSION) ? 0.8 :  // 62% WR, tighten
-                                                         1.0;
-        legacy_size_mult *= layer_mult;
 
         if (consecutive_losses_ >= 2) {
             legacy_size_mult *= 0.6;

@@ -100,15 +100,15 @@ struct TradingConfig {
     static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;  // tightened: less loss when wrong
     static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 2500; // extended: need more time to reach 20bp TP
 
-    static constexpr double LEADLAG_TP_BP              = 10.0;  // lowered: MFE avg 8bp, 20bp unreachable — exits as TIMEOUT
+    static constexpr double LEADLAG_TP_BP              = 15.0;  // raised: trail exits show moves go 10-15bp
 
     // Stop loss for lead-lag trades
     // Tight stop — if ETH/SOL doesn't follow BTC within 5s, exit
-    static constexpr double LEADLAG_SL_BP              = 4.0;   // tightened from 5bp — less loss when wrong
+    static constexpr double LEADLAG_SL_BP              = 3.0;   // tightened: timing edge — wrong = exit immediately
 
     // Maximum hold time for lead-lag before forced flat
     // Propagation completes within ~200ms. 3s is generous timeout.
-    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 5000;   // extended: need more time to reach 20bp TP
+    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 5000;
 
 
     // -------------------------------------------------------------------------
@@ -153,14 +153,13 @@ struct TradingConfig {
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
     static constexpr double IMPULSE_TP_BP              = 20.0;
-    static constexpr double IMPULSE_SL_BP              = 5.0;   // tightened from 7bp — cut losers faster
-    static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 15000; // cut from 30s — TIMEOUT losses running too long
+    static constexpr double IMPULSE_SL_BP              = 4.0;   // tightened: avg winner +8bp dwarfs -4bp loser
+    static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 15000;
 
     // EXPANSION has own tighter parameters — weaker edge than IMPULSE
-    // SL tighter (5bp) to cut failed breakouts fast. Hold 12s max — if it hasn't moved by then it won't.
-    static constexpr double EXPANSION_TP_BP             = 18.0;  // was shared with IMPULSE at 20bp
-    static constexpr double EXPANSION_SL_BP             = 4.0;   // tightened from 5bp — -6bp loss was exceeding SL
-    static constexpr int64_t EXPANSION_MAX_HOLD_MS      =  8000; // cut from 12s — dead trades should exit faster
+    static constexpr double EXPANSION_TP_BP             = 18.0;
+    static constexpr double EXPANSION_SL_BP             = 3.0;   // tightened: cut failed breakouts faster
+    static constexpr int64_t EXPANSION_MAX_HOLD_MS      =  6000; // 7 timeouts in session — dead trades exit sooner
 
     // Minimum ticks in short window before impulse fires
     static constexpr int IMPULSE_MIN_SHORT_TICKS       = 5;

@@ -11,8 +11,8 @@ ExecStart=/home/jo/ChimeraCrypto/build/chimera
 ExecStop=/bin/kill -SIGINT $MAINPID
 Restart=on-failure
 RestartSec=10
-StandardOutput=append:/home/jo/ChimeraCrypto/logs/chimera_service.log
-StandardError=append:/home/jo/ChimeraCrypto/logs/chimera_service.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

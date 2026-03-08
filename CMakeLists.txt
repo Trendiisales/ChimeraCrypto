@@ -63,3 +63,9 @@ target_compile_options(chimera PRIVATE
 set_target_properties(chimera PROPERTIES
     LINK_FLAGS "-flto"
 )
+
+# LTO strips execute permission on the output binary — restore it after every build
+add_custom_command(TARGET chimera POST_BUILD
+    COMMAND chmod +x $<TARGET_FILE:chimera>
+    COMMENT "Restoring execute permission after LTO link"
+)

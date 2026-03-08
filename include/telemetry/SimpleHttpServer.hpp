@@ -131,6 +131,18 @@ private:
         }
     }
     
+    // send_all — guaranteed full send loop, handles partial sends on large responses
+    static void send_all(int fd, const std::string& data) {
+        const char* ptr = data.c_str();
+        size_t remaining = data.size();
+        while (remaining > 0) {
+            ssize_t sent = ::send(fd, ptr, remaining, MSG_NOSIGNAL);
+            if (sent <= 0) break;
+            ptr += sent;
+            remaining -= sent;
+        }
+    }
+
     void serve_file(int client_fd, const std::string& filename, const std::string& content_type) {
         std::string filepath = "/home/jo/ChimeraCrypto/gui/" + filename;
         std::ifstream file(filepath);
@@ -149,12 +161,12 @@ private:
         response << "Content-Type: " << content_type << "\r\n";
         response << "Content-Length: " << body.size() << "\r\n";
         response << "Access-Control-Allow-Origin: *\r\n";
+        response << "Cache-Control: no-store, no-cache\r\n";
         response << "Connection: close\r\n";
         response << "\r\n";
         response << body;
         
-        std::string resp_str = response.str();
-        send(client_fd, resp_str.c_str(), resp_str.size(), 0);
+        send_all(client_fd, response.str());
     }
     
     void serve_state(int client_fd) {
@@ -165,12 +177,12 @@ private:
         response << "Content-Type: application/json\r\n";
         response << "Content-Length: " << json.size() << "\r\n";
         response << "Access-Control-Allow-Origin: *\r\n";
+        response << "Cache-Control: no-store, no-cache\r\n";
         response << "Connection: close\r\n";
         response << "\r\n";
         response << json;
         
-        std::string resp_str = response.str();
-        send(client_fd, resp_str.c_str(), resp_str.size(), 0);
+        send_all(client_fd, response.str());
     }
     
     void send_404(int client_fd) {

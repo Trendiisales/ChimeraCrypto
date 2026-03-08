@@ -922,6 +922,14 @@ private:
         const char* sym = (id == 0) ? "BTC" : (id == 1) ? "ETH" : "SOL";
         std::string key = std::string(sym) + " EXPAND";
 
+        // ETH EXPAND DISABLED — 85 trades, 42% WR, -69.38bp (session log 2026-03-08)
+        // ETH in BREAKOUT moves too fast — edge consumed before entry, SL gapping -8bp avg.
+        // BTC: 60% WR +13.65bp — keep. SOL: 60% WR — keep.
+        if (id == 1) {
+            rejection_throttle_.record(key, "eth_expand_disabled");
+            return false;
+        }
+
         // Per-symbol guard
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 

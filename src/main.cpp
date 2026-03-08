@@ -83,7 +83,7 @@ static std::atomic<bool> g_running{true};
 static std::atomic<int>  g_sig_count{0};
 
 struct PriceCache {
-    std::atomic<uint64_t> bits[3] = {};
+    std::atomic<uint64_t> bits[MAX_SYMBOLS] = {};
     void set(int id, double v) {
         uint64_t b; __builtin_memcpy(&b, &v, 8);
         bits[id].store(b, std::memory_order_relaxed);

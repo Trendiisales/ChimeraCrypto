@@ -1,0 +1,14 @@
+[Unit]
+Description=CHIMERA trade log auto-pusher
+After=network.target
+
+[Service]
+Type=simple
+User=jo
+WorkingDirectory=/home/jo/ChimeraCrypto
+ExecStart=/home/jo/ChimeraCrypto/scripts/push_trades.sh
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

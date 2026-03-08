@@ -309,7 +309,7 @@ public:
             json << "\"buildup_ticks\":"     << ms.buildup_ticks;
             
             json << "}";
-            if (i < 2) json << ",";
+            if (i < MAX_SYMBOLS - 1) json << ",";
         }
         
         json << "}";

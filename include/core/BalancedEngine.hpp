@@ -480,13 +480,7 @@ public:
         // Update regime based on volatility ratio
         Regime old_regime = s.regime;
         s.regime = classify_regime(id);
-        
-        if (s.regime != old_regime) {
-            const char* sym = sym_short(id);
-            std::printf("[REGIME-CHANGE] %s: %s → %s\n", 
-                       sym, regime_name(old_regime), regime_name(s.regime));
-            std::fflush(stdout);
-        }
+        // Note: classify_regime() already logs the change with full detail
         
         // Position management
         // PENDING: limit order posted, check for fill or cancellation
@@ -830,9 +824,15 @@ private:
         // If regime changed, reset tick counter and log
         if (new_regime != s.regime) {
             const char* sym = sym_short(id);
-            std::printf("[REGIME-CHANGE] %s: %s → %s (vol_ratio_smooth=%.3f after %d ticks)\n",
-                       sym, regime_name(s.regime), regime_name(new_regime), vol_ratio, s.regime_ticks);
-            std::fflush(stdout);
+            // Suppress noisy DEAD↔GRIND oscillation during startup calibration
+            // Only log after the symbol has been running for at least 200 ticks
+            bool suppress = (s.regime_ticks < 200 && 
+                            (s.regime == REGIME_DEAD || new_regime == REGIME_DEAD));
+            if (!suppress) {
+                std::printf("[REGIME-CHANGE] %s: %s → %s (vol_ratio=%.3f after %d ticks)\n",
+                           sym, regime_name(s.regime), regime_name(new_regime), vol_ratio, s.regime_ticks);
+                std::fflush(stdout);
+            }
             s.regime_ticks = 0;
             
             // Set anchor price when entering BUILDUP or BREAKOUT for displacement confirmation

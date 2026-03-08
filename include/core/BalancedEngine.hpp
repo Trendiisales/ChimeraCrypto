@@ -229,6 +229,9 @@ public:
             expand_state_[i] = 0;
             expand_entry_price_[i] = 0.0;
             expand_peak_price_[i] = 0.0;
+            sym_consecutive_sl_[i] = 0;
+            sym_sl_cooldown_[i]    = 0;
+            depth_baseline_[i]     = 0.0;
         }
         
         // Phase 2: Initialize capital control

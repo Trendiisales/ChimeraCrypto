@@ -251,10 +251,10 @@ public:
             json << "\"regime_multiplier\":" << allocator_[i].get_multiplier() << ",";
             json << "\"dynamic_cap_R\":" << allocator_[i].allowed_R(2.0) << ",";
             
-            // Micro
+            // Micro — BalancedEngine handles all symbols together, no per-symbol micro stats
             json << "\"micro_active\":" << (ms.micro_active ? "true" : "false") << ",";
-            json << "\"micro_total_pnl_bp\":" << (balanced_.get_realized_pnl() * 100) << ",";
-            json << "\"micro_total_trades\":" << balanced_.get_total_trades() << ",";
+            json << "\"micro_total_pnl_bp\":0.0,";
+            json << "\"micro_total_trades\":0,";
             
             // Structural
             json << "\"structural_active\":" << (structural_stats.active ? "true" : "false") << ",";

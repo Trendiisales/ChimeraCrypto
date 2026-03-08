@@ -205,9 +205,8 @@ public:
         json << std::fixed << std::setprecision(2);
         json << "{";
         
-        json << "\"btc_price\":" << market_state_[0].last_price << ",";
-        json << "\"eth_price\":" << market_state_[1].last_price << ",";
-        json << "\"sol_price\":" << market_state_[2].last_price << ",";
+        for (int _pi = 0; _pi < MAX_SYMBOLS; ++_pi)
+            json << "\"" << sym_short(_pi) << "_price\":" << market_state_[_pi].last_price << ",";
         json << "\"pnl\":" << balanced_.get_total_pnl() << ",";
         json << "\"realized_pnl\":" << balanced_.get_realized_pnl() << ",";
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";

@@ -96,19 +96,19 @@ struct TradingConfig {
     // Hold tightened 2500→1500ms: if SOL hasn't moved in 1.5s, the propagation is done.
     // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 12.0; // min ETH move to signal
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 12.0;
-    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 4.0;  // was 5.0 — tighter, cut faster
-    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 1500; // was 2500
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 20.0;  // raised: 12bp = zero net edge after costs
+    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;  // tightened: less loss when wrong
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 2500; // extended: need more time to reach 20bp TP
 
-    static constexpr double LEADLAG_TP_BP              = 14.0;
+    static constexpr double LEADLAG_TP_BP              = 20.0;  // raised: 14bp had no edge at 63% WR (net=2bp)
 
     // Stop loss for lead-lag trades
     // Tight stop — if ETH/SOL doesn't follow BTC within 5s, exit
-    static constexpr double LEADLAG_SL_BP              = 5.0;
+    static constexpr double LEADLAG_SL_BP              = 4.0;   // tightened from 5bp — less loss when wrong
 
     // Maximum hold time for lead-lag before forced flat
     // Propagation completes within ~200ms. 3s is generous timeout.
-    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 3000;
+    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 5000;   // extended: need more time to reach 20bp TP
 
 
     // -------------------------------------------------------------------------

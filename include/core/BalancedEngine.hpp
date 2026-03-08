@@ -1532,6 +1532,18 @@ private:
             latency_gov_.regime() == NET_CLEAN ? 5.0 : 15.0
         );
         
+        // ENGINE SIZE MULTIPLIER — based on EV analysis at 63% WR
+        // IMPULSE: +3.19bp EV → max size | EXPAND: +2.30bp EV → full size
+        // LEADLAG: -0.59bp EV → half size until TP raised trades prove edge
+        // VACUUM: +0.30bp EV → normal | VWAP: +1.19bp EV → normal
+        double eng_mult = (layer == LAYER_IMPULSE)          ? 1.5 :  // best EV engine
+                          (layer == LAYER_EXPANSION)        ? 1.3 :  // strong EV
+                          (layer == LAYER_LEADLAG)          ? 0.6 :  // EV marginal — reduced
+                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 0.5 :  // zero net edge — minimal
+                          (layer == LAYER_VWAP)             ? 1.1 :  // decent EV
+                                                              1.0;   // VACUUM normal
+        legacy_size_mult *= eng_mult;
+
         // PER-SYMBOL SIZE MULTIPLIER — data driven from log analysis
         // SOL: 71% WR → boost. ETH: 50% WR → reduce. BTC: 66% WR → neutral.
         double sym_mult = (id == 2) ? 1.4 :   // SOL — 71% WR, best performer

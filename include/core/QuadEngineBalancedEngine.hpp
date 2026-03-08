@@ -206,7 +206,7 @@ public:
         json << "{";
         
         for (int _pi = 0; _pi < MAX_SYMBOLS; ++_pi)
-            json << "\"" << sym_short(_pi) << "_price\":" << market_state_[_pi].last_price << ",";
+            json << "\"" << sym_full(_pi) << "_price\":" << market_state_[_pi].last_price << ",";
         json << "\"pnl\":" << balanced_.get_total_pnl() << ",";
         json << "\"realized_pnl\":" << balanced_.get_realized_pnl() << ",";
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";

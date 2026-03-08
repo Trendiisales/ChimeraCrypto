@@ -272,8 +272,8 @@ function updateAll(data) {
   // Update all symbol prices dynamically
   SYMBOLS.forEach(({ short, full }) => {
     const key = short.toLowerCase();
-    // Backend sends BTC_price, ETH_price, BNB_price etc (sym_short = uppercase)
-    const px = data[short.toUpperCase() + '_price'] || 0;
+    // Backend emits full symbol price keys: btcusdt_price, ethusdt_price etc
+    const px = data[full + '_price'] || data[short.toUpperCase() + '_price'] || data[short.toLowerCase() + '_price'] || 0;
     updatePrice('px-' + key, px, lastPrices[key], short);
     lastPrices[key] = px;
   });
@@ -436,7 +436,9 @@ setInterval(poll, 1000);
 setInterval(updateUptime, 1000);
 
 // ── COLLAPSIBLE SYM-BLOCKS ────────────────────────────────────────────────────
-function toggleBlock(sl) {
+function toggleBlock(sl, event) {
+  // Only toggle if click was on the header itself, not on trade rows or eng-cells
+  if (event) event.stopPropagation();
   const block = document.getElementById('sb-' + sl);
   if (!block) return;
   block.classList.toggle('collapsed');

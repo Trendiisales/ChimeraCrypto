@@ -244,7 +244,7 @@ public:
             auto compression_stats = compression_[i].get_stats();
             auto& ms = market_state_[i];
             
-            json << "\"" << symbols[i] << "\":{";
+            json << "\"" << sym_full(i) << "\":{";
             
             // Regime allocator state
             json << "\"regime_state\":\"" << allocator_[i].get_state_name() << "\",";

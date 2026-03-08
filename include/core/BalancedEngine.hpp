@@ -1899,8 +1899,8 @@ private:
     // PER-SYMBOL CIRCUIT BREAKER — prevents entering a trending-against-us move
     // After 2 consecutive SL exits on the same symbol, pause that symbol 5 minutes
     // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
-    int     sym_consecutive_sl_[MAX_SYMBOLS];
-    int64_t sym_sl_cooldown_[MAX_SYMBOLS];
+    int     sym_consecutive_sl_[MAX_SYMBOLS];
+    int64_t sym_sl_cooldown_[MAX_SYMBOLS];
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
 
@@ -1965,7 +1965,7 @@ private:
     AdaptiveReinforcementLayer reinforcement_;
 
     // Depth baseline per symbol — used for real queue_density in cap_env
-    double depth_baseline_[MAX_SYMBOLS];
+    double depth_baseline_[MAX_SYMBOLS];
 
     // Spot executor — wired at startup via set_executor()
     SpotExecutor* executor_ = nullptr;

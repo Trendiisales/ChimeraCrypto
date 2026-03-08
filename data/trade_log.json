@@ -3451,3 +3451,5 @@
 {"t":"2026-03-08T19:55:53","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
 {"t":"2026-03-08T19:56:18","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
 {"t":"2026-03-08T20:10:44","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
+{"t":"2026-03-08T20:16:13","s":"BTC","e":"IMPULSE","p":-0.27,"en":67100.87,"ex":67099.05,"mfe":0.00,"mae":-0.27,"hold":15291,"why":"TIMEOUT"}
+{"t":"2026-03-08T20:19:01","s":"ETH","e":"IMPULSE","p":1.54,"en":1960.66,"ex":1960.96,"mfe":1.74,"mae":-3.00,"hold":4815,"why":"TRAIL"}

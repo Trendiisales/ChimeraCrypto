@@ -27,6 +27,7 @@ class QuadEngineBalancedEngine {
 public:
     QuadEngineBalancedEngine() : http_server_(8080) {
         load_trades_from_disk();
+        write_session_marker();
 
         // Wire BalancedEngine exit callback → our trade log
         balanced_.set_trade_exit_callback([this](const BalancedEngine::TradeExitData& td) {
@@ -409,9 +410,17 @@ private:
 
     static std::string now_hms() {
         auto t = std::time(nullptr);
-        char buf[16];
-        std::strftime(buf, sizeof(buf), "%H:%M:%S", std::gmtime(&t));
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", std::gmtime(&t));
         return std::string(buf);
+    }
+
+    void write_session_marker() {
+        { int _r = ::system("mkdir -p data"); (void)_r; }
+        std::ofstream f(TRADE_LOG_FILE, std::ios::app);
+        if (!f.is_open()) return;
+        f << "{\"t\":\"" << now_hms() << "\",\"s\":\"SESSION\",\"e\":\"START\","
+          << "\"p\":0,\"en\":0,\"ex\":0,\"mfe\":0,\"mae\":0,\"hold\":0,\"why\":\"START\"}\n";
     }
 
     void push_trade(const std::string& sym, const std::string& eng,

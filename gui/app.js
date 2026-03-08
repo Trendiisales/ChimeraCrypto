@@ -206,9 +206,9 @@ function renderTradeLog() {
   const body = $('trade-table-body');
   if (!body) return;
 
-  // Calculate all stats
+  // Calculate all stats — skip SESSION markers
   let totalPnl = 0, winPnl = 0, lossPnl = 0, winCount = 0, lossCount = 0;
-  localTrades.forEach(t => {
+  localTrades.filter(t => t.s !== 'SESSION').forEach(t => {
     const p = +t.p || 0;
     totalPnl += p;
     if (p >= 0) { winPnl += p; winCount++; }
@@ -253,7 +253,7 @@ function renderTradeLog() {
     body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>';
     return;
   }
-  body.innerHTML = localTrades.slice(0, 80).map(makeRow).join('');
+  body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
 }
 
 // ── TRADE CARDS ───────────────────────────────────────────────────────────────
@@ -485,7 +485,7 @@ updateWinRate();
 
 // Restore wins/losses from loaded trades for accurate WR display
 wins = 0; losses = 0;
-localTrades.forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; });
+localTrades.filter(t => t.s !== 'SESSION').forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; });
 updateWinRate();
 
 poll();

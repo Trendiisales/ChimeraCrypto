@@ -3524,3 +3524,6 @@
 {"t":"2026-03-09T08:36:17","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
 {"t":"2026-03-09T08:36:38","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
 {"t":"2026-03-09T08:39:49","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
+{"t":"2026-03-09T08:44:41","s":"BNB","e":"LEADLAG","p":2.62,"en":625.24,"ex":625.40,"mfe":2.62,"mae":-0.10,"hold":5013,"why":"TIMEOUT"}
+{"t":"2026-03-09T08:44:42","s":"ETH","e":"LEADLAG","p":4.22,"en":1992.30,"ex":1993.14,"mfe":6.53,"mae":-0.10,"hold":6595,"why":"TIMEOUT"}
+{"t":"2026-03-09T08:44:44","s":"SOL","e":"LEADLAG","p":5.89,"en":83.47,"ex":83.52,"mfe":5.89,"mae":-0.10,"hold":8163,"why":"TIMEOUT"}

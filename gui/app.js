@@ -41,17 +41,17 @@ function playWin() {
   if (!audioUnlocked || !audioCtx) return;
   try {
     const now = audioCtx.currentTime;
-    [[0, 1400, 1480], [0.22, 1400, 1480]].forEach(([t, f1, f2]) => {
+    [[0, 880, 1040], [0.22, 1100, 1320]].forEach(([t, f1, f2]) => {
       [f1, f2].forEach((freq, i) => {
         const osc = audioCtx.createOscillator(), gain = audioCtx.createGain(), comp = audioCtx.createDynamicsCompressor();
-        comp.threshold.value = -6; comp.ratio.value = 3;
+        comp.threshold.value = -3; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.1;
         osc.connect(gain); gain.connect(comp); comp.connect(audioCtx.destination);
         osc.type = 'sine'; osc.frequency.setValueAtTime(freq, now + t);
         gain.gain.setValueAtTime(0, now + t);
-        gain.gain.linearRampToValueAtTime(i === 0 ? 1.2 : 0.6, now + t + 0.008);
-        gain.gain.exponentialRampToValueAtTime(0.3, now + t + 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + t + 1.2);
-        osc.start(now + t); osc.stop(now + t + 1.3);
+        gain.gain.linearRampToValueAtTime(i === 0 ? 1.8 : 0.9, now + t + 0.008); // louder: 1.2→1.8
+        gain.gain.exponentialRampToValueAtTime(0.3, now + t + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + t + 1.4);
+        osc.start(now + t); osc.stop(now + t + 1.5);
       });
     });
   } catch(e) {}
@@ -115,7 +115,7 @@ function mergeTrades(serverLog, isBootLoad) {
               : (tr.t.endsWith('Z') || tr.t.includes('+') ? tr.t : tr.t + 'Z'))
           : null;
         const tradeAge = tsStr ? (Date.now() - new Date(tsStr).getTime()) : 99999;
-        const isFresh = tradeAge < 30000;
+        const isFresh = tradeAge < 60000; // widened 30s→60s: handles slow polls and slightly stale server timestamps
         if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); } }
         else if (+tr.p < 0) { losses++; if (isFresh) playLoss(); }
         else { wins++; }

@@ -25,6 +25,7 @@
 #include "execution/ExecutionOptimizer.hpp"
 #include "reinforcement/AdaptiveReinforcementLayer.hpp"
 #include "market_data/FundingRateFetcher.hpp"
+#include "core/NGASLeadLagEngine.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -50,7 +51,8 @@ enum LayerMode {
     LAYER_VACUUM,        // Liquidity Vacuum — ask-side drain breakout
     LAYER_VWAP,          // VWAP Reversion — buy dip back to session VWAP
     LAYER_LIQUIDATION,   // Liquidation Cascade — short liq on perp → spot long
-    LAYER_FUNDING        // Funding Rate Signal — deeply negative funding → sustained long
+    LAYER_FUNDING,       // Funding Rate Signal — deeply negative funding → sustained long
+    LAYER_NGAS           // NGAS Lead-Lag — Natural Gas drop → risk-on crypto LONG
 };
 
 enum PosState {
@@ -134,6 +136,9 @@ struct SymbolState {
 
     // Funding signal: track last entry time per symbol
     int64_t last_funding_entry_ts = 0;
+
+    // NGAS lead-lag: track last entry time per symbol
+    int64_t last_ngas_entry_ts = 0;
 
     void reset() {
         last_price = 0;
@@ -540,6 +545,7 @@ public:
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
         if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+        if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
@@ -551,6 +557,7 @@ public:
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
+    void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
@@ -561,13 +568,13 @@ public:
     // Full session breakdown — auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
         int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
         double total_pnl=0.0;
-        for (int i=1;i<8;i++){
+        for (int i=1;i<11;i++){
             total_wins    += layer_stats_[i].wins;
             total_losses  += layer_stats_[i].losses;
             total_tp      += layer_stats_[i].tp_exits;
@@ -1214,6 +1221,41 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // try_ngas_entry — spot long when NGAS drops sharply (risk-on rotation)
+    //
+    // Signal: NGASFetcher.signal_dir() == -1  (NGAS fell >2% in 15min)
+    //   Natural Gas price drop = energy deflation = risk-on rotation into BTC/ETH
+    //   Spot buys with wider TP/SL (macro signal, slow-burn, not latency-sensitive)
+    //
+    // Only BTC (id=0) and ETH (id=1). 8h cooldown. 1h max hold.
+    // -----------------------------------------------------------------------
+    bool try_ngas_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (!ngas_) return false;
+        if (id != 0 && id != 1) return false;
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
+        // Per-symbol cooldown (stored in SymbolState, not NGASEngine — consistent with funding)
+        if (ts - s.last_ngas_entry_ts < TradingConfig::NGAS_COOLDOWN_MS) return false;
+
+        // Latency gate (loose — not latency sensitive)
+        if (latency_ms > TradingConfig::NGAS_LATENCY_MAX_MS) return false;
+
+        // Arm baseline and check if signal is still valid
+        ngas_->arm_if_new_signal(id, price);
+
+        if (!ngas_->check_long_signal(id, price, ts, latency_ms)) return false;
+
+        std::printf("[NGAS-ENTRY] %s | ngas_px=%.4f | ngas_chg=%.2f%% | crypto=%.4f | latency=%.1fms | ENTERING LONG\n",
+            sym_short(id), ngas_->ngas_price(), ngas_->ngas_change_pct(), price, latency_ms);
+        std::fflush(stdout);
+
+        ngas_->consume_signal(id, ts);
+        s.last_ngas_entry_ts = ts;
+        enter(id, price, ts, s, LAYER_NGAS, true);
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
     // manage_pending — checks limit order fill status each tick
     // Called when pos.state == POS_PENDING
     // -----------------------------------------------------------------------
@@ -1244,7 +1286,8 @@ private:
                                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
                                (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
                                (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
-                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      : "EXPAND";
+                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
+                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1317,6 +1360,12 @@ private:
             tp_bp     = TradingConfig::FUNDING_SIG_TP_BP;
             sl_bp     = TradingConfig::FUNDING_SIG_SL_BP;
             max_hold  = TradingConfig::FUNDING_SIG_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_NGAS) {
+            // NGAS lead-lag: macro risk-on rotation signal
+            // Wide TP/SL — macro noise is larger than microstructure
+            tp_bp     = TradingConfig::NGAS_TP_BP;
+            sl_bp     = TradingConfig::NGAS_SL_BP;
+            max_hold  = TradingConfig::NGAS_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG) {
             // TP=14bp gross → +4bp net after 10bp costs. SL=5bp. Hold 3s max.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
@@ -1609,6 +1658,7 @@ private:
         // Expected gross edge per layer (gross TP targets from TradingConfig)
         sig.expected_bps = (layer == LAYER_LIQUIDATION) ? TradingConfig::LIQ_TP_BP :
                            (layer == LAYER_FUNDING)     ? TradingConfig::FUNDING_SIG_TP_BP :
+                           (layer == LAYER_NGAS)         ? TradingConfig::NGAS_TP_BP :
                            (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
                            (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
                            (layer == LAYER_VACUUM)          ? TradingConfig::VACUUM_TP_BP :
@@ -1710,6 +1760,7 @@ private:
         // LEADLAG: near-100% WR in history — run at max leverage (4x)
         double eng_mult = (layer == LAYER_LIQUIDATION)      ? 4.0 :  // MAX LEVERAGE — high WR event-driven
                           (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE — slow-burn, less timing edge
+                          (layer == LAYER_NGAS)             ? 1.5 :  // MODERATE — macro signal, decent but slow
                           (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE — proven near-100% WR
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
@@ -1748,7 +1799,8 @@ private:
                            (layer == LAYER_VWAP)              ? "VWAP"      :
                            (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" :
                            (layer == LAYER_LIQUIDATION)      ? "LIQ"        :
-                           (layer == LAYER_FUNDING)          ? "FUND"       : "EXPAND";
+                           (layer == LAYER_FUNDING)          ? "FUND"       :
+                           (layer == LAYER_NGAS)             ? "NGAS"       : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             // ── MAKER MODE: post limit order ──────────────────────────────
@@ -1845,7 +1897,8 @@ private:
                                   (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
                                   (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
                                (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
-                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      : "EXPAND";
+                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
+                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "EXPAND";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -1923,7 +1976,8 @@ private:
                                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
                                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
                                (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
-                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      : "EXPAND";
+                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
+                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "EXPAND";
         broadcast_to_gui(GuiMessageBuilder::position_exit(
             symbol_full, layer_str, pnl, hold_time_ms, current_latency
         ));
@@ -2023,7 +2077,8 @@ private:
     LiquidationEngine liq_engine_;
     LimitOrderManager limit_orders_[MAX_SYMBOLS];  // One per symbol
     ShadowLogger shadow_log_;
-    FundingRateFetcher* funding_ = nullptr;  // optional — set from main()
+    FundingRateFetcher*  funding_ = nullptr;  // optional — set from main()
+    NGASLeadLagEngine*   ngas_    = nullptr;  // optional — set from main()
     VolatilityScoring vol_scoring_[MAX_SYMBOLS];
     StatefulGovernor governor_;
     MultiSymbolAllocator allocator_;

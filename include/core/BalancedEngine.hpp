@@ -1626,7 +1626,8 @@ private:
         // EXPAND marginal, ETH weakest performer across all engines.
 
         // Per-engine multiplier
-        double eng_mult = (layer == LAYER_LEADLAG)          ? 2.0 :  // 80%+ WR proven — full size
+        // LEADLAG: near-100% WR in history — run at max leverage (4x)
+        double eng_mult = (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE — proven near-100% WR
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
                           (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal — neutral size

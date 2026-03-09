@@ -258,10 +258,24 @@ function regimeClass(state) {
 
 // ── MAIN UPDATE ───────────────────────────────────────────────────────────────
 let firstPoll = true;
+let lastKnownUptimeHours = null;
 
 function updateAll(data) {
   if (!data) return;
   if (!uptimeStart) uptimeStart = Date.now();
+
+  // ── Restart detection ───────────────────────────────────────────────────
+  // Server sends uptime_hours. If it goes backwards (or resets near 0),
+  // the server restarted — clear stale localStorage trades from old session.
+  const serverUptime = data.uptime_hours || 0;
+  if (lastKnownUptimeHours !== null && serverUptime < lastKnownUptimeHours - 0.01) {
+    // Server restarted — clear old session trades
+    console.log('[Chimera] Server restart detected (uptime reset). Clearing old session trades.');
+    localTrades = [];
+    try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
+    uptimeStart = Date.now();
+  }
+  lastKnownUptimeHours = serverUptime;
 
   const updatePrice = (id, val, prev, sym) => {
     const el = $(id); if (!el) return;
@@ -292,6 +306,15 @@ function updateAll(data) {
   set('st-pnl', fmtPnl(pnl));
   const stpnl = $('st-pnl'); if (stpnl) stpnl.className = 'sr-val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '');
   set('st-trades', data.total_trades || 0);
+
+  // Override ts-pnl with server-authoritative value (localStorage can have stale trades from old sessions)
+  const tsPnlEl = $('ts-pnl');
+  if (tsPnlEl && data.pnl !== undefined) {
+    tsPnlEl.textContent = fmtPnl(pnl);
+    tsPnlEl.className = 'ts-val ' + (pnl >= 0 ? 'ts-pos' : 'ts-neg');
+  }
+  const tsCountEl = $('ts-count');
+  if (tsCountEl && data.total_trades !== undefined) tsCountEl.textContent = data.total_trades || 0;
   set('st-pos', data.open_positions || 0);
   set('st-lat', lat > 0 ? lat.toFixed(1) + 'ms' : '--ms');
 

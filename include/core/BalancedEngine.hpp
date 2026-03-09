@@ -229,6 +229,8 @@ public:
             expand_state_[i] = 0;
             expand_entry_price_[i] = 0.0;
             expand_peak_price_[i] = 0.0;
+            expand_confirm_ticks_[i] = 0;
+            expand_post_compress_ticks_[i] = 999; // start above lockout — no initial block
             sym_consecutive_sl_[i] = 0;
             sym_sl_cooldown_[i]    = 0;
             depth_baseline_[i]     = 0.0;
@@ -834,11 +836,23 @@ private:
                 std::fflush(stdout);
             }
             s.regime_ticks = 0;
-            
+
+            // Track COMPRESSION→BREAKOUT transition for EXPAND post-compress lockout
+            // Prevents EXPAND from firing on the first ticks of compression exit
+            // (regime lag: compression just ended but market hasn't confirmed direction)
+            if (new_regime == REGIME_BREAKOUT) {
+                expand_post_compress_ticks_[id] = 0;  // reset — start counting
+            }
+
             // Set anchor price when entering BUILDUP or BREAKOUT for displacement confirmation
             if (new_regime == REGIME_BUILDUP || new_regime == REGIME_BREAKOUT) {
                 s.regime_anchor_price = s.last_price;
             }
+        }
+
+        // Increment post-compress counter every tick while in BREAKOUT
+        if (new_regime == REGIME_BREAKOUT && expand_post_compress_ticks_[id] < 9999) {
+            expand_post_compress_ticks_[id]++;
         }
         
         return new_regime;
@@ -957,9 +971,27 @@ private:
 
         double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
         if (vol_ratio <= TradingConfig::EXPANSION_VOL_RATIO) {
+            expand_confirm_ticks_[id] = 0;  // reset consecutive counter on weak tick
             rejection_throttle_.record(key, "weak_volatility");
             return false;
         }
+
+        // CONSECUTIVE TICK CONFIRMATION — require N ticks above threshold before entry
+        // One tick above vol_ratio is noise. N consecutive ticks = genuine expansion.
+        expand_confirm_ticks_[id]++;
+        if (expand_confirm_ticks_[id] < TradingConfig::EXPANSION_CONFIRM_TICKS) {
+            rejection_throttle_.record(key, "confirm_ticks_pending");
+            return false;
+        }
+
+        // POST-COMPRESS LOCKOUT — block EXPAND for N ticks after COMPRESSION→BREAKOUT
+        // Prevents firing on the regime lag period where compression just ended
+        // but price hasn't yet picked a direction
+        if (expand_post_compress_ticks_[id] < TradingConfig::EXPAND_POST_COMPRESS_LOCKOUT) {
+            rejection_throttle_.record(key, "post_compress_lockout");
+            return false;
+        }
+
         if ((int)s.short_returns.size() < TradingConfig::EXPANSION_MIN_SHORT_TICKS) {
             rejection_throttle_.record(key, "insufficient_ticks");
             return false;
@@ -984,6 +1016,7 @@ private:
             return false;
         }
 
+        expand_confirm_ticks_[id] = 0;  // reset after entry — fresh confirmation needed next time
         enter(id, price, ts, s, LAYER_EXPANSION, true);
         return true;
     }
@@ -1271,6 +1304,23 @@ private:
         // Minimum hold: don't exit before MIN_HOLD_TICKS
         if (s.pos.open_ticks < TradingConfig::MIN_HOLD_TICKS) {
             return;
+        }
+
+        // Breakeven protection for EXPANSION — if trade peaked at 2bp profit, floor at entry
+        // For LONG: move_bp positive = profit. For SHORT: move_bp negative = profit.
+        // peak_profit_bp = max favorable move regardless of direction.
+        double expand_peak_profit = s.pos.is_long ? s.pos.mfe : (-s.pos.mae);
+        if (s.pos.layer == LAYER_EXPANSION && expand_peak_profit >= 2.0) {
+            // Current profit has reversed back to 0 or below — exit at near-breakeven
+            double current_profit = s.pos.is_long ? move_bp : (-move_bp);
+            if (current_profit <= 0.0) {
+                std::printf("[BREAKEVEN] %s | EXPAND | peak=%.2fbp now=%.2fbp — protecting gains\n",
+                    sym_short(id), expand_peak_profit, current_profit);
+                std::fflush(stdout);
+                pending_exit_reason_ = "TRAIL";  // counts as trail exit in stats
+                exit(id, move_bp, ts, s);
+                return;
+            }
         }
 
         // Trailing stop for IMPULSE/EXPAND (once in profit > cost floor)
@@ -1903,6 +1953,8 @@ private:
     int expand_state_[MAX_SYMBOLS];
     double expand_entry_price_[MAX_SYMBOLS];
     double expand_peak_price_[MAX_SYMBOLS];
+    int expand_confirm_ticks_[MAX_SYMBOLS];  // consecutive ticks above vol_ratio threshold
+    int expand_post_compress_ticks_[MAX_SYMBOLS]; // ticks since COMPRESSION→BREAKOUT transition
     int consecutive_losses_;
     int64_t last_loss_ts_;
 

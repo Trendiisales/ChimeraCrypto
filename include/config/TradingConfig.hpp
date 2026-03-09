@@ -339,6 +339,28 @@ struct TradingConfig {
     static constexpr double  FUNDING_SIG_LATENCY_MAX   = 50.0;    // not latency sensitive
 
     // -------------------------------------------------------------------------
+    // NGAS LEAD-LAG ENGINE — Natural Gas macro signal leads crypto risk rotation
+    // -------------------------------------------------------------------------
+    // NGAS price drop  (< -NGAS_DROP_PCT over 15min)  = risk-on  → LONG BTC/ETH
+    // NGAS price spike (> +NGAS_SPIKE_PCT over 15min) = risk-off → SHORT (skipped, spot-only)
+    //
+    // Data: stooq.com (NGO.F CME front-month), polled every 5 minutes
+    // Fallback: Yahoo Finance NG=F
+    //
+    // Signal window: 15-60 min after NGAS move (macro rotation is slow)
+    // Only BTC (id=0) and ETH (id=1) — strongest NGAS/crypto correlation
+    // 8h cooldown per symbol — NGAS price normalises over several hours
+    //
+    static constexpr double  NGAS_DROP_PCT              = 2.0;     // min NGAS drop  % to trigger risk-on LONG
+    static constexpr double  NGAS_SPIKE_PCT             = 2.0;     // min NGAS spike % (informational — no short)
+    static constexpr double  NGAS_CRYPTO_MOVED_MAX_BP   = 25.0;    // if crypto already moved 25bp, signal absorbed
+    static constexpr double  NGAS_TP_BP                 = 35.0;    // wider TP — macro slow-burn move
+    static constexpr double  NGAS_SL_BP                 = 10.0;    // wider SL  — macro noise is higher
+    static constexpr int64_t NGAS_MAX_HOLD_MS           = 3600000; // 1 hour max hold
+    static constexpr int64_t NGAS_COOLDOWN_MS           = 28800000;// 8 hours between entries per symbol
+    static constexpr double  NGAS_LATENCY_MAX_MS        = 50.0;    // not latency-sensitive (macro signal)
+
+    // -------------------------------------------------------------------------
     // DIAGNOSTIC OUTPUT
     // -------------------------------------------------------------------------
     static constexpr int REGIME_DIAG_INTERVAL     = 500;

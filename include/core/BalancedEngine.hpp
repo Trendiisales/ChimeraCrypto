@@ -1891,8 +1891,10 @@ private:
                     std::fflush(stdout);
                 }
             } else {
-                // TIMEOUT/other loss resets SL streak but NOT the full cooldown
-                sym_consecutive_sl_[id] = 0;
+                // TIMEOUT/other non-SL loss does NOT reset SL streak
+                // Previously this reset to 0, allowing SL→TIMEOUT→SL→TIMEOUT to bypass the
+                // circuit breaker indefinitely. Now only a WIN resets the streak.
+                // (sym_consecutive_sl_ stays at current count)
             }
         } else {
             loss_streak_ = 0;

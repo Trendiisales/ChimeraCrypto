@@ -153,7 +153,7 @@ struct TradingConfig {
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
     static constexpr double IMPULSE_TP_BP              = 10.0;  // lowered 20→10bp: 0 TP hits at 20bp, moves not extending
-    static constexpr double IMPULSE_SL_BP              = 7.0;   // widened 5→7bp: avg MAE=4.13bp — SL was sitting in noise floor, getting stopped by normal vol
+    static constexpr double IMPULSE_SL_BP              = 5.0;   // tightened 7→5bp: 9 SL hits all -7bp, 7/9 had MFE<0.6 (never moved right) — bad entries not noise. Cuts 2bp per SL hit.
     static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 20000; // extended 15→20s: timeouts suggest moves need more time
 
     // EXPANSION has own tighter parameters — weaker edge than IMPULSE

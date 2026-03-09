@@ -446,7 +446,20 @@ private:
         r.hold_ms     = hold_ms;
         r.reason      = reason.empty() ? (pnl_bp >= 0 ? "TP" : "SL") : reason;
         save_trade_to_disk(r);
+        // IN-MEMORY DEDUP — prevent disk-loaded records appearing twice when live
+        // callback fires for a trade already in memory from load_trades_from_disk()
+        std::string mem_key = r.time + "|" + r.symbol + "|" + r.engine + "|" +
+                              std::to_string((int)(r.pnl_bp * 100));
         std::lock_guard<std::mutex> lk(trade_log_mutex_);
+        for (const auto& t : trade_log_) {
+            std::string k = t.time + "|" + t.symbol + "|" + t.engine + "|" +
+                            std::to_string((int)(t.pnl_bp * 100));
+            if (k == mem_key) {
+                std::printf("[TRADE-MEM-DEDUP] skipped in-memory duplicate: %s\n", mem_key.c_str());
+                std::fflush(stdout);
+                return;
+            }
+        }
         trade_log_.push_front(r);
         if (trade_log_.size() > 200) trade_log_.pop_back();
     }

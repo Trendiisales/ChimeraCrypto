@@ -110,6 +110,19 @@ struct TradingConfig {
     // Propagation completes within ~200ms. 3s is generous timeout.
     static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 5000;
 
+    // -------------------------------------------------------------------------
+    // LIQUIDATION CASCADE ENGINE — spot long on short liquidations from perp
+    // -------------------------------------------------------------------------
+    // Short liquidation on perp = forced buy on perp = spot follows up 50-200ms later
+    // Min notional filters noise — only meaningful liquidations move spot
+    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 200000.0; // 00k min — smaller liq don't move spot
+    static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 4.0;      // if spot already moved 4bp, we're chasing — skip
+    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 400;      // signal expires after 400ms — propagation window
+    static constexpr int64_t LIQ_COOLDOWN_MS        = 3000;     // 3s between liq trades per symbol — no stacking
+    static constexpr double  LIQ_TP_BP              = 12.0;     // TP: slightly tighter than LEADLAG (liq moves ~8-15bp)
+    static constexpr double  LIQ_SL_BP              = 4.0;      // SL: slightly wider than LEADLAG (more volatile entry)
+    static constexpr int64_t LIQ_MAX_HOLD_MS        = 5000;     // max hold 5s same as LEADLAG
+
 
     // -------------------------------------------------------------------------
     // IMBALANCE SIGNAL PARAMETERS (GRIND regime)

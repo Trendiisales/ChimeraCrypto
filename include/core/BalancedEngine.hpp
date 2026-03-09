@@ -5,6 +5,7 @@
 #include "LatencyGovernor.hpp"
 #include "RegimeTypes.hpp"
 #include "LeadLagEngine.hpp"
+#include "LiquidationEngine.hpp"
 #include "VolatilityScoring.hpp"
 #include "StatefulGovernor.hpp"
 #include "MultiSymbolAllocator.hpp"
@@ -46,8 +47,9 @@ enum LayerMode {
     LAYER_EXPANSION,
     LAYER_LEADLAG,
     LAYER_LEADLAG_ETH_SOL,  // ETH leads SOL — secondary correlation
-    LAYER_VACUUM,   // Liquidity Vacuum — ask-side drain breakout
-    LAYER_VWAP      // VWAP Reversion — buy dip back to session VWAP
+    LAYER_VACUUM,        // Liquidity Vacuum — ask-side drain breakout
+    LAYER_VWAP,          // VWAP Reversion — buy dip back to session VWAP
+    LAYER_LIQUIDATION    // Liquidation Cascade — short liq on perp → spot long
 };
 
 enum PosState {
@@ -531,7 +533,8 @@ public:
         }
 
         // Try signals in priority order
-        // Priority: lead-lag first (best EV), then breakout, then microstructure
+        // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
+        if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
@@ -544,6 +547,7 @@ public:
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
+    LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
     int    get_total_trades()   const { return total_trades_; }
@@ -552,7 +556,7 @@ public:
     // Full session breakdown — auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
@@ -1147,7 +1151,28 @@ private:
         enter(id, price, ts, s, LAYER_LEADLAG, true);
         return true;
     }
-    
+
+    // -----------------------------------------------------------------------
+    // try_liquidation_entry — spot long on short liquidation cascade
+    // Called from on_tick when liq_engine_ has a pending valid signal
+    // -----------------------------------------------------------------------
+    bool try_liquidation_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (id == 0) return false; // BTC too fast — liquidation already in price by the time we enter
+        if (s.pos.state == POS_OPEN) return false;
+
+        if (!liq_engine_.check_signal(id, price, ts, latency_ms)) return false;
+
+        double notional = liq_engine_.get_notional(id);
+        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | price=%.4f | latency=%.1fms | ENTERING LONG
+",
+            sym_short(id), notional, price, latency_ms);
+        std::fflush(stdout);
+
+        liq_engine_.consume_signal(id, ts);
+        enter(id, price, ts, s, LAYER_LIQUIDATION, true);
+        return true;
+    }
+
     // -----------------------------------------------------------------------
     // manage_pending — checks limit order fill status each tick
     // Called when pos.state == POS_PENDING
@@ -1177,7 +1202,8 @@ private:
                                (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
                                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
                                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                               (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   : "EXPAND";
+                               (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
+                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1238,7 +1264,13 @@ private:
         double sl_bp      = 0.0;
         int64_t max_hold  = 0;
 
-        if (s.pos.layer == LAYER_LEADLAG) {
+        if (s.pos.layer == LAYER_LIQUIDATION) {
+            // Liquidation cascade: short liq on perp → spot follows up
+            // TP=12bp, SL=4bp, hold 5s
+            tp_bp     = TradingConfig::LIQ_TP_BP;
+            sl_bp     = TradingConfig::LIQ_SL_BP;
+            max_hold  = TradingConfig::LIQ_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_LEADLAG) {
             // TP=14bp gross → +4bp net after 10bp costs. SL=5bp. Hold 3s max.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_SL_BP;
@@ -1528,7 +1560,8 @@ private:
                     (layer == LAYER_EXPANSION) ? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
         // Expected gross edge per layer (gross TP targets from TradingConfig)
-        sig.expected_bps = (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
+        sig.expected_bps = (layer == LAYER_LIQUIDATION) ? TradingConfig::LIQ_TP_BP :
+                           (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
                            (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
                            (layer == LAYER_VACUUM)          ? TradingConfig::VACUUM_TP_BP :
                            (layer == LAYER_VWAP)              ? TradingConfig::VWAP_TP_BP :
@@ -1627,7 +1660,8 @@ private:
 
         // Per-engine multiplier
         // LEADLAG: near-100% WR in history — run at max leverage (4x)
-        double eng_mult = (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE — proven near-100% WR
+        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 4.0 :  // MAX LEVERAGE — high WR event-driven
+                          (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE — proven near-100% WR
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
                           (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal — neutral size
@@ -1663,7 +1697,8 @@ private:
                            (layer == LAYER_LEADLAG)  ? "LEADLAG" :
                            (layer == LAYER_VACUUM)          ? "VACUUM"    :
                            (layer == LAYER_VWAP)              ? "VWAP"      :
-                           (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" : "EXPAND";
+                           (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" :
+                           (layer == LAYER_LIQUIDATION)      ? "LIQ"        : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             // ── MAKER MODE: post limit order ──────────────────────────────
@@ -1758,7 +1793,8 @@ private:
                                   (s.pos.layer == LAYER_VACUUM)         ? "VACUUM"    :
                                   (s.pos.layer == LAYER_VWAP)           ? "VWAP"      :
                                   (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                                  (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   : "EXPAND";
+                                  (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
+                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       : "EXPAND";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -1834,7 +1870,8 @@ private:
                                (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
                                (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
                                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
-                               (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" : "EXPAND";
+                               (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
+                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       : "EXPAND";
         broadcast_to_gui(GuiMessageBuilder::position_exit(
             symbol_full, layer_str, pnl, hold_time_ms, current_latency
         ));
@@ -1930,7 +1967,8 @@ private:
     
     SymbolState symbols_[MAX_SYMBOLS];
     LatencyGovernor latency_gov_;
-    LeadLagEngine leadlag_;
+    LeadLagEngine     leadlag_;
+    LiquidationEngine liq_engine_;
     LimitOrderManager limit_orders_[MAX_SYMBOLS];  // One per symbol
     ShadowLogger shadow_log_;
     FundingRateFetcher* funding_ = nullptr;  // optional — set from main()

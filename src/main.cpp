@@ -16,6 +16,7 @@
 #include "live/BinanceWSFeed.hpp"
 #include "live/SpotExecutor.hpp"
 #include "core/QuadEngineBalancedEngine.hpp"
+#include "core/LiquidationFeed.hpp"
 #include "core/market_data/FundingRateFetcher.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "execution/NetworkLatencySystem.hpp"
@@ -139,6 +140,23 @@ int main() {
         g_funding.fetch();
         controller.set_funding_fetcher(&g_funding);
     }).detach();
+
+    // ── 2b. Liquidation feed — Binance futures forceOrder stream ─────────────
+    chimera::LiquidationFeed liq_feed;
+    liq_feed.set_callback([&](const chimera::LiquidationEvent& ev) {
+        // Route to engine — thread safe (atomic flag in LiquidationEngine)
+        controller.liq_engine().on_liquidation(ev);
+        if (ev.symbol_id >= 0) {
+            std::printf("[LIQ] SHORT LIQ %s | $%.0f | price=%.2f
+",
+                chimera::sym_short(ev.symbol_id), ev.notional_usd, ev.price);
+            std::fflush(stdout);
+        }
+    });
+    liq_feed.start();
+    std::printf("[STARTUP] Liquidation feed started (fstream.binance.com)
+");
+    std::fflush(stdout);
 
     // ── 3. WebSocket feed ─────────────────────────────────────────────────────
     chimera::BinanceWSFeed feed;

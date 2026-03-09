@@ -106,7 +106,15 @@ function mergeTrades(serverLog, isBootLoad) {
         // Only ring bell for trades that actually just happened (within 30s)
         // Prevents bell storm when trade_log contains historical trades that
         // look "new" because localTrades was cleared (e.g. on restart detection)
-        const tradeAge = tr.t ? (Date.now() - new Date(tr.t.length < 12 ? new Date().toISOString().slice(0,10) + 'T' + tr.t : tr.t).getTime()) : 99999;
+        // Always treat server timestamps as UTC (append Z if no timezone suffix)
+        // Without Z, browsers in non-UTC timezones (e.g. NZ +13) parse as local time
+        // making every trade appear 13 hours old → bell never rings
+        const tsStr = tr.t
+          ? (tr.t.length < 12
+              ? new Date().toISOString().slice(0,10) + 'T' + tr.t + 'Z'
+              : (tr.t.endsWith('Z') || tr.t.includes('+') ? tr.t : tr.t + 'Z'))
+          : null;
+        const tradeAge = tsStr ? (Date.now() - new Date(tsStr).getTime()) : 99999;
         const isFresh = tradeAge < 30000;
         if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); } }
         else if (+tr.p < 0) { losses++; if (isFresh) playLoss(); }

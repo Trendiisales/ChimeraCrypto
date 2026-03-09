@@ -103,8 +103,13 @@ function mergeTrades(serverLog, isBootLoad) {
     if (!existing.has(key)) {
       localTrades.unshift(tr); existing.add(key); newCount++;
       if (!isBootLoad) {
-        if (+tr.p > 0) { wins++; playWin(); flashWin(tr.s, tr.p); }
-        else if (+tr.p < 0) { losses++; playLoss(); }
+        // Only ring bell for trades that actually just happened (within 30s)
+        // Prevents bell storm when trade_log contains historical trades that
+        // look "new" because localTrades was cleared (e.g. on restart detection)
+        const tradeAge = tr.t ? (Date.now() - new Date(tr.t.length < 12 ? new Date().toISOString().slice(0,10) + 'T' + tr.t : tr.t).getTime()) : 99999;
+        const isFresh = tradeAge < 30000;
+        if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); } }
+        else if (+tr.p < 0) { losses++; if (isFresh) playLoss(); }
         else { wins++; }
       } else {
         if (+tr.p > 0) wins++; else if (+tr.p < 0) losses++;
@@ -269,11 +274,12 @@ function updateAll(data) {
   // the server restarted — clear stale localStorage trades from old session.
   const serverUptime = data.uptime_hours || 0;
   if (lastKnownUptimeHours !== null && serverUptime < lastKnownUptimeHours - 0.01) {
-    // Server restarted — clear old session trades
+    // Server restarted — clear old session trades and silence bell on re-merge
     console.log('[Chimera] Server restart detected (uptime reset). Clearing old session trades.');
     localTrades = [];
     try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
     uptimeStart = Date.now();
+    firstPoll = true;  // treat next trade merge as boot load — no bell for old trades
   }
   lastKnownUptimeHours = serverUptime;
 

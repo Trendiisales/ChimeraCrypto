@@ -152,9 +152,9 @@ struct TradingConfig {
     // Our latency (18-25ms) is fast enough to catch early breakouts.
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
-    static constexpr double IMPULSE_TP_BP              = 20.0;
-    static constexpr double IMPULSE_SL_BP              = 4.0;   // tightened: avg winner +8bp dwarfs -4bp loser
-    static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 15000;
+    static constexpr double IMPULSE_TP_BP              = 10.0;  // lowered 20→10bp: 0 TP hits at 20bp, moves not extending
+    static constexpr double IMPULSE_SL_BP              = 5.0;   // widened 4→5bp: being picked off by noise, need breathing room
+    static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 20000; // extended 15→20s: timeouts suggest moves need more time
 
     // EXPANSION has own tighter parameters — weaker edge than IMPULSE
     static constexpr double EXPANSION_TP_BP             = 18.0;
@@ -255,7 +255,7 @@ struct TradingConfig {
     // IMPULSE TP=20bp — trail must not arm until trade has real room.
     // Previous 1.5bp was cutting winners at 1-3bp; 0 TP hits in 24 trades.
     // Raise to 10bp: let IMPULSE run, hard SL=4bp protects the downside.
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 10.0; // arm at 10bp — IMPULSE TP=20bp
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 5.0;  // arm at 5bp — IMPULSE TP=10bp (50% of TP)
 
     // Minimum ticks to hold before any exit allowed (prevent instant exits)
     static constexpr int    MIN_HOLD_TICKS             = 3;

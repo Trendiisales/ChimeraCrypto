@@ -252,10 +252,10 @@ struct TradingConfig {
     static constexpr double TRAIL_LONG_VOL_MULT        = 3.0;  // loosened — was cutting 12bp winner at 4bp
 
     // Minimum profit before trailing stop activates
-    // Lowered 5.0→2.5bp: at 5bp we were holding through full reversals on small wins.
-    // ETH example: peaked +0.50bp, reversed to -3.86bp mae because trail never armed.
-    // At 2.5bp the trail arms sooner and protects partial gains.
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 1.5;  // arm at 1.5bp — protect small wins
+    // IMPULSE TP=20bp — trail must not arm until trade has real room.
+    // Previous 1.5bp was cutting winners at 1-3bp; 0 TP hits in 24 trades.
+    // Raise to 10bp: let IMPULSE run, hard SL=4bp protects the downside.
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 10.0; // arm at 10bp — IMPULSE TP=20bp
 
     // Minimum ticks to hold before any exit allowed (prevent instant exits)
     static constexpr int    MIN_HOLD_TICKS             = 3;

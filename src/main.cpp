@@ -18,6 +18,8 @@
 #include "core/QuadEngineBalancedEngine.hpp"
 #include "core/LiquidationFeed.hpp"
 #include "core/market_data/FundingRateFetcher.hpp"
+#include "core/market_data/NGASFetcher.hpp"
+#include "core/NGASLeadLagEngine.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "execution/NetworkLatencySystem.hpp"
 #include "core/SymbolIndex.hpp"
@@ -79,6 +81,8 @@ void release_instance_lock() {
 chimera::ExchangeLatencyEngine g_exchange_latency;
 chimera::FundingRateFetcher    g_funding;
 Chimera::NetworkLatencySystem  g_network_latency;
+chimera::NGASFetcher           g_ngas_fetcher;
+chimera::NGASLeadLagEngine     g_ngas_engine;
 
 static std::atomic<bool> g_running{true};
 static std::atomic<int>  g_sig_count{0};
@@ -140,6 +144,13 @@ int main() {
         g_funding.fetch();
         controller.set_funding_fetcher(&g_funding);
     }).detach();
+
+    // ── 2c. NGAS fetcher — Natural Gas macro lead-lag signal ─────────────────
+    g_ngas_engine.set_fetcher(&g_ngas_fetcher);
+    controller.set_ngas_engine(&g_ngas_engine);
+    g_ngas_fetcher.start();
+    std::printf("[STARTUP] NGAS macro fetcher started (5-min poll, NGO.F via stooq)\n");
+    std::fflush(stdout);
 
     // ── 2b. Liquidation feed — Binance futures forceOrder stream ─────────────
     chimera::LiquidationFeed liq_feed;

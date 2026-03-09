@@ -147,15 +147,13 @@ int main() {
         // Route to engine — thread safe (atomic flag in LiquidationEngine)
         controller.liq_engine().on_liquidation(ev);
         if (ev.symbol_id >= 0) {
-            std::printf("[LIQ] SHORT LIQ %s | $%.0f | price=%.2f
-",
+            std::printf("[LIQ] SHORT LIQ %s | $%.0f | price=%.2f\n",
                 chimera::sym_short(ev.symbol_id), ev.notional_usd, ev.price);
             std::fflush(stdout);
         }
     });
     liq_feed.start();
-    std::printf("[STARTUP] Liquidation feed started (fstream.binance.com)
-");
+    std::printf("[STARTUP] Liquidation feed started (fstream.binance.com)\n");
     std::fflush(stdout);
 
     // ── 3. WebSocket feed ─────────────────────────────────────────────────────

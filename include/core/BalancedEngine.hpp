@@ -1163,8 +1163,7 @@ private:
         if (!liq_engine_.check_signal(id, price, ts, latency_ms)) return false;
 
         double notional = liq_engine_.get_notional(id);
-        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | price=%.4f | latency=%.1fms | ENTERING LONG
-",
+        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | price=%.4f | latency=%.1fms | ENTERING LONG\n",
             sym_short(id), notional, price, latency_ms);
         std::fflush(stdout);
 

@@ -320,6 +320,25 @@ struct TradingConfig {
     static constexpr double MAKER_COST_FLOOR_BP = 4.0;
 
     // -------------------------------------------------------------------------
+    // FUNDING RATE SIGNAL ENGINE — spot long when shorts crowded on perp
+    // -------------------------------------------------------------------------
+    // When funding rate is deeply negative, shorts are paying longs.
+    // Shorts are overstretched → spot gets bought as longs collect carry.
+    // This is a slow-burn multi-hour directional trade, not a scalp.
+    //
+    // Entry: funding < -0.0003 (-30bp/8h) AND no position open on that symbol
+    // Exit:  trailing TP 30bp, SL 8bp, max hold 2 hours
+    // Only fires on BTC (id=0) and ETH (id=1) — most liquid, most reliable
+    // Only fires once per 4-hour window per symbol — funding changes slowly
+    //
+    static constexpr double  FUNDING_SIG_THRESHOLD     = -0.0003; // -30bp/8h = shorts very crowded
+    static constexpr double  FUNDING_SIG_TP_BP         = 30.0;    // wider TP — slow-burn move
+    static constexpr double  FUNDING_SIG_SL_BP         = 8.0;     // wider SL — slow-burn noise
+    static constexpr int64_t FUNDING_SIG_MAX_HOLD_MS   = 7200000; // 2 hours
+    static constexpr int64_t FUNDING_SIG_COOLDOWN_MS   = 14400000;// 4 hours per symbol
+    static constexpr double  FUNDING_SIG_LATENCY_MAX   = 50.0;    // not latency sensitive
+
+    // -------------------------------------------------------------------------
     // DIAGNOSTIC OUTPUT
     // -------------------------------------------------------------------------
     static constexpr int REGIME_DIAG_INTERVAL     = 500;

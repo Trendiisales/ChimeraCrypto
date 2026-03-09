@@ -49,7 +49,8 @@ enum LayerMode {
     LAYER_LEADLAG_ETH_SOL,  // ETH leads SOL — secondary correlation
     LAYER_VACUUM,        // Liquidity Vacuum — ask-side drain breakout
     LAYER_VWAP,          // VWAP Reversion — buy dip back to session VWAP
-    LAYER_LIQUIDATION    // Liquidation Cascade — short liq on perp → spot long
+    LAYER_LIQUIDATION,   // Liquidation Cascade — short liq on perp → spot long
+    LAYER_FUNDING        // Funding Rate Signal — deeply negative funding → sustained long
 };
 
 enum PosState {
@@ -130,6 +131,9 @@ struct SymbolState {
     // Liquidity Vacuum: rolling ask depth baseline
     double ask_depth_ema = 0.0;   // EMA of ask_size (baseline)
     bool ask_depth_init  = false;
+
+    // Funding signal: track last entry time per symbol
+    int64_t last_funding_entry_ts = 0;
 
     void reset() {
         last_price = 0;
@@ -535,6 +539,7 @@ public:
         // Try signals in priority order
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
         if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
+        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
@@ -556,7 +561,7 @@ public:
     // Full session breakdown — auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
@@ -1173,6 +1178,42 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // try_funding_entry — spot long when perp funding deeply negative
+    //
+    // Signal: funding_rate < -0.0003 (-30bp/8h)
+    //   Shorts on perp are paying longs. Shorts are crowded and overstretched.
+    //   Spot gets sustained buy pressure as longs collect carry.
+    //   This is a slow multi-hour move, not a scalp.
+    //
+    // Only BTC (id=0) and ETH (id=1). 4h cooldown. 2h max hold.
+    // -----------------------------------------------------------------------
+    bool try_funding_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Only BTC and ETH — most reliable funding signal
+        if (id != 0 && id != 1) return false;
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (!funding_ || !funding_->ready()) return false;
+
+        // Cooldown — funding changes slowly, 4h between entries
+        if (ts - s.last_funding_entry_ts < TradingConfig::FUNDING_SIG_COOLDOWN_MS) return false;
+
+        double rate = funding_->rate();
+
+        // Only enter on deeply negative funding (shorts crowded = longs have edge)
+        if (rate >= TradingConfig::FUNDING_SIG_THRESHOLD) return false;
+
+        // Latency not critical for this engine — it's a slow signal
+        if (latency_ms > TradingConfig::FUNDING_SIG_LATENCY_MAX) return false;
+
+        std::printf("[FUNDING-SIGNAL] %s | rate=%.5f%% (%.1fbp/8h) | ENTERING LONG\n",
+            sym_short(id), rate * 100.0, rate * 10000.0);
+        std::fflush(stdout);
+
+        s.last_funding_entry_ts = ts;
+        enter(id, price, ts, s, LAYER_FUNDING, true);
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
     // manage_pending — checks limit order fill status each tick
     // Called when pos.state == POS_PENDING
     // -----------------------------------------------------------------------
@@ -1202,7 +1243,8 @@ private:
                                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
                                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
                                (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
-                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       : "EXPAND";
+                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
+                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1269,6 +1311,12 @@ private:
             tp_bp     = TradingConfig::LIQ_TP_BP;
             sl_bp     = TradingConfig::LIQ_SL_BP;
             max_hold  = TradingConfig::LIQ_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_FUNDING) {
+            // Funding signal: deeply negative funding = sustained long
+            // Wide TP/SL — slow-burn multi-hour move
+            tp_bp     = TradingConfig::FUNDING_SIG_TP_BP;
+            sl_bp     = TradingConfig::FUNDING_SIG_SL_BP;
+            max_hold  = TradingConfig::FUNDING_SIG_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG) {
             // TP=14bp gross → +4bp net after 10bp costs. SL=5bp. Hold 3s max.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
@@ -1560,6 +1608,7 @@ private:
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
         // Expected gross edge per layer (gross TP targets from TradingConfig)
         sig.expected_bps = (layer == LAYER_LIQUIDATION) ? TradingConfig::LIQ_TP_BP :
+                           (layer == LAYER_FUNDING)     ? TradingConfig::FUNDING_SIG_TP_BP :
                            (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
                            (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
                            (layer == LAYER_VACUUM)          ? TradingConfig::VACUUM_TP_BP :
@@ -1660,6 +1709,7 @@ private:
         // Per-engine multiplier
         // LEADLAG: near-100% WR in history — run at max leverage (4x)
         double eng_mult = (layer == LAYER_LIQUIDATION)      ? 4.0 :  // MAX LEVERAGE — high WR event-driven
+                          (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE — slow-burn, less timing edge
                           (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE — proven near-100% WR
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
@@ -1697,7 +1747,8 @@ private:
                            (layer == LAYER_VACUUM)          ? "VACUUM"    :
                            (layer == LAYER_VWAP)              ? "VWAP"      :
                            (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" :
-                           (layer == LAYER_LIQUIDATION)      ? "LIQ"        : "EXPAND";
+                           (layer == LAYER_LIQUIDATION)      ? "LIQ"        :
+                           (layer == LAYER_FUNDING)          ? "FUND"       : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             // ── MAKER MODE: post limit order ──────────────────────────────
@@ -1793,7 +1844,8 @@ private:
                                   (s.pos.layer == LAYER_VWAP)           ? "VWAP"      :
                                   (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
                                   (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
-                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       : "EXPAND";
+                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
+                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      : "EXPAND";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -1870,7 +1922,8 @@ private:
                                (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
                                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
                                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       : "EXPAND";
+                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
+                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      : "EXPAND";
         broadcast_to_gui(GuiMessageBuilder::position_exit(
             symbol_full, layer_str, pnl, hold_time_ms, current_latency
         ));

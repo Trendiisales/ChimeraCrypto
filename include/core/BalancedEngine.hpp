@@ -2046,8 +2046,7 @@ private:
             return false;
         }
 
-        std::printf("[OFI] %s | ofi=%.3f | vol_spike=%.2fx | book=%.3f | lat=%.1fms | LONG
-",
+        std::printf("[OFI] %s | ofi=%.3f | vol_spike=%.2fx | book=%.3f | lat=%.1fms | LONG\n",
                     sym_short(id), ofi_ratio, vol_ratio, t.book_imbalance, latency_ms);
         std::fflush(stdout);
         enter(id, price, ts, s, LAYER_OFI, true);
@@ -2106,8 +2105,7 @@ private:
             return false;
         }
 
-        std::printf("[SWEEP] %s | size_spike=%.1fx | ask_collapse=%.1f%% | lat=%.1fms | LONG
-",
+        std::printf("[SWEEP] %s | size_spike=%.1fx | ask_collapse=%.1f%% | lat=%.1fms | LONG\n",
                     sym_short(id), size_spike, ask_collapse * 100.0, latency_ms);
         std::fflush(stdout);
         // Sweeps use taker entry — edge window is <200ms
@@ -2167,8 +2165,7 @@ private:
             }
         }
 
-        std::printf("[MM-PRESSURE] %s | imbal_ema=%.3f | drift=%.2fbp | ticks=%d | lat=%.1fms | LONG
-",
+        std::printf("[MM-PRESSURE] %s | imbal_ema=%.3f | drift=%.2fbp | ticks=%d | lat=%.1fms | LONG\n",
                     sym_short(id), s.mm_imbal_ema, drift_bps, s.mm_drift_ticks, latency_ms);
         std::fflush(stdout);
         enter(id, price, ts, s, LAYER_MM_PRESSURE, true);

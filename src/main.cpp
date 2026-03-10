@@ -180,25 +180,35 @@ int main() {
         double mid = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         price_cache.set(id, mid);
 
-        if (tick.trade_time > 0) {
-            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            g_exchange_latency.record(now_ms, tick.trade_time);
-        }
-
-        if (!g_exchange_latency.ready()) return;
-
         auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
 
-        controller.on_tick(id, tick, now_ms, g_exchange_latency.p95());
+        // Per-tick data age: how old is this price when we receive it.
+        // Used as the latency_ms signal gate — stale ticks are skipped.
+        // p95 is kept for GUI/monitoring only, NOT for signal gating.
+        // BUG WAS: passing p95 (~36ms constant) as latency_ms caused ALL
+        // signal gates (LEADLAG=35ms, IMBAL=25ms) to permanently block
+        // after the first 2048 ticks. Only early-session trades fired.
+        double tick_age_ms = 0.0;
+        if (tick.trade_time > 0) {
+            tick_age_ms = static_cast<double>(now_ms - tick.trade_time);
+            if (tick_age_ms < 0.0) tick_age_ms = 0.0;
+            g_exchange_latency.record(now_ms, tick.trade_time); // p95 for GUI only
+        }
+
+        // Don't gate on calibration — fire from tick 1.
+        // Hard ceiling: skip only truly stale ticks (>200ms = feed issue).
+        if (tick_age_ms > 200.0) return;
+
+        controller.on_tick(id, tick, now_ms, tick_age_ms);
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n % 1000 == 0) {
-            std::printf("[TICK] n=%d | %s px=%.2f | lat_p95=%.2fms | fills=%d\n",
+            std::printf("[TICK] n=%d | %s px=%.2f | tick_age=%.1fms | lat_p95=%.1fms | fills=%d\n",
                 n, tick.symbol.c_str(), mid,
-                g_exchange_latency.p95(),
+                tick_age_ms,
+                g_exchange_latency.ready() ? g_exchange_latency.p95() : 0.0,
                 executor_ok ? executor.fills() : 0);
             std::fflush(stdout);
         }

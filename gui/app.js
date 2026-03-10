@@ -126,7 +126,7 @@ function mergeTrades(serverLog, isBootLoad) {
   });
   if (newCount > 0 || before === 0) {
     localTrades = localTrades.slice(0, 200);
-    saveTrades(); renderTradeLog(); renderSymbolTrades(); renderRpTrades(); updateWinRate();
+    saveTrades(); renderTradeLog(); renderSymbolTrades(); updateWinRate();
   }
 }
 
@@ -303,24 +303,30 @@ function reasonClass(r) {
 }
 
 function makeRow(tr) {
-  const pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
-  const rc = reasonClass(tr.why || tr.reason || '');
-  const sym = (tr.s || '').replace('USDT', '');
-  const en = tr.en ? fmtPrice(tr.en, sym) : '--';
-  const ex = tr.ex ? fmtPrice(tr.ex, sym) : '--';
-  const why = (tr.why || tr.reason || '?').toUpperCase();
-  const time = tr.t ? tr.t.substring(11, 19) : '--';
-  return `<div class="tl-row ${isWin?'win':'loss'}">
-    <span class="tl-tag ${isWin?'win':'loss'}">${isWin?'W':'L'}</span>
-    <span class="tl-sym">${sym}</span>
-    <span class="tl-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
-    <span class="tl-pnl ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
-    <span class="tl-eng">${tr.e||'--'}</span>
-    <span class="tl-val">${en}</span>
-    <span class="tl-val">${ex}</span>
-    <span class="tl-reason ${rc}">${why}</span>
-    <span class="tl-time">${time}</span>
-  </div>`;
+  var pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
+  var rc  = reasonClass(tr.why || tr.reason || '');
+  var sym = (tr.s || '').replace('USDT','').replace('/','');
+  var en  = tr.en ? fmtPrice(tr.en, sym) : '--';
+  var ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
+  var why = (tr.why || tr.reason || '?').toUpperCase();
+  var time = tr.t ? tr.t.substring(0,16).replace('T',' ') : '--';
+  var mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
+  var mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
+  var hold = tr.hold != null ? fmtHold(tr.hold) : '--';
+  var wc = isWin ? 'win' : 'loss', pc = isWin ? 'pos' : 'neg';
+  var h = '<div class="tl-row ' + wc + '">';
+  h += '<div class="tl-r1"><span class="tl-tag ' + wc + '">' + (isWin?'W':'L') + '</span>';
+  h += '<span class="tl-sym">' + sym + '</span><span class="tl-eng">' + (tr.e||'--') + '</span>';
+  h += '<span class="tl-pnl ' + pc + '">' + fmtPnl(pnl) + '</span></div>';
+  h += '<div class="tl-r2"><span>In:<strong>' + en + '</strong></span>';
+  h += '<span>Out:<strong>' + ex + '</strong></span>';
+  h += '<span>Hold:<strong>' + hold + '</strong></span></div>';
+  h += '<div class="tl-r3"><span class="tl-mfe">MFE ' + mfe + '</span>';
+  h += '<span class="tl-mae">MAE ' + mae + '</span>';
+  h += '<span class="tl-why ' + rc + '">' + why + '</span>';
+  h += '<span class="tl-time">' + time + '</span></div>';
+  h += '</div>';
+  return h;
 }
 
 //  REGIME STATE 

@@ -322,7 +322,7 @@ struct TradingConfig {
     // Use 4bp as conservative floor.
     static constexpr double MAKER_COST_FLOOR_BP = 4.0;
     // Round-trip costs used in exit() net PnL calculation (BUG4 FIX)
-    static constexpr double TAKER_ROUND_TRIP_BP = 8.0;  // 4bp/side VIP0 taker fee
+    static constexpr double TAKER_ROUND_TRIP_BP = 8.0;  // 4bp/side VIP0 taker fee (IMPULSE/ETH-LEAD when active)
     static constexpr double MAKER_ROUND_TRIP_BP = 4.0;  // ~1bp rebate/side + ~2bp spread
 
     // -------------------------------------------------------------------------

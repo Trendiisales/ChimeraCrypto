@@ -1001,8 +1001,14 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
 
-        // EXPAND: BTC(0) 60% WR +13bp, SOL(2) 60% WR. All others net negative.
-        if (id != 0 && id != 2) {
+        // EXPAND symbol filter:
+        //   BTC(0):  60% WR +13.65bp -- deep books, confirmed edge
+        //   SOL(2):  blocked -- 60% WR but inverted R:R (-8.75bp losers vs +4.27bp winners)
+        //   AVAX(4), LINK(5), POL(6): thin books, explosive moves, 3 live trades +22/+11/+22bp
+        //     EXPAND requires REGIME_BREAKOUT (vol_ratio > 1.75x) -- very high bar on thin books
+        //     When LINK/AVAX/POL reach BREAKOUT regime they run hard. EXPANSION_ALT_TP_BP=25bp.
+        //   ETH(1), BNB(3): remain blocked -- net negative EV
+        if (id == 1 || id == 2 || id == 3) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
         }
@@ -2065,10 +2071,12 @@ private:
                                   (s.pos.layer == LAYER_VACUUM)         ? "VACUUM"    :
                                   (s.pos.layer == LAYER_VWAP)           ? "VWAP"      :
                                   (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
+                               (s.pos.layer == LAYER_LEADLAG)       ? "LEADLAG"   :
+                               (s.pos.layer == LAYER_EXPANSION)     ? "EXPAND"    :
                                   (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
                                (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
                                (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
-                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "EXPAND";
+                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "UNKNOWN";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -2147,9 +2155,12 @@ private:
                                (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
                                (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
                                (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
+                               (s.pos.layer == LAYER_LEADLAG)       ? "LEADLAG"   :
+                               (s.pos.layer == LAYER_EXPANSION)     ? "EXPAND"    :
+                               (s.pos.layer == LAYER_IMPULSE)       ? "IMPULSE"   :
+                               (s.pos.layer == LAYER_LIQUIDATION)   ? "LIQ"       :
                                (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
-                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "EXPAND";
+                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "UNKNOWN";
         broadcast_to_gui(GuiMessageBuilder::position_exit(
             symbol_full, layer_str, pnl, hold_time_ms, current_latency
         ));

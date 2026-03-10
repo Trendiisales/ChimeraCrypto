@@ -70,16 +70,6 @@ function playLoss() {
   } catch(e) {}
 }
 
-function flashSymRow(sym, isWin) {
-  const s = (sym || '').replace('USDT','').replace('/','').toLowerCase();
-  const row = document.getElementById('sb-' + s);
-  if (!row) return;
-  const hd = row.querySelector('.sym-hd');
-  if (!hd) return;
-  const cls = isWin ? 'flash-win' : 'flash-loss';
-  hd.classList.add(cls);
-  setTimeout(() => hd.classList.remove(cls), 800);
-}
 function flashWin(sym, pnl) {
   const el = document.getElementById('win-flash');
   if (!el) return;
@@ -126,8 +116,8 @@ function mergeTrades(serverLog, isBootLoad) {
           : null;
         const tradeAge = tsStr ? (Date.now() - new Date(tsStr).getTime()) : 99999;
         const isFresh = tradeAge < 60000; // widened 30s60s: handles slow polls and slightly stale server timestamps
-        if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); flashSymRow(tr.s, true); } }
-        else if (+tr.p < 0) { losses++; if (isFresh) { playLoss(); flashSymRow(tr.s, false); } }
+        if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); } }
+        else if (+tr.p < 0) { losses++; if (isFresh) playLoss(); }
         else { wins++; }
       } else {
         if (+tr.p > 0) wins++; else if (+tr.p < 0) losses++;
@@ -211,8 +201,7 @@ function updateUptime() {
 }
 
 function renderTradeLog() {
-  const body = $('trade-table-body');
-  if (!body) return;
+  const body = $('trade-table-body'); // may be null in new layout - stats still run
   let totalPnl = 0, winPnl = 0, lossPnl = 0, winCount = 0, lossCount = 0;
   localTrades.filter(t => t.s !== 'SESSION').forEach(t => {
     const p = +t.p || 0; totalPnl += p;
@@ -226,17 +215,19 @@ function renderTradeLog() {
 
   set('ts-count', total); set('ts-wins', winCount); set('ts-losses', lossCount);
   const pnlEl = $('ts-pnl');
-  if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.className = 'ts-val ' + (totalPnl >= 0 ? 'ts-pos' : 'ts-neg'); }
+  if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.className = 'tl-stat-val ' + (totalPnl >= 0 ? 'pos' : 'neg'); }
   const usdEl = $('ts-usd');
-  if (usdEl) { usdEl.textContent = fmtUsd(bpToUsd(totalPnl)); usdEl.className = 'ts-val ' + (totalPnl >= 0 ? 'ts-pos' : 'ts-neg'); }
+  if (usdEl) { usdEl.textContent = fmtUsd(bpToUsd(totalPnl)); usdEl.className = 'tl-stat-val ' + (totalPnl >= 0 ? 'pos' : 'neg'); }
   const wrEl = $('ts-wr');
-  if (wrEl) { wrEl.textContent = wr !== null ? (wr*100).toFixed(0)+'%' : '--%'; wrEl.className = 'ts-val ' + (wr !== null ? (wr >= 0.5 ? 'ts-pos' : 'ts-neg') : ''); }
+  if (wrEl) { wrEl.textContent = wr !== null ? (wr*100).toFixed(0)+'%' : '--%'; wrEl.className = 'tl-stat-val ' + (wr !== null ? (wr >= 0.5 ? 'pos' : 'neg') : ''); }
   const awEl = $('ts-avgwin'); if (awEl) awEl.textContent = avgWin !== null ? '+' + avgWin.toFixed(2) + 'bp' : '--';
   const alEl = $('ts-avgloss'); if (alEl) alEl.textContent = avgLoss !== null ? avgLoss.toFixed(2) + 'bp' : '--';
   const expEl = $('ts-exp');
-  if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'ts-val ' + (exp !== null ? (exp >= 0 ? 'ts-pos' : 'ts-neg') : ''); }
-  if (!localTrades.length) { body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>'; return; }
-  body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
+  if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'tl-stat-val ' + (exp !== null ? (exp >= 0 ? 'pos' : 'neg') : ''); }
+  if (body) {
+    if (!localTrades.length) { body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>'; return; }
+    body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
+  }
 }
 
 

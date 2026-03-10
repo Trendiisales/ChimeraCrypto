@@ -40,20 +40,20 @@ struct TradingConfig {
 
     // Hard cutoff: above this, all signals blocked
     // = WS p95 (25ms) + 2x buffer for spikes. Any higher = genuine congestion.
-    static constexpr double LATENCY_HARD_LIMIT_MS  = 50.0;
+    static constexpr double LATENCY_HARD_LIMIT_MS  = 100.0; // data age: block only genuine feed lag (>100ms)
 
     // Net-clean threshold: below = full size trades allowed
     // = WS p95 upper bound + small buffer. Above = reduce size or skip.
-    static constexpr double LATENCY_NET_CLEAN_MS   = 30.0;
+    static constexpr double LATENCY_NET_CLEAN_MS   = 60.0;  // data age p95=36ms, was cutting size on every normal tick
 
     // Lead-lag maximum: BTCETH/SOL propagation window shrinks with latency
     // At 35ms we still have 15-165ms of the 50-200ms propagation window remaining
     // Above 35ms the edge window is too uncertain to trade reliably
-    static constexpr double LATENCY_LEADLAG_MAX_MS = 35.0;
+    static constexpr double LATENCY_LEADLAG_MAX_MS = 80.0;  // data age: p95=36ms was permanently blocking all leadlag
 
     // Imbalance signal max: requires very fresh book data to be reliable
     // Only fire imbalance trades when latency is well below 25ms p95
-    static constexpr double LATENCY_IMBALANCE_MAX_MS = 25.0;
+    static constexpr double LATENCY_IMBALANCE_MAX_MS = 60.0; // data age: p50=25ms was blocking ~50% of imbalance ticks
 
 
     // -------------------------------------------------------------------------
@@ -190,7 +190,7 @@ struct TradingConfig {
     static constexpr double VACUUM_TP_BP               = 16.0;
     static constexpr double VACUUM_SL_BP               = 6.0;
     static constexpr int64_t VACUUM_MAX_HOLD_MS        = 12000;
-    static constexpr double LATENCY_VACUUM_MAX_MS      = 30.0;  // tight  edge decays fast
+    static constexpr double LATENCY_VACUUM_MAX_MS      = 60.0;  // data age calibrated: old 30ms blocked p95 ticks
 
     // -------------------------------------------------------------------------
     // VWAP REVERSION ENGINE

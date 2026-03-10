@@ -171,7 +171,8 @@ struct TradingConfig {
     static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 20000; // extended 1520s: timeouts suggest moves need more time
 
     // EXPANSION has own tighter parameters  weaker edge than IMPULSE
-    static constexpr double EXPANSION_TP_BP             = 6.0;   // tightened 18->6bp: MFE data shows moves peak at 5-7bp, 18bp never hit
+    static constexpr double EXPANSION_TP_BP             = 6.0;   // BTC: moves are shallow, 6bp is correct ceiling
+    static constexpr double EXPANSION_ALT_TP_BP         = 25.0;  // LINK/AVAX/POL: thin books, moves run 11-22bp consistently (3 trades: +22, +11, +22bp)
     static constexpr double EXPANSION_SL_BP             = 3.0;   // tightened 5->3bp: avg SL loss was -8bp, tighter with higher vol filter
     static constexpr int64_t EXPANSION_MAX_HOLD_MS      = 8000;  // tightened 12->8s: cut dead trades faster, timeout losses were drift
 

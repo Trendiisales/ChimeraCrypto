@@ -202,6 +202,7 @@ public:
     LiquidationEngine& liq_engine() { return balanced_.liq_engine(); }
     void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
     void set_latency(double ms) { last_latency_ms_ = ms; }
+    void set_lat_p95(double ms)  { lat_p95_display_  = ms; }
     
     std::string generate_state_json() {
         std::ostringstream json;
@@ -214,7 +215,8 @@ public:
         json << "\"realized_pnl\":" << balanced_.get_realized_pnl() << ",";
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
-        json << "\"latency_p95\":" << last_latency_ms_ << ",";
+        json << "\"latency_p95\":" << lat_p95_display_ << ",";
+        json << "\"tick_age_ms\":" << last_latency_ms_ << ",";
         json << balanced_.get_boost_json() << ",";
 
         // Full session stats  per-layer wins/losses/tp/sl/trail/timeout
@@ -328,7 +330,8 @@ private:
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
 
-    double last_latency_ms_ = 0.0;
+    double last_latency_ms_  = 0.0;  // per-tick age for signal gating
+    double lat_p95_display_  = 0.0;  // rolling p95 for GUI display only
 
     // Trade log ring buffer
     struct TradeRecord {

@@ -47,12 +47,12 @@ enum LayerMode {
     LAYER_IMPULSE,
     LAYER_EXPANSION,
     LAYER_LEADLAG,
-    LAYER_LEADLAG_ETH_SOL,  // ETH leads SOL — secondary correlation
-    LAYER_VACUUM,        // Liquidity Vacuum — ask-side drain breakout
-    LAYER_VWAP,          // VWAP Reversion — buy dip back to session VWAP
-    LAYER_LIQUIDATION,   // Liquidation Cascade — short liq on perp → spot long
-    LAYER_FUNDING,       // Funding Rate Signal — deeply negative funding → sustained long
-    LAYER_NGAS           // NGAS Lead-Lag — Natural Gas drop → risk-on crypto LONG
+    LAYER_LEADLAG_ETH_SOL,  // ETH leads SOL  secondary correlation
+    LAYER_VACUUM,        // Liquidity Vacuum  ask-side drain breakout
+    LAYER_VWAP,          // VWAP Reversion  buy dip back to session VWAP
+    LAYER_LIQUIDATION,   // Liquidation Cascade  short liq on perp  spot long
+    LAYER_FUNDING,       // Funding Rate Signal  deeply negative funding  sustained long
+    LAYER_NGAS           // NGAS Lead-Lag  Natural Gas drop  risk-on crypto LONG
 };
 
 enum PosState {
@@ -117,7 +117,7 @@ struct SymbolState {
 
     MarketTick last_tick;   // Latest tick with real book data
 
-    // Entry context for shadow logger — captured at entry, written at exit
+    // Entry context for shadow logger  captured at entry, written at exit
     double entry_imbalance  = 0.0;
     double entry_flow_ratio = 0.0;
     double entry_spread_bps = 0.0;
@@ -199,7 +199,7 @@ class BalancedEngine {
 public:
     using GuiBroadcastCallback = std::function<void(const std::string&)>;
 
-    // Called after every completed trade — for QuadEngine to log full trade data
+    // Called after every completed trade  for QuadEngine to log full trade data
     struct TradeExitData {
         std::string symbol;   // "BTC" / "ETH" / "SOL"
         std::string engine;   // "EXPAND" / "LEADLAG" etc.
@@ -241,7 +241,7 @@ public:
             expand_entry_price_[i] = 0.0;
             expand_peak_price_[i] = 0.0;
             expand_confirm_ticks_[i] = 0;
-            expand_post_compress_ticks_[i] = 999; // start above lockout — no initial block
+            expand_post_compress_ticks_[i] = 999; // start above lockout  no initial block
             sym_consecutive_sl_[i] = 0;
             sym_sl_cooldown_[i]    = 0;
             depth_baseline_[i]     = 0.0;
@@ -250,21 +250,21 @@ public:
         // Phase 2: Initialize capital control
         capital_control_.set_base_capital(10000.0);
         
-        std::printf("╔════════════════════════════════════════════════════════════════╗\n");
-        std::printf("║      BALANCED ENGINE PHASE 2 - INSTITUTIONAL REBUILD          ║\n");
-        std::printf("╠════════════════════════════════════════════════════════════════╣\n");
-        std::printf("║ Microstructure Analysis: ENABLED                              ║\n");
-        std::printf("║ Toxic Flow Detection: ENABLED                                 ║\n");
-        std::printf("║ Hybrid Regime Classifier: ENABLED                             ║\n");
-        std::printf("║ Adaptive Allocator: ENABLED (5ms loop)                        ║\n");
-        std::printf("║ Capital Control Layer: ENABLED                                ║\n");
-        std::printf("║ Execution Optimizer: ENABLED                                  ║\n");
-        std::printf("║ Reinforcement Layer: ENABLED                                  ║\n");
-        std::printf("║ Engines: LEADLAG BTC→ETH/SOL | ETH→SOL | IMPULSE | EXPAND    ║\n");
-        std::printf("║          VACUUM | VWAP-REV | IMBAL (6 engines, long-only)     ║\n");
-        std::printf("║ Multi-position: UP TO 3 (1 per symbol)                        ║\n");
-        std::printf("║ Dead zone (20-23 UTC): max 1 pos, raised thresholds           ║\n");
-        std::printf("╚════════════════════════════════════════════════════════════════╝\n");
+        std::printf("\n");
+        std::printf("      BALANCED ENGINE PHASE 2 - INSTITUTIONAL REBUILD          \n");
+        std::printf("\n");
+        std::printf(" Microstructure Analysis: ENABLED                              \n");
+        std::printf(" Toxic Flow Detection: ENABLED                                 \n");
+        std::printf(" Hybrid Regime Classifier: ENABLED                             \n");
+        std::printf(" Adaptive Allocator: ENABLED (5ms loop)                        \n");
+        std::printf(" Capital Control Layer: ENABLED                                \n");
+        std::printf(" Execution Optimizer: ENABLED                                  \n");
+        std::printf(" Reinforcement Layer: ENABLED                                  \n");
+        std::printf(" Engines: LEADLAG BTCETH/SOL | ETHSOL | IMPULSE | EXPAND    \n");
+        std::printf("          VACUUM | VWAP-REV | IMBAL (6 engines, long-only)     \n");
+        std::printf(" Multi-position: UP TO 3 (1 per symbol)                        \n");
+        std::printf(" Dead zone (20-23 UTC): max 1 pos, raised thresholds           \n");
+        std::printf("\n");
         std::fflush(stdout);
     }
 
@@ -525,7 +525,7 @@ public:
         int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : 3;
         if (open_positions_ >= max_pos) return;
         
-        // PER-SYMBOL CIRCUIT BREAKER — block entry if symbol is in SL cooldown
+        // PER-SYMBOL CIRCUIT BREAKER  block entry if symbol is in SL cooldown
         // Fires after SYM_SL_STREAK_LIMIT (2) consecutive SL losses on this symbol
         // Prevents entering a trending-against-us move (e.g. ETH crash 02:46-02:51)
         if (ts < sym_sl_cooldown_[id]) {
@@ -565,7 +565,7 @@ public:
     int    get_total_trades()   const { return total_trades_; }
     int    get_open_positions() const { return open_positions_; }
 
-    // Full session breakdown — auto-maintained on every exit, no grep needed
+    // Full session breakdown  auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
             "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS"
@@ -629,7 +629,7 @@ public:
 private:
     // PHASE 2: Market data update
     // tick carries REAL bid/ask/depth/trade data from the live feed.
-    // No fake constants. If a field is 0.0, the feed hasn't sent it yet —
+    // No fake constants. If a field is 0.0, the feed hasn't sent it yet 
     // we use it as-is; the EMA-based engines self-initialise gracefully.
     void update_market_data(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
         // Keep snapshot latency current so exit() can log it correctly
@@ -842,22 +842,22 @@ private:
         // If regime changed, reset tick counter and log
         if (new_regime != s.regime) {
             const char* sym = sym_short(id);
-            // Suppress noisy DEAD↔GRIND oscillation during startup calibration
+            // Suppress noisy DEADGRIND oscillation during startup calibration
             // Only log after the symbol has been running for at least 200 ticks
             bool suppress = (s.regime_ticks < 200 && 
                             (s.regime == REGIME_DEAD || new_regime == REGIME_DEAD));
             if (!suppress) {
-                std::printf("[REGIME-CHANGE] %s: %s → %s (vol_ratio=%.3f after %d ticks)\n",
+                std::printf("[REGIME-CHANGE] %s: %s  %s (vol_ratio=%.3f after %d ticks)\n",
                            sym, regime_name(s.regime), regime_name(new_regime), vol_ratio, s.regime_ticks);
                 std::fflush(stdout);
             }
             s.regime_ticks = 0;
 
-            // Track COMPRESSION→BREAKOUT transition for EXPAND post-compress lockout
+            // Track COMPRESSIONBREAKOUT transition for EXPAND post-compress lockout
             // Prevents EXPAND from firing on the first ticks of compression exit
             // (regime lag: compression just ended but market hasn't confirmed direction)
             if (new_regime == REGIME_BREAKOUT) {
-                expand_post_compress_ticks_[id] = 0;  // reset — start counting
+                expand_post_compress_ticks_[id] = 0;  // reset  start counting
             }
 
             // Set anchor price when entering BUILDUP or BREAKOUT for displacement confirmation
@@ -875,12 +875,12 @@ private:
     }
     
     // ======================================================================
-    // flow_ratio — directional order flow confirmation
+    // flow_ratio  directional order flow confirmation
     // ======================================================================
     // Uses real agg_buy_volume / agg_sell_volume from @aggTrade stream.
     // Returns fraction of recent volume that was aggressive buy: 0.5 = neutral
     // > 0.6 = buy pressure confirming a long signal
-    // < 0.4 = sell pressure — do not enter long
+    // < 0.4 = sell pressure  do not enter long
     //
     // This is FREE information already in our feed that most systems ignore.
     // A breakout with 70% buy flow is far more reliable than one with 40%.
@@ -891,12 +891,12 @@ private:
         double buy  = t.agg_buy_volume;
         double sell = t.agg_sell_volume;
         double total = buy + sell;
-        if (total < 1e-9) return 0.5; // no data — neutral
+        if (total < 1e-9) return 0.5; // no data  neutral
         return buy / total;
     }
 
     // ======================================================================
-    // IMPULSE — fires in BREAKOUT regime
+    // IMPULSE  fires in BREAKOUT regime
     // Latency requirement: < 50ms (hard limit)
     // Edge: genuine vol expansion, price displaced from regime anchor
     // TP/SL from TradingConfig: 20bp TP, 8bp SL
@@ -947,7 +947,7 @@ private:
     }
 
     // ======================================================================
-    // EXPANSION — fires in BUILDUP or BREAKOUT regime
+    // EXPANSION  fires in BUILDUP or BREAKOUT regime
     // Latency requirement: < 50ms (hard limit)
     // Edge: vol_ratio expanding, price confirming direction
     // ======================================================================
@@ -955,9 +955,9 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
 
-        // ETH EXPAND DISABLED — 85 trades, 42% WR, -69.38bp (session log 2026-03-08)
-        // ETH in BREAKOUT moves too fast — edge consumed before entry, SL gapping -8bp avg.
-        // BTC: 60% WR +13.65bp — keep. SOL: 60% WR — keep.
+        // ETH EXPAND DISABLED  85 trades, 42% WR, -69.38bp (session log 2026-03-08)
+        // ETH in BREAKOUT moves too fast  edge consumed before entry, SL gapping -8bp avg.
+        // BTC: 60% WR +13.65bp  keep. SOL: 60% WR  keep.
         if (id == 1) {
             rejection_throttle_.record(key, "eth_expand_disabled");
             return false;
@@ -971,7 +971,7 @@ private:
             return false;
         }
         if (s.regime != REGIME_BREAKOUT) {
-            // Was: BUILDUP || BREAKOUT — BUILDUP entries were failing too often.
+            // Was: BUILDUP || BREAKOUT  BUILDUP entries were failing too often.
             // BREAKOUT-only: vol_ratio already > 1.65, genuine expansion confirmed.
             rejection_throttle_.record(key, "weak_regime");
             return false;
@@ -992,7 +992,7 @@ private:
             return false;
         }
 
-        // CONSECUTIVE TICK CONFIRMATION — require N ticks above threshold before entry
+        // CONSECUTIVE TICK CONFIRMATION  require N ticks above threshold before entry
         // One tick above vol_ratio is noise. N consecutive ticks = genuine expansion.
         expand_confirm_ticks_[id]++;
         if (expand_confirm_ticks_[id] < TradingConfig::EXPANSION_CONFIRM_TICKS) {
@@ -1000,7 +1000,7 @@ private:
             return false;
         }
 
-        // POST-COMPRESS LOCKOUT — block EXPAND for N ticks after COMPRESSION→BREAKOUT
+        // POST-COMPRESS LOCKOUT  block EXPAND for N ticks after COMPRESSIONBREAKOUT
         // Prevents firing on the regime lag period where compression just ended
         // but price hasn't yet picked a direction
         if (expand_post_compress_ticks_[id] < TradingConfig::EXPAND_POST_COMPRESS_LOCKOUT) {
@@ -1019,7 +1019,7 @@ private:
             return false;
         }
 
-        // LATENCY GUARD — expansion edge decays fast, stale data = bad entry
+        // LATENCY GUARD  expansion edge decays fast, stale data = bad entry
         if (latency_ms > TradingConfig::LATENCY_NET_CLEAN_MS) {
             rejection_throttle_.record(key, "latency_too_high");
             return false;
@@ -1032,14 +1032,14 @@ private:
             return false;
         }
 
-        expand_confirm_ticks_[id] = 0;  // reset after entry — fresh confirmation needed next time
+        expand_confirm_ticks_[id] = 0;  // reset after entry  fresh confirmation needed next time
         enter(id, price, ts, s, LAYER_EXPANSION, true);
         return true;
     }
 
     // ======================================================================
-    // IMBALANCE — fires in GRIND regime on strong book pressure
-    // Latency requirement: < 25ms (tighter than hard limit — needs fresh data)
+    // IMBALANCE  fires in GRIND regime on strong book pressure
+    // Latency requirement: < 25ms (tighter than hard limit  needs fresh data)
     // Edge: bid/ask imbalance predicts 1-3 tick direction
     //
     // EV analysis at our latency:
@@ -1055,7 +1055,7 @@ private:
         // Per-symbol guard
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
-        // TIGHTER latency gate than hard limit — imbalance edge decays fast
+        // TIGHTER latency gate than hard limit  imbalance edge decays fast
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
             rejection_throttle_.record(key, "latency_too_high");
             return false;
@@ -1087,7 +1087,7 @@ private:
             rejection_throttle_.record(key, "weak_imbalance");
             return false;
         }
-        // Spot only — long side only (imbalance > 0 = bid pressure = buy signal)
+        // Spot only  long side only (imbalance > 0 = bid pressure = buy signal)
         if (imbalance < 0) {
             rejection_throttle_.record(key, "short_not_supported_spot");
             return false;
@@ -1098,25 +1098,25 @@ private:
     }
 
     // ======================================================================
-    // LEAD-LAG — BTC leads ETH and SOL by 50-200ms
+    // LEAD-LAG  BTC leads ETH and SOL by 50-200ms
     // Latency requirement: < 35ms (LATENCY_LEADLAG_MAX_MS)
     //
     // MEASURED EDGE at our latency:
     //   WS latency p95 = 18-25ms
-    //   BTC→ETH/SOL propagation = 50-200ms
+    //   BTCETH/SOL propagation = 50-200ms
     //   Remaining edge window = 25-175ms (conservative 75ms)
     //   TP = 14bp gross (+4bp net after 10bp costs)
     //   SL = 5bp
     //   Minimum win rate for positive EV = 73%
     //   (only fires on 12bp BTC move AND target hasn't moved 4bp yet)
     //
-    // Only fires on ETH (id=1) and SOL (id=2) — BTC IS the leader
+    // Only fires on ETH (id=1) and SOL (id=2)  BTC IS the leader
     // ======================================================================
     bool check_leadlag(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         // BTC does not follow itself
         if (id == 0) return false;
 
-        const char* sym = sym_short(id);  // was hardcoded ETH/SOL — now works for all 7 symbols
+        const char* sym = sym_short(id);  // was hardcoded ETH/SOL  now works for all 7 symbols
         std::string key = std::string(sym) + " LEADLAG";
 
         if (ts < layer_lock_until_) {
@@ -1136,13 +1136,13 @@ private:
             return false;
         }
 
-        // Spot only — long side only
+        // Spot only  long side only
         if (direction < 0) {
             rejection_throttle_.record(key, "short_not_supported_spot");
             return false;
         }
 
-        // SUSTAIN FILTER — reject fake BTC spikes that reverse immediately.
+        // SUSTAIN FILTER  reject fake BTC spikes that reverse immediately.
         // Require BTC move to still be >= 60% of threshold at entry time.
         // Real moves sustain. Fake moves are already reversing by the time
         // we check. Eliminates most SL hits on LEADLAG.
@@ -1165,11 +1165,11 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // try_liquidation_entry — spot long on short liquidation cascade
+    // try_liquidation_entry  spot long on short liquidation cascade
     // Called from on_tick when liq_engine_ has a pending valid signal
     // -----------------------------------------------------------------------
     bool try_liquidation_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        if (id == 0) return false; // BTC too fast — liquidation already in price by the time we enter
+        if (id == 0) return false; // BTC too fast  liquidation already in price by the time we enter
         if (s.pos.state == POS_OPEN) return false;
 
         if (!liq_engine_.check_signal(id, price, ts, latency_ms)) return false;
@@ -1185,7 +1185,7 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // try_funding_entry — spot long when perp funding deeply negative
+    // try_funding_entry  spot long when perp funding deeply negative
     //
     // Signal: funding_rate < -0.0003 (-30bp/8h)
     //   Shorts on perp are paying longs. Shorts are crowded and overstretched.
@@ -1195,12 +1195,12 @@ private:
     // Only BTC (id=0) and ETH (id=1). 4h cooldown. 2h max hold.
     // -----------------------------------------------------------------------
     bool try_funding_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        // Only BTC and ETH — most reliable funding signal
+        // Only BTC and ETH  most reliable funding signal
         if (id != 0 && id != 1) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (!funding_ || !funding_->ready()) return false;
 
-        // Cooldown — funding changes slowly, 4h between entries
+        // Cooldown  funding changes slowly, 4h between entries
         if (ts - s.last_funding_entry_ts < TradingConfig::FUNDING_SIG_COOLDOWN_MS) return false;
 
         double rate = funding_->rate();
@@ -1208,7 +1208,7 @@ private:
         // Only enter on deeply negative funding (shorts crowded = longs have edge)
         if (rate >= TradingConfig::FUNDING_SIG_THRESHOLD) return false;
 
-        // Latency not critical for this engine — it's a slow signal
+        // Latency not critical for this engine  it's a slow signal
         if (latency_ms > TradingConfig::FUNDING_SIG_LATENCY_MAX) return false;
 
         std::printf("[FUNDING-SIGNAL] %s | rate=%.5f%% (%.1fbp/8h) | ENTERING LONG\n",
@@ -1221,7 +1221,7 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // try_ngas_entry — spot long when NGAS drops sharply (risk-on rotation)
+    // try_ngas_entry  spot long when NGAS drops sharply (risk-on rotation)
     //
     // Signal: NGASFetcher.signal_dir() == -1  (NGAS fell >2% in 15min)
     //   Natural Gas price drop = energy deflation = risk-on rotation into BTC/ETH
@@ -1234,10 +1234,10 @@ private:
         if (id != 0 && id != 1) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
-        // Per-symbol cooldown (stored in SymbolState, not NGASEngine — consistent with funding)
+        // Per-symbol cooldown (stored in SymbolState, not NGASEngine  consistent with funding)
         if (ts - s.last_ngas_entry_ts < TradingConfig::NGAS_COOLDOWN_MS) return false;
 
-        // Latency gate (loose — not latency sensitive)
+        // Latency gate (loose  not latency sensitive)
         if (latency_ms > TradingConfig::NGAS_LATENCY_MAX_MS) return false;
 
         // Arm baseline and check if signal is still valid
@@ -1256,7 +1256,7 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // manage_pending — checks limit order fill status each tick
+    // manage_pending  checks limit order fill status each tick
     // Called when pos.state == POS_PENDING
     // -----------------------------------------------------------------------
     void manage_pending(int id, double price, int64_t ts, SymbolState& s) {
@@ -1267,7 +1267,7 @@ private:
         LimitStatus status = limit_orders_[id].update(ask, bid, ts);
 
         if (status == LimitStatus::FILLED) {
-            // Limit filled — transition to open position
+            // Limit filled  transition to open position
             double fill_px = limit_orders_[id].fill_price();
             s.pos.state      = POS_OPEN;
             s.pos.entry_price = fill_px;
@@ -1303,7 +1303,7 @@ private:
             limit_orders_[id].reset();
 
         } else if (status == LimitStatus::CANCELLED) {
-            // Limit timed out or price moved away — abandon
+            // Limit timed out or price moved away  abandon
             s.pos.state = POS_FLAT;
             s.pos.reset();
             limit_orders_[id].reset();
@@ -1342,52 +1342,52 @@ private:
         // Calculate peak profit in bp
         double peak_profit_bp = (s.pos.peak_price - s.pos.entry_price) / s.pos.entry_price * 10000.0;
         
-        // Per-strategy TP/SL/timeout — all calibrated in TradingConfig
+        // Per-strategy TP/SL/timeout  all calibrated in TradingConfig
         // against the 10bp round-trip cost at our measured Tokyo latency
         double tp_bp      = 0.0;
         double sl_bp      = 0.0;
         int64_t max_hold  = 0;
 
         if (s.pos.layer == LAYER_LIQUIDATION) {
-            // Liquidation cascade: short liq on perp → spot follows up
+            // Liquidation cascade: short liq on perp  spot follows up
             // TP=12bp, SL=4bp, hold 5s
             tp_bp     = TradingConfig::LIQ_TP_BP;
             sl_bp     = TradingConfig::LIQ_SL_BP;
             max_hold  = TradingConfig::LIQ_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_FUNDING) {
             // Funding signal: deeply negative funding = sustained long
-            // Wide TP/SL — slow-burn multi-hour move
+            // Wide TP/SL  slow-burn multi-hour move
             tp_bp     = TradingConfig::FUNDING_SIG_TP_BP;
             sl_bp     = TradingConfig::FUNDING_SIG_SL_BP;
             max_hold  = TradingConfig::FUNDING_SIG_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_NGAS) {
             // NGAS lead-lag: macro risk-on rotation signal
-            // Wide TP/SL — macro noise is larger than microstructure
+            // Wide TP/SL  macro noise is larger than microstructure
             tp_bp     = TradingConfig::NGAS_TP_BP;
             sl_bp     = TradingConfig::NGAS_SL_BP;
             max_hold  = TradingConfig::NGAS_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG) {
-            // TP=14bp gross → +4bp net after 10bp costs. SL=5bp. Hold 3s max.
+            // TP=14bp gross  +4bp net after 10bp costs. SL=5bp. Hold 3s max.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_SL_BP;
             max_hold  = TradingConfig::LEADLAG_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG_ETH_SOL) {
-            // ETH→SOL: TP=12bp, SL=5bp, hold 2.5s (tighter window)
+            // ETHSOL: TP=12bp, SL=5bp, hold 2.5s (tighter window)
             tp_bp     = TradingConfig::LEADLAG_ETH_SOL_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_ETH_SOL_SL_BP;
             max_hold  = TradingConfig::LEADLAG_ETH_SOL_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_MICRO) {
-            // TP=12bp gross → +2bp net. SL=3bp. Hold 8s max.
+            // TP=12bp gross  +2bp net. SL=3bp. Hold 8s max.
             tp_bp     = TradingConfig::IMBALANCE_TP_BP;
             sl_bp     = TradingConfig::IMBALANCE_SL_BP;
             max_hold  = TradingConfig::IMBALANCE_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_VACUUM) {
-            // TP=16bp gross → +6bp net. SL=6bp. Hold 12s max.
+            // TP=16bp gross  +6bp net. SL=6bp. Hold 12s max.
             tp_bp     = TradingConfig::VACUUM_TP_BP;
             sl_bp     = TradingConfig::VACUUM_SL_BP;
             max_hold  = TradingConfig::VACUUM_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_VWAP) {
-            // TP=18bp gross → +8bp net. SL=7bp. Hold 45s max (slower reversion).
+            // TP=18bp gross  +8bp net. SL=7bp. Hold 45s max (slower reversion).
             tp_bp     = TradingConfig::VWAP_TP_BP;
             sl_bp     = TradingConfig::VWAP_SL_BP;
             max_hold  = TradingConfig::VWAP_MAX_HOLD_MS;
@@ -1397,7 +1397,7 @@ private:
             sl_bp    = TradingConfig::EXPANSION_SL_BP;
             max_hold = TradingConfig::EXPANSION_MAX_HOLD_MS;
         } else {
-            // IMPULSE: TP=20bp gross → +10bp net. SL=7bp. Hold 30s.
+            // IMPULSE: TP=20bp gross  +10bp net. SL=7bp. Hold 30s.
             tp_bp     = TradingConfig::IMPULSE_TP_BP;
             sl_bp     = TradingConfig::IMPULSE_SL_BP;
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
@@ -1434,15 +1434,15 @@ private:
             return;
         }
 
-        // Breakeven protection for EXPANSION — if trade peaked at 2bp profit, floor at entry
+        // Breakeven protection for EXPANSION  if trade peaked at 2bp profit, floor at entry
         // For LONG: move_bp positive = profit. For SHORT: move_bp negative = profit.
         // peak_profit_bp = max favorable move regardless of direction.
         double expand_peak_profit = s.pos.is_long ? s.pos.mfe : (-s.pos.mae);
         if (s.pos.layer == LAYER_EXPANSION && expand_peak_profit >= 2.0) {
-            // Current profit has reversed back to 0 or below — exit at near-breakeven
+            // Current profit has reversed back to 0 or below  exit at near-breakeven
             double current_profit = s.pos.is_long ? move_bp : (-move_bp);
             if (current_profit <= 0.0) {
-                std::printf("[BREAKEVEN] %s | EXPAND | peak=%.2fbp now=%.2fbp — protecting gains\n",
+                std::printf("[BREAKEVEN] %s | EXPAND | peak=%.2fbp now=%.2fbp  protecting gains\n",
                     sym_short(id), expand_peak_profit, current_profit);
                 std::fflush(stdout);
                 pending_exit_reason_ = "TRAIL";  // counts as trail exit in stats
@@ -1479,11 +1479,11 @@ private:
     }
 
     // ======================================================================
-    // LEAD-LAG ETH → SOL
-    // ETH leads SOL by ~30-80ms (smaller correlation window than BTC→ETH/SOL)
+    // LEAD-LAG ETH  SOL
+    // ETH leads SOL by ~30-80ms (smaller correlation window than BTCETH/SOL)
     // Only fires on SOL (id=2). Long-only, spot-valid.
     // ETH needs 6bp move; SOL must not have moved 3bp yet.
-    // TP=12bp, SL=5bp — slightly tighter than BTC→ETH/SOL due to smaller edge
+    // TP=12bp, SL=5bp  slightly tighter than BTCETH/SOL due to smaller edge
     // ======================================================================
     bool check_leadlag_eth_sol(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         // Only SOL follows ETH
@@ -1499,7 +1499,7 @@ private:
             rejection_throttle_.record(key, "layer_locked");
             return false;
         }
-        // ETH→SOL window is tighter than BTC→ETH — use imbalance limit (20ms)
+        // ETHSOL window is tighter than BTCETH  use imbalance limit (20ms)
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
             rejection_throttle_.record(key, "latency_too_high");
             return false;
@@ -1516,7 +1516,7 @@ private:
             return false;
         }
 
-        // ORDER FLOW CONFIRMATION — ETH led, but SOL must also have buy pressure
+        // ORDER FLOW CONFIRMATION  ETH led, but SOL must also have buy pressure
         // If SOL order flow is weak, ETH move is already absorbed, skip entry
         double flow = compute_flow_ratio(id);
         if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
@@ -1533,7 +1533,7 @@ private:
     }
     // Edge: ask-side depth drains >40% vs EMA baseline without price moving.
     // When the ask wall disappears, price gaps up through the vacuum.
-    // Fires in GRIND or BUILDUP — best in calmer regimes where a sudden
+    // Fires in GRIND or BUILDUP  best in calmer regimes where a sudden
     // ask drain is structural, not just noise.
     // EV: TP=16bp gross (+6bp net), SL=6bp, win rate target ~65%
     // ======================================================================
@@ -1548,7 +1548,7 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        // Only fires in GRIND or BUILDUP — BREAKOUT has own engines
+        // Only fires in GRIND or BUILDUP  BREAKOUT has own engines
         if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
             rejection_throttle_.record(key, "wrong_regime");
             return false;
@@ -1573,7 +1573,7 @@ private:
             rejection_throttle_.record(key, "ask_not_drained");
             return false;
         }
-        // Bid must still be present — confirms buyers are active, not just thin market
+        // Bid must still be present  confirms buyers are active, not just thin market
         if (t.book_imbalance < TradingConfig::VACUUM_MIN_IMBALANCE) {
             rejection_throttle_.record(key, "no_bid_confirmation");
             return false;
@@ -1588,10 +1588,10 @@ private:
     }
 
     // ======================================================================
-    // VWAP REVERSION — spot-only long
+    // VWAP REVERSION  spot-only long
     // Edge: in GRIND regime, price pulls >20bp below session VWAP with
     // positive book imbalance = buy the mean reversion back toward VWAP.
-    // Classic institutional anchor — large players accumulate at VWAP
+    // Classic institutional anchor  large players accumulate at VWAP
     // discounts, pulling price back. Very high win rate in ranging markets.
     // Not valid in BREAKOUT (trending away from VWAP is a feature, not a bug).
     // EV: TP=18bp gross (+8bp net), SL=7bp, win rate target ~68%
@@ -1607,7 +1607,7 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        // Only fires in GRIND — VWAP reversion fails in trending regimes
+        // Only fires in GRIND  VWAP reversion fails in trending regimes
         if (s.regime != REGIME_GRIND) {
             rejection_throttle_.record(key, "not_grind");
             return false;
@@ -1632,12 +1632,12 @@ private:
             rejection_throttle_.record(key, "not_far_enough_below_vwap");
             return false;
         }
-        // Don't enter if too far below VWAP — that's a breakdown, not a dip
+        // Don't enter if too far below VWAP  that's a breakdown, not a dip
         if (deviation_bp > TradingConfig::VWAP_MAX_DEVIATION_BP) {
             rejection_throttle_.record(key, "too_far_below_vwap");
             return false;
         }
-        // Book must show bid pressure — buyers are stepping in
+        // Book must show bid pressure  buyers are stepping in
         if (t.book_imbalance < TradingConfig::VWAP_MIN_IMBALANCE) {
             rejection_throttle_.record(key, "no_bid_confirmation");
             return false;
@@ -1668,7 +1668,7 @@ private:
                                                                  TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
 
-        // HARD LATENCY BACKSTOP — never enter on stale data regardless of engine
+        // HARD LATENCY BACKSTOP  never enter on stale data regardless of engine
         if (market_env_.latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
             std::string key = std::string(sym_short(id)) + " ENTER";
             rejection_throttle_.record(key, "latency_hard_block");
@@ -1722,7 +1722,7 @@ private:
         
         double final_weight = base_weight * micro_bias * regime_mult;
         
-        // Compute final size via CapitalControlLayer — use real live values
+        // Compute final size via CapitalControlLayer  use real live values
         CapitalControlLayer::MarketEnv cap_env;
         cap_env.short_range    = market_env_.short_range;
         cap_env.long_range     = market_env_.long_range;
@@ -1751,36 +1751,36 @@ private:
             latency_gov_.regime() == NET_CLEAN ? 5.0 : 15.0
         );
         
-        // ── POSITION SIZING MULTIPLIERS ──────────────────────────────────────
-        // Single consolidated block — net multiplier per engine/symbol combo.
+        //  POSITION SIZING MULTIPLIERS 
+        // Single consolidated block  net multiplier per engine/symbol combo.
         // Based on session data: LEADLAG 80%+ WR +3.8bp avg, IMPULSE 70% WR,
         // EXPAND marginal, ETH weakest performer across all engines.
 
         // Per-engine multiplier
-        // LEADLAG: near-100% WR in history — run at max leverage (4x)
-        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 4.0 :  // MAX LEVERAGE — high WR event-driven
-                          (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE — slow-burn, less timing edge
-                          (layer == LAYER_NGAS)             ? 1.5 :  // MODERATE — macro signal, decent but slow
-                          (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE — proven near-100% WR
+        // LEADLAG: near-100% WR in history  run at max leverage (4x)
+        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 4.0 :  // MAX LEVERAGE  high WR event-driven
+                          (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE  slow-burn, less timing edge
+                          (layer == LAYER_NGAS)             ? 1.5 :  // MODERATE  macro signal, decent but slow
+                          (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE  proven near-100% WR
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
-                          (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal — neutral size
+                          (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal  neutral size
                           (layer == LAYER_VWAP)             ? 1.1 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
 
-        // Per-symbol multiplier — data driven
+        // Per-symbol multiplier  data driven
         // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.
-        double sym_mult = (id == 2) ? 1.4 :   // SOL — consistently best WR
-                          (id == 1) ? 0.7 :   // ETH — weakest, EXPAND disabled
-                                      1.0;    // BTC + new symbols — neutral
+        double sym_mult = (id == 2) ? 1.4 :   // SOL  consistently best WR
+                          (id == 1) ? 0.7 :   // ETH  weakest, EXPAND disabled
+                                      1.0;    // BTC + new symbols  neutral
         legacy_size_mult *= sym_mult;
 
         if (consecutive_losses_ >= 2) {
             legacy_size_mult *= 0.6;
         }
 
-        // FUNDING RATE ADJUSTMENT — reduce long size when longs are crowded
+        // FUNDING RATE ADJUSTMENT  reduce long size when longs are crowded
         // High positive funding = overcrowded longs = lower expected edge
         if (funding_ && funding_->ready()) {
             double fund_mult = funding_->long_size_multiplier();
@@ -1803,7 +1803,7 @@ private:
                            (layer == LAYER_NGAS)             ? "NGAS"       : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
-            // ── MAKER MODE: post limit order ──────────────────────────────
+            //  MAKER MODE: post limit order 
             // Do NOT open position yet. Set state to PENDING.
             // manage_pending() will open position when/if limit is filled.
             double bid = s.last_tick.bid > 0.0 ? s.last_tick.bid : price;
@@ -1819,7 +1819,7 @@ private:
             s.pos.state         = POS_PENDING;
             s.pos.pending_layer = layer;
             s.pos.is_long       = is_long;
-            open_positions_++;  // Reserve — decremented if cancelled
+            open_positions_++;  // Reserve  decremented if cancelled
 
             if (layer == LAYER_EXPANSION) {
                 expand_state_[id] = 1;
@@ -1832,7 +1832,7 @@ private:
             std::fflush(stdout);
 
         } else {
-            // ── TAKER MODE: open position immediately ─────────────────────
+            //  TAKER MODE: open position immediately 
             s.pos.state       = POS_OPEN;
             s.pos.entry_price = price;
             s.pos.entry_ts    = ts;
@@ -1862,7 +1862,7 @@ private:
                 sym, mode, is_long ? "LONG" : "SHORT", regime_name(s.regime), price, final_weight, legacy_size_mult);
             std::fflush(stdout);
 
-            // Execute order (shadow or live — determined by executor config)
+            // Execute order (shadow or live  determined by executor config)
             if (executor_) {
                 double qty = (final_size * legacy_size_mult) / std::max(price, 1.0);
                 executor_->execute(sym_lower(id), is_long, qty, price);
@@ -1929,8 +1929,9 @@ private:
 
         // Record per-layer session stats (visible in GUI Session Stats panel)
         stats_for(s.pos.layer).record(pnl, exit_reason, s.pos.mfe, s.pos.mae);
+        capital_control_.record_trade_result(pnl > 0.0);  // win-rate boost tracker
 
-        // Shadow log — structured CSV for edge measurement
+        // Shadow log  structured CSV for edge measurement
         {
             ShadowEntry se;
             se.ts_enter      = s.pos.entry_ts;
@@ -2024,19 +2025,19 @@ private:
             snapshots_[id].loss_streak++;
             snapshots_[id].last_disable_time = std::chrono::steady_clock::now();
 
-            // PER-SYMBOL CIRCUIT BREAKER — track SL streak per symbol
+            // PER-SYMBOL CIRCUIT BREAKER  track SL streak per symbol
             if (exit_reason == "SL") {
                 sym_consecutive_sl_[id]++;
                 if (sym_consecutive_sl_[id] >= SYM_SL_STREAK_LIMIT) {
                     sym_sl_cooldown_[id] = ts + SYM_SL_PAUSE_MS;
                     const char* sym = sym_short(id);
-                    std::printf("[CIRCUIT-BREAK-TRIGGER] %s | %d consecutive SLs — pausing 5min\n",
+                    std::printf("[CIRCUIT-BREAK-TRIGGER] %s | %d consecutive SLs  pausing 5min\n",
                         sym, sym_consecutive_sl_[id]);
                     std::fflush(stdout);
                 }
             } else {
                 // TIMEOUT/other non-SL loss does NOT reset SL streak
-                // Previously this reset to 0, allowing SL→TIMEOUT→SL→TIMEOUT to bypass the
+                // Previously this reset to 0, allowing SLTIMEOUTSLTIMEOUT to bypass the
                 // circuit breaker indefinitely. Now only a WIN resets the streak.
                 // (sym_consecutive_sl_ stays at current count)
             }
@@ -2049,7 +2050,7 @@ private:
         
         if (loss_streak_ >= 3) kill_until_ = ts + 5000;
         
-        // Scale cooldown with consecutive losses — back off faster after streak
+        // Scale cooldown with consecutive losses  back off faster after streak
         // 0 losses: 500ms | 1 loss: 1000ms | 2: 2000ms | 3+: 5000ms
         int64_t cooldown_ms = 500;
         if (consecutive_losses_ >= 3) cooldown_ms = 5000;
@@ -2077,8 +2078,8 @@ private:
     LiquidationEngine liq_engine_;
     LimitOrderManager limit_orders_[MAX_SYMBOLS];  // One per symbol
     ShadowLogger shadow_log_;
-    FundingRateFetcher*  funding_ = nullptr;  // optional — set from main()
-    NGASLeadLagEngine*   ngas_    = nullptr;  // optional — set from main()
+    FundingRateFetcher*  funding_ = nullptr;  // optional  set from main()
+    NGASLeadLagEngine*   ngas_    = nullptr;  // optional  set from main()
     VolatilityScoring vol_scoring_[MAX_SYMBOLS];
     StatefulGovernor governor_;
     MultiSymbolAllocator allocator_;
@@ -2102,11 +2103,11 @@ private:
     double expand_entry_price_[MAX_SYMBOLS];
     double expand_peak_price_[MAX_SYMBOLS];
     int expand_confirm_ticks_[MAX_SYMBOLS];  // consecutive ticks above vol_ratio threshold
-    int expand_post_compress_ticks_[MAX_SYMBOLS]; // ticks since COMPRESSION→BREAKOUT transition
+    int expand_post_compress_ticks_[MAX_SYMBOLS]; // ticks since COMPRESSIONBREAKOUT transition
     int consecutive_losses_;
     int64_t last_loss_ts_;
 
-    // PER-SYMBOL CIRCUIT BREAKER — prevents entering a trending-against-us move
+    // PER-SYMBOL CIRCUIT BREAKER  prevents entering a trending-against-us move
     // After 2 consecutive SL exits on the same symbol, pause that symbol 5 minutes
     // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
     int     sym_consecutive_sl_[MAX_SYMBOLS];
@@ -2118,8 +2119,8 @@ private:
     double realized_pnl_;
     int total_trades_;
 
-    // ── PER-LAYER SESSION STATS ───────────────────────────────────────────────
-    // Automatically updated in exit() — queried by GUI via get_session_stats_json()
+    //  PER-LAYER SESSION STATS 
+    // Automatically updated in exit()  queried by GUI via get_session_stats_json()
     struct LayerStats {
         int wins          = 0;
         int losses        = 0;
@@ -2174,10 +2175,10 @@ private:
     ExecutionOptimizer execution_optimizer_;
     AdaptiveReinforcementLayer reinforcement_;
 
-    // Depth baseline per symbol — used for real queue_density in cap_env
+    // Depth baseline per symbol  used for real queue_density in cap_env
     double depth_baseline_[MAX_SYMBOLS];
 
-    // Spot executor — wired at startup via set_executor()
+    // Spot executor  wired at startup via set_executor()
     SpotExecutor* executor_ = nullptr;
 
     static const char* sym_lower(int id) { return sym_full(id); }

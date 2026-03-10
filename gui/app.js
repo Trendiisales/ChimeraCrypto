@@ -359,7 +359,7 @@ function updateAll(data) {
   const updatePrice = (id, val, prev, sym) => {
     const el = $(id); if (!el) return;
     el.textContent = fmtPrice(val, sym);
-    el.className = 'sym-price' + (val > prev ? ' up' : val < prev ? ' down' : '');
+    el.className = 'sym-px' + (val > prev ? ' up' : val < prev ? ' down' : '');
   };
 
   // Update all symbol prices dynamically
@@ -531,7 +531,7 @@ function updateBoostPanel(data) {
       const pEl = $(`pnl-${sym}-${eng}`);
       if (pEl) { pEl.textContent = pnlBp != null ? fmtPnl(pnlBp) : '0bp'; pEl.className = 'est-val ' + (pnlBp > 0 ? 'pos' : pnlBp < 0 ? 'neg' : 'dim'); }
       set(`trades-${sym}-${eng}`, trades != null ? trades : 0);
-      if (wr != null) { const wrEl = $(`wr-${sym}-${eng}`); if (wrEl) { wrEl.textContent = (wr * 100).toFixed(0) + '%'; wrEl.className = 'est-val ' + (wr >= 0.5 ? 'pos' : 'neg'); } }
+      if (wr != null) { const wrEl = $(`wr-${sym}-${eng}`); if (wrEl) { wrEl.textContent = (wr * 100).toFixed(0) + '%'; wrEl.textContent = (wr * 100).toFixed(0) + '%WR'; wrEl.className = 'eng-wr ' + (wr >= 0.5 ? 'pos' : 'neg'); } }
       if (entry != null && entry > 0) set(`ep-${sym}-${eng}`, fmtPrice(entry, sym));
     });
   });
@@ -642,6 +642,7 @@ setInterval(() => {
 
 //  INIT 
 loadTrades(); renderTradeLog(); updateWinRate();
+switchTab('trades');
 wins = 0; losses = 0;
 localTrades.filter(t => t.s !== 'SESSION').forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; });
 updateWinRate();

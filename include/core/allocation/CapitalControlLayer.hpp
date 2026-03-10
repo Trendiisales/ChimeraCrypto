@@ -82,22 +82,24 @@ private:
 
 public:
     CapitalControlLayer() {
-        // Pre-seed from historical trade log data (2026-03-10)
-        // LEADLAG: 25/29 wins = 86.2% -> linear(86.2%, 70%, 90%) = 0.81 -> boost = 1 + 0.81*3 = 3.43x
-        seed_engine("LEADLAG",    25, 29);
-        // LL-ETH-SOL: 6/6 = 100% -> capped at 4.0x
+        seed_engine("LEADLAG",    27, 31);
         seed_engine("LL-ETH-SOL", 6,  6);
-        // IMPULSE: 54/99 = 54.5% -> below threshold -> 1.0x
-        seed_engine("IMPULSE",    54, 99);
-        // EXPAND: 45/100 = 45% -> below threshold -> 1.0x
-        seed_engine("EXPAND",     45, 100);
-        // Others: no historical data -> 1.0x
-        seed_engine("LIQ",   0, 0);
-        seed_engine("FUND",  0, 0);
-        seed_engine("NGAS",  0, 0);
+        seed_engine("ETH-LEAD",   0,  0);
+        seed_engine("SOL-LEAD",   0,  0);
+        seed_engine("VOLSHOCK",   0,  0);
+        seed_engine("LIQ",        0,  0);
+        seed_engine("FUND",       0,  0);
+        seed_engine("NGAS",       0,  0);
+        seed_engine("IMPULSE",   56, 99);
+        seed_engine("EXPAND",     6, 10);
     }
 
     void set_base_capital(double v) { base_capital_ = v; }
+    void update_compounding_equity(double realized_equity) {
+        base_capital_ = 0.90 * base_capital_ + 0.10 * realized_equity;
+        if (base_capital_ < realized_equity * 0.50)
+            base_capital_ = realized_equity * 0.50;
+    }
 
     // Call after every closed trade with the engine label string
     void record_trade_result(const std::string& engine, bool win) {

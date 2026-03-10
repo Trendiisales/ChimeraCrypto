@@ -316,17 +316,6 @@ public:
             if (i < MAX_SYMBOLS - 1) json << ",";
         }
         
-        // Per-engine win-rate boost multipliers (pre-seeded from history)
-        json << ",\"boost_leadlag\":"    << balanced_.get_win_boost_for("LEADLAG")    << ",";
-        json << "\"boost_ll_eth_sol\":"  << balanced_.get_win_boost_for("LL-ETH-SOL") << ",";
-        json << "\"boost_impulse\":"     << balanced_.get_win_boost_for("IMPULSE")    << ",";
-        json << "\"boost_expand\":"      << balanced_.get_win_boost_for("EXPAND")     << ",";
-        json << "\"boost_liq\":"         << balanced_.get_win_boost_for("LIQ")        << ",";
-        json << "\"boost_fund\":"        << balanced_.get_win_boost_for("FUND")       << ",";
-        json << "\"boost_ngas\":"        << balanced_.get_win_boost_for("NGAS")       << ",";
-        json << "\"boost_eth_lead\":"    << balanced_.get_win_boost_for("ETH-LEAD")   << ",";
-        json << "\"boost_sol_lead\":"    << balanced_.get_win_boost_for("SOL-LEAD")   << ",";
-        json << "\"boost_volshock\":"    << balanced_.get_win_boost_for("VOLSHOCK")   << ",";
         json << "}";
         return json.str();
     }

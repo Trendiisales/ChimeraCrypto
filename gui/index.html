@@ -276,6 +276,32 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 #win-flash.show{display:block;animation:slidedown .2s ease}
 @keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* Right panel trade log */
+.rp-trade-row{padding:7px 10px;border-bottom:1px solid rgba(26,42,56,.7);display:flex;flex-direction:column;gap:3px}
+.rp-trade-row:last-child{border-bottom:none}
+.rp-trade-row.win{border-left:3px solid rgba(0,230,118,.7);background:rgba(0,230,118,.025)}
+.rp-trade-row.loss{border-left:3px solid rgba(255,61,87,.6);background:rgba(255,61,87,.02)}
+.rptr-top{display:flex;align-items:center;gap:7px}
+.rptr-tag{font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.5px;min-width:28px}
+.rptr-tag.win{color:var(--green)}.rptr-tag.loss{color:var(--red)}
+.rptr-sym{font-family:var(--fh);font-size:13px;font-weight:800;color:var(--accent);min-width:36px;letter-spacing:1px}
+.rptr-eng{font-family:var(--fh);font-size:10px;font-weight:700;color:#4a7090;flex:1}
+.rptr-pnl{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+.rptr-pnl.pos{color:var(--green)}.rptr-pnl.neg{color:var(--red)}
+.rptr-usd{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+.rptr-usd.pos{color:rgba(0,230,118,.65)}.rptr-usd.neg{color:rgba(255,61,87,.65)}
+.rptr-badge{font-family:var(--fh);font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;margin-left:auto}
+.rptr-badge.tp{background:rgba(0,230,118,.15);color:var(--green)}
+.rptr-badge.sl{background:rgba(255,61,87,.15);color:var(--red)}
+.rptr-badge.trail{background:rgba(0,212,255,.12);color:var(--accent)}
+.rptr-badge.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
+.rptr-mid{display:flex;gap:8px;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rptr-mid span{white-space:nowrap}
+.rptr-mid strong{color:#7ab0c8}
+.rptr-bot{display:flex;gap:10px;font-size:9px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rptr-mfe{color:rgba(0,230,118,.6)}.rptr-mae{color:rgba(255,61,87,.6)}
+.rptr-time{margin-left:auto;color:#2d4558}
 </style>
 </head>
 <body>
@@ -540,6 +566,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
       <div class="rp-tab" id="tab-boost" onclick="switchTab('boost')">BOOST</div>
       <div class="rp-tab" id="tab-engine" onclick="switchTab('engine')">ENGINES</div>
       <div class="rp-tab" id="tab-signal" onclick="switchTab('signal')">SIGNALS</div>
+      <div class="rp-tab" id="tab-trades" onclick="switchTab('trades')">TRADES</div>
     </div>
 
     <!-- REGIME TAB -->
@@ -610,6 +637,22 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
           <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>
         </div>
+      </div>
+    </div>
+
+    <!-- TRADES TAB -->
+    <div class="rp-content" id="tc-trades" style="display:none;padding:0;gap:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--dim);border-bottom:1px solid var(--border);flex-shrink:0">
+        <span style="font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:2px;color:var(--muted)">TRADE LOG</span>
+        <div style="display:flex;gap:12px;align-items:center">
+          <span style="font-size:10px;color:var(--muted)">W:<span id="rp-wins" style="color:var(--green);font-weight:700">0</span></span>
+          <span style="font-size:10px;color:var(--muted)">L:<span id="rp-losses" style="color:var(--red);font-weight:700">0</span></span>
+          <span style="font-size:10px;color:var(--muted)">WR:<span id="rp-wr" style="color:var(--text);font-weight:700">--%</span></span>
+          <span style="font-size:10px;color:var(--muted)">PnL:<span id="rp-pnl" style="font-weight:700">--</span></span>
+        </div>
+      </div>
+      <div id="rp-trade-list" style="flex:1;overflow-y:auto;padding:0">
+        <div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet</div>
       </div>
     </div>
 

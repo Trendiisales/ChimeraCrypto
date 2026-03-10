@@ -275,6 +275,10 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 #win-flash{display:none;position:fixed;top:0;left:0;right:0;padding:14px;text-align:center;font-family:var(--fh);font-size:28px;font-weight:800;letter-spacing:8px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200}
 #win-flash.show{display:block;animation:slidedown .2s ease}
 @keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+.sym-hd.flash-win{animation:row-flash-win .8s ease}
+.sym-hd.flash-loss{animation:row-flash-loss .8s ease}
+@keyframes row-flash-win{0%{background:rgba(0,230,118,.35)}100%{background:linear-gradient(90deg,rgba(0,212,255,.06),transparent)}}
+@keyframes row-flash-loss{0%{background:rgba(255,61,87,.25)}100%{background:linear-gradient(90deg,rgba(0,212,255,.06),transparent)}}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 
 /* Right panel trade log */

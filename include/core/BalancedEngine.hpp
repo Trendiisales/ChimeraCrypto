@@ -348,9 +348,7 @@ public:
             telem << std::fixed << std::setprecision(2);
             telem << "{\"type\":\"telemetry\","
                   << "\"equity\":" << (10000.0 + total_pnl_) << ","
-                  << "\"day_pnl\":" << total_pnl_
-                  << ",\"last_trade_gross\":" << pnl
-                  << ",\"last_trade_net\":" << pnl_net << ","
+                  << "\"day_pnl\":" << total_pnl_ << ","
                   << "\"pnl\":" << total_pnl_ << ","
                   << "\"unrealized_pnl\":0,"
                   << "\"trades_today\":" << total_trades_ << ","

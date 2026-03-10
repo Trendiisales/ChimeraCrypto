@@ -79,22 +79,25 @@ public:
             timeout   = TradingConfig::MAKER_IMBALANCE_TIMEOUT_MS;
             stale_bp  = TradingConfig::MAKER_STALE_BP;
         }
-        // LAYER_LEADLAG: post at mid - 0.4 * spread
-        //   We need to fill quickly — edge window is 75ms remaining
-        //   Short timeout: 200ms (if not filled, edge is gone)
-        //   Stale if ask rises 2bp (ETH already moved, missed the lag)
-        else if (layer_id == 3) {  // LAYER_LEADLAG
-            limit_px  = mid - 0.4 * spread;
+        // LAYER_LEADLAG: post at ask (cross the spread — aggressive fill)
+        //   LEADLAG fires when BTC moves and ETH/SOL is RISING. Price moves UP.
+        //   A limit BELOW mid will never fill — ask moves away from us immediately.
+        //   We must cross the spread and fill at ask. The 6bp maker saving is worthless
+        //   if the order never fills. LEADLAG edge (8bp net) > spread cost (~0.5bp).
+        //   Timeout: 200ms still valid — if ask has moved far above our fill, stale exit.
+        else if (layer_id == 3) {  // LAYER_LEADLAG — aggressive: fill at ask
+            limit_px  = ask;  // cross the spread — guarantees immediate fill on rising price
             timeout   = TradingConfig::MAKER_LEADLAG_TIMEOUT_MS;
-            stale_bp  = TradingConfig::MAKER_STALE_BP * 0.6;
+            stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;  // allow more drift — we're filling into a move
         }
-        // LAYER_IMPULSE: post at mid - 0.25 * spread
-        //   Breakout fills fast or not at all
-        //   Timeout: 500ms
-        else if (layer_id == 1) {  // LAYER_IMPULSE
-            limit_px  = mid - 0.25 * spread;
+        // LAYER_IMPULSE: post at ask (aggressive fill — breakout price is moving UP)
+        //   Same logic as LEADLAG: price is expanding upward on a breakout.
+        //   Posting below mid means ask is running away. Fill at ask immediately.
+        //   Timeout: 500ms — if not filled at ask, price has moved too far.
+        else if (layer_id == 1) {  // LAYER_IMPULSE — aggressive: fill at ask
+            limit_px  = ask;  // cross the spread — breakout price is moving fast
             timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;
-            stale_bp  = TradingConfig::MAKER_STALE_BP;
+            stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;
         }
         // LAYER_EXPANSION: post at mid - 0.3 * spread
         else {

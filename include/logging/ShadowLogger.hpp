@@ -12,7 +12,7 @@
 //
 // CSV format: one row per trade exit
 // Fields: ts_enter,ts_exit,symbol,layer,regime,entry_px,exit_px,
-//         pnl_bp,mfe_bp,mae_bp,hold_ms,latency_ms,
+//         pnl_bp,gross_bp,mfe_bp,mae_bp,hold_ms,latency_ms,
 //         imbalance_at_entry,flow_ratio_at_entry,spread_at_entry,
 //         btc_move_bp,win
 // ============================================================================
@@ -30,7 +30,8 @@ struct ShadowEntry {
     char    regime[12]     = {};
     double  entry_px       = 0.0;
     double  exit_px        = 0.0;
-    double  pnl_bp         = 0.0;
+    double  pnl_bp         = 0.0;  // net after round-trip cost
+        double gross_bp        = 0.0;  // raw price move before cost
     double  mfe_bp         = 0.0;
     double  mae_bp         = 0.0;
     int64_t hold_ms        = 0;
@@ -68,12 +69,12 @@ public:
         if (!f_) return;
         std::fprintf(f_,
             "%lld,%lld,%s,%s,%s,"
-            "%.4f,%.4f,%.4f,%.4f,%.4f,"
+            "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
             "%lld,%.2f,%.4f,%.4f,"
             "%.4f,%.4f,%d\n",
             (long long)e.ts_enter, (long long)e.ts_exit,
             e.symbol, e.layer, e.regime,
-            e.entry_px, e.exit_px, e.pnl_bp, e.mfe_bp, e.mae_bp,
+            e.entry_px, e.exit_px, e.pnl_bp, e.gross_bp, e.mfe_bp, e.mae_bp,
             (long long)e.hold_ms, e.latency_ms, e.imbalance, e.flow_ratio,
             e.spread_bps, e.btc_move_bp, e.win);
         std::fflush(f_);

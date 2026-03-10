@@ -225,8 +225,69 @@ function renderTradeLog() {
   const expEl = $('ts-exp');
   if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'tl-stat-val ' + (exp !== null ? (exp >= 0 ? 'pos' : 'neg') : ''); }
   if (body) {
-    if (!localTrades.length) { body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>'; return; }
-    body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
+    var trades = localTrades.filter(function(t){ return t.s !== 'SESSION'; });
+    if (!trades.length) {
+      body.innerHTML = '<tr><td colspan="15" class="tp-empty">Waiting for first trade...</td></tr>';
+      return;
+    }
+    // Group by engine
+    var engines = ['LEADLAG','LL-ETH-SOL','IMPULSE','EXPAND','LIQUIDATION','FUNDING','NGAS','ETH-LEAD','SOL-LEAD','VOLSHOCK','VWAP','VACUUM','MICRO'];
+    var groups = {};
+    engines.forEach(function(e){ groups[e] = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0}; });
+    var other = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0};
+    trades.forEach(function(t) {
+      var e = (t.e||'OTHER').toUpperCase();
+      var g = groups[e] || other;
+      if (!groups[e]) { other.trades++; } else { g.trades++; }
+      var p = +t.p || 0; g.pnl += p;
+      if (p >= 0) { g.wins++; g.winPnl += p; } else { g.losses++; g.lossPnl += p; }
+      g.mfe += (+t.mfe || 0); g.mae += (+t.mae || 0);
+      var why = (t.why||t.reason||'').toLowerCase();
+      if (why==='tp') g.tp++; else if (why==='sl') g.sl++; else if (why==='trail') g.trail++; else g.timeout++;
+    });
+    // Totals row
+    var tot = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0};
+    var rows = '';
+    engines.forEach(function(e) {
+      var g = groups[e]; if (!g || g.trades === 0) return;
+      var wr = g.wins/g.trades; var avgW = g.wins>0?g.winPnl/g.wins:null; var avgL = g.losses>0?g.lossPnl/g.losses:null;
+      var exp = (avgW!==null&&avgL!==null) ? wr*avgW+(1-wr)*avgL : null;
+      var avgMfe = g.mfe/g.trades; var avgMae = g.mae/g.trades;
+      var pc = g.pnl>=0?'pos':'neg'; var wrc = wr>=0.5?'pos':'neg';
+      rows += '<tr>';
+      rows += '<td>' + e + '</td>';
+      rows += '<td>' + g.trades + '</td>';
+      rows += '<td style="color:var(--green)">' + g.wins + '</td>';
+      rows += '<td style="color:var(--red)">' + g.losses + '</td>';
+      rows += '<td class="etd-wr ' + wrc + '">' + (wr*100).toFixed(0) + '%</td>';
+      rows += '<td class="etd-pnl ' + pc + '">' + (g.pnl>=0?'+':'') + g.pnl.toFixed(2) + 'bp</td>';
+      rows += '<td style="color:var(--green)">' + (avgW!==null?'+'+avgW.toFixed(2)+'bp':'--') + '</td>';
+      rows += '<td style="color:var(--red)">' + (avgL!==null?avgL.toFixed(2)+'bp':'--') + '</td>';
+      rows += '<td class="etd-pnl ' + (exp!==null?(exp>=0?'pos':'neg'):'') + '">' + (exp!==null?(exp>=0?'+':'')+exp.toFixed(2)+'bp':'--') + '</td>';
+      rows += '<td style="color:rgba(0,230,118,.7)">+' + avgMfe.toFixed(2) + 'bp</td>';
+      rows += '<td style="color:rgba(255,61,87,.7)">' + avgMae.toFixed(2) + 'bp</td>';
+      rows += '<td>' + g.tp + '</td><td>' + g.sl + '</td><td>' + g.trail + '</td><td>' + g.timeout + '</td>';
+      rows += '</tr>';
+      ['trades','wins','losses','pnl','winPnl','lossPnl','mfe','mae','tp','sl','trail','timeout'].forEach(function(k){ tot[k]+=g[k]; });
+    });
+    // Total row
+    var twr = tot.wins/tot.trades; var tpc = tot.pnl>=0?'pos':'neg'; var twrc = twr>=0.5?'pos':'neg';
+    var tAvgW = tot.wins>0?tot.winPnl/tot.wins:null; var tAvgL = tot.losses>0?tot.lossPnl/tot.losses:null;
+    var tExp = (tAvgW!==null&&tAvgL!==null)?twr*tAvgW+(1-twr)*tAvgL:null;
+    rows += '<tr class="total-row">';
+    rows += '<td>TOTAL</td><td>' + tot.trades + '</td>';
+    rows += '<td style="color:var(--green)">' + tot.wins + '</td>';
+    rows += '<td style="color:var(--red)">' + tot.losses + '</td>';
+    rows += '<td class="etd-wr ' + twrc + '">' + (twr*100).toFixed(0) + '%</td>';
+    rows += '<td class="etd-pnl ' + tpc + '">' + (tot.pnl>=0?'+':'') + tot.pnl.toFixed(2) + 'bp</td>';
+    rows += '<td style="color:var(--green)">' + (tAvgW!==null?'+'+tAvgW.toFixed(2)+'bp':'--') + '</td>';
+    rows += '<td style="color:var(--red)">' + (tAvgL!==null?tAvgL.toFixed(2)+'bp':'--') + '</td>';
+    rows += '<td class="etd-pnl ' + (tExp!==null?(tExp>=0?'pos':'neg'):'') + '">' + (tExp!==null?(tExp>=0?'+':'')+tExp.toFixed(2)+'bp':'--') + '</td>';
+    rows += '<td>+' + (tot.mfe/tot.trades).toFixed(2) + 'bp</td>';
+    rows += '<td>' + (tot.mae/tot.trades).toFixed(2) + 'bp</td>';
+    rows += '<td>' + tot.tp + '</td><td>' + tot.sl + '</td><td>' + tot.trail + '</td><td>' + tot.timeout + '</td>';
+    rows += '</tr>';
+    body.innerHTML = rows;
   }
 }
 

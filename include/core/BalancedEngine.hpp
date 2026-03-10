@@ -580,7 +580,10 @@ public:
         j << "\"boost_expand\":"     << capital_control_.win_boost_for("EXPAND")     << ",";
         j << "\"boost_liq\":"        << capital_control_.win_boost_for("LIQ")        << ",";
         j << "\"boost_fund\":"       << capital_control_.win_boost_for("FUND")       << ",";
-        j << "\"boost_ngas\":"       << capital_control_.win_boost_for("NGAS");
+        j << "\"boost_ngas\":"       << capital_control_.win_boost_for("NGAS")       << ",";
+        j << "\"boost_eth_lead\":"   << capital_control_.win_boost_for("ETH-LEAD")   << ",";
+        j << "\"boost_sol_lead\":"   << capital_control_.win_boost_for("SOL-LEAD")   << ",";
+        j << "\"boost_volshock\":"   << capital_control_.win_boost_for("VOLSHOCK");
         return j.str();
     }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }

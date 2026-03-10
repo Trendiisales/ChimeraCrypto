@@ -233,23 +233,23 @@ function renderTradeLog() {
 
 //  RIGHT PANEL TRADE LOG
 function renderRpTrades() {
-  const list = document.getElementById('rp-trade-list');
+  var list = document.getElementById('rp-trade-list');
   if (!list) return;
-  const trades = localTrades.filter(t => t.s !== 'SESSION');
+  var trades = localTrades.filter(function(t){ return t.s !== 'SESSION'; });
   if (!trades.length) {
     list.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet</div>';
     return;
   }
-  let wins = 0, losses = 0, totalPnl = 0;
-  trades.forEach(t => {
-    const p = +t.p || 0; totalPnl += p;
+  var wins = 0, losses = 0, totalPnl = 0;
+  trades.forEach(function(t) {
+    var p = +t.p || 0; totalPnl += p;
     if (p >= 0) wins++; else losses++;
   });
-  const total = wins + losses;
-  const wrEl = document.getElementById('rp-wr');
-  const wEl  = document.getElementById('rp-wins');
-  const lEl  = document.getElementById('rp-losses');
-  const pEl  = document.getElementById('rp-pnl');
+  var total = wins + losses;
+  var wrEl = document.getElementById('rp-wr');
+  var wEl  = document.getElementById('rp-wins');
+  var lEl  = document.getElementById('rp-losses');
+  var pEl  = document.getElementById('rp-pnl');
   if (wEl) wEl.textContent = wins;
   if (lEl) lEl.textContent = losses;
   if (wrEl) wrEl.textContent = total > 0 ? (wins/total*100).toFixed(0)+'%' : '--%';
@@ -257,37 +257,40 @@ function renderRpTrades() {
     pEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + 'bp';
     pEl.style.color = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
   }
-  list.innerHTML = trades.slice(0, 100).map(tr => {
-    const pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
-    const rc  = reasonClass(tr.why || tr.reason || '');
-    const sym = (tr.s || '').replace('USDT','').replace('/','');
-    const en  = tr.en ? fmtPrice(tr.en, sym) : '--';
-    const ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
-    const why = (tr.why || tr.reason || '?').toUpperCase();
-    const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(0,16).replace('T',' ') : tr.t) : '--';
-    const mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
-    const mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
-    const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
-    return \`<div class="rp-trade-row \${isWin?'win':'loss'}">
-      <div class="rptr-top">
-        <span class="rptr-tag \${isWin?'win':'loss'}">\${isWin?'WIN':'LOSS'}</span>
-        <span class="rptr-sym">\${sym}</span>
-        <span class="rptr-eng">\${tr.e||'--'}</span>
-        <span class="rptr-pnl \${isWin?'pos':'neg'}">\${fmtPnl(pnl)}</span>
-        <span class="rptr-usd \${isWin?'pos':'neg'}">\${fmtUsd(usd)}</span>
-        <span class="rptr-badge \${rc}">\${why}</span>
-      </div>
-      <div class="rptr-mid">
-        <span>Entry: <strong>\${en}</strong></span>
-        <span>Exit: <strong>\${ex}</strong></span>
-        <span>Hold: <strong>\${hold}</strong></span>
-      </div>
-      <div class="rptr-bot">
-        <span class="rptr-mfe">MFE \${mfe}</span>
-        <span class="rptr-mae">MAE \${mae}</span>
-        <span class="rptr-time">\${time}</span>
-      </div>
-    </div>\`;
+  list.innerHTML = trades.slice(0, 100).map(function(tr) {
+    var pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
+    var rc  = reasonClass(tr.why || tr.reason || '');
+    var sym = (tr.s || '').replace('USDT','').replace('/','');
+    var en  = tr.en ? fmtPrice(tr.en, sym) : '--';
+    var ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
+    var why = (tr.why || tr.reason || '?').toUpperCase();
+    var time = tr.t ? (tr.t.length > 10 ? tr.t.substring(0,16).replace('T',' ') : tr.t) : '--';
+    var mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
+    var mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
+    var hold = tr.hold != null ? fmtHold(tr.hold) : '--';
+    var winCls = isWin ? 'win' : 'loss';
+    var pnlCls = isWin ? 'pos' : 'neg';
+    var html  = '<div class="rp-trade-row ' + winCls + '">';
+    html += '<div class="rptr-top">';
+    html += '<span class="rptr-tag ' + winCls + '">' + (isWin?'WIN':'LOSS') + '</span>';
+    html += '<span class="rptr-sym">' + sym + '</span>';
+    html += '<span class="rptr-eng">' + (tr.e||'--') + '</span>';
+    html += '<span class="rptr-pnl ' + pnlCls + '">' + fmtPnl(pnl) + '</span>';
+    html += '<span class="rptr-usd ' + pnlCls + '">' + fmtUsd(usd) + '</span>';
+    html += '<span class="rptr-badge ' + rc + '">' + why + '</span>';
+    html += '</div>';
+    html += '<div class="rptr-mid">';
+    html += '<span>Entry: <strong>' + en + '</strong></span>';
+    html += '<span>Exit: <strong>' + ex + '</strong></span>';
+    html += '<span>Hold: <strong>' + hold + '</strong></span>';
+    html += '</div>';
+    html += '<div class="rptr-bot">';
+    html += '<span class="rptr-mfe">MFE ' + mfe + '</span>';
+    html += '<span class="rptr-mae">MAE ' + mae + '</span>';
+    html += '<span class="rptr-time">' + time + '</span>';
+    html += '</div>';
+    html += '</div>';
+    return html;
   }).join('');
 }
 

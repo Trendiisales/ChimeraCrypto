@@ -99,7 +99,16 @@ public:
             timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;
             stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;
         }
-        // LAYER_EXPANSION: post at mid - 0.3 * spread
+        // LAYER_LEADLAG aggressive maker (layer_id=4): post at ask - 0.1*spread
+        // Sits just inside the spread. Fills when a seller hits slightly below ask.
+        // Saves ~4bp vs taker (no crossing fee), fills ~70% of time given 300ms window.
+        // If price runs away (ask rises 2bp) = stale, signal is gone anyway.
+        else if (layer_id == 4) {
+            limit_px  = ask - 0.1 * spread;
+            timeout   = 300;   // 300ms: LEADLAG edge window ~80ms, 3x buffer
+            stale_bp  = 2.0;   // cancel if ask rises 2bp — move has started without us
+        }
+        // LAYER_EXPANSION: post at mid - 0.3 * spread (kept for reference, currently disabled)
         else {
             limit_px  = mid - 0.3 * spread;
             timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;

@@ -455,7 +455,7 @@ function updateBoostPanel(data) {
     { key: 'boost_sweep',      id: 'sweep'      },
     { key: 'boost_mm',         id: 'mm'         },
   ];
-  const MAX_BOOST = 4.0;
+  const MAX_BOOST = 2.5;
   engines.forEach(({ key, id }) => {
     const val = data[key] !== undefined ? +data[key] : 1.0;
     const pct = Math.min(100, ((val - 1.0) / (MAX_BOOST - 1.0)) * 100);

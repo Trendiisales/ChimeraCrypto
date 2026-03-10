@@ -38,8 +38,8 @@ public:
 
     static constexpr double WIN_BOOST_THRESHOLD  = 0.70;
     static constexpr double WIN_BOOST_PEAK       = 0.90;
-    static constexpr double WIN_BOOST_MAX        = 4.0;
-    static constexpr int    WIN_BOOST_MIN_TRADES = 6;    // lowered: LL-ETH-SOL only has 6
+    static constexpr double WIN_BOOST_MAX        = 2.5;  // reduced from 4x — was oversizing on live equity
+    static constexpr int    WIN_BOOST_MIN_TRADES = 10;   // raised from 6 — need more evidence before boosting
     static constexpr double WIN_BOOST_DECAY      = 0.90; // per loss
 
 private:
@@ -82,16 +82,19 @@ private:
 
 public:
     CapitalControlLayer() {
-        seed_engine("LEADLAG",    27, 31);
-        seed_engine("LL-ETH-SOL", 6,  6);
-        seed_engine("ETH-LEAD",   0,  0);
-        seed_engine("SOL-LEAD",   0,  0);
-        seed_engine("VOLSHOCK",   0,  0);
-        seed_engine("LIQ",        0,  0);
-        seed_engine("FUND",       0,  0);
-        seed_engine("NGAS",       0,  0);
-        seed_engine("IMPULSE",   56, 99);
-        seed_engine("EXPAND",     6, 10);
+        // Seeds from 2026-03-11 live session (read from GUI trade table)
+        // Format: seed_engine(name, wins, total)
+        // Engines below 70% WR or <10 trades start at 1.0x — no historical inflation
+        seed_engine("LEADLAG",    8,  20);  // 40% WR — below threshold, starts 1.0x
+        seed_engine("LL-ETH-SOL", 3,   3); // 100% WR but only 3T — under min_trades, starts 1.0x
+        seed_engine("ETH-LEAD",   1,   6); // 17% WR — starts 1.0x
+        seed_engine("SOL-LEAD",   0,   1); // 0% WR  — starts 1.0x
+        seed_engine("VOLSHOCK",   0,   0); // no data
+        seed_engine("LIQ",        0,   0); // no data
+        seed_engine("FUND",       0,   0); // no data
+        seed_engine("NGAS",       0,   0); // no data
+        seed_engine("IMPULSE",    4,   9); // 44% WR — starts 1.0x
+        seed_engine("EXPAND",    35,  67); // 52% WR — starts 1.0x
     }
 
     void set_base_capital(double v) { base_capital_ = v; }

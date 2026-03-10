@@ -165,7 +165,8 @@ struct TradingConfig {
     // Our latency (18-25ms) is fast enough to catch early breakouts.
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
-    static constexpr double IMPULSE_TP_BP              = 10.0;  // lowered 2010bp: 0 TP hits at 20bp, moves not extending
+    static constexpr double IMPULSE_TP_BP              = 10.0;  // BTC/SOL: shallow moves, 10bp is ceiling
+    static constexpr double IMPULSE_ALT_TP_BP          = 20.0;  // AVAX/LINK/POL: thin books, moves run further (AVAX hit 10.5bp with zero resistance)
     static constexpr double IMPULSE_SL_BP              = 5.0;   // tightened 75bp: 9 SL hits all -7bp, 7/9 had MFE<0.6 (never moved right)  bad entries not noise. Cuts 2bp per SL hit.
     static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 20000; // extended 1520s: timeouts suggest moves need more time
 

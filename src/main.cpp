@@ -25,6 +25,190 @@
 #include "core/SymbolIndex.hpp"
 #include "config/TradingConfig.hpp"
 
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <dirent.h>
+#include <sys/stat.h>
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RollingLogger — tees stdout+stderr to daily log files
+// Files: logs/chimera_YYYY-MM-DD.log
+// Retention: LOG_KEEP_DAYS days (older files auto-deleted)
+// Thread-safe: uses a mutex on write
+// ─────────────────────────────────────────────────────────────────────────────
+#include <mutex>
+#include <ctime>
+#include <cstring>
+#include <cerrno>
+
+class RollingLogger {
+public:
+    static constexpr int LOG_KEEP_DAYS = 7;
+    static constexpr const char* LOG_DIR = "logs";
+
+    RollingLogger() { open_today(); }
+
+    ~RollingLogger() { flush_and_close(); }
+
+    // Call once at startup to redirect stdout+stderr
+    void install() {
+        // Redirect stdout
+        orig_stdout_ = stdout;
+        pipe(stdout_pipe_);
+        orig_stdout_fd_ = dup(STDOUT_FILENO);
+        dup2(stdout_pipe_[1], STDOUT_FILENO);
+        close(stdout_pipe_[1]);
+
+        // Redirect stderr
+        orig_stderr_fd_ = dup(STDERR_FILENO);
+        dup2(stdout_pipe_[1], STDERR_FILENO);  // merge stderr into same pipe
+
+        // Start drain thread
+        drain_thread_ = std::thread([this]{ drain_loop(); });
+    }
+
+    // Write directly (bypass pipe — for pre-install messages)
+    void write_direct(const char* msg) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        check_rotate();
+        if (file_.is_open()) {
+            file_ << msg;
+            file_.flush();
+        }
+    }
+
+    std::string current_path() const { return current_path_; }
+
+    void flush_and_close() {
+        running_ = false;
+        if (drain_thread_.joinable()) drain_thread_.join();
+        std::lock_guard<std::mutex> lk(mtx_);
+        if (file_.is_open()) { file_.flush(); file_.close(); }
+    }
+
+private:
+    std::ofstream            file_;
+    std::string              current_path_;
+    int                      current_day_ = -1;
+    std::mutex               mtx_;
+    std::atomic<bool>        running_{true};
+    std::thread              drain_thread_;
+    FILE*                    orig_stdout_ = nullptr;
+    int                      orig_stdout_fd_ = -1;
+    int                      orig_stderr_fd_ = -1;
+    int                      stdout_pipe_[2] = {-1, -1};
+
+    static std::string utc_date_str() {
+        time_t t = time(nullptr);
+        struct tm ti{};
+        gmtime_r(&t, &ti);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                 ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
+        return buf;
+    }
+
+    static int utc_day() {
+        time_t t = time(nullptr);
+        struct tm ti{};
+        gmtime_r(&t, &ti);
+        return ti.tm_yday;
+    }
+
+    void open_today() {
+        std::lock_guard<std::mutex> lk(mtx_);
+        if (file_.is_open()) { file_.flush(); file_.close(); }
+        mkdir(LOG_DIR, 0755);
+        current_path_ = std::string(LOG_DIR) + "/chimera_" + utc_date_str() + ".log";
+        file_.open(current_path_, std::ios::app);
+        current_day_ = utc_day();
+        if (file_.is_open()) {
+            file_ << "\n=== LOG OPENED " << utc_date_str() << " ===\n";
+            file_.flush();
+        }
+        purge_old_logs();
+    }
+
+    void check_rotate() {
+        // called under mtx_
+        if (utc_day() != current_day_) {
+            if (file_.is_open()) { file_.flush(); file_.close(); }
+            mkdir(LOG_DIR, 0755);
+            current_path_ = std::string(LOG_DIR) + "/chimera_" + utc_date_str() + ".log";
+            file_.open(current_path_, std::ios::app);
+            current_day_ = utc_day();
+            if (file_.is_open()) {
+                file_ << "\n=== LOG ROTATED " << utc_date_str() << " ===\n";
+                file_.flush();
+            }
+            purge_old_logs();
+        }
+    }
+
+    void purge_old_logs() {
+        // called under mtx_
+        DIR* dir = opendir(LOG_DIR);
+        if (!dir) return;
+        std::vector<std::string> files;
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != nullptr) {
+            std::string name(ent->d_name);
+            if (name.rfind("chimera_", 0) == 0 && name.size() > 4 &&
+                name.substr(name.size()-4) == ".log") {
+                files.push_back(std::string(LOG_DIR) + "/" + name);
+            }
+        }
+        closedir(dir);
+        std::sort(files.begin(), files.end());
+        while (static_cast<int>(files.size()) > LOG_KEEP_DAYS) {
+            std::remove(files.front().c_str());
+            files.erase(files.begin());
+        }
+    }
+
+    void drain_loop() {
+        // Drain the stdout pipe, tee to original stdout fd + log file
+        char buf[4096];
+        while (running_.load()) {
+            struct timeval tv{0, 50000};  // 50ms timeout
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(stdout_pipe_[0], &fds);
+            int n = select(stdout_pipe_[0] + 1, &fds, nullptr, nullptr, &tv);
+            if (n <= 0) continue;
+            ssize_t bytes = read(stdout_pipe_[0], buf, sizeof(buf)-1);
+            if (bytes <= 0) continue;
+            buf[bytes] = '\0';
+            // Write to original stdout
+            write(orig_stdout_fd_, buf, bytes);
+            // Write to log file
+            std::lock_guard<std::mutex> lk(mtx_);
+            check_rotate();
+            if (file_.is_open()) {
+                file_.write(buf, bytes);
+                file_.flush();
+            }
+        }
+        // Drain remainder
+        while (true) {
+            struct timeval tv{0, 5000};
+            fd_set fds; FD_ZERO(&fds); FD_SET(stdout_pipe_[0], &fds);
+            if (select(stdout_pipe_[0]+1, &fds, nullptr, nullptr, &tv) <= 0) break;
+            ssize_t bytes = read(stdout_pipe_[0], buf, sizeof(buf)-1);
+            if (bytes <= 0) break;
+            buf[bytes] = '\0';
+            write(orig_stdout_fd_, buf, bytes);
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (file_.is_open()) file_.write(buf, bytes);
+        }
+    }
+};
+
+static RollingLogger* g_logger = nullptr;
+
 //  SINGLE-INSTANCE LOCK 
 // Uses an advisory flock() on a PID file.
 // The lock is automatically released by the OS if the process crashes or exits.
@@ -109,12 +293,18 @@ void signal_handler(int sig) {
         // Second Ctrl+C  something is hanging, force exit immediately
         std::fprintf(stderr, "\n[SHUTDOWN] Forced exit.\n");
         release_instance_lock();
+    if (g_logger) { g_logger->flush_and_close(); }
         std::_Exit(0);
     }
 }
 
 int main() {
-    //  0. Single-instance lock  must be first 
+    //  0. Rolling log — install first so all output is captured
+    g_logger = new RollingLogger();
+    printf("[STARTUP] Rolling log: %s (7-day retention)\n", g_logger->current_path().c_str());
+    fflush(stdout);
+
+    //  1. Single-instance lock  must be first 
     acquire_instance_lock();
 
     std::signal(SIGINT,  signal_handler);

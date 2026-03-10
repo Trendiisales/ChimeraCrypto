@@ -243,6 +243,57 @@ struct RejectionThrottle {
     }
 };
 
+// =============================================================================
+// LayerPerformanceTracker
+// Per-layer exponential moving average of PnL (bps).
+// Adapted from the EdgeReinforcement pattern in the reference engine designs.
+// alpha=0.05 → ~20-trade window. Multiplier clamped [0.4, 1.5].
+// OFI/SWEEP/MM_PRESSURE start at 0.5x per config; once they accumulate
+// 10+ trades the tracker overrides with a data-driven multiplier.
+// =============================================================================
+class LayerPerformanceTracker {
+public:
+    static constexpr int NUM_LAYERS = 17;
+    static constexpr double ALPHA   = 0.05;   // ~20-trade EMA window
+    static constexpr double MULT_LO = 0.40;   // floor: never below 40% base size
+    static constexpr double MULT_HI = 1.50;   // ceiling: conservative until proven
+    static constexpr int    MIN_TRADES = 10;  // trades required before override kicks in
+
+    void record(LayerMode layer, double pnl_bps) {
+        int idx = (int)layer;
+        if (idx <= 0 || idx >= NUM_LAYERS) return;
+        pnl_ema_[idx] = pnl_ema_[idx] * (1.0 - ALPHA) + pnl_bps * ALPHA;
+        trade_count_[idx]++;
+    }
+
+    // Returns a sizing multiplier in [MULT_LO, MULT_HI].
+    // If fewer than MIN_TRADES have been seen for this layer, returns 1.0
+    // (neutral — let the hard-coded eng_mult in enter() control sizing).
+    double multiplier(LayerMode layer) const {
+        int idx = (int)layer;
+        if (idx <= 0 || idx >= NUM_LAYERS) return 1.0;
+        if (trade_count_[idx] < MIN_TRADES) return 1.0;
+        // Linearly map EMA pnl in [-20, +20] bps to [MULT_LO, MULT_HI]
+        double norm = pnl_ema_[idx] / 20.0;  // normalise: +20bp → +1.0
+        double mult = 1.0 + norm * 0.5;      // ±50% swing around 1.0
+        return std::max(MULT_LO, std::min(MULT_HI, mult));
+    }
+
+    double pnl_ema(LayerMode layer) const {
+        int idx = (int)layer;
+        return (idx > 0 && idx < NUM_LAYERS) ? pnl_ema_[idx] : 0.0;
+    }
+
+    int trade_count(LayerMode layer) const {
+        int idx = (int)layer;
+        return (idx > 0 && idx < NUM_LAYERS) ? trade_count_[idx] : 0;
+    }
+
+private:
+    double pnl_ema_[NUM_LAYERS]   = {};
+    int    trade_count_[NUM_LAYERS] = {};
+};
+
 class BalancedEngine {
 public:
     using GuiBroadcastCallback = std::function<void(const std::string&)>;
@@ -665,7 +716,7 @@ public:
         j << std::fixed << std::setprecision(2);
         int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
         double total_pnl=0.0;
-        for (int i=1;i<14;i++){
+        for (int i=1;i<17;i++){  // 1=MICRO .. 16=MM_PRESSURE — covers all active layers
             total_wins    += layer_stats_[i].wins;
             total_losses  += layer_stats_[i].losses;
             total_tp      += layer_stats_[i].tp_exits;
@@ -687,7 +738,7 @@ public:
           << "\"timeout_exits\":" << total_timeout << ","
           << "\"by_layer\":[";
         bool first=true;
-        for (int i=1;i<14;i++){  // 1=MICRO .. 13=VOLSHOCK -- covers all active layers
+        for (int i=1;i<17;i++){  // 1=MICRO .. 16=MM_PRESSURE -- covers all active layers
             const auto& ls=layer_stats_[i];
             if (ls.total()==0) continue;
             if (!first) j << ",";
@@ -2336,6 +2387,22 @@ private:
                                                               1.0;
         legacy_size_mult *= eng_mult;
 
+        // Per-layer adaptive multiplier — data-driven, kicks in after MIN_TRADES.
+        // Derived from LayerPerformanceTracker EMA (EdgeReinforcement pattern).
+        // Bounded [0.40, 1.50] so it can never zero-out a layer or over-lever.
+        {
+            double layer_mult = layer_tracker_.multiplier(layer);
+            if (layer_mult != 1.0) {
+                std::printf("[LAYER-ADAPT] %s layer=%d trades=%d pnl_ema=%.2fbp mult=%.2f\n",
+                    sym_short(id), (int)layer,
+                    layer_tracker_.trade_count(layer),
+                    layer_tracker_.pnl_ema(layer),
+                    layer_mult);
+                std::fflush(stdout);
+                legacy_size_mult *= layer_mult;
+            }
+        }
+
         // Per-symbol multiplier  data driven
         // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.
         // sym_mult: per-symbol size bias
@@ -2628,6 +2695,9 @@ private:
         tr.mfe_bps = s.pos.mfe;
         tr.mae_bps = s.pos.mae;
         reinforcement_.record_trade(tr);
+
+        // Per-layer performance EMA — feeds sizing multiplier in enter()
+        layer_tracker_.record(s.pos.layer, pnl_net);
         
         // Update allocator metrics
         if (s.pos.layer == LAYER_IMPULSE || s.pos.layer == LAYER_EXPANSION) {
@@ -2779,11 +2849,12 @@ private:
         double avg_mfe()  const { return total() > 0 ? sum_mfe / total() : 0.0; }
         double avg_mae()  const { return total() > 0 ? sum_mae / total() : 0.0; }
     };
-    LayerStats layer_stats_[14]; // indexed by LayerMode enum value (0..13)
+    LayerStats layer_stats_[17]; // indexed by LayerMode enum value (0..16)
+                                  // 14=LAYER_OFI  15=LAYER_SWEEP  16=LAYER_MM_PRESSURE
 
     LayerStats& stats_for(LayerMode m) {
         int idx = (int)m;
-        return layer_stats_[(idx >= 0 && idx < 14) ? idx : 0];
+        return layer_stats_[(idx >= 0 && idx < 17) ? idx : 0];
     }
     
     GuiBroadcastCallback gui_broadcast_;
@@ -2800,6 +2871,7 @@ private:
     CapitalControlLayer capital_control_;
     ExecutionOptimizer execution_optimizer_;
     AdaptiveReinforcementLayer reinforcement_;
+    LayerPerformanceTracker    layer_tracker_;  // per-layer EMA sizing feedback
 
     // Depth baseline per symbol  used for real queue_density in cap_env
     double depth_baseline_[MAX_SYMBOLS];

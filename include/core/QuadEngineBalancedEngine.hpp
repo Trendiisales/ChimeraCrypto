@@ -86,12 +86,7 @@ public:
     }
     
     void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
-        // EMA-smooth the per-tick age so GUI doesn't flicker
-        // alpha=0.1: ~10-tick smoothing window, stable display
-        if (last_latency_ms_ == 0.0)
-            last_latency_ms_ = latency_ms;
-        else
-            last_latency_ms_ = 0.9 * last_latency_ms_ + 0.1 * latency_ms;
+        last_latency_ms_ = latency_ms;  // raw per-tick age for signal gating
         // Derive scalar price for engines that don't need full tick
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
 

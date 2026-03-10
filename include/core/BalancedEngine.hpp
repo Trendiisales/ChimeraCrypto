@@ -1001,8 +1001,10 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
 
-        // EXPAND: BTC(0) 60% WR +13bp, SOL(2) 60% WR. All others net negative.
-        if (id != 0 && id != 2) {
+        // EXPAND: BTC(0) ONLY -- 60% WR +13.65bp, +1.36bp/trade
+        // SOL(2): 60% WR but -4.70bp total (-0.94bp/trade) -- winners avg +4.27bp, losers avg -8.75bp, inverted R:R
+        // ETH(1): 42% WR -69bp -- already dead
+        if (id != 0) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
         }

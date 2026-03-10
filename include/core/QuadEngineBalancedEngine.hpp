@@ -29,7 +29,7 @@ public:
         load_trades_from_disk();
         write_session_marker();
 
-        // Wire BalancedEngine exit callback → our trade log
+        // Wire BalancedEngine exit callback  our trade log
         balanced_.set_trade_exit_callback([this](const BalancedEngine::TradeExitData& td) {
             push_trade(td.symbol, td.engine, td.pnl_bp,
                        td.entry_price, td.exit_price,
@@ -58,25 +58,25 @@ public:
         }
         
         std::printf("\n");
-        std::printf("╔════════════════════════════════════════════════════════════════╗\n");
-        std::printf("║         QUAD ENGINE + REGIME ALLOCATOR FRAMEWORK              ║\n");
-        std::printf("╠════════════════════════════════════════════════════════════════╣\n");
-        std::printf("║ SIGNAL ENGINES:                                                ║\n");
-        std::printf("║   • MICRO (BalancedEngine):    10-30bp (15bp min)             ║\n");
-        std::printf("║   • STRUCTURAL:                30-150bp riders                 ║\n");
-        std::printf("║   • CONVEX SHOCK:              20bp+ acceleration              ║\n");
-        std::printf("║   • COMPRESSION BREAKOUT:      Tight range → expansion         ║\n");
-        std::printf("║                                                                ║\n");
-        std::printf("║ CAPITAL INTELLIGENCE:                                          ║\n");
-        std::printf("║   • Regime State Allocator:    Dynamic capital scaling        ║\n");
-        std::printf("║     - DEAD (0.0x)              Kill all trading                ║\n");
-        std::printf("║     - COMPRESSION (0.5x)       Conservative sizing             ║\n");
-        std::printf("║     - EXPANSION (1.0x)         Normal sizing                   ║\n");
-        std::printf("║     - SHOCK (1.5x)             Aggressive scaling              ║\n");
-        std::printf("║                                                                ║\n");
-        std::printf("║ Portfolio Cap: 2.0R base → 0-3.0R dynamic per symbol          ║\n");
-        std::printf("║ GUI: http://154.45.251.118:8080                               ║\n");
-        std::printf("╚════════════════════════════════════════════════════════════════╝\n");
+        std::printf("\n");
+        std::printf("         QUAD ENGINE + REGIME ALLOCATOR FRAMEWORK              \n");
+        std::printf("\n");
+        std::printf(" SIGNAL ENGINES:                                                \n");
+        std::printf("    MICRO (BalancedEngine):    10-30bp (15bp min)             \n");
+        std::printf("    STRUCTURAL:                30-150bp riders                 \n");
+        std::printf("    CONVEX SHOCK:              20bp+ acceleration              \n");
+        std::printf("    COMPRESSION BREAKOUT:      Tight range  expansion         \n");
+        std::printf("                                                                \n");
+        std::printf(" CAPITAL INTELLIGENCE:                                          \n");
+        std::printf("    Regime State Allocator:    Dynamic capital scaling        \n");
+        std::printf("     - DEAD (0.0x)              Kill all trading                \n");
+        std::printf("     - COMPRESSION (0.5x)       Conservative sizing             \n");
+        std::printf("     - EXPANSION (1.0x)         Normal sizing                   \n");
+        std::printf("     - SHOCK (1.5x)             Aggressive scaling              \n");
+        std::printf("                                                                \n");
+        std::printf(" Portfolio Cap: 2.0R base  0-3.0R dynamic per symbol          \n");
+        std::printf(" GUI: http://154.45.251.118:8080                               \n");
+        std::printf("\n");
         std::printf("\n");
         std::fflush(stdout);
     }
@@ -193,6 +193,7 @@ public:
     std::string get_rejection_stats() const { return balanced_.get_rejection_stats(); }
     std::string get_session_stats_json() const { return balanced_.get_session_stats_json(); }
     double get_total_pnl() const { return balanced_.get_total_pnl(); }
+    std::string get_boost_json() const { return balanced_.get_boost_json(); }
     double get_realized_pnl() const { return balanced_.get_realized_pnl(); }
     int get_total_trades() const { return balanced_.get_total_trades(); }
     int get_open_positions() const { return balanced_.get_open_positions(); }
@@ -214,8 +215,9 @@ public:
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         json << "\"latency_p95\":" << last_latency_ms_ << ",";
+        json << balanced_.get_boost_json() << ",";
 
-        // Full session stats — per-layer wins/losses/tp/sl/trail/timeout
+        // Full session stats  per-layer wins/losses/tp/sl/trail/timeout
         json << balanced_.get_session_stats_json() << ",";
 
         // Trade log JSON array
@@ -253,7 +255,7 @@ public:
             json << "\"regime_multiplier\":" << allocator_[i].get_multiplier() << ",";
             json << "\"dynamic_cap_R\":" << allocator_[i].allowed_R(2.0) << ",";
             
-            // Micro — BalancedEngine handles all symbols together, no per-symbol micro stats
+            // Micro  BalancedEngine handles all symbols together, no per-symbol micro stats
             json << "\"micro_active\":" << (ms.micro_active ? "true" : "false") << ",";
             json << "\"micro_total_pnl_bp\":0.0,";
             json << "\"micro_total_trades\":0,";
@@ -353,7 +355,7 @@ private:
     double prev_compression_pnl_[MAX_SYMBOLS]    = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
-    std::string last_written_trade_key_;  // dedup guard — prevents double-writes
+    std::string last_written_trade_key_;  // dedup guard  prevents double-writes
 
     void load_trades_from_disk() {
         std::ifstream f(TRADE_LOG_FILE);
@@ -391,7 +393,7 @@ private:
         // Ensure data dir exists
         { int _r = ::system("mkdir -p data"); (void)_r; }
 
-        // DEDUP GUARD — prevent double-writes when two processes run simultaneously
+        // DEDUP GUARD  prevent double-writes when two processes run simultaneously
         // or when the callback fires twice for the same trade (e.g. after a restart)
         std::string dedup_key = r.time + "|" + r.symbol + "|" + r.engine + "|" +
                                 std::to_string((int)(r.pnl_bp * 100));
@@ -448,7 +450,7 @@ private:
         r.hold_ms     = hold_ms;
         r.reason      = reason.empty() ? (pnl_bp >= 0 ? "TP" : "SL") : reason;
         save_trade_to_disk(r);
-        // IN-MEMORY DEDUP — prevent disk-loaded records appearing twice when live
+        // IN-MEMORY DEDUP  prevent disk-loaded records appearing twice when live
         // callback fires for a trade already in memory from load_trades_from_disk()
         std::string mem_key = r.time + "|" + r.symbol + "|" + r.engine + "|" +
                               std::to_string((int)(r.pnl_bp * 100));

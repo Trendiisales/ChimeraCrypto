@@ -39,6 +39,7 @@
 #include <iomanip>
 #include "logging/ShadowLogger.hpp"
 #include "core/LimitOrderManager.hpp"
+#include "core/PnLGovernor.hpp"
 
 namespace chimera {
 
@@ -347,7 +348,9 @@ public:
             telem << std::fixed << std::setprecision(2);
             telem << "{\"type\":\"telemetry\","
                   << "\"equity\":" << (10000.0 + total_pnl_) << ","
-                  << "\"day_pnl\":" << total_pnl_ << ","
+                  << "\"day_pnl\":" << total_pnl_
+                  << ",\"last_trade_gross\":" << pnl
+                  << ",\"last_trade_net\":" << pnl_net << ","
                   << "\"pnl\":" << total_pnl_ << ","
                   << "\"unrealized_pnl\":0,"
                   << "\"trades_today\":" << total_trades_ << ","
@@ -524,6 +527,7 @@ public:
         }
         
         // Signal evaluation
+        pnl_governor_.reset_if_new_day();  // BUG2 FIX: daily PnL reset check
         if (ts < kill_until_) return;
         if (ts < s.cooldown_until) return;
         // Per-symbol guard: don't enter if this symbol already has a position
@@ -1852,11 +1856,23 @@ private:
             return;
         }
 
-        // COST FLOOR GATE
-        // Taker: 10bp floor | Maker: 4bp floor (rebate ~1bp/side, spread=0)
-        double cost_floor = TradingConfig::MAKER_MODE
-            ? TradingConfig::MAKER_COST_FLOOR_BP
-            : TradingConfig::COST_FLOOR_BP;
+        // COST FLOOR GATE — per-layer, based on actual execution model
+        // TAKER layers (post at ask, guaranteed fill): 8bp round trip cost → 12bp floor
+        //   LEADLAG, IMPULSE, ETH_LEAD, SOL_LEAD, VOLSHOCK, LIQUIDATION
+        // MAKER layers (post below mid, rebate): ~4bp cost → 4bp floor
+        //   IMBALANCE, EXPANSION, VWAP, VACUUM
+        bool is_taker_layer = (layer == LAYER_LEADLAG        ||
+                               layer == LAYER_IMPULSE        ||
+                               layer == LAYER_ETH_LEAD       ||
+                               layer == LAYER_SOL_LEAD       ||
+                               layer == LAYER_VOLSHOCK       ||
+                               layer == LAYER_LIQUIDATION    ||
+                               layer == LAYER_LEADLAG_ETH_SOL);
+        double cost_floor = is_taker_layer
+            ? TradingConfig::COST_FLOOR_BP              // 12bp — taker round trip
+            : (layer == LAYER_EXPANSION)
+                ? TradingConfig::EXPANSION_COST_FLOOR_BP // 8bp — BUG10: EXPANSION net-negative at 4bp floor
+                : TradingConfig::MAKER_COST_FLOOR_BP;    // 4bp  — maker rebate (IMBALANCE, VWAP, VACUUM)
         if (sig.expected_bps < cost_floor) {
             std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
@@ -1947,26 +1963,32 @@ private:
 
         // Per-engine multiplier
         // LEADLAG: near-100% WR in history  run at max leverage (4x)
-        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 4.0 :  // MAX LEVERAGE  high WR event-driven
-                          (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE  slow-burn, less timing edge
-                          (layer == LAYER_NGAS)             ? 1.5 :  // MODERATE  macro signal, decent but slow
-                          (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE  proven near-100% WR
-                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
-                          (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
-                          (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal  neutral size
-                          (layer == LAYER_ETH_LEAD)         ? 3.0 :  // same edge as LEADLAG, tier 2
-                          (layer == LAYER_SOL_LEAD)         ? 2.5 :  // tier 3, slightly less data
-                          (layer == LAYER_VOLSHOCK)         ? 2.0 :  // new engine, conservative start
-                          (layer == LAYER_VWAP)             ? 1.1 :
+        // eng_mult: position size multiplier per layer
+        // All aggressive multipliers removed until net-positive edge confirmed
+        // over 50+ trades. LEADLAG was 4x on gross-positive/net-negative edge.
+        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 2.0 :  // event-driven, capped until live confirmed
+                          (layer == LAYER_FUNDING)          ? 1.5 :  // slow-burn
+                          (layer == LAYER_NGAS)             ? 1.0 :  // macro, unproven net
+                          (layer == LAYER_LEADLAG)          ? 1.0 :  // BUG5 FIX: was 4x, net-negative at 47% WR
+                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 0.5 :  // net-negative until proven (see audit)
+                          (layer == LAYER_IMPULSE)          ? 1.0 :  // neutral until net confirmed
+                          (layer == LAYER_EXPANSION)        ? 0.8 :  // BUG10: net-negative, reduce exposure
+                          (layer == LAYER_ETH_LEAD)         ? 1.0 :  // unproven, neutral
+                          (layer == LAYER_SOL_LEAD)         ? 1.0 :  // unproven, neutral
+                          (layer == LAYER_VOLSHOCK)         ? 0.5 :  // new engine, conservative
+                          (layer == LAYER_VWAP)             ? 1.0 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
 
         // Per-symbol multiplier  data driven
         // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.
-        double sym_mult = (id == 4 || id == 5 || id == 6) ? 4.0 :  // AVAX/LINK/POL: 100% WR IMPULSE, thin books, TP in <1s, near-zero MAE
-                          (id == 2) ? 1.4 :   // SOL: consistently best WR across engines
-                          (id == 1) ? 0.7 :   // ETH: filtered from most engines
-                                      1.0;    // others: neutral
+        // sym_mult: per-symbol size bias
+        // BUG6 FIX: AVAX/LINK/POL was 4x — thin books + few trades = unacceptable live risk
+        // Capped at 1.5 until 50+ live net-positive trades confirmed per symbol
+        double sym_mult = (id == 4 || id == 5 || id == 6) ? 1.5 :  // AVAX/LINK/POL: thin books, capped until live confirmed
+                          (id == 2) ? 1.2 :   // SOL: good WR, modest boost
+                          (id == 1) ? 0.7 :   // ETH: weakest performer, suppressed
+                                      1.0;    // BTC/BNB: neutral
         legacy_size_mult *= sym_mult;
 
         if (consecutive_losses_ >= 2) {
@@ -2006,9 +2028,17 @@ private:
             double ask = s.last_tick.ask > 0.0 ? s.last_tick.ask : price * 1.0001;
 
             // Map LayerMode to int id expected by LimitOrderManager
-            int layer_int = (layer == LAYER_MICRO)     ? 0 :
-                            (layer == LAYER_IMPULSE)   ? 1 :
-                            (layer == LAYER_EXPANSION) ? 2 : 3;  // LEADLAG=3
+            // 0=IMBALANCE(maker/bid), 1=IMPULSE(taker/ask), 2=EXPANSION(maker/mid), 3=LEADLAG(taker/ask)
+            // All taker layers (LEADLAG, ETH_LEAD, SOL_LEAD, VOLSHOCK, LL_ETH_SOL) map to 3 = post at ask
+            int layer_int = (layer == LAYER_MICRO)              ? 0 :  // maker: post at bid
+                            (layer == LAYER_IMPULSE)             ? 1 :  // taker: post at ask
+                            (layer == LAYER_EXPANSION)           ? 2 :  // maker: post at mid-0.3*spread
+                            (layer == LAYER_LEADLAG)             ? 3 :  // taker: post at ask
+                            (layer == LAYER_LEADLAG_ETH_SOL)     ? 3 :  // taker: post at ask
+                            (layer == LAYER_ETH_LEAD)            ? 3 :  // taker: post at ask (BUG7 FIX)
+                            (layer == LAYER_SOL_LEAD)            ? 3 :  // taker: post at ask (BUG7 FIX)
+                            (layer == LAYER_VOLSHOCK)            ? 3 :  // taker: post at ask (BUG7 FIX)
+                                                                   3;   // default taker
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
 
@@ -2074,18 +2104,34 @@ private:
     void exit(int id, double pnl, int64_t ts, SymbolState& s) {
         const char* sym = sym_short(id);
         std::string symbol_full = sym_full(id);
-        
+
+        // NET PnL: subtract round-trip cost based on actual execution model
+        // Taker layers (post at ask): 8bp round trip (4bp/side at VIP0)
+        // Maker layers (post below mid): 4bp round trip (rebate ~1bp/side, spread ~2bp)
+        bool is_taker_exit = (s.pos.layer == LAYER_LEADLAG         ||
+                              s.pos.layer == LAYER_IMPULSE         ||
+                              s.pos.layer == LAYER_ETH_LEAD        ||
+                              s.pos.layer == LAYER_SOL_LEAD        ||
+                              s.pos.layer == LAYER_VOLSHOCK        ||
+                              s.pos.layer == LAYER_LIQUIDATION     ||
+                              s.pos.layer == LAYER_LEADLAG_ETH_SOL);
+        double round_trip_cost = is_taker_exit
+            ? TradingConfig::TAKER_ROUND_TRIP_BP   // 8bp
+            : TradingConfig::MAKER_ROUND_TRIP_BP;  // 4bp
+        double pnl_net = pnl - round_trip_cost;
+
         int64_t hold_time_ms = ts - s.pos.entry_ts;  // ts is already milliseconds
         double current_latency = snapshots_[id].lat_p95_ms;
         double slippage_bps = 2.0;
-        
-        pnl_by_band_.record_trade(symbol_full, current_latency, pnl, slippage_bps);
-        
-        realized_pnl_ += pnl;
+
+        pnl_by_band_.record_trade(symbol_full, current_latency, pnl_net, slippage_bps);
+
+        realized_pnl_ += pnl_net;
         total_pnl_ = realized_pnl_;
         total_trades_++;
         
-        // Determine reason for P&L sign
+        // From here on, use pnl_net for all recording/display
+        // pnl (raw gross move) kept only for price reconstruction in shadow log
         const char* layer_label =
                             (s.pos.layer == LAYER_MICRO)          ? "IMBAL"      :
                             (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"    :
@@ -2100,12 +2146,12 @@ private:
                             (s.pos.layer == LAYER_ETH_LEAD)       ? "ETH-LEAD"   :
                             (s.pos.layer == LAYER_SOL_LEAD)       ? "SOL-LEAD"   :
                             (s.pos.layer == LAYER_VOLSHOCK)       ? "VOLSHOCK"   : "UNKNOWN";
-        const char* win_str = pnl > 0 ? "WIN" : "LOSS";
+        const char* win_str = pnl_net > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
             sym, layer_label, win_str,
             pending_exit_reason_.empty() ? "?" : pending_exit_reason_.c_str(),
-            pnl, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
+            pnl_net, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
         std::fflush(stdout);
 
         // Compute exit reason before the callback block so it's in scope for
@@ -2117,7 +2163,7 @@ private:
             TradeExitData td;
             td.symbol      = sym;
             td.engine      = layer_label;
-            td.pnl_bp      = pnl;
+            td.pnl_bp      = pnl_net;
             td.entry_price = s.pos.entry_price;
             td.exit_price  = s.pos.entry_price * (1.0 + pnl / 10000.0);
             td.mfe_bp      = s.pos.mfe;
@@ -2129,8 +2175,14 @@ private:
         pending_exit_reason_.clear();
 
         // Record per-layer session stats (visible in GUI Session Stats panel)
-        stats_for(s.pos.layer).record(pnl, exit_reason, s.pos.mfe, s.pos.mae);
-        capital_control_.record_trade_result(std::string(layer_label), pnl > 0.0);
+        stats_for(s.pos.layer).record(pnl_net, exit_reason, s.pos.mfe, s.pos.mae);
+        pnl_governor_.record(pnl_net);  // BUG2 FIX: daily loss governor (resets at UTC midnight)
+        if (pnl_governor_.blocked()) {
+            std::printf("[DAILY-KILL] Daily loss limit reached (%.1fbp) — halting new entries until UTC midnight\n", -120.0);
+            std::fflush(stdout);
+            kill_until_ = ts + 24 * 3600 * 1000LL;  // effectively stop until next restart / midnight reset
+        }
+        capital_control_.record_trade_result(std::string(layer_label), pnl_net > 0.0);
         capital_control_.update_compounding_equity(10000.0 + realized_pnl_);  // per-engine win-rate boost
 
         // Shadow log  structured CSV for edge measurement
@@ -2147,7 +2199,8 @@ private:
                 sizeof(se.regime)-1);
             se.entry_px      = s.pos.entry_price;
             se.exit_px       = s.pos.entry_price * (1.0 + pnl / 10000.0);
-            se.pnl_bp        = pnl;
+            se.pnl_bp        = pnl_net;   // net after round-trip cost
+            se.gross_bp      = pnl;        // raw price move before cost
             se.mfe_bp        = s.pos.mfe;
             se.mae_bp        = s.pos.mae;
             se.hold_ms       = hold_time_ms;
@@ -2206,24 +2259,24 @@ private:
         // PHASE 2: Update reinforcement layer
         AdaptiveReinforcementLayer::TradeResult tr;
         tr.regime = (int)regime_classifiers_[id].regime();
-        tr.pnl_bps = pnl;
+        tr.pnl_bps = pnl_net;
         tr.mfe_bps = s.pos.mfe;
         tr.mae_bps = s.pos.mae;
         reinforcement_.record_trade(tr);
         
         // Update allocator metrics
         if (s.pos.layer == LAYER_IMPULSE || s.pos.layer == LAYER_EXPANSION) {
-            adaptive_allocator_.update_impulse_metrics(pnl, s.pos.mfe, s.pos.mae, 0.0);
+            adaptive_allocator_.update_impulse_metrics(pnl_net, s.pos.mfe, s.pos.mae, 0.0);
         } else {
-            adaptive_allocator_.update_maker_metrics(pnl, s.pos.mfe, s.pos.mae, 0.0);
+            adaptive_allocator_.update_maker_metrics(pnl_net, s.pos.mfe, s.pos.mae, 0.0);
         }
         
         LayerType layer_type = (s.pos.layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
                                (s.pos.layer == LAYER_EXPANSION) ? LayerType::EXPAND :
                                (s.pos.layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
-        governor_.record_trade_result(symbol_full, layer_type, pnl);
+        governor_.record_trade_result(symbol_full, layer_type, pnl_net);
         
-        if (pnl < 0) {
+        if (pnl_net < 0) {
             loss_streak_++;
             consecutive_losses_++;
             last_loss_ts_ = ts;
@@ -2246,7 +2299,7 @@ private:
                 // circuit breaker indefinitely. Now only a WIN resets the streak.
                 // (sym_consecutive_sl_ stays at current count)
             }
-        } else {
+        } else { // pnl_net >= 0
             loss_streak_ = 0;
             consecutive_losses_ = 0;
             snapshots_[id].loss_streak = 0;
@@ -2288,6 +2341,7 @@ private:
     NGASLeadLagEngine*   ngas_    = nullptr;  // optional  set from main()
     VolatilityScoring vol_scoring_[MAX_SYMBOLS];
     StatefulGovernor governor_;
+    PnLGovernor      pnl_governor_;   // BUG2 FIX: daily loss limit with UTC midnight reset
     MultiSymbolAllocator allocator_;
     RejectionTelemetryAsync rejection_telemetry_;
     

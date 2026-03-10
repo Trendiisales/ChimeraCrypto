@@ -354,7 +354,14 @@ public:
                   << "\"btc_position\":0,"
                   << "\"eth_position\":0,"
                   << "\"sol_position\":0,"
-                  << "\"governor\":\"ACTIVE\""
+                  << "\"governor\":\"ACTIVE\"," 
+                  << "\"boost_leadlag\":" << capital_control_.win_boost_for("LEADLAG") << "," 
+                  << "\"boost_ll_eth_sol\":" << capital_control_.win_boost_for("LL-ETH-SOL") << "," 
+                  << "\"boost_impulse\":" << capital_control_.win_boost_for("IMPULSE") << "," 
+                  << "\"boost_expand\":" << capital_control_.win_boost_for("EXPAND") << "," 
+                  << "\"boost_liq\":" << capital_control_.win_boost_for("LIQ") << "," 
+                  << "\"boost_fund\":" << capital_control_.win_boost_for("FUND") << "," 
+                  << "\"boost_ngas\":" << capital_control_.win_boost_for("NGAS") 
                   << "}";
             broadcast_to_gui(telem.str());
             

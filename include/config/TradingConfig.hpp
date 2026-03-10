@@ -339,6 +339,23 @@ struct TradingConfig {
     static constexpr double  FUNDING_SIG_LATENCY_MAX   = 50.0;    // not latency sensitive
 
     // -------------------------------------------------------------------------
+    // ETH LEAD-LAG (Tier 2) ENGINE
+    static constexpr double  ETH_LEAD_TP_BP         = 12.0;  // slightly lower than BTC->alts, ETH moves less
+    static constexpr double  ETH_LEAD_SL_BP         =  3.0;  // tight -- same mechanism, same timing edge
+    static constexpr int64_t ETH_LEAD_MAX_HOLD_MS   = 5000;  // 5s -- ETH propagation is ~100ms slower
+    static constexpr double  ETH_LEAD_SUSTAIN_MULT  =  0.6;  // sustain filter: 60% of threshold
+
+    // SOL LEAD-LAG (Tier 3) ENGINE
+    static constexpr double  SOL_LEAD_TP_BP         = 10.0;  // SOL->alts moves ~8-12bp
+    static constexpr double  SOL_LEAD_SL_BP         =  3.5;  // slightly wider: SOL is more volatile
+    static constexpr int64_t SOL_LEAD_MAX_HOLD_MS   = 4000;  // 4s -- SOL propagation is fastest
+    static constexpr double  SOL_LEAD_SUSTAIN_MULT  =  0.58; // sustain: 7/12bp threshold
+
+    // VOLUME SHOCK CONTINUATION ENGINE
+    static constexpr double  VOLSHOCK_TP_BP         = 10.0;  // conservative: new engine, no data yet
+    static constexpr double  VOLSHOCK_SL_BP         =  4.0;  // 2.5:1 gross R:R
+    static constexpr int64_t VOLSHOCK_MAX_HOLD_MS   = 6000;  // 6s -- let continuation develop
+
     // NGAS LEAD-LAG ENGINE  Natural Gas macro signal leads crypto risk rotation
     // -------------------------------------------------------------------------
     // NGAS price drop  (< -NGAS_DROP_PCT over 15min)  = risk-on   LONG BTC/ETH

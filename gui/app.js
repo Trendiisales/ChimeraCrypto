@@ -231,7 +231,7 @@ function renderTradeLog() {
       return;
     }
     // Group by engine
-    var engines = ['LEADLAG','LL-ETH-SOL','IMPULSE','EXPAND','LIQUIDATION','FUNDING','NGAS','ETH-LEAD','SOL-LEAD','VOLSHOCK','VWAP','VACUUM','MICRO'];
+    var engines = ['LEADLAG','LL-ETH-SOL','IMPULSE','EXPAND','LIQUIDATION','FUNDING','NGAS','ETH-LEAD','SOL-LEAD','VOLSHOCK','VWAP','VACUUM','MICRO','OFI','SWEEP','MM-PRESSURE'];
     var groups = {};
     engines.forEach(function(e){ groups[e] = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0}; });
     var other = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0};
@@ -451,6 +451,9 @@ function updateBoostPanel(data) {
     { key: 'boost_eth_lead',   id: 'eth-lead'   },
     { key: 'boost_sol_lead',   id: 'sol-lead'   },
     { key: 'boost_volshock',   id: 'volshock'   },
+    { key: 'boost_ofi',        id: 'ofi'        },
+    { key: 'boost_sweep',      id: 'sweep'      },
+    { key: 'boost_mm',         id: 'mm'         },
   ];
   const MAX_BOOST = 4.0;
   engines.forEach(({ key, id }) => {
@@ -468,6 +471,41 @@ function updateBoostPanel(data) {
       valEl.className = 'boost-val' + (isMax ? ' max' : '');
     }
   });
+
+  // Layer Adapt Panel — shows LayerPerformanceTracker state for OFI/SWEEP/MM-PRESSURE
+  const la = data.layer_adapt;
+  if (la) {
+    const ADAPT_LAYERS = [
+      { key: 'ofi',   label: 'OFI'         },
+      { key: 'sweep', label: 'SWEEP'        },
+      { key: 'mm',    label: 'MM-PRESS'     },
+    ];
+    ADAPT_LAYERS.forEach(({ key, label }) => {
+      const d = la[key];
+      if (!d) return;
+      const trades  = d.trades || 0;
+      const pnlEma  = d.pnl_ema || 0;
+      const mult    = d.mult || 1.0;
+      const active  = trades >= 10;  // MIN_TRADES from LayerPerformanceTracker
+      const multEl  = $('la-mult-' + key);
+      const tradesEl = $('la-trades-' + key);
+      const emaEl   = $('la-ema-' + key);
+      const statusEl = $('la-status-' + key);
+      if (multEl) {
+        multEl.textContent = mult.toFixed(2) + 'x';
+        multEl.className = 'la-mult ' + (mult > 1.0 ? 'pos' : mult < 1.0 ? 'neg' : 'muted');
+      }
+      if (tradesEl) tradesEl.textContent = trades + 'T';
+      if (emaEl) {
+        emaEl.textContent = (pnlEma >= 0 ? '+' : '') + pnlEma.toFixed(1) + 'bp';
+        emaEl.className = 'la-ema ' + (pnlEma >= 0 ? 'pos' : 'neg');
+      }
+      if (statusEl) {
+        statusEl.textContent = active ? 'ACTIVE' : 'WARMUP';
+        statusEl.className = 'la-status ' + (active ? 'la-active' : 'la-warmup');
+      }
+    });
+  }
 }
 
   // Top bar

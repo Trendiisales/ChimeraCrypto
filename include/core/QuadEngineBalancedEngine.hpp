@@ -217,6 +217,7 @@ public:
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         json << "\"latency_p95\":" << lat_p95_display_ << ",";
         json << balanced_.get_boost_json() << ",";
+        json << balanced_.get_layer_adapt_json() << ",";
 
         // Full session stats  per-layer wins/losses/tp/sl/trail/timeout
         json << balanced_.get_session_stats_json() << ",";

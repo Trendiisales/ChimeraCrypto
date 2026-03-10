@@ -330,6 +330,13 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .etd-wr.pos{color:var(--green)}.etd-wr.neg{color:var(--red)}
 .trades-panel-body{overflow-y:auto;flex:1;min-height:0;}
 .tp-empty{padding:10px 14px;color:var(--muted);font-size:11px;font-style:italic}
+.la-mult{font-family:var(--fh);font-size:13px;font-weight:700}
+.la-mult.pos{color:var(--green)}.la-mult.neg{color:var(--red)}.la-mult.muted{color:var(--muted)}
+.la-ema{font-size:11px;font-weight:600}
+.la-ema.pos{color:var(--green)}.la-ema.neg{color:var(--red)}.la-ema.muted{color:var(--muted)}
+.la-status{font-size:9px;font-family:var(--fh);font-weight:700;letter-spacing:1px;padding:1px 4px;border-radius:2px}
+.la-warmup{color:var(--yellow);background:rgba(255,200,0,.1);border:1px solid rgba(255,200,0,.3)}
+.la-active{color:var(--green);background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.3)}
 </style>
 </head>
 <body>
@@ -631,6 +638,77 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         </tbody>
       </table>
     </div>
+
+    <!-- Session by-layer breakdown (fed from get_session_stats_json) -->
+    <div style="padding:8px 12px;border-top:1px solid var(--border)">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px">SESSION BY LAYER</div>
+      <div id="st-by-layer" style="font-size:12px;color:var(--muted)">No trades yet</div>
+    </div>
+
+    <!-- Layer Adapt Panel — LayerPerformanceTracker state for OFI/SWEEP/MM-PRESSURE -->
+    <div style="padding:8px 12px;border-top:1px solid var(--border)">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px">LAYER ADAPT SIZING</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+
+        <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:3px;padding:6px 8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-family:var(--fh);font-size:10px;letter-spacing:1px;color:var(--accent)">OFI</span>
+            <span id="la-status-ofi" class="la-status la-warmup">WARMUP</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span id="la-mult-ofi" class="la-mult muted">1.00x</span>
+            <span id="la-ema-ofi" class="la-ema muted">+0.0bp</span>
+            <span id="la-trades-ofi" style="color:var(--muted);font-size:11px">0T</span>
+          </div>
+        </div>
+
+        <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:3px;padding:6px 8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-family:var(--fh);font-size:10px;letter-spacing:1px;color:var(--accent)">SWEEP</span>
+            <span id="la-status-sweep" class="la-status la-warmup">WARMUP</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span id="la-mult-sweep" class="la-mult muted">1.00x</span>
+            <span id="la-ema-sweep" class="la-ema muted">+0.0bp</span>
+            <span id="la-trades-sweep" style="color:var(--muted);font-size:11px">0T</span>
+          </div>
+        </div>
+
+        <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:3px;padding:6px 8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-family:var(--fh);font-size:10px;letter-spacing:1px;color:var(--accent)">MM-PRESS</span>
+            <span id="la-status-mm" class="la-status la-warmup">WARMUP</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span id="la-mult-mm" class="la-mult muted">1.00x</span>
+            <span id="la-ema-mm" class="la-ema muted">+0.0bp</span>
+            <span id="la-trades-mm" style="color:var(--muted);font-size:11px">0T</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Boost bars: win-boost multipliers per engine (includes OFI/SWEEP/MM) -->
+    <div style="padding:8px 12px;border-top:1px solid var(--border)">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px">WIN BOOST MULTIPLIERS</div>
+      <div>
+        <div class="boost-row"><span class="boost-eng">LEADLAG</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-leadlag" style="width:0%"></div></div><span class="boost-val" id="bval-leadlag">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">LL-ETH-SOL</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ll-eth-sol" style="width:0%"></div></div><span class="boost-val" id="bval-ll-eth-sol">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">IMPULSE</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-impulse" style="width:0%"></div></div><span class="boost-val" id="bval-impulse">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">EXPAND</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-expand" style="width:0%"></div></div><span class="boost-val" id="bval-expand">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">LIQ</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-liq" style="width:0%"></div></div><span class="boost-val" id="bval-liq">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">FUND</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-fund" style="width:0%"></div></div><span class="boost-val" id="bval-fund">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">NGAS</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ngas" style="width:0%"></div></div><span class="boost-val" id="bval-ngas">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">ETH-LEAD</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-eth-lead" style="width:0%"></div></div><span class="boost-val" id="bval-eth-lead">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">SOL-LEAD</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-sol-lead" style="width:0%"></div></div><span class="boost-val" id="bval-sol-lead">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng">VOLSHOCK</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-volshock" style="width:0%"></div></div><span class="boost-val" id="bval-volshock">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng" style="color:var(--accent)">OFI</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ofi" style="width:0%"></div></div><span class="boost-val" id="bval-ofi">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng" style="color:var(--accent)">SWEEP</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-sweep" style="width:0%"></div></div><span class="boost-val" id="bval-sweep">1.00x</span></div>
+        <div class="boost-row"><span class="boost-eng" style="color:var(--accent)">MM-PRESS</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-mm" style="width:0%"></div></div><span class="boost-val" id="bval-mm">1.00x</span></div>
+      </div>
+    </div>
+
   </div>
 </div><!-- /page-body -->
 <script src="/app.js"></script>

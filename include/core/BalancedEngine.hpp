@@ -707,6 +707,32 @@ public:
     int    get_total_trades()   const { return total_trades_; }
     int    get_open_positions() const { return open_positions_; }
 
+    // Per-layer adaptive sizing state — for GUI layer-adapt panel
+    // Returns JSON fragment (no outer braces) ready to embed in telemetry payload
+    std::string get_layer_adapt_json() const {
+        std::ostringstream j;
+        j << std::fixed << std::setprecision(3);
+        // Only the three new layers need monitoring — established layers are not tracker-driven
+        static const struct { LayerMode mode; const char* name; } TRACKED[] = {
+            { LAYER_OFI,         "ofi"  },
+            { LAYER_SWEEP,       "sweep"},
+            { LAYER_MM_PRESSURE, "mm"   },
+        };
+        j << "\"layer_adapt\":{";
+        bool first = true;
+        for (const auto& t : TRACKED) {
+            if (!first) j << ",";
+            first = false;
+            j << "\"" << t.name << "\":{"
+              << "\"trades\":"  << layer_tracker_.trade_count(t.mode) << ","
+              << "\"pnl_ema\":" << layer_tracker_.pnl_ema(t.mode) << ","
+              << "\"mult\":"    << layer_tracker_.multiplier(t.mode)
+              << "}";
+        }
+        j << "}";
+        return j.str();
+    }
+
     // Full session breakdown  auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {

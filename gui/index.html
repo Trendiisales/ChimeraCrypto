@@ -42,8 +42,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
 /* ââ PAGE BODY ââââââââââââââââââââââââââââââââ */
 .page-body{
-  display:grid;
-  grid-template-columns:1fr 340px;
+  display:flex;
+  flex-direction:column;
   height:calc(100vh - 52px);
   overflow:hidden;
 }
@@ -52,19 +52,20 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .sym-panel{
   display:flex;flex-direction:column;
   overflow:hidden;
-  border-right:2px solid var(--border2);
+  border-bottom:2px solid var(--border2);
+  flex:none;
 }
 
 /* 7 symbol rows fill height exactly */
 .sym-rows{
   display:flex;flex-direction:column;
-  flex:1;overflow-y:auto;overflow-x:hidden;
+  flex:none;overflow:hidden;
 }
 .sym-row{
   flex:none;
   display:flex;flex-direction:column;
   border-bottom:1px solid var(--border);
-  min-height:0;overflow:hidden;
+  height:80px;overflow:hidden;
   transition:flex .25s ease;
 }
 .sym-row:last-child{border-bottom:none}
@@ -309,6 +310,35 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .rptr-bot{display:flex;gap:10px;font-size:9px;color:var(--muted);font-variant-numeric:tabular-nums}
 .rptr-mfe{color:rgba(0,230,118,.6)}.rptr-mae{color:rgba(255,61,87,.6)}
 .rptr-time{margin-left:auto;color:#2d4558}
+
+.trades-panel{display:flex;flex-direction:column;flex:1;min-height:0;background:var(--surface);border-top:2px solid var(--border2);}
+.trades-panel-hd{display:flex;align-items:center;gap:16px;padding:5px 12px;background:var(--dim);border-bottom:1px solid var(--border);flex-shrink:0;}
+.tp-label{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:2px;color:var(--muted);flex-shrink:0}
+.tp-stats{display:flex;gap:12px;font-size:11px;color:var(--muted);flex-wrap:wrap}
+.tp-val{font-weight:700;font-variant-numeric:tabular-nums;color:var(--text);margin-left:2px}
+.tp-val.pos{color:var(--green)}.tp-val.neg{color:var(--red)}
+.trades-panel-body{display:flex;flex-direction:row;flex-wrap:wrap;overflow-y:auto;padding:4px;gap:4px;align-content:flex-start;flex:1;min-height:0;}
+.tp-empty{padding:10px 14px;color:var(--muted);font-size:11px;font-style:italic}
+.tl-row{display:flex;flex-direction:column;gap:2px;padding:5px 8px;border-radius:3px;border:1px solid var(--border2);min-width:155px;flex:1;max-width:210px;background:var(--surface2);}
+.tl-row.win{border-left:3px solid rgba(0,230,118,.6);background:rgba(0,230,118,.03)}
+.tl-row.loss{border-left:3px solid rgba(255,61,87,.5);background:rgba(255,61,87,.02)}
+.tl-r1{display:flex;align-items:center;gap:5px}
+.tl-tag{font-family:var(--fh);font-size:10px;font-weight:800}
+.tl-tag.win{color:var(--green)}.tl-tag.loss{color:var(--red)}
+.tl-sym{font-family:var(--fh);font-size:12px;font-weight:800;color:var(--accent)}
+.tl-eng{font-size:10px;color:#4a7090;flex:1}
+.tl-pnl{font-size:12px;font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto}
+.tl-pnl.pos{color:var(--green)}.tl-pnl.neg{color:var(--red)}
+.tl-r2{display:flex;gap:6px;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tl-r2 strong{color:#7ab0c8}
+.tl-r3{display:flex;gap:6px;font-size:9px;font-variant-numeric:tabular-nums}
+.tl-mfe{color:rgba(0,230,118,.7)}.tl-mae{color:rgba(255,61,87,.7)}
+.tl-why{padding:1px 4px;border-radius:2px;font-family:var(--fh);font-weight:700;font-size:9px}
+.tl-why.tp{background:rgba(0,230,118,.15);color:var(--green)}
+.tl-why.sl{background:rgba(255,61,87,.15);color:var(--red)}
+.tl-why.trail{background:rgba(0,212,255,.12);color:var(--accent)}
+.tl-why.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
+.tl-time{margin-left:auto;color:#2d4558;font-size:9px}
 </style>
 </head>
 <body>
@@ -565,105 +595,29 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
     </div>
   </div><!-- /sym-panel -->
 
-  <!-- RIGHT PANEL -->
-  <div class="right-panel">
-    <!-- Tab bar -->
-    <div class="rp-tabs">
-      <div class="rp-tab" id="tab-regime" onclick="switchTab('regime')">REGIME</div>
-      <div class="rp-tab" id="tab-boost" onclick="switchTab('boost')">BOOST</div>
-      <div class="rp-tab" id="tab-engine" onclick="switchTab('engine')">ENGINES</div>
-      <div class="rp-tab" id="tab-signal" onclick="switchTab('signal')">SIGNALS</div>
-      <div class="rp-tab active" id="tab-trades" onclick="switchTab('trades')">TRADES</div>
-    </div>
-
-    <!-- REGIME TAB -->
-    <div class="rp-content" id="tc-regime" style="display:none">
-      <div class="rp-sec">
-        <div class="rp-head">Regime Allocator</div>
-        <div class="rp-body">
-          <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">1.00</span></div>
-          <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">1.00</span></div>
-          <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">1.00</span></div>
-          <div class="regime-row"><span class="regime-sym">BNB</span><span class="regime-state rs-neutral" id="rs-bnb">NEUTRAL</span><span class="regime-mult" id="rm-bnb">1.00</span></div>
-          <div class="regime-row"><span class="regime-sym">AVAX</span><span class="regime-state rs-neutral" id="rs-avax">NEUTRAL</span><span class="regime-mult" id="rm-avax">1.00</span></div>
-          <div class="regime-row"><span class="regime-sym">LINK</span><span class="regime-state rs-neutral" id="rs-link">NEUTRAL</span><span class="regime-mult" id="rm-link">1.00</span></div>
-          <div class="regime-row"><span class="regime-sym">POL</span><span class="regime-state rs-neutral" id="rs-pol">NEUTRAL</span><span class="regime-mult" id="rm-pol">1.00</span></div>
-        </div>
-      </div>
-      <div class="rp-sec">
-        <div class="rp-head">Session Stats</div>
-        <div class="rp-body">
-          <div class="stat-row"><span class="sr-label">Total P&L</span><span class="sr-val" id="st-pnl">+0.00bp</span></div>
-          <div class="stat-row"><span class="sr-label">Total Trades</span><span class="sr-val accent" id="st-trades">0</span></div>
-          <div class="stat-row"><span class="sr-label">Win Rate</span><span class="sr-val" id="st-wr">--%</span></div>
-          <div class="stat-row"><span class="sr-label">Open Positions</span><span class="sr-val" id="st-pos">0</span></div>
-          <div class="stat-row"><span class="sr-label">Latency p95</span><span class="sr-val accent" id="st-lat">--ms</span></div>
-          <div class="stat-row"><span class="sr-label">Uptime</span><span class="sr-val" id="st-uptime" style="font-size:15px">--</span></div>
-        </div>
+  <!-- TRADES PANEL -->
+  <div class="trades-panel">
+    <div class="trades-panel-hd">
+      <span class="tp-label">TRADE LOG</span>
+      <div class="tp-stats">
+        <span>W:<span id="ts-wins" class="tp-val pos">0</span></span>
+        <span>L:<span id="ts-losses" class="tp-val neg">0</span></span>
+        <span>WR:<span id="ts-wr" class="tp-val">--%</span></span>
+        <span>PnL:<span id="ts-pnl" class="tp-val">+0.00bp</span></span>
+        <span>USD:<span id="ts-usd" class="tp-val">+$0.00</span></span>
+        <span>AvgW:<span id="ts-avgwin" class="tp-val pos">--</span></span>
+        <span>AvgL:<span id="ts-avgloss" class="tp-val neg">--</span></span>
+        <span>Exp:<span id="ts-exp" class="tp-val">--</span></span>
+        <span>TP:<span id="st-tp" class="tp-val">0</span></span>
+        <span>SL:<span id="st-sl" class="tp-val">0</span></span>
+        <span>TR:<span id="st-trail" class="tp-val">0</span></span>
+        <span>TO:<span id="st-timeout" class="tp-val">0</span></span>
       </div>
     </div>
-
-    <!-- BOOST TAB -->
-    <div class="rp-content" id="tc-boost" style="display:none">
-      <div class="rp-sec">
-        <div class="rp-head">Boost Multiplier</div>
-        <div class="rp-body">
-          <div class="boost-row"><span class="boost-eng">LEADLAG</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-leadlag" style="width:0%"></div></div><span class="boost-val" id="bval-leadlag">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">LL-ETH-SOL</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ll-eth-sol" style="width:0%"></div></div><span class="boost-val" id="bval-ll-eth-sol">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">IMPULSE</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-impulse" style="width:0%"></div></div><span class="boost-val" id="bval-impulse">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">EXPAND</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-expand" style="width:0%"></div></div><span class="boost-val" id="bval-expand">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">LIQ</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-liq" style="width:0%"></div></div><span class="boost-val" id="bval-liq">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">FUND</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-fund" style="width:0%"></div></div><span class="boost-val" id="bval-fund">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">NGAS</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ngas" style="width:0%"></div></div><span class="boost-val" id="bval-ngas">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">ETH-LEAD</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-eth-lead" style="width:0%"></div></div><span class="boost-val" id="bval-eth-lead">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">SOL-LEAD</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-sol-lead" style="width:0%"></div></div><span class="boost-val" id="bval-sol-lead">1.0x</span></div>
-          <div class="boost-row"><span class="boost-eng">VOLSHOCK</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-volshock" style="width:0%"></div></div><span class="boost-val" id="bval-volshock">1.0x</span></div>
-        </div>
-      </div>
+    <div class="trades-panel-body" id="trade-table-body">
+      <div class="tp-empty">Waiting for first trade...</div>
     </div>
-
-    <!-- ENGINES TAB (By Engine) -->
-    <div class="rp-content" id="tc-engine" style="display:none">
-      <div class="rp-sec">
-        <div class="rp-head">By Engine</div>
-        <div class="rp-body" id="st-by-layer"><div style="color:var(--muted);font-size:11px">No trades yet</div></div>
-      </div>
-    </div>
-
-    <!-- SIGNAL TAB -->
-    <div class="rp-content" id="tc-signal" style="display:none">
-      <div class="rp-sec">
-        <div class="rp-head">Signal Conditions â BTC</div>
-        <div class="rp-body">
-          <div class="cond-sect">STRUCTURAL  volâ¥1.4 Â· dispâ¥20bp</div>
-          <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
-          <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">--bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
-          <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
-          <div class="cond-sect">CONVEX  volâ¥1.8 Â· accelâ¥15bp</div>
-          <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">--bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
-          <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
-          <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TRADES TAB -->
-    <div class="rp-content" id="tc-trades" style="padding:0;gap:0">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--dim);border-bottom:1px solid var(--border);flex-shrink:0">
-        <span style="font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:2px;color:var(--muted)">TRADE LOG</span>
-        <div style="display:flex;gap:12px;align-items:center">
-          <span style="font-size:10px;color:var(--muted)">W:<span id="rp-wins" style="color:var(--green);font-weight:700">0</span></span>
-          <span style="font-size:10px;color:var(--muted)">L:<span id="rp-losses" style="color:var(--red);font-weight:700">0</span></span>
-          <span style="font-size:10px;color:var(--muted)">WR:<span id="rp-wr" style="color:var(--text);font-weight:700">--%</span></span>
-          <span style="font-size:10px;color:var(--muted)">PnL:<span id="rp-pnl" style="font-weight:700">--</span></span>
-        </div>
-      </div>
-      <div id="rp-trade-list" style="flex:1;overflow-y:auto;padding:0">
-        <div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet</div>
-      </div>
-    </div>
-
-  </div><!-- /right-panel -->
+  </div>
 </div><!-- /page-body -->
 <script src="/app.js"></script>
 </body>

@@ -400,6 +400,12 @@ struct TradingConfig {
     // In dead zone: max 1 position, raise imbalance threshold by this factor
     static constexpr double DEAD_ZONE_IMBAL_MULT  = 1.5;
     static constexpr int    DEAD_ZONE_MAX_POS     = 1;
+    static constexpr int    MAX_CONCURRENT_POSITIONS = 5;
+    static constexpr int    LEADLAG_PRIME_START_UTC   = 1;
+    static constexpr int    LEADLAG_PRIME_END_UTC     = 5;
+    static constexpr double LEADLAG_OFFPEAK_SIZE_MULT = 0.5;
+    static constexpr double RISK_FRACTION             = 0.02;
+    static constexpr double MAX_TOTAL_EXPOSURE_PCT    = 0.25;
 };
 
 } // namespace chimera

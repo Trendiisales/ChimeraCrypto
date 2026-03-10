@@ -3,507 +3,617 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title> CHIMERA  Trading Desk</title>
+<title>⬡ CHIMERA — Trading Desk</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#060a0d;--surface:#0a1018;--surface2:#0e1620;--border:#1c2d3f;--border2:#253545;
-  --text:#d4e8f0;--muted:#4d6878;--dim:#1a2a38;
+  --bg:#060a0d;--surface:#0a1018;--surface2:#0d1520;--border:#1a2a38;--border2:#243446;
+  --text:#cce4f0;--muted:#3d5a70;--dim:#0f1e2c;
   --accent:#00d4ff;--green:#00e676;--red:#ff3d57;--yellow:#ffd600;--orange:#ff6b00;
   --fm:'IBM Plex Mono',monospace;--fh:'Barlow Condensed',sans-serif;
+  --row-h:calc((100vh - 52px - 32px) / 7);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{font-size:13px}
-body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;overflow:hidden}
-/* scanlines removed */
+html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--fm)}
 
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:var(--surface);border-bottom:2px solid var(--border2);position:relative;z-index:100;flex-shrink:0}
-.topbar-left{display:flex;align-items:baseline;gap:16px}
-.logo{font-family:var(--fh);font-size:26px;font-weight:800;letter-spacing:4px;color:var(--accent);text-shadow:0 0 28px rgba(0,212,255,.5)}
-.logo-sub{font-size:14px;color:var(--muted);letter-spacing:3px;text-transform:uppercase;font-family:var(--fh)}
-.topbar-center{display:flex;gap:36px;align-items:center}
-.tb-stat{text-align:center;min-width:100px}
-.tb-label{display:block;font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:var(--fh);margin-bottom:3px}
-.tb-val{font-size:14px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1}
+/* ── TOPBAR ─────────────────────────────────── */
+.topbar{
+  height:52px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;background:var(--surface);border-bottom:2px solid var(--border2);
+  flex-shrink:0;position:relative;z-index:100;
+}
+.logo{font-family:var(--fh);font-size:22px;font-weight:900;letter-spacing:5px;color:var(--accent);text-shadow:0 0 22px rgba(0,212,255,.45)}
+.logo-sub{font-size:11px;color:var(--muted);letter-spacing:3px;font-family:var(--fh);margin-left:10px}
+.tb-center{display:flex;gap:0;align-items:stretch;height:100%}
+.tb-stat{display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 16px;border-left:1px solid var(--border);min-width:90px}
+.tb-label{font-size:8px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;font-family:var(--fh);margin-bottom:2px}
+.tb-val{font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 .tb-val.pos{color:var(--green)}.tb-val.neg{color:var(--red)}.tb-val.accent{color:var(--accent)}
-.topbar-right{display:flex;gap:12px;align-items:center}
-.badge{padding:6px 16px;border-radius:2px;font-size:13px;font-weight:700;letter-spacing:2px;border:1px solid;font-family:var(--fh)}
+.tb-right{display:flex;gap:8px;align-items:center}
+.badge{padding:5px 12px;border-radius:2px;font-size:11px;font-weight:700;letter-spacing:2px;border:1px solid;font-family:var(--fh)}
 .badge-shadow{background:rgba(255,107,0,.12);color:var(--orange);border-color:var(--orange)}
-.badge-conn{background:rgba(0,212,255,.1);color:var(--accent);border-color:var(--accent)}
 .badge-disc{background:rgba(255,61,87,.1);color:var(--red);border-color:var(--red)}
-.dot{width:12px;height:12px;border-radius:50%;background:var(--muted)}
-.dot.live{background:var(--green);box-shadow:0 0 12px var(--green);animation:blink 1.4s infinite}
+.badge-conn{background:rgba(0,212,255,.1);color:var(--accent);border-color:var(--accent)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.dot.live{background:var(--green);box-shadow:0 0 10px var(--green);animation:blink 1.4s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 
-.page-body{display:grid;grid-template-columns:1fr 420px;height:calc(100vh - 80px);overflow:hidden}
-.left-panel{overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:14px}
-.right-panel{border-left:2px solid var(--border2);overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;background:var(--surface)}
+/* ── PAGE BODY ──────────────────────────────── */
+.page-body{
+  display:grid;
+  grid-template-columns:1fr 340px;
+  height:calc(100vh - 52px);
+  overflow:hidden;
+}
 
-.sym-block{background:var(--surface);border:1px solid var(--border2);border-radius:4px;overflow:visible;flex-shrink:0}
-.sym-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:linear-gradient(90deg,rgba(0,212,255,.08),transparent);border-bottom:1px solid var(--border2)}
-.sym-name{font-family:var(--fh);font-size:20px;font-weight:800;color:var(--accent);letter-spacing:2px;min-width:100px}
-.sym-price{font-size:28px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-0.5px}
-.sym-price.up{color:var(--green);text-shadow:0 0 20px rgba(0,230,118,.4)}
-.sym-price.down{color:var(--red);text-shadow:0 0 20px rgba(255,61,87,.3)}
-.sym-meta{display:flex;gap:22px;font-size:13px}
-.sym-meta span{color:var(--muted)}.sym-meta strong{color:var(--text);font-size:15px}
+/* ── LEFT: SYMBOL GRID ──────────────────────── */
+.sym-panel{
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  border-right:2px solid var(--border2);
+}
 
-.eng-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--border)}
-.eng-cell{background:var(--bg);display:flex;position:relative;overflow:hidden;min-height:80px}
-.eng-cell.active-pos{background:rgba(0,230,118,.05)}
-.signal-col{width:7px;flex-shrink:0;background:#0d2030;transition:all .3s;border-right:1px solid rgba(0,0,0,.5)}
-.eng-content{flex:1;padding:8px 10px;min-width:0}
-.eng-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
-.eng-name{font-family:var(--fh);font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7ab0c8}
-.eng-badge{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:2px}
-.eng-badge.active{background:rgba(0,230,118,.18);color:var(--green)}
-.eng-badge.armed{background:rgba(255,214,0,.15);color:var(--yellow);animation:pulse-arm 1s infinite}
-.eng-badge.off{background:rgba(255,255,255,.04);color:var(--muted)}
+/* 7 symbol rows fill height exactly */
+.sym-rows{
+  display:flex;flex-direction:column;
+  flex:1;overflow:hidden;
+}
+.sym-row{
+  flex:1;
+  display:flex;flex-direction:column;
+  border-bottom:1px solid var(--border);
+  min-height:0;overflow:hidden;
+  transition:flex .25s ease;
+}
+.sym-row:last-child{border-bottom:none}
+.sym-row.expanded{flex:3}
+
+/* Symbol header row */
+.sym-hd{
+  display:grid;
+  grid-template-columns:110px 140px 82px 130px 1fr;
+  align-items:center;
+  padding:0 10px 0 12px;
+  height:34px;flex-shrink:0;
+  background:var(--surface2);
+  border-bottom:1px solid var(--border);
+  cursor:pointer;gap:8px;
+  transition:background .15s;
+}
+.sym-hd:hover{background:rgba(0,212,255,.06)}
+.sym-ticker{font-family:var(--fh);font-size:16px;font-weight:900;color:var(--accent);letter-spacing:1.5px}
+.sym-px{font-size:17px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.sym-px.up{color:var(--green)}.sym-px.down{color:var(--red)}
+.sym-regime{display:inline-block;font-family:var(--fh);font-size:10px;font-weight:700;padding:2px 8px;border-radius:2px;letter-spacing:1px;text-align:center}
+.r-compression{background:rgba(255,214,0,.15);color:var(--yellow)}
+.r-expansion{background:rgba(0,212,255,.15);color:var(--accent)}
+.r-trending{background:rgba(0,230,118,.15);color:var(--green)}
+.r-neutral{background:rgba(74,96,112,.2);color:var(--muted)}
+.r-dead{background:rgba(255,61,87,.12);color:var(--red)}
+.sym-meta{display:flex;gap:14px;font-size:10px;color:var(--muted)}
+.sym-meta span{white-space:nowrap}
+.sym-meta strong{color:#8ab8d0}
+.sym-hd-right{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.sym-pnl-badge{font-family:var(--fh);font-size:12px;font-weight:700;white-space:nowrap}
+.sym-pnl-badge.pos{color:var(--green)}.sym-pnl-badge.neg{color:var(--red)}.sym-pnl-badge.zero{color:var(--muted)}
+.sym-trades-count{font-size:10px;color:var(--muted);white-space:nowrap}
+.chev{font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0}
+.sym-row.expanded .chev{transform:rotate(180deg)}
+
+/* Engine strip — compact single row */
+.eng-strip{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  flex:1;min-height:0;
+  background:var(--bg);
+}
+.eng-cell{
+  display:flex;flex-direction:column;justify-content:center;
+  padding:4px 8px;border-right:1px solid var(--border);
+  position:relative;overflow:hidden;min-width:0;
+}
+.eng-cell:last-child{border-right:none}
+.eng-cell.has-pos{background:rgba(0,230,118,.04)}
+.eng-cell-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.eng-nm{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:1px;color:#4a7090;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eng-badge{font-family:var(--fh);font-size:8px;font-weight:700;padding:1px 5px;border-radius:1px;letter-spacing:.5px;flex-shrink:0}
+.eb-off{background:rgba(255,255,255,.04);color:var(--muted)}
+.eb-active{background:rgba(0,230,118,.2);color:var(--green)}
+.eb-armed{background:rgba(255,214,0,.18);color:var(--yellow);animation:pulse-arm 1s infinite}
 @keyframes pulse-arm{0%,100%{opacity:1}50%{opacity:.4}}
-.eng-stats{display:grid;grid-template-columns:1fr 1fr;gap:3px 8px}
-.est-label{font-size:10px;color:#5a7a90;letter-spacing:1px;text-transform:uppercase;font-weight:600}
-.est-val{font-size:15px;font-weight:700;color:#ffffff;font-variant-numeric:tabular-nums;line-height:1.2}
-.est-val.pos{color:var(--green)}.est-val.neg{color:var(--red)}.est-val.dim{color:#7ab0c8}
+.eng-stats-row{display:flex;gap:8px;align-items:baseline}
+.eng-pnl{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+.eng-pnl.pos{color:var(--green)}.eng-pnl.neg{color:var(--red)}.eng-pnl.zero{color:#4a7090}
+.eng-sub{font-size:9px;color:var(--muted);font-variant-numeric:tabular-nums}
+/* Left accent bar */
+.eng-cell::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background .3s}
+.eng-cell.has-pos::before{background:var(--green)}
 
-.rp-sec{border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.rp-head{padding:10px 16px;background:var(--dim);font-family:var(--fh);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)}
-.rp-body{padding:12px 14px}
-.regime-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+/* Expanded trade rows */
+.sym-trades-exp{
+  display:none;
+  border-top:1px solid var(--border);
+  overflow-y:auto;max-height:140px;
+  background:rgba(0,0,0,.3);
+}
+.sym-row.expanded .sym-trades-exp{display:block}
+.sym-trades-exp::-webkit-scrollbar{width:3px}
+.sym-trades-exp::-webkit-scrollbar-thumb{background:var(--border2)}
+.trade-row{
+  display:grid;
+  grid-template-columns:40px 58px 64px 70px 1fr 56px 56px 52px;
+  align-items:center;padding:4px 12px;
+  border-bottom:1px solid rgba(255,255,255,.025);
+  font-size:11px;font-variant-numeric:tabular-nums;
+}
+.trade-row:last-child{border-bottom:none}
+.trade-row.win{border-left:2px solid rgba(0,230,118,.6);background:rgba(0,230,118,.025)}
+.trade-row.loss{border-left:2px solid rgba(255,61,87,.5);background:rgba(255,61,87,.02)}
+.tr-tag{font-family:var(--fh);font-size:10px;font-weight:800;letter-spacing:.5px}
+.tr-tag.win{color:var(--green)}.tr-tag.loss{color:var(--red)}
+.tr-pnl{font-weight:700;font-size:12px}.tr-pnl.pos{color:var(--green)}.tr-pnl.neg{color:var(--red)}
+.tr-usd{font-size:10px;font-weight:600}.tr-usd.pos{color:rgba(0,230,118,.7)}.tr-usd.neg{color:rgba(255,61,87,.7)}
+.tr-eng{font-family:var(--fh);font-size:10px;font-weight:700;color:#4a7090}
+.tr-val{font-size:10px;color:#5a8090;font-weight:500}
+.tr-badge{font-family:var(--fh);font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px}
+.tr-badge.tp{background:rgba(0,230,118,.15);color:var(--green)}
+.tr-badge.sl{background:rgba(255,61,87,.15);color:var(--red)}
+.tr-badge.trail{background:rgba(0,212,255,.12);color:var(--accent)}
+.tr-badge.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
+.tr-time{font-size:9px;color:#2d4558}
+.trades-empty{padding:6px 12px;font-size:10px;color:var(--muted);font-style:italic}
+
+/* Trade log bar at bottom */
+.trade-log-bar{
+  height:32px;flex-shrink:0;
+  display:flex;align-items:center;
+  background:var(--surface);
+  border-top:2px solid var(--border2);
+  padding:0 14px;gap:18px;overflow:hidden;
+}
+.tl-label{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);flex-shrink:0}
+.tl-stat{display:flex;align-items:baseline;gap:5px;flex-shrink:0}
+.tl-stat-label{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:var(--fh)}
+.tl-stat-val{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.tl-stat-val.pos{color:var(--green)}.tl-stat-val.neg{color:var(--red)}.tl-stat-val.accent{color:var(--accent)}
+.tl-sep{width:1px;height:18px;background:var(--border);flex-shrink:0}
+.tl-clear{background:rgba(255,61,87,.1);color:var(--red);border:1px solid rgba(255,61,87,.2);padding:2px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto;flex-shrink:0}
+
+/* ── RIGHT PANEL ────────────────────────────── */
+.right-panel{
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  background:var(--surface);
+}
+.rp-tabs{
+  display:flex;border-bottom:2px solid var(--border2);flex-shrink:0;
+}
+.rp-tab{
+  flex:1;padding:8px 4px;text-align:center;
+  font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:1.5px;
+  text-transform:uppercase;color:var(--muted);cursor:pointer;
+  border-right:1px solid var(--border);transition:all .15s;
+}
+.rp-tab:last-child{border-right:none}
+.rp-tab:hover{color:var(--text);background:rgba(255,255,255,.03)}
+.rp-tab.active{color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px;background:rgba(0,212,255,.05)}
+
+.rp-content{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.rp-content::-webkit-scrollbar{width:3px}
+.rp-content::-webkit-scrollbar-thumb{background:var(--border2)}
+
+/* Section within right panel */
+.rp-sec{border:1px solid var(--border);border-radius:3px;overflow:hidden;flex-shrink:0}
+.rp-head{
+  padding:7px 12px;background:var(--dim);
+  font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:2px;
+  text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);
+}
+.rp-body{padding:8px 10px}
+
+/* Regime rows */
+.regime-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(26,42,56,.8)}
 .regime-row:last-child{border-bottom:none}
-.regime-sym{color:var(--muted);font-family:var(--fh);font-weight:700;letter-spacing:1px;min-width:46px;font-size:18px}
-.regime-state{font-family:var(--fh);font-weight:700;padding:4px 12px;border-radius:2px;font-size:13px;letter-spacing:1.5px}
-.rs-neutral{background:rgba(74,96,112,.3);color:var(--muted)}.rs-trending{background:rgba(0,212,255,.15);color:var(--accent)}
-.rs-burst{background:rgba(0,230,118,.15);color:var(--green)}.rs-compression{background:rgba(255,214,0,.15);color:var(--yellow)}
-.rs-dead{background:rgba(255,61,87,.12);color:var(--red)}
-.regime-mult{color:var(--muted);font-size:17px;font-variant-numeric:tabular-nums;min-width:50px;text-align:right}
+.regime-sym{font-family:var(--fh);font-weight:700;letter-spacing:1px;font-size:14px;color:var(--muted);min-width:38px}
+.regime-state{font-family:var(--fh);font-weight:700;padding:2px 8px;border-radius:2px;font-size:10px;letter-spacing:1px}
+.rs-neutral{background:rgba(74,96,112,.25);color:var(--muted)}
+.rs-compression{background:rgba(255,214,0,.15);color:var(--yellow)}
+.rs-expansion{background:rgba(0,212,255,.15);color:var(--accent)}
+.rs-trending{background:rgba(0,230,118,.15);color:var(--green)}
+.rs-dead{background:rgba(255,61,87,.1);color:var(--red)}
+.rs-burst{background:rgba(0,230,118,.18);color:var(--green)}
+.regime-mult{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums;min-width:36px;text-align:right}
 .regime-mult.hi{color:var(--green)}.regime-mult.lo{color:var(--red)}
-.boost-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);gap:8px}
+
+/* Boost bars */
+.boost-row{display:flex;align-items:center;padding:4px 0;gap:7px;border-bottom:1px solid rgba(26,42,56,.5)}
 .boost-row:last-child{border-bottom:none}
-.boost-eng{color:var(--muted);font-family:var(--fh);font-weight:700;font-size:12px;letter-spacing:1px;min-width:80px}
-.boost-bar-bg{flex:1;height:6px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden}
-.boost-bar-fill{height:100%;border-radius:3px;background:var(--green);transition:width 0.4s ease}
+.boost-eng{color:var(--muted);font-family:var(--fh);font-weight:700;font-size:10px;letter-spacing:.5px;min-width:72px}
+.boost-bar-bg{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
+.boost-bar-fill{height:100%;border-radius:2px;background:var(--green);transition:width .4s ease}
 .boost-bar-fill.max{background:#f59e0b}
-.boost-val{font-family:var(--fh);font-size:13px;font-weight:700;min-width:36px;text-align:right;color:var(--green)}
+.boost-val{font-family:var(--fh);font-size:11px;font-weight:700;min-width:30px;text-align:right;color:var(--green)}
 .boost-val.max{color:#f59e0b}
-.cond-sect{font-family:var(--fh);font-size:12px;color:var(--muted);margin:10px 0 6px;letter-spacing:1px;text-transform:uppercase;opacity:.8}
-.cond-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:14px;border-bottom:1px solid rgba(28,45,63,.5)}
-.cond-row:last-child{border-bottom:none}
-.cond-label{color:var(--muted);font-size:14px}
-.cond-val{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;flex:1;text-align:right;padding-right:12px;font-size:15px}
-.cond-check{width:11px;height:11px;border-radius:50%;flex-shrink:0}
-.cond-check.met{background:var(--green);box-shadow:0 0 8px var(--green)}.cond-check.near{background:var(--yellow)}.cond-check.off{background:var(--dim);border:1px solid var(--border2)}
-.stat-row{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid rgba(28,45,63,.5)}
+
+/* Session stats */
+.stat-row{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid rgba(26,42,56,.5)}
 .stat-row:last-child{border-bottom:none}
-.sr-label{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.5px;font-family:var(--fh)}
-.sr-val{font-weight:700;font-size:22px;color:var(--text);font-variant-numeric:tabular-nums}
+.sr-label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-family:var(--fh)}
+.sr-val{font-weight:700;font-size:18px;color:var(--text);font-variant-numeric:tabular-nums}
 .sr-val.pos{color:var(--green)}.sr-val.neg{color:var(--red)}.sr-val.accent{color:var(--accent)}
 
-.trade-log-inner{border-top:2px solid var(--border2);background:var(--bg);display:flex;flex-direction:column}
-.tli-head{display:flex;align-items:center;gap:0;padding:7px 14px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto}
-.tli-title{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#2d4558;margin-right:12px;flex-shrink:0}
-.ts-block{display:flex;flex-direction:column;gap:1px;padding:0 12px;flex-shrink:0}
-.ts-sep{width:1px;height:30px;background:var(--border2);flex-shrink:0;margin:0 2px}
-.ts-label{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#2d4558;font-family:var(--fh)}
-.ts-val{font-size:15px;font-weight:700;color:#c0d8e8;font-variant-numeric:tabular-nums}
-.ts-val.ts-pos{color:var(--green)}.ts-val.ts-neg{color:var(--red)}
-.tli-cols{display:grid;grid-template-columns:42px 46px 76px 72px 88px 88px 72px 60px 72px;align-items:center;padding:4px 14px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.3);flex-shrink:0}
-.tlic{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#2d4558}
-.tli-body{overflow-y:auto;overflow-x:hidden;max-height:320px;min-height:60px}
-.tli-body::-webkit-scrollbar{width:3px}
-.tli-body::-webkit-scrollbar-thumb{background:var(--border2)}
-.tl-row{display:grid;grid-template-columns:42px 46px 76px 72px 88px 88px 72px 60px 72px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,.03)}
-.tl-row.win{border-left:3px solid rgba(0,230,118,.6);background:rgba(0,230,118,.025)}
-.tl-row.loss{border-left:3px solid rgba(255,61,87,.6);background:rgba(255,61,87,.025)}
-.tl-tag{font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.5px}
-.tl-tag.win{color:var(--green)}.tl-tag.loss{color:var(--red)}
-.tl-sym{font-family:var(--fh);font-size:14px;font-weight:700;color:#c0d8e8}
-.tl-pnl{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
-.tl-pnl.pos{color:var(--green)}.tl-pnl.neg{color:var(--red)}
-.tl-eng{font-family:var(--fh);font-size:12px;font-weight:600;color:#5a8090}
-.tl-val{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:#6a8fa8}
-.tl-val.pos{color:var(--green)}.tl-val.neg{color:var(--red)}
-.tl-reason{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:2px;display:inline-block}
-.tl-reason.tp{background:rgba(0,230,118,.15);color:#00e676}
-.tl-reason.sl{background:rgba(255,61,87,.15);color:#ff3d57}
-.tl-reason.trail{background:rgba(0,212,255,.12);color:#00d4ff}
-.tl-reason.timeout{background:rgba(255,214,0,.1);color:#ffd600}
-.tl-time{font-size:11px;color:#2d4558;font-variant-numeric:tabular-nums}
-.tli-empty{padding:14px 16px;color:var(--muted);font-size:13px;opacity:.5}
+/* By engine section */
+.by-eng-row{padding:6px 0;border-bottom:1px solid rgba(26,42,56,.5)}
+.by-eng-row:last-child{border-bottom:none}
+.by-eng-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.by-eng-name{font-family:var(--fh);font-size:11px;font-weight:700;color:var(--accent);letter-spacing:1px}
+.by-eng-pnl{font-weight:700;font-size:14px;font-variant-numeric:tabular-nums}
+.by-eng-pnl.pos{color:var(--green)}.by-eng-pnl.neg{color:var(--red)}
+.by-eng-mid{display:flex;gap:8px;font-size:10px;color:var(--muted);margin-bottom:2px}
+.by-eng-wr{font-weight:700}
+.by-eng-wr.good{color:var(--green)}.by-eng-wr.bad{color:var(--red)}
+.by-eng-exits{display:flex;gap:6px;font-size:9px;font-family:var(--fh)}
+.be-tp{color:var(--green)}.be-sl{color:var(--red)}.be-tr{color:var(--accent)}.be-to{color:var(--yellow)}
 
-/* Per-symbol trade rows under engine grid */
-.sym-trades{border-top:1px solid var(--border2)}
-.sym-trade-row{display:grid;grid-template-columns:44px 62px 70px 72px 1fr 54px 60px 56px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,.025);font-variant-numeric:tabular-nums}
-.sym-trade-row:last-child{border-bottom:none}
-.sym-trade-row.win{border-left:3px solid var(--green);background:rgba(0,230,118,.03)}
-.sym-trade-row.loss{border-left:3px solid var(--red);background:rgba(255,61,87,.03)}
-.str-tag{font-family:var(--fh);font-size:12px;font-weight:800;letter-spacing:1px}
-.str-tag.win{color:var(--green)}.str-tag.loss{color:var(--red)}
-.str-pnl{font-size:16px;font-weight:800}
-.str-pnl.pos{color:var(--green)}.str-pnl.neg{color:var(--red)}
-.str-usd{font-size:13px;font-weight:700}
-.str-usd.pos{color:rgba(0,230,118,.7)}.str-usd.neg{color:rgba(255,61,87,.7)}
-.str-eng{font-family:var(--fh);font-size:12px;font-weight:700;color:#7ab0c8}
-.str-val{font-size:13px;color:#8aafc4;font-weight:600}
-.str-badge{font-family:var(--fh);font-size:11px;font-weight:700;padding:2px 7px;border-radius:2px}
-.str-badge.tp{background:rgba(0,230,118,.15);color:var(--green)}
-.str-badge.sl{background:rgba(255,61,87,.15);color:var(--red)}
-.str-badge.trail{background:rgba(0,212,255,.12);color:var(--accent)}
-.str-badge.timeout{background:rgba(255,214,0,.1);color:var(--yellow)}
-.str-time{font-size:11px;color:#3d5a6e}
-.sym-trades-empty{padding:8px 14px;font-size:12px;color:#3d5a6e;font-style:italic}
-.sym-trades-hdr{display:grid;grid-template-columns:44px 54px 90px 80px 80px 64px 60px 1fr;padding:4px 14px;background:var(--bg);border-bottom:1px solid var(--border)}
-.sth{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#2d4558}
+/* Signal conditions */
+.cond-sect{font-family:var(--fh);font-size:9px;color:var(--muted);margin:8px 0 4px;letter-spacing:1px;text-transform:uppercase}
+.cond-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(26,42,56,.4)}
+.cond-row:last-child{border-bottom:none}
+.cond-label{color:var(--muted);font-size:11px}
+.cond-val{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;flex:1;text-align:right;padding-right:8px;font-size:12px}
+.cond-check{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.cond-check.met{background:var(--green);box-shadow:0 0 6px var(--green)}.cond-check.near{background:var(--yellow)}.cond-check.off{background:var(--dim);border:1px solid var(--border2)}
 
-#win-flash{display:none;position:fixed;top:0;left:0;right:0;padding:20px;text-align:center;font-family:var(--fh);font-size:36px;font-weight:800;letter-spacing:10px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200}
-#win-flash.show{display:block;animation:slidedown .25s ease}
-@keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
-::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
-
-/* Collapsible sym-blocks for new symbols */
-.sym-block.collapsed .eng-grid { display: none; }
-.sym-block.collapsed .sym-trades { display: none; }
-.sym-head { cursor: pointer; user-select: none; }
-.sym-head:hover { background: linear-gradient(90deg,rgba(0,212,255,.13),transparent); }
-.collapse-arrow { font-size: 14px; color: var(--muted); margin-left: 10px; transition: transform 0.2s; flex-shrink: 0; }
-.sym-block.collapsed .collapse-arrow { transform: rotate(-90deg); }
-.sym-mini { display: none; gap: 20px; font-size: 12px; align-items: center; flex-wrap: wrap; }
-.sym-block.collapsed .sym-mini { display: flex; }
-.sm-item { color: var(--muted); }
-.sm-item strong { color: var(--text); font-size: 13px; }
-.sm-pnl.pos { color: var(--green); } .sm-pnl.neg { color: var(--red); }
-
-
-/* Poll error banner */
-#poll-error{display:none;position:fixed;bottom:0;left:0;right:0;z-index:300;background:rgba(255,61,87,.95);color:#fff;font-family:var(--fh);font-size:13px;font-weight:600;padding:8px 20px;display:flex;align-items:center;gap:16px;border-top:2px solid var(--red)}
+/* Error banner */
+#poll-error{display:none;position:fixed;bottom:0;left:0;right:0;z-index:300;background:rgba(255,61,87,.95);color:#fff;font-family:var(--fh);font-size:12px;font-weight:600;padding:6px 18px;flex-direction:row;align-items:center;gap:14px;border-top:2px solid var(--red)}
 #poll-error.show{display:flex}
 #poll-error-msg{flex:1;letter-spacing:.5px}
-#poll-error-time{color:rgba(255,255,255,.7);font-size:12px;flex-shrink:0}
-#poll-error-count{background:rgba(0,0,0,.3);padding:2px 8px;border-radius:2px;font-size:12px;flex-shrink:0}
-/* Last-poll timestamp in topbar */
-#tb-last-poll{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-#tb-last-poll.stale{color:var(--red)}
+#poll-error-time{color:rgba(255,255,255,.65);font-size:11px}
+/* Win flash */
+#win-flash{display:none;position:fixed;top:0;left:0;right:0;padding:14px;text-align:center;font-family:var(--fh);font-size:28px;font-weight:800;letter-spacing:8px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200}
+#win-flash.show{display:block;animation:slidedown .2s ease}
+@keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 </style>
 </head>
 <body>
 <div id="poll-error"><span id="poll-error-count">ERR0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
-<div id="win-flash"> WIN</div>
+<div id="win-flash">⬡ WIN</div>
+
+<!-- ── TOPBAR ── -->
 <div class="topbar">
-  <div class="topbar-left">
+  <div style="display:flex;align-items:baseline;gap:4px">
     <span class="logo">CHIMERA</span>
-    <span class="logo-sub">Quad Engine  Live Stream</span>
+    <span class="logo-sub">QUAD ENGINE</span>
   </div>
-  <div class="topbar-center">
+  <div class="tb-center">
     <div class="tb-stat"><span class="tb-label">Equity</span><span id="tb-equity" class="tb-val">$10,000</span></div>
     <div class="tb-stat"><span class="tb-label">Day P&L</span><span id="tb-pnl" class="tb-val">+0.00bp</span></div>
     <div class="tb-stat"><span class="tb-label">Trades</span><span id="tb-trades" class="tb-val accent">0</span></div>
     <div class="tb-stat"><span class="tb-label">Positions</span><span id="tb-positions" class="tb-val">0</span></div>
-    <div class="tb-stat"><span class="tb-label">Latency p95</span><span id="tb-latency" class="tb-val accent">--ms</span></div>
-    <div class="tb-stat"><span class="tb-label">Last Poll</span><span id="tb-last-poll" class="tb-val" style="color:var(--muted)">--</span></div>
+    <div class="tb-stat"><span class="tb-label">Lat p95</span><span id="tb-latency" class="tb-val accent">--ms</span></div>
     <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
   </div>
-  <div class="topbar-right">
-    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:4px 10px;border-radius:2px;font-size:10px;font-family:inherit;cursor:pointer;letter-spacing:1px"> UNMUTE</button>
+  <div class="tb-right">
+    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:3px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px">⟨ UNMUTE</button>
     <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
     <span id="conn-badge" class="badge badge-disc">OFFLINE</span>
     <div id="live-dot" class="dot"></div>
   </div>
 </div>
 
+<!-- ── PAGE BODY ── -->
 <div class="page-body">
-<div class="left-panel">
 
-<div class="sym-block" id="sb-btc">
-  <div class="sym-head" onclick="toggleBlock('btc')"><span class="sym-name">BTC/USDT</span><span id="px-btc" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-btc">--</strong></span><span>Disp: <strong id="dp-btc">--bp</strong></span><span>Regime: <strong id="reg-btc">--</strong></span><span>Cap: <strong id="cap-btc">--</strong>R</span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-btc-micro"><div class="signal-col" id="sc-btc-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-btc-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-btc-structural"><div class="signal-col" id="sc-btc-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-btc-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-btc-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-btc-convex"><div class="signal-col" id="sc-btc-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-btc-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-btc">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-btc-compression"><div class="signal-col" id="sc-btc-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-btc-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-btc">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-btc-vacuum"><div class="signal-col" id="sc-btc-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-btc-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-btc">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-btc-vwap"><div class="signal-col" id="sc-btc-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-btc-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-btc">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-btc" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+  <!-- LEFT: Symbol rows -->
+  <div class="sym-panel">
+    <div class="sym-rows">
 
-<div class="sym-block" id="sb-eth">
-  <div class="sym-head" onclick="toggleBlock('eth')"><span class="sym-name">ETH/USDT</span><span id="px-eth" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-eth">--</strong></span><span>Disp: <strong id="dp-eth">--bp</strong></span><span>Regime: <strong id="reg-eth">--</strong></span><span>Cap: <strong id="cap-eth">--</strong>R</span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-eth-micro"><div class="signal-col" id="sc-eth-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-eth-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-eth-structural"><div class="signal-col" id="sc-eth-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-eth-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-eth-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-eth-convex"><div class="signal-col" id="sc-eth-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-eth-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-eth">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-eth-compression"><div class="signal-col" id="sc-eth-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-eth-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-eth">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-eth-vacuum"><div class="signal-col" id="sc-eth-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-eth-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-eth">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-eth-vwap"><div class="signal-col" id="sc-eth-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-eth-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-eth">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-eth" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+      <!-- BTC -->
+      <div class="sym-row" id="sb-btc">
+        <div class="sym-hd" onclick="toggleSym('btc',event)">
+          <span class="sym-ticker">BTC/USDT</span>
+          <span id="px-btc" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-btc">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-btc">--</strong></span>
+            <span>Disp:<strong id="dp-btc">--bp</strong></span>
+            <span>Cap:<strong id="cap-btc">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-btc">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-btc">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-btc-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-btc-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-micro">+0bp</span><span class="eng-sub" id="trades-btc-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-btc-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-btc-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-structural">+0bp</span><span class="eng-sub" id="trades-btc-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-btc-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-btc-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-convex">+0bp</span><span class="eng-sub" id="trades-btc-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-btc-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-btc-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-compression">+0bp</span><span class="eng-sub" id="cticks-btc">0/100</span></div></div>
+          <div class="eng-cell" id="ec-btc-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-btc-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-vacuum">+0bp</span><span class="eng-sub" id="drain-btc">0%</span></div></div>
+          <div class="eng-cell" id="ec-btc-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-btc-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-vwap">+0bp</span><span class="eng-sub" id="vwapdev-btc">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-btc" class="trades-empty">No trades yet</div></div>
+      </div>
 
-<div class="sym-block" id="sb-sol">
-  <div class="sym-head" onclick="toggleBlock('sol')"><span class="sym-name">SOL/USDT</span><span id="px-sol" class="sym-price">--</span>
-    <div class="sym-meta"><span>Vol: <strong id="vr-sol">--</strong></span><span>Disp: <strong id="dp-sol">--bp</strong></span><span>Regime: <strong id="reg-sol">--</strong></span><span>Cap: <strong id="cap-sol">--</strong>R</span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-sol-micro"><div class="signal-col" id="sc-sol-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-sol-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-sol-structural"><div class="signal-col" id="sc-sol-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-sol-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-sol-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-sol-convex"><div class="signal-col" id="sc-sol-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-sol-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-sol">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-sol-compression"><div class="signal-col" id="sc-sol-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-sol-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-sol">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-sol-vacuum"><div class="signal-col" id="sc-sol-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-sol-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-sol">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-sol-vwap"><div class="signal-col" id="sc-sol-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-sol-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-sol">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-sol" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+      <!-- ETH -->
+      <div class="sym-row" id="sb-eth">
+        <div class="sym-hd" onclick="toggleSym('eth',event)">
+          <span class="sym-ticker">ETH/USDT</span>
+          <span id="px-eth" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-eth">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-eth">--</strong></span>
+            <span>Disp:<strong id="dp-eth">--bp</strong></span>
+            <span>Cap:<strong id="cap-eth">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-eth">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-eth">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-eth-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-eth-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-micro">+0bp</span><span class="eng-sub" id="trades-eth-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-eth-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-eth-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-structural">+0bp</span><span class="eng-sub" id="trades-eth-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-eth-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-eth-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-convex">+0bp</span><span class="eng-sub" id="trades-eth-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-eth-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-eth-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-compression">+0bp</span><span class="eng-sub" id="cticks-eth">0/100</span></div></div>
+          <div class="eng-cell" id="ec-eth-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-eth-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-vacuum">+0bp</span><span class="eng-sub" id="drain-eth">0%</span></div></div>
+          <div class="eng-cell" id="ec-eth-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-eth-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-vwap">+0bp</span><span class="eng-sub" id="vwapdev-eth">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-eth" class="trades-empty">No trades yet</div></div>
+      </div>
 
-<div class="sym-block collapsed" id="sb-bnb">
-  <div class="sym-head" onclick="toggleBlock('bnb')"><span class="sym-name">BNB/USDT</span><span id="px-bnb" class="sym-price">--</span>
-    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-bnb">--</strong></span><span class="sm-item">Regime: <strong id="reg-bnb">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-bnb">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-bnb">0</strong></span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-bnb-micro"><div class="signal-col" id="sc-bnb-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-bnb-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-bnb-structural"><div class="signal-col" id="sc-bnb-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-bnb-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-bnb-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-bnb-convex"><div class="signal-col" id="sc-bnb-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-bnb-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-bnb">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-bnb-compression"><div class="signal-col" id="sc-bnb-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-bnb-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-bnb">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-bnb-vacuum"><div class="signal-col" id="sc-bnb-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-bnb-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-bnb">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-bnb-vwap"><div class="signal-col" id="sc-bnb-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-bnb-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-bnb">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-bnb" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+      <!-- SOL -->
+      <div class="sym-row" id="sb-sol">
+        <div class="sym-hd" onclick="toggleSym('sol',event)">
+          <span class="sym-ticker">SOL/USDT</span>
+          <span id="px-sol" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-sol">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-sol">--</strong></span>
+            <span>Disp:<strong id="dp-sol">--bp</strong></span>
+            <span>Cap:<strong id="cap-sol">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-sol">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-sol">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-sol-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-sol-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-micro">+0bp</span><span class="eng-sub" id="trades-sol-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-sol-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-sol-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-structural">+0bp</span><span class="eng-sub" id="trades-sol-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-sol-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-sol-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-convex">+0bp</span><span class="eng-sub" id="trades-sol-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-sol-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-sol-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-compression">+0bp</span><span class="eng-sub" id="cticks-sol">0/100</span></div></div>
+          <div class="eng-cell" id="ec-sol-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-sol-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-vacuum">+0bp</span><span class="eng-sub" id="drain-sol">0%</span></div></div>
+          <div class="eng-cell" id="ec-sol-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-sol-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-vwap">+0bp</span><span class="eng-sub" id="vwapdev-sol">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-sol" class="trades-empty">No trades yet</div></div>
+      </div>
 
-<div class="sym-block collapsed" id="sb-avax">
-  <div class="sym-head" onclick="toggleBlock('avax')"><span class="sym-name">AVAX/USDT</span><span id="px-avax" class="sym-price">--</span>
-    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-avax">--</strong></span><span class="sm-item">Regime: <strong id="reg-avax">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-avax">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-avax">0</strong></span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-avax-micro"><div class="signal-col" id="sc-avax-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-avax-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-avax-structural"><div class="signal-col" id="sc-avax-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-avax-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-avax-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-avax-convex"><div class="signal-col" id="sc-avax-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-avax-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-avax">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-avax-compression"><div class="signal-col" id="sc-avax-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-avax-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-avax">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-avax-vacuum"><div class="signal-col" id="sc-avax-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-avax-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-avax">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-avax-vwap"><div class="signal-col" id="sc-avax-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-avax-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-avax">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-avax" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+      <!-- BNB -->
+      <div class="sym-row" id="sb-bnb">
+        <div class="sym-hd" onclick="toggleSym('bnb',event)">
+          <span class="sym-ticker">BNB/USDT</span>
+          <span id="px-bnb" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-bnb">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-bnb">--</strong></span>
+            <span>Disp:<strong id="dp-bnb">--bp</strong></span>
+            <span>Cap:<strong id="cap-bnb">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-bnb">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-bnb">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-bnb-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-bnb-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-micro">+0bp</span><span class="eng-sub" id="trades-bnb-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-bnb-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-bnb-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-structural">+0bp</span><span class="eng-sub" id="trades-bnb-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-bnb-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-bnb-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-convex">+0bp</span><span class="eng-sub" id="trades-bnb-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-bnb-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-bnb-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-compression">+0bp</span><span class="eng-sub" id="cticks-bnb">0/100</span></div></div>
+          <div class="eng-cell" id="ec-bnb-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-bnb-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-vacuum">+0bp</span><span class="eng-sub" id="drain-bnb">0%</span></div></div>
+          <div class="eng-cell" id="ec-bnb-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-bnb-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-vwap">+0bp</span><span class="eng-sub" id="vwapdev-bnb">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-bnb" class="trades-empty">No trades yet</div></div>
+      </div>
 
-<div class="sym-block collapsed" id="sb-link">
-  <div class="sym-head" onclick="toggleBlock('link')"><span class="sym-name">LINK/USDT</span><span id="px-link" class="sym-price">--</span>
-    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-link">--</strong></span><span class="sm-item">Regime: <strong id="reg-link">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-link">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-link">0</strong></span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-link-micro"><div class="signal-col" id="sc-link-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-link-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-link-structural"><div class="signal-col" id="sc-link-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-link-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-link-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-link-convex"><div class="signal-col" id="sc-link-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-link-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-link">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-link-compression"><div class="signal-col" id="sc-link-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-link-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-link">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-link-vacuum"><div class="signal-col" id="sc-link-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-link-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-link">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-link-vwap"><div class="signal-col" id="sc-link-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-link-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-link">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-link" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+      <!-- AVAX -->
+      <div class="sym-row" id="sb-avax">
+        <div class="sym-hd" onclick="toggleSym('avax',event)">
+          <span class="sym-ticker">AVAX/USDT</span>
+          <span id="px-avax" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-avax">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-avax">--</strong></span>
+            <span>Disp:<strong id="dp-avax">--bp</strong></span>
+            <span>Cap:<strong id="cap-avax">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-avax">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-avax">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-avax-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-avax-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-micro">+0bp</span><span class="eng-sub" id="trades-avax-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-avax-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-avax-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-structural">+0bp</span><span class="eng-sub" id="trades-avax-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-avax-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-avax-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-convex">+0bp</span><span class="eng-sub" id="trades-avax-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-avax-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-avax-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-compression">+0bp</span><span class="eng-sub" id="cticks-avax">0/100</span></div></div>
+          <div class="eng-cell" id="ec-avax-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-avax-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-vacuum">+0bp</span><span class="eng-sub" id="drain-avax">0%</span></div></div>
+          <div class="eng-cell" id="ec-avax-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-avax-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-vwap">+0bp</span><span class="eng-sub" id="vwapdev-avax">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-avax" class="trades-empty">No trades yet</div></div>
+      </div>
 
-<div class="sym-block collapsed" id="sb-pol">
-  <div class="sym-head" onclick="toggleBlock('pol')"><span class="sym-name">POL/USDT</span><span id="px-pol" class="sym-price">--</span>
-    <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-pol">--</strong></span><span class="sm-item">Regime: <strong id="reg-pol">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-pol">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-pol">0</strong></span></div>
-    <span class="collapse-arrow"></span></div>
-  <div class="eng-grid">
-    <div class="eng-cell" id="ec-pol-micro"><div class="signal-col" id="sc-pol-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-pol-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-micro">0</div></div></div></div></div>
-    <div class="eng-cell" id="ec-pol-structural"><div class="signal-col" id="sc-pol-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-pol-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-pol-structural">--</div></div></div></div></div>
-    <div class="eng-cell" id="ec-pol-convex"><div class="signal-col" id="sc-pol-convex"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">CONVEX</span><span class="eng-badge off" id="eb-pol-convex">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-convex">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-convex">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-convex">--%</div></div><div><div class="est-label">Accel</div><div class="est-val dim" id="accel-pol">--bp</div></div></div></div></div>
-    <div class="eng-cell" id="ec-pol-compression"><div class="signal-col" id="sc-pol-compression"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">COMPR</span><span class="eng-badge off" id="eb-pol-compression">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-compression">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-compression">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-compression">--%</div></div><div><div class="est-label">Ticks</div><div class="est-val dim" id="cticks-pol">0/100</div></div></div></div></div>
-    <div class="eng-cell" id="ec-pol-vacuum"><div class="signal-col" id="sc-pol-vacuum"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VACUUM</span><span class="eng-badge off" id="eb-pol-vacuum">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-vacuum">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-vacuum">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-vacuum">--%</div></div><div><div class="est-label">Drain</div><div class="est-val dim" id="drain-pol">0%</div></div></div></div></div>
-    <div class="eng-cell" id="ec-pol-vwap"><div class="signal-col" id="sc-pol-vwap"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">VWAP REV</span><span class="eng-badge off" id="eb-pol-vwap">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-vwap">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-vwap">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-vwap">--%</div></div><div><div class="est-label">Dev</div><div class="est-val dim" id="vwapdev-pol">0bp</div></div></div></div></div>
-  </div>
-  <div class="sym-trades">
-    <div class="sym-trades-hdr">
-      <span class="sth"></span><span class="sth">P&amp;L</span><span class="sth">USD</span>
-      <span class="sth">Engine</span><span class="sth">Entry&#8594;Exit</span>
-      <span class="sth">Hold</span><span class="sth">Exit</span><span class="sth">Time</span>
-    </div>
-    <div id="str-pol" class="sym-trades-empty">No trades yet</div>
-  </div>
-</div>
+      <!-- LINK -->
+      <div class="sym-row" id="sb-link">
+        <div class="sym-hd" onclick="toggleSym('link',event)">
+          <span class="sym-ticker">LINK/USDT</span>
+          <span id="px-link" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-link">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-link">--</strong></span>
+            <span>Disp:<strong id="dp-link">--bp</strong></span>
+            <span>Cap:<strong id="cap-link">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-link">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-link">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-link-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-link-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-micro">+0bp</span><span class="eng-sub" id="trades-link-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-link-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-link-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-structural">+0bp</span><span class="eng-sub" id="trades-link-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-link-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-link-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-convex">+0bp</span><span class="eng-sub" id="trades-link-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-link-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-link-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-compression">+0bp</span><span class="eng-sub" id="cticks-link">0/100</span></div></div>
+          <div class="eng-cell" id="ec-link-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-link-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-vacuum">+0bp</span><span class="eng-sub" id="drain-link">0%</span></div></div>
+          <div class="eng-cell" id="ec-link-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-link-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-vwap">+0bp</span><span class="eng-sub" id="vwapdev-link">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-link" class="trades-empty">No trades yet</div></div>
+      </div>
 
-<div class="sym-block">
-  <!-- ALL-SYMBOL TRADE LOG -->
-  <div class="trade-log-inner">
-    <div class="tli-head">
-      <span class="tli-title">ALL TRADES</span>
-      <div class="ts-block"><div class="ts-label">TRADES</div><div class="ts-val" id="ts-count">0</div></div>
-      <div class="ts-sep"></div>
-      <div class="ts-block"><div class="ts-label">WIN RATE</div><div class="ts-val" id="ts-wr">--%</div></div>
-      <div class="ts-block ts-sub"><div class="ts-label">W / L</div><div class="ts-val"><span id="ts-wins" style="color:var(--green)">0</span><span style="color:var(--muted)"> / </span><span id="ts-losses" style="color:var(--red)">0</span></div></div>
-      <div class="ts-sep"></div>
-      <div class="ts-block"><div class="ts-label">TOTAL P&amp;L</div><div class="ts-val" id="ts-pnl">+0.00bp</div></div>
-      <div class="ts-block ts-sub"><div class="ts-label">USD</div><div class="ts-val" id="ts-usd">+$0.00</div></div>
-      <div class="ts-sep"></div>
-      <div class="ts-block"><div class="ts-label">AVG WIN</div><div class="ts-val ts-pos" id="ts-avgwin">--</div></div>
-      <div class="ts-block"><div class="ts-label">AVG LOSS</div><div class="ts-val ts-neg" id="ts-avgloss">--</div></div>
-      <div class="ts-block"><div class="ts-label">EXPECTANCY</div><div class="ts-val" id="ts-exp">--</div></div>
-      <button onclick="clearTrades()" style="background:rgba(255,61,87,.1);color:var(--red);border:1px solid rgba(255,61,87,.25);padding:3px 10px;border-radius:2px;font-size:10px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto;flex-shrink:0">CLEAR</button>
-    </div>
-    <div class="tli-cols">
-      <span class="tlic"></span><span class="tlic">Sym</span><span class="tlic">P&amp;L</span>
-      <span class="tlic">USD</span><span class="tlic">Engine</span><span class="tlic">Entry</span>
-      <span class="tlic">Exit</span><span class="tlic">Result</span><span class="tlic">Time</span>
-    </div>
-    <div class="tli-body" id="trade-table-body"><div class="tli-empty">Waiting for first trade...</div></div>
-  </div>
-</div>
+      <!-- POL -->
+      <div class="sym-row" id="sb-pol">
+        <div class="sym-hd" onclick="toggleSym('pol',event)">
+          <span class="sym-ticker">POL/USDT</span>
+          <span id="px-pol" class="sym-px">--</span>
+          <span class="sym-regime r-neutral" id="reg-pol">--</span>
+          <div class="sym-meta">
+            <span>Vol:<strong id="vr-pol">--</strong></span>
+            <span>Disp:<strong id="dp-pol">--bp</strong></span>
+            <span>Cap:<strong id="cap-pol">--</strong></span>
+          </div>
+          <div class="sym-hd-right">
+            <span class="sym-pnl-badge zero" id="mini-pnl-pol">+0.00bp</span>
+            <span class="sym-trades-count" id="mini-t-pol">0T</span>
+            <span class="chev">▼</span>
+          </div>
+        </div>
+        <div class="eng-strip">
+          <div class="eng-cell" id="ec-pol-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-pol-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-micro">+0bp</span><span class="eng-sub" id="trades-pol-micro">0T</span></div></div>
+          <div class="eng-cell" id="ec-pol-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-pol-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-structural">+0bp</span><span class="eng-sub" id="trades-pol-structural">0T</span></div></div>
+          <div class="eng-cell" id="ec-pol-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-pol-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-convex">+0bp</span><span class="eng-sub" id="trades-pol-convex">0T</span></div></div>
+          <div class="eng-cell" id="ec-pol-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-pol-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-compression">+0bp</span><span class="eng-sub" id="cticks-pol">0/100</span></div></div>
+          <div class="eng-cell" id="ec-pol-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-pol-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-vacuum">+0bp</span><span class="eng-sub" id="drain-pol">0%</span></div></div>
+          <div class="eng-cell" id="ec-pol-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-pol-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-vwap">+0bp</span><span class="eng-sub" id="vwapdev-pol">0bp</span></div></div>
+        </div>
+        <div class="sym-trades-exp"><div id="str-pol" class="trades-empty">No trades yet</div></div>
+      </div>
 
-</div><!-- /left-panel -->
+    </div><!-- /sym-rows -->
 
-<div class="right-panel">
-  <div class="rp-sec">
-    <div class="rp-head">Regime Allocator</div>
-    <div class="rp-body">
-      <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">BNB</span><span class="regime-state rs-neutral" id="rs-bnb">NEUTRAL</span><span class="regime-mult" id="rm-bnb">1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">AVAX</span><span class="regime-state rs-neutral" id="rs-avax">NEUTRAL</span><span class="regime-mult" id="rm-avax">1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">LINK</span><span class="regime-state rs-neutral" id="rs-link">NEUTRAL</span><span class="regime-mult" id="rm-link">1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">POL</span><span class="regime-state rs-neutral" id="rs-pol">NEUTRAL</span><span class="regime-mult" id="rm-pol">1.00</span></div>
+    <!-- Trade log strip at bottom -->
+    <div class="trade-log-bar">
+      <span class="tl-label">ALL TRADES</span>
+      <div class="tl-stat"><span class="tl-stat-label">Trades</span><span class="tl-stat-val accent" id="ts-count">0</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">WR</span><span class="tl-stat-val" id="ts-wr">--%</span></div>
+      <div class="tl-stat"><span class="tl-stat-val" style="color:var(--green);font-size:11px" id="ts-wins">0</span><span class="tl-stat-label">/</span><span class="tl-stat-val" style="color:var(--red);font-size:11px" id="ts-losses">0</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">P&L</span><span class="tl-stat-val" id="ts-pnl">+0.00bp</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">USD</span><span class="tl-stat-val" id="ts-usd">+$0.00</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">Avg Win</span><span class="tl-stat-val pos" id="ts-avgwin">--</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">Avg Loss</span><span class="tl-stat-val neg" id="ts-avgloss">--</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">Exp</span><span class="tl-stat-val" id="ts-exp">--</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">TP</span><span class="tl-stat-val pos" id="st-tp">0</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">SL</span><span class="tl-stat-val neg" id="st-sl">0</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">TR</span><span class="tl-stat-val accent" id="st-trail">0</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">TO</span><span class="tl-stat-val" style="color:var(--yellow)" id="st-timeout">0</span></div>
+      <button class="tl-clear" onclick="clearTrades()">CLEAR</button>
     </div>
-  </div>
-  </div>
-  <div class="rp-sec">
-    <div class="rp-head">Boost Multiplier</div>
-    <div class="rp-body">
-      <div class="boost-row">
-        <span class="boost-eng">LEADLAG</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-leadlag" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-leadlag">1.0x</span>
+  </div><!-- /sym-panel -->
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <!-- Tab bar -->
+    <div class="rp-tabs">
+      <div class="rp-tab active" id="tab-regime" onclick="switchTab('regime')">REGIME</div>
+      <div class="rp-tab" id="tab-boost" onclick="switchTab('boost')">BOOST</div>
+      <div class="rp-tab" id="tab-engine" onclick="switchTab('engine')">ENGINES</div>
+      <div class="rp-tab" id="tab-signal" onclick="switchTab('signal')">SIGNALS</div>
+    </div>
+
+    <!-- REGIME TAB -->
+    <div class="rp-content" id="tc-regime">
+      <div class="rp-sec">
+        <div class="rp-head">Regime Allocator</div>
+        <div class="rp-body">
+          <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">1.00</span></div>
+          <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">1.00</span></div>
+          <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">1.00</span></div>
+          <div class="regime-row"><span class="regime-sym">BNB</span><span class="regime-state rs-neutral" id="rs-bnb">NEUTRAL</span><span class="regime-mult" id="rm-bnb">1.00</span></div>
+          <div class="regime-row"><span class="regime-sym">AVAX</span><span class="regime-state rs-neutral" id="rs-avax">NEUTRAL</span><span class="regime-mult" id="rm-avax">1.00</span></div>
+          <div class="regime-row"><span class="regime-sym">LINK</span><span class="regime-state rs-neutral" id="rs-link">NEUTRAL</span><span class="regime-mult" id="rm-link">1.00</span></div>
+          <div class="regime-row"><span class="regime-sym">POL</span><span class="regime-state rs-neutral" id="rs-pol">NEUTRAL</span><span class="regime-mult" id="rm-pol">1.00</span></div>
+        </div>
       </div>
-      <div class="boost-row">
-        <span class="boost-eng">LL-ETH-SOL</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ll-eth-sol" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-ll-eth-sol">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">IMPULSE</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-impulse" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-impulse">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">EXPAND</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-expand" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-expand">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">LIQ</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-liq" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-liq">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">FUND</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-fund" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-fund">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">NGAS</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ngas" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-ngas">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">ETH-LEAD</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-eth-lead" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-eth-lead">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">SOL-LEAD</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-sol-lead" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-sol-lead">1.0x</span>
-      </div>
-      <div class="boost-row">
-        <span class="boost-eng">VOLSHOCK</span>
-        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-volshock" style="width:0%"></div></div>
-        <span class="boost-val" id="bval-volshock">1.0x</span>
+      <div class="rp-sec">
+        <div class="rp-head">Session Stats</div>
+        <div class="rp-body">
+          <div class="stat-row"><span class="sr-label">Total P&L</span><span class="sr-val" id="st-pnl">+0.00bp</span></div>
+          <div class="stat-row"><span class="sr-label">Total Trades</span><span class="sr-val accent" id="st-trades">0</span></div>
+          <div class="stat-row"><span class="sr-label">Win Rate</span><span class="sr-val" id="st-wr">--%</span></div>
+          <div class="stat-row"><span class="sr-label">Open Positions</span><span class="sr-val" id="st-pos">0</span></div>
+          <div class="stat-row"><span class="sr-label">Latency p95</span><span class="sr-val accent" id="st-lat">--ms</span></div>
+          <div class="stat-row"><span class="sr-label">Uptime</span><span class="sr-val" id="st-uptime" style="font-size:15px">--</span></div>
+        </div>
       </div>
     </div>
-  </div>
-  <div class="rp-sec">
-    <div class="rp-head">Signal Conditions  BTC</div>
-    <div class="rp-body">
-      <div class="cond-sect">STRUCTURAL  vol1.4  disp20bp</div>
-      <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
-      <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">--bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
-      <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
-      <div class="cond-sect">CONVEX  vol1.8  accel15bp</div>
-      <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">--bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
-      <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
-      <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>
+
+    <!-- BOOST TAB -->
+    <div class="rp-content" id="tc-boost" style="display:none">
+      <div class="rp-sec">
+        <div class="rp-head">Boost Multiplier</div>
+        <div class="rp-body">
+          <div class="boost-row"><span class="boost-eng">LEADLAG</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-leadlag" style="width:0%"></div></div><span class="boost-val" id="bval-leadlag">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">LL-ETH-SOL</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ll-eth-sol" style="width:0%"></div></div><span class="boost-val" id="bval-ll-eth-sol">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">IMPULSE</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-impulse" style="width:0%"></div></div><span class="boost-val" id="bval-impulse">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">EXPAND</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-expand" style="width:0%"></div></div><span class="boost-val" id="bval-expand">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">LIQ</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-liq" style="width:0%"></div></div><span class="boost-val" id="bval-liq">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">FUND</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-fund" style="width:0%"></div></div><span class="boost-val" id="bval-fund">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">NGAS</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ngas" style="width:0%"></div></div><span class="boost-val" id="bval-ngas">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">ETH-LEAD</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-eth-lead" style="width:0%"></div></div><span class="boost-val" id="bval-eth-lead">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">SOL-LEAD</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-sol-lead" style="width:0%"></div></div><span class="boost-val" id="bval-sol-lead">1.0x</span></div>
+          <div class="boost-row"><span class="boost-eng">VOLSHOCK</span><div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-volshock" style="width:0%"></div></div><span class="boost-val" id="bval-volshock">1.0x</span></div>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="rp-sec">
-    <div class="rp-head">Session Stats</div>
-    <div class="rp-body">
-      <div class="stat-row"><span class="sr-label">Total P&L</span><span class="sr-val" id="st-pnl">+0.00bp</span></div>
-      <div class="stat-row"><span class="sr-label">Total Trades</span><span class="sr-val accent" id="st-trades">0</span></div>
-      <div class="stat-row"><span class="sr-label">Win Rate</span><span class="sr-val" id="st-wr">--%</span></div>
-      <div class="stat-row"><span class="sr-label">Open Positions</span><span class="sr-val" id="st-pos">0</span></div>
-      <div class="stat-row"><span class="sr-label">Latency p95</span><span class="sr-val accent" id="st-lat">--ms</span></div>
-      <div class="stat-row"><span class="sr-label">Uptime</span><span class="sr-val" id="st-uptime">--</span></div>
+
+    <!-- ENGINES TAB (By Engine) -->
+    <div class="rp-content" id="tc-engine" style="display:none">
+      <div class="rp-sec">
+        <div class="rp-head">By Engine</div>
+        <div class="rp-body" id="st-by-layer"><div style="color:var(--muted);font-size:11px">No trades yet</div></div>
+      </div>
     </div>
-  </div>
-  <div class="rp-sec">
-    <div class="rp-head">Exit Breakdown</div>
-    <div class="rp-body">
-      <div class="stat-row"><span class="sr-label" style="color:var(--green)">TP Hits</span><span class="sr-val pos" id="st-tp">0</span></div>
-      <div class="stat-row"><span class="sr-label" style="color:var(--red)">SL Hits</span><span class="sr-val neg" id="st-sl">0</span></div>
-      <div class="stat-row"><span class="sr-label" style="color:var(--accent)">Trail Stops</span><span class="sr-val accent" id="st-trail">0</span></div>
-      <div class="stat-row"><span class="sr-label" style="color:var(--yellow)">Timeouts</span><span class="sr-val" style="color:var(--yellow)" id="st-timeout">0</span></div>
+
+    <!-- SIGNAL TAB -->
+    <div class="rp-content" id="tc-signal" style="display:none">
+      <div class="rp-sec">
+        <div class="rp-head">Signal Conditions — BTC</div>
+        <div class="rp-body">
+          <div class="cond-sect">STRUCTURAL  vol≥1.4 · disp≥20bp</div>
+          <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
+          <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">--bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
+          <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
+          <div class="cond-sect">CONVEX  vol≥1.8 · accel≥15bp</div>
+          <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">--bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
+          <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
+          <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="rp-sec">
-    <div class="rp-head">By Engine</div>
-    <div class="rp-body" id="st-by-layer"><div style="color:var(--muted);font-size:11px">No trades yet</div></div>
-  </div>
-</div><!-- /right-panel -->
+
+  </div><!-- /right-panel -->
 </div><!-- /page-body -->
 <script src="/app.js"></script>
 </body>

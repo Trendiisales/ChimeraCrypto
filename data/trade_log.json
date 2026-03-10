@@ -3610,3 +3610,4 @@
 {"t":"2026-03-10T20:51:39","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
 {"t":"2026-03-10T21:45:26","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}
 {"t":"2026-03-10T22:11:30","s":"ETH","e":"LIQ","p":-12.02,"en":2022.80,"ex":2021.99,"mfe":0.00,"mae":-4.02,"hold":629,"why":"SL"}
+{"t":"2026-03-10T22:36:55","s":"SESSION","e":"START","p":0,"en":0,"ex":0,"mfe":0,"mae":0,"hold":0,"why":"START"}

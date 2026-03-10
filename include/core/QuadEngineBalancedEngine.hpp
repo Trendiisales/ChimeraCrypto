@@ -86,7 +86,12 @@ public:
     }
     
     void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
-        last_latency_ms_ = latency_ms;
+        // EMA-smooth the per-tick age so GUI doesn't flicker
+        // alpha=0.1: ~10-tick smoothing window, stable display
+        if (last_latency_ms_ == 0.0)
+            last_latency_ms_ = latency_ms;
+        else
+            last_latency_ms_ = 0.9 * last_latency_ms_ + 0.1 * latency_ms;
         // Derive scalar price for engines that don't need full tick
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
 
@@ -216,7 +221,6 @@ public:
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         json << "\"latency_p95\":" << lat_p95_display_ << ",";
-        json << "\"tick_age_ms\":" << last_latency_ms_ << ",";
         json << balanced_.get_boost_json() << ",";
 
         // Full session stats  per-layer wins/losses/tp/sl/trail/timeout

@@ -389,6 +389,46 @@ struct TradingConfig {
     static constexpr double  NGAS_LATENCY_MAX_MS        = 50.0;    // not latency-sensitive (macro signal)
 
     // -------------------------------------------------------------------------
+    // ORDER FLOW IMBALANCE (LAYER_OFI)
+    // -------------------------------------------------------------------------
+    // Edge: 33-tick OFI ratio > 0.25 + volume spike + book confirmation
+    // Maker entry. TP=18bp, SL=6bp → EV +4.8bp at 45% WR after ~4bp cost.
+    // Only fires in GRIND/BUILDUP to avoid chasing breakout momentum.
+    static constexpr double OFI_RATIO_THRESHOLD    = 0.25;  // (buy_ema - sell_ema) / total > 0.25
+    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.5;   // current volume > 1.5x EMA baseline
+    static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.10;  // book_imbalance > 0.10 (bid-heavy)
+    static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
+    static constexpr double OFI_TP_BP              = 18.0;  // conservative: new engine, calibrate later
+    static constexpr double OFI_SL_BP              = 6.0;   // 3:1 gross R:R
+    static constexpr int64_t OFI_MAX_HOLD_MS       = 10000; // 10s: OFI moves are medium-speed
+
+    // -------------------------------------------------------------------------
+    // LIQUIDITY SWEEP (LAYER_SWEEP)
+    // -------------------------------------------------------------------------
+    // Edge: trade size spike >5x + ask depth collapse >40% + buyer aggression
+    // Taker entry (edge decays fast, <200ms window). TP=22bp, SL=8bp.
+    // EV at 55% WR: 0.55*22 - 0.45*8 = +8.5bp net after ~8bp taker cost.
+    static constexpr double SWEEP_SIZE_SPIKE_MULT     = 5.0;  // trade qty > 5x EMA baseline
+    static constexpr double SWEEP_DEPTH_COLLAPSE_RATIO = 0.40; // ask depth drops >40% vs prev tick
+    static constexpr double SWEEP_MAX_SPREAD_BPS      = 3.0;  // wider allowed: sweeps happen in volatile books
+    static constexpr double SWEEP_TP_BP               = 22.0; // sweeps produce 30-120bp raw, 22bp is conservative
+    static constexpr double SWEEP_SL_BP               = 8.0;  // wider SL: sweep entry is fast/volatile
+    static constexpr int64_t SWEEP_MAX_HOLD_MS        = 8000; // 8s: momentum continuation fades fast
+
+    // -------------------------------------------------------------------------
+    // MARKET MAKER INVENTORY PRESSURE (LAYER_MM_PRESSURE)
+    // -------------------------------------------------------------------------
+    // Edge: persistent slow book imbalance + upward price drift + OFI confirmation
+    // Maker entry. TP=20bp, SL=7bp → EV +6.5bp at 50% WR after ~4bp maker cost.
+    // Only fires in GRIND regime — MM rebalancing is a ranging-market phenomenon.
+    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.20;  // slow imbal EMA > 0.20 (bid-heavy)
+    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 3.0;   // cumulative drift > 3bp over window
+    static constexpr double MM_MAX_SPREAD_BPS       = 2.0;   // tight spread required
+    static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
+    static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise
+    static constexpr int64_t MM_MAX_HOLD_MS         = 20000; // 20s: inventory pressure resolves slowly
+
+    // -------------------------------------------------------------------------
     // DIAGNOSTIC OUTPUT
     // -------------------------------------------------------------------------
     static constexpr int REGIME_DIAG_INTERVAL     = 500;

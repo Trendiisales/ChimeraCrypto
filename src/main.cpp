@@ -201,6 +201,9 @@ int main() {
         if (tick_age_ms > 200.0) return;
 
         controller.on_tick(id, tick, now_ms, tick_age_ms);
+        // Keep GUI latency display showing true rolling p95 (not per-tick age)
+        if (g_exchange_latency.ready())
+            controller.set_lat_p95(g_exchange_latency.p95());
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;

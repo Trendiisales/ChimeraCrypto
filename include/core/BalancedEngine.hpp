@@ -1440,7 +1440,9 @@ private:
             max_hold  = TradingConfig::VWAP_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_EXPANSION) {
             // EXPANSION: own tighter params. Cut losers fast at 12s/5bp SL.
-            tp_bp    = TradingConfig::EXPANSION_TP_BP;
+            // LINK(5)/AVAX(4)/POL(6): thin books, moves run 11-22bp -- 6bp TP cuts winners short
+            bool is_alt_expand = (id == 4 || id == 5 || id == 6);
+            tp_bp    = is_alt_expand ? TradingConfig::EXPANSION_ALT_TP_BP : TradingConfig::EXPANSION_TP_BP;
             sl_bp    = TradingConfig::EXPANSION_SL_BP;
             max_hold = TradingConfig::EXPANSION_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_ETH_LEAD) {

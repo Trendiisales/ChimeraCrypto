@@ -533,7 +533,7 @@ public:
         int utc_hour = (int)((ts / 3600000LL) % 24);
         bool dead_zone = (utc_hour >= TradingConfig::SESSION_DEAD_START_UTC &&
                           utc_hour <  TradingConfig::SESSION_DEAD_END_UTC);
-        int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : 3;
+        int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : TradingConfig::MAX_CONCURRENT_POSITIONS;
         if (open_positions_ >= max_pos) return;
         
         // PER-SYMBOL CIRCUIT BREAKER  block entry if symbol is in SL cooldown
@@ -557,6 +557,9 @@ public:
         if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         if (try_funding_entry(id, price, ts, s, latency_ms)) return;
         if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+        bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
+                         utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
+        ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         if (check_eth_lead(id, price, ts, s, latency_ms)) return;
@@ -938,6 +941,12 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMPULSE";
 
+        // ETH(1) 54% WR -10bp, BNB(3) 28% WR -17bp -> filtered out
+        if (id == 1 || id == 3) {
+            rejection_throttle_.record(key, "symbol_filtered");
+            return false;
+        }
+
         // Per-symbol guard: don't enter if this symbol already has a position
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
@@ -988,11 +997,9 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
 
-        // ETH EXPAND DISABLED  85 trades, 42% WR, -69.38bp (session log 2026-03-08)
-        // ETH in BREAKOUT moves too fast  edge consumed before entry, SL gapping -8bp avg.
-        // BTC: 60% WR +13.65bp  keep. SOL: 60% WR  keep.
-        if (id == 1) {
-            rejection_throttle_.record(key, "eth_expand_disabled");
+        // EXPAND: BTC(0) 60% WR +13bp, SOL(2) 60% WR. All others net negative.
+        if (id != 0 && id != 2) {
+            rejection_throttle_.record(key, "symbol_filtered");
             return false;
         }
 
@@ -2083,7 +2090,8 @@ private:
 
         // Record per-layer session stats (visible in GUI Session Stats panel)
         stats_for(s.pos.layer).record(pnl, exit_reason, s.pos.mfe, s.pos.mae);
-        capital_control_.record_trade_result(std::string(layer_label), pnl > 0.0);  // per-engine win-rate boost
+        capital_control_.record_trade_result(std::string(layer_label), pnl > 0.0);
+        capital_control_.update_compounding_equity(10000.0 + realized_pnl_);  // per-engine win-rate boost
 
         // Shadow log  structured CSV for edge measurement
         {
@@ -2248,7 +2256,8 @@ private:
     int64_t last_snapshot_update_[MAX_SYMBOLS];
     int64_t tick_count_[MAX_SYMBOLS];
     int64_t last_tick_count_reset_[MAX_SYMBOLS];
-    int open_positions_;
+    int    open_positions_;
+    double ll_offpeak_size_mult_ = 1.0;
     int loss_streak_;
     int64_t kill_until_;
     SystemState system_state_;

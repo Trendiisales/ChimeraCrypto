@@ -632,7 +632,7 @@ public:
           << "\"timeout_exits\":" << total_timeout << ","
           << "\"by_layer\":[";
         bool first=true;
-        for (int i=1;i<8;i++){
+        for (int i=1;i<14;i++){  // 1=MICRO .. 13=VOLSHOCK -- covers all active layers
             const auto& ls=layer_stats_[i];
             if (ls.total()==0) continue;
             if (!first) j << ",";

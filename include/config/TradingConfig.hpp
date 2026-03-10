@@ -61,7 +61,8 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Taker fees (8bp) + spread (1bp) + slippage (1bp) = ~10bp per round trip.
     // Any signal with expected edge below this is a guaranteed loser.
-    static constexpr double COST_FLOOR_BP = 12.0;  // raised from 10  kills zero P&L entries (25% of trades)
+    static constexpr double COST_FLOOR_BP = 12.0;        // taker round trip floor (LEADLAG/IMPULSE etc)
+    static constexpr double EXPANSION_COST_FLOOR_BP = 8.0; // BUG10: EXPANSION net-negative at 4bp floor, raise to 8bp
 
 
     // -------------------------------------------------------------------------
@@ -320,6 +321,9 @@ struct TradingConfig {
     // Total maker round-trip cost: ~3-4bp
     // Use 4bp as conservative floor.
     static constexpr double MAKER_COST_FLOOR_BP = 4.0;
+    // Round-trip costs used in exit() net PnL calculation (BUG4 FIX)
+    static constexpr double TAKER_ROUND_TRIP_BP = 8.0;  // 4bp/side VIP0 taker fee
+    static constexpr double MAKER_ROUND_TRIP_BP = 4.0;  // ~1bp rebate/side + ~2bp spread
 
     // -------------------------------------------------------------------------
     // FUNDING RATE SIGNAL ENGINE  spot long when shorts crowded on perp

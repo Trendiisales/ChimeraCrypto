@@ -202,15 +202,20 @@ int main() {
 
         controller.on_tick(id, tick, now_ms, tick_age_ms);
 
+        // EMA of raw tick_age_ms — same clock both sides (AWS NTP), no correction needed
+        // alpha=0.01: ~100-tick smoothing window gives stable display without lag
+        static double ema_age_ms = 0.0;
+        if (ema_age_ms == 0.0) ema_age_ms = tick_age_ms;
+        else ema_age_ms = 0.99 * ema_age_ms + 0.01 * tick_age_ms;
+
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (n % 1000 == 0) {
-            double p95 = g_exchange_latency.ready() ? g_exchange_latency.p95() : 0.0;
-            // Update GUI latency display every 1000 ticks (~1s) — stable, not per-tick
-            controller.set_lat_p95(p95);
-            std::printf("[TICK] n=%d | %s px=%.2f | tick_age=%.1fms | feed_p95=%.1fms | fills=%d\n",
+        if (n % 500 == 0) {
+            // Update GUI WS Delay display every 500 ticks (~0.5s) from EMA
+            controller.set_lat_p95(ema_age_ms);
+            std::printf("[TICK] n=%d | %s px=%.2f | tick_age=%.1fms | ema_age=%.1fms | fills=%d\n",
                 n, tick.symbol.c_str(), mid,
-                tick_age_ms, p95,
+                tick_age_ms, ema_age_ms,
                 executor_ok ? executor.fills() : 0);
             std::fflush(stdout);
         }

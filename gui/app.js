@@ -126,7 +126,7 @@ function mergeTrades(serverLog, isBootLoad) {
   });
   if (newCount > 0 || before === 0) {
     localTrades = localTrades.slice(0, 200);
-    saveTrades(); renderTradeLog(); renderSymbolTrades(); updateWinRate();
+    saveTrades(); renderTradeLog(); renderSymbolTrades(); renderRpTrades(); updateWinRate();
   }
 }
 
@@ -227,6 +227,67 @@ function renderTradeLog() {
   if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'ts-val ' + (exp !== null ? (exp >= 0 ? 'ts-pos' : 'ts-neg') : ''); }
   if (!localTrades.length) { body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>'; return; }
   body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
+}
+
+
+//  RIGHT PANEL TRADE LOG
+function renderRpTrades() {
+  const list = document.getElementById('rp-trade-list');
+  if (!list) return;
+  const trades = localTrades.filter(t => t.s !== 'SESSION');
+  if (!trades.length) {
+    list.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet</div>';
+    return;
+  }
+  let wins = 0, losses = 0, totalPnl = 0;
+  trades.forEach(t => {
+    const p = +t.p || 0; totalPnl += p;
+    if (p >= 0) wins++; else losses++;
+  });
+  const total = wins + losses;
+  const wrEl = document.getElementById('rp-wr');
+  const wEl  = document.getElementById('rp-wins');
+  const lEl  = document.getElementById('rp-losses');
+  const pEl  = document.getElementById('rp-pnl');
+  if (wEl) wEl.textContent = wins;
+  if (lEl) lEl.textContent = losses;
+  if (wrEl) wrEl.textContent = total > 0 ? (wins/total*100).toFixed(0)+'%' : '--%';
+  if (pEl) {
+    pEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + 'bp';
+    pEl.style.color = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+  list.innerHTML = trades.slice(0, 100).map(tr => {
+    const pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
+    const rc  = reasonClass(tr.why || tr.reason || '');
+    const sym = (tr.s || '').replace('USDT','').replace('/','');
+    const en  = tr.en ? fmtPrice(tr.en, sym) : '--';
+    const ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
+    const why = (tr.why || tr.reason || '?').toUpperCase();
+    const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(0,16).replace('T',' ') : tr.t) : '--';
+    const mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
+    const mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
+    const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
+    return \`<div class="rp-trade-row \${isWin?'win':'loss'}">
+      <div class="rptr-top">
+        <span class="rptr-tag \${isWin?'win':'loss'}">\${isWin?'WIN':'LOSS'}</span>
+        <span class="rptr-sym">\${sym}</span>
+        <span class="rptr-eng">\${tr.e||'--'}</span>
+        <span class="rptr-pnl \${isWin?'pos':'neg'}">\${fmtPnl(pnl)}</span>
+        <span class="rptr-usd \${isWin?'pos':'neg'}">\${fmtUsd(usd)}</span>
+        <span class="rptr-badge \${rc}">\${why}</span>
+      </div>
+      <div class="rptr-mid">
+        <span>Entry: <strong>\${en}</strong></span>
+        <span>Exit: <strong>\${ex}</strong></span>
+        <span>Hold: <strong>\${hold}</strong></span>
+      </div>
+      <div class="rptr-bot">
+        <span class="rptr-mfe">MFE \${mfe}</span>
+        <span class="rptr-mae">MAE \${mae}</span>
+        <span class="rptr-time">\${time}</span>
+      </div>
+    </div>\`;
+  }).join('');
 }
 
 //  TRADE CARDS 
@@ -604,10 +665,11 @@ function autoExpandIfActive(sl, isActive) {
 }
 
 function switchTab(name) {
-  ['regime','boost','engine','signal'].forEach(t => {
+  ['regime','boost','engine','signal','trades'].forEach(t => {
     const tab = document.getElementById('tab-' + t);
     const content = document.getElementById('tc-' + t);
     if (tab) tab.classList.toggle('active', t === name);
     if (content) content.style.display = t === name ? 'flex' : 'none';
   });
+  if (name === 'trades') renderRpTrades();
 }

@@ -57,7 +57,10 @@ enum LayerMode {
     LAYER_NGAS,          // NGAS Lead-Lag  Natural Gas drop  risk-on crypto LONG
     LAYER_ETH_LEAD,      // ETH leads SOL/BNB/AVAX/LINK/POL (Tier 2 lead-lag)
     LAYER_SOL_LEAD,      // SOL leads AVAX/POL (Tier 3 lead-lag)
-    LAYER_VOLSHOCK       // Volume Shock Continuation -- spike + displacement
+    LAYER_VOLSHOCK,         // Volume Shock Continuation -- spike + displacement
+    LAYER_OFI,              // Order Flow Imbalance -- persistent buy aggression
+    LAYER_SWEEP,            // Liquidity Sweep -- aggressive spike + depth collapse
+    LAYER_MM_PRESSURE       // Market Maker Inventory Pressure -- slow drift + absorption
 };
 
 enum PosState {
@@ -151,6 +154,25 @@ struct SymbolState {
     double sell_vol_ema = 0.0;   // EMA of agg_sell_volume per tick
     bool   flow_ema_init = false;
 
+    // ── OFI Pressure: longer-window buy/sell volume accumulator ────────────
+    // Alpha=0.03 → ~33-tick window.  Separate from the fast 0.05 LEADLAG gate.
+    double ofi_buy_ema   = 0.0;
+    double ofi_sell_ema  = 0.0;
+    bool   ofi_ema_init  = false;
+
+    // ── Sweep detection: trade-size EMA + prior-tick depth snapshot ────────
+    double trade_size_ema   = 0.0;   // EMA(alpha=0.05) of per-tick trade_qty
+    bool   trade_size_init  = false;
+    double prev_ask_depth   = 0.0;   // depth snapshot from previous tick
+    double prev_bid_depth   = 0.0;
+
+    // ── MM Inventory Pressure: slow book-imbalance + price-drift EMAs ──────
+    double mm_imbal_ema     = 0.0;   // EMA(alpha=0.02) of book_imbalance
+    bool   mm_imbal_init    = false;
+    double mm_drift_sum     = 0.0;   // cumulative mid-price change over window
+    double mm_prev_mid      = 0.0;   // previous mid for drift calculation
+    int    mm_drift_ticks   = 0;     // ticks in current drift window
+
     void reset() {
         last_price = 0;
         short_returns.clear();
@@ -172,6 +194,18 @@ struct SymbolState {
         buy_vol_ema   = 0.0;
         sell_vol_ema  = 0.0;
         flow_ema_init = false;
+        ofi_buy_ema   = 0.0;
+        ofi_sell_ema  = 0.0;
+        ofi_ema_init  = false;
+        trade_size_ema  = 0.0;
+        trade_size_init = false;
+        prev_ask_depth  = 0.0;
+        prev_bid_depth  = 0.0;
+        mm_imbal_ema    = 0.0;
+        mm_imbal_init   = false;
+        mm_drift_sum    = 0.0;
+        mm_prev_mid     = 0.0;
+        mm_drift_ticks  = 0;
         pos.reset();
     }
 };
@@ -585,6 +619,9 @@ public:
         if (check_vacuum(id, price, ts, s, latency_ms)) return;
         if (check_imbalance(id, price, ts, s, latency_ms)) return;
         if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+        if (check_ofi_pressure(id, price, ts, s, latency_ms)) return;
+        if (check_sweep(id, price, ts, s, latency_ms)) return;
+        if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
@@ -601,7 +638,10 @@ public:
         j << "\"boost_ngas\":"       << capital_control_.win_boost_for("NGAS")       << ",";
         j << "\"boost_eth_lead\":"   << capital_control_.win_boost_for("ETH-LEAD")   << ",";
         j << "\"boost_sol_lead\":"   << capital_control_.win_boost_for("SOL-LEAD")   << ",";
-        j << "\"boost_volshock\":"   << capital_control_.win_boost_for("VOLSHOCK");
+        j << "\"boost_volshock\":"   << capital_control_.win_boost_for("VOLSHOCK") << ",";
+        j << "\"boost_ofi\":"         << capital_control_.win_boost_for("OFI")        << ",";
+        j << "\"boost_sweep\":"       << capital_control_.win_boost_for("SWEEP")      << ",";
+        j << "\"boost_mm\":"          << capital_control_.win_boost_for("MM-PRESSURE");
         return j.str();
     }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
@@ -619,7 +659,7 @@ public:
     // Full session breakdown  auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK","OFI","SWEEP","MM-PRESSURE"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
@@ -773,6 +813,65 @@ private:
                                        + (1.0 - FLOW_EMA_ALPHA) * symbols_[id].buy_vol_ema;
             symbols_[id].sell_vol_ema = FLOW_EMA_ALPHA * tick.agg_sell_volume
                                        + (1.0 - FLOW_EMA_ALPHA) * symbols_[id].sell_vol_ema;
+        }
+
+        // ── OFI slow EMA (alpha=0.03, ~33-tick window) ────────────────────────
+        if (tick.agg_buy_volume > 0.0 || tick.agg_sell_volume > 0.0) {
+            constexpr double OFI_ALPHA = 0.03;
+            auto& ss = symbols_[id];
+            if (!ss.ofi_ema_init) {
+                ss.ofi_buy_ema  = tick.agg_buy_volume;
+                ss.ofi_sell_ema = tick.agg_sell_volume;
+                ss.ofi_ema_init = true;
+            } else {
+                ss.ofi_buy_ema  = OFI_ALPHA * tick.agg_buy_volume
+                                  + (1.0 - OFI_ALPHA) * ss.ofi_buy_ema;
+                ss.ofi_sell_ema = OFI_ALPHA * tick.agg_sell_volume
+                                  + (1.0 - OFI_ALPHA) * ss.ofi_sell_ema;
+            }
+        }
+
+        // ── Sweep: trade-size EMA (alpha=0.05) ────────────────────────────────
+        if (tick.trade_qty > 0.0) {
+            constexpr double SZ_ALPHA = 0.05;
+            auto& ss = symbols_[id];
+            if (!ss.trade_size_init) {
+                ss.trade_size_ema  = tick.trade_qty;
+                ss.trade_size_init = true;
+            } else {
+                ss.trade_size_ema  = SZ_ALPHA * tick.trade_qty
+                                     + (1.0 - SZ_ALPHA) * ss.trade_size_ema;
+            }
+        }
+
+        // ── MM Pressure: slow book-imbalance EMA + mid-price drift ────────────
+        if (tick.bid > 0.0 && tick.ask > 0.0) {
+            constexpr double MM_ALPHA = 0.02;
+            auto& ss = symbols_[id];
+            double mid = (tick.bid + tick.ask) * 0.5;
+            if (!ss.mm_imbal_init) {
+                ss.mm_imbal_ema  = tick.book_imbalance;
+                ss.mm_prev_mid   = mid;
+                ss.mm_imbal_init = true;
+            } else {
+                ss.mm_imbal_ema  = MM_ALPHA * tick.book_imbalance
+                                   + (1.0 - MM_ALPHA) * ss.mm_imbal_ema;
+                // Accumulate drift: signed mid-price change
+                ss.mm_drift_sum   += (mid - ss.mm_prev_mid);
+                ss.mm_prev_mid    = mid;
+                ss.mm_drift_ticks++;
+                // Reset drift window every 100 ticks
+                if (ss.mm_drift_ticks >= 100) {
+                    ss.mm_drift_sum   = 0.0;
+                    ss.mm_drift_ticks = 0;
+                }
+            }
+        }
+
+        // ── Sweep: snapshot current depth for next-tick collapse detection ────
+        if (tick.bid > 0.0 && tick.ask > 0.0) {
+            symbols_[id].prev_ask_depth = tick.ask_size;
+            symbols_[id].prev_bid_depth = tick.bid_size;
         }
     }
     
@@ -1395,7 +1494,10 @@ private:
                                (s.pos.layer == LAYER_NGAS)          ? "NGAS"      :
                                (s.pos.layer == LAYER_ETH_LEAD)      ? "ETH-LEAD"  :
                                (s.pos.layer == LAYER_SOL_LEAD)      ? "SOL-LEAD"  :
-                               (s.pos.layer == LAYER_VOLSHOCK)      ? "VOLSHOCK"  : "EXPAND";
+                               (s.pos.layer == LAYER_VOLSHOCK)      ? "VOLSHOCK"  :
+                               (s.pos.layer == LAYER_OFI)           ? "OFI"       :
+                               (s.pos.layer == LAYER_SWEEP)         ? "SWEEP"     :
+                               (s.pos.layer == LAYER_MM_PRESSURE)   ? "MM-PRESS"  : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1538,6 +1640,18 @@ private:
             tp_bp    = TradingConfig::VOLSHOCK_TP_BP;
             sl_bp    = TradingConfig::VOLSHOCK_SL_BP;
             max_hold = TradingConfig::VOLSHOCK_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_OFI) {
+            tp_bp    = TradingConfig::OFI_TP_BP;
+            sl_bp    = TradingConfig::OFI_SL_BP;
+            max_hold = TradingConfig::OFI_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_SWEEP) {
+            tp_bp    = TradingConfig::SWEEP_TP_BP;
+            sl_bp    = TradingConfig::SWEEP_SL_BP;
+            max_hold = TradingConfig::SWEEP_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_MM_PRESSURE) {
+            tp_bp    = TradingConfig::MM_TP_BP;
+            sl_bp    = TradingConfig::MM_SL_BP;
+            max_hold = TradingConfig::MM_MAX_HOLD_MS;
         } else {
             // IMPULSE: alt coins (AVAX/LINK/POL) get wider TP -- thin books, moves run to 20bp+
             // SOL: standard TP (moves are shallower than micro-caps)
@@ -1878,6 +1992,189 @@ private:
         return true;
     }
 
+    // =========================================================================
+    // LAYER_OFI  Order Flow Imbalance Pressure
+    // =========================================================================
+    // Edge: when the 33-tick OFI ratio is strongly positive AND a volume spike
+    // confirms buy aggression, price tends to follow 10-40 bps within seconds.
+    // Fires in GRIND or BUILDUP only (BREAKOUT has its own momentum engines).
+    // Maker entry — the edge is structural, not latency-sensitive.
+    // EV at 45% WR: 0.45*18 - 0.55*6 = 8.1 - 3.3 = +4.8bp net (after ~4bp maker cost)
+    // =========================================================================
+    bool check_ofi_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
+
+        // Regime: GRIND or BUILDUP only
+        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "wrong_regime");
+            return false;
+        }
+        if (!s.ofi_ema_init) return false;
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+        if (t.spread_bps > TradingConfig::OFI_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "spread_wide");
+            return false;
+        }
+
+        double total_flow = s.ofi_buy_ema + s.ofi_sell_ema;
+        if (total_flow < 1e-9) return false;
+        double ofi_ratio = (s.ofi_buy_ema - s.ofi_sell_ema) / total_flow;
+
+        // Must exceed threshold in the long direction only (spot = long bias)
+        if (ofi_ratio < TradingConfig::OFI_RATIO_THRESHOLD) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "ofi_weak");
+            return false;
+        }
+
+        // Volume confirmation: current trade size must be above EMA baseline
+        if (!s.trade_size_init || s.trade_size_ema < 1e-9) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "no_vol_baseline");
+            return false;
+        }
+        double vol_ratio = (t.agg_buy_volume + t.agg_sell_volume) / s.trade_size_ema;
+        if (vol_ratio < TradingConfig::OFI_VOLUME_SPIKE_MULT) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "volume_low");
+            return false;
+        }
+
+        // Book must also lean long (bid depth >= ask depth)
+        if (t.book_imbalance < TradingConfig::OFI_BOOK_CONFIRM_IMBAL) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "book_neutral");
+            return false;
+        }
+
+        std::printf("[OFI] %s | ofi=%.3f | vol_spike=%.2fx | book=%.3f | lat=%.1fms | LONG
+",
+                    sym_short(id), ofi_ratio, vol_ratio, t.book_imbalance, latency_ms);
+        std::fflush(stdout);
+        enter(id, price, ts, s, LAYER_OFI, true);
+        return true;
+    }
+
+    // =========================================================================
+    // LAYER_SWEEP  Liquidity Sweep / Stop Run
+    // =========================================================================
+    // Edge: a spike in aggressive trade size (>5x EMA) combined with a depth
+    // collapse on the same side signals a stop run.  We trade momentum continuation
+    // (the most reliable outcome — 60-70% of sweeps continue 20-80 bps).
+    // Taker entry only — sweep edges decay in <200ms, maker fill is uncertain.
+    // EV at 55% WR: 0.55*22 - 0.45*8 = 12.1 - 3.6 = +8.5bp net (after ~8bp taker)
+    // =========================================================================
+    bool check_sweep(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
+
+        // Sweeps work in any regime — they are self-creating events
+        if (s.regime == REGIME_DEAD) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", "dead_regime");
+            return false;
+        }
+        if (!s.trade_size_init || s.trade_size_ema < 1e-9) return false;
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+        if (t.spread_bps > TradingConfig::SWEEP_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", "spread_wide");
+            return false;
+        }
+
+        double trade_size = t.agg_buy_volume + t.agg_sell_volume;
+        double size_spike  = trade_size / s.trade_size_ema;
+
+        // Condition 1: aggressive trade spike
+        if (size_spike < TradingConfig::SWEEP_SIZE_SPIKE_MULT) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", "size_spike_low");
+            return false;
+        }
+
+        // Condition 2: ask-side depth collapse from previous tick (long sweep signal)
+        // bid-side collapse would be a short, but we are spot-only (long bias)
+        if (s.prev_ask_depth < 1e-9) return false;
+        double ask_collapse = (s.prev_ask_depth - t.ask_size) / s.prev_ask_depth;
+
+        if (ask_collapse < TradingConfig::SWEEP_DEPTH_COLLAPSE_RATIO) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", "depth_intact");
+            return false;
+        }
+
+        // Condition 3: trade must be buyer-initiated (momentum direction confirmed)
+        if (t.agg_buy_volume <= t.agg_sell_volume) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", "no_buy_aggression");
+            return false;
+        }
+
+        std::printf("[SWEEP] %s | size_spike=%.1fx | ask_collapse=%.1f%% | lat=%.1fms | LONG
+",
+                    sym_short(id), size_spike, ask_collapse * 100.0, latency_ms);
+        std::fflush(stdout);
+        // Sweeps use taker entry — edge window is <200ms
+        enter(id, price, ts, s, LAYER_SWEEP, true);
+        return true;
+    }
+
+    // =========================================================================
+    // LAYER_MM_PRESSURE  Market Maker Inventory Pressure
+    // =========================================================================
+    // Edge: when MMs have accumulated inventory on one side they are forced to
+    // rebalance, creating a slow but directional drift.  Signals:
+    //   - persistent book imbalance (slow EMA > threshold)
+    //   - cumulative price drift in the same direction over 100 ticks
+    //   - trades being absorbed (book imbalance sustained despite flow)
+    // Maker entry — this is a slow structural move, not a latency play.
+    // EV at 50% WR: 0.50*20 - 0.50*7 = 10 - 3.5 = +6.5bp net (after ~4bp maker)
+    // =========================================================================
+    bool check_mm_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
+
+        // Best in GRIND — MM rebalancing is a ranging-market phenomenon
+        if (s.regime != REGIME_GRIND) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
+            return false;
+        }
+        if (!s.mm_imbal_init || s.mm_drift_ticks < 20) return false;
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+        if (t.spread_bps > TradingConfig::MM_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "spread_wide");
+            return false;
+        }
+
+        // Condition 1: slow book imbalance EMA must be positive (bid-heavy)
+        if (s.mm_imbal_ema < TradingConfig::MM_IMBAL_EMA_THRESHOLD) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "imbal_ema_low");
+            return false;
+        }
+
+        // Condition 2: cumulative price drift must be positive (upward pressure)
+        // Normalise drift as bps of current price
+        double drift_bps = (s.mm_drift_sum / price) * 10000.0;
+        if (drift_bps < TradingConfig::MM_DRIFT_BPS_THRESHOLD) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "drift_weak");
+            return false;
+        }
+
+        // Condition 3: OFI must also be buy-sided (absorption confirmation)
+        if (s.ofi_ema_init) {
+            double total = s.ofi_buy_ema + s.ofi_sell_ema;
+            if (total > 1e-9 && (s.ofi_buy_ema - s.ofi_sell_ema) / total < 0.05) {
+                rejection_throttle_.record(std::string(sym_short(id)) + " MM", "ofi_not_confirming");
+                return false;
+            }
+        }
+
+        std::printf("[MM-PRESSURE] %s | imbal_ema=%.3f | drift=%.2fbp | ticks=%d | lat=%.1fms | LONG
+",
+                    sym_short(id), s.mm_imbal_ema, drift_bps, s.mm_drift_ticks, latency_ms);
+        std::fflush(stdout);
+        enter(id, price, ts, s, LAYER_MM_PRESSURE, true);
+        return true;
+    }
+
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
         Signal sig;
         sig.symbol = sym_full(id);
@@ -1885,7 +2182,10 @@ private:
                     (layer == LAYER_EXPANSION) ? LayerType::EXPAND :
                     (layer == LAYER_ETH_LEAD)  ? LayerType::EXPAND :
                     (layer == LAYER_SOL_LEAD)  ? LayerType::EXPAND :
-                    (layer == LAYER_VOLSHOCK)  ? LayerType::EXPAND :
+                    (layer == LAYER_VOLSHOCK)   ? LayerType::EXPAND :
+                    (layer == LAYER_OFI)        ? LayerType::EXPAND :
+                    (layer == LAYER_SWEEP)      ? LayerType::EXPAND :
+                    (layer == LAYER_MM_PRESSURE)? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
         // Expected gross edge per layer (gross TP targets from TradingConfig)
         sig.expected_bps = (layer == LAYER_LIQUIDATION) ? TradingConfig::LIQ_TP_BP :
@@ -1918,7 +2218,8 @@ private:
                                layer == LAYER_ETH_LEAD       ||
                                layer == LAYER_SOL_LEAD       ||
                                layer == LAYER_VOLSHOCK       ||
-                               layer == LAYER_LIQUIDATION);
+                               layer == LAYER_LIQUIDATION ||
+                               layer == LAYER_SWEEP);
         bool is_leadlag_layer = (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL);
         double cost_floor = is_taker_layer  ? TradingConfig::COST_FLOOR_BP          // 12bp — taker
                           : is_leadlag_layer ? TradingConfig::MAKER_COST_FLOOR_BP    // 4bp  — aggressive maker
@@ -1997,7 +2298,10 @@ private:
             (layer == LAYER_NGAS)            ? "NGAS"       :
             (layer == LAYER_ETH_LEAD)        ? "ETH-LEAD"   :
             (layer == LAYER_SOL_LEAD)        ? "SOL-LEAD"   :
-            (layer == LAYER_VOLSHOCK)        ? "VOLSHOCK"   : "UNKNOWN";
+            (layer == LAYER_VOLSHOCK)        ? "VOLSHOCK"   :
+            (layer == LAYER_OFI)             ? "OFI"        :
+            (layer == LAYER_SWEEP)           ? "SWEEP"      :
+            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "UNKNOWN";
         double final_size = capital_control_.compute_final_size(
             final_weight, cap_env, unrealized_bp, drawdown_bp, ccl_engine
         );
@@ -2028,6 +2332,9 @@ private:
                           (layer == LAYER_ETH_LEAD)         ? 1.0 :  // unproven, neutral
                           (layer == LAYER_SOL_LEAD)         ? 1.0 :  // unproven, neutral
                           (layer == LAYER_VOLSHOCK)         ? 0.5 :  // new engine, conservative
+                          (layer == LAYER_OFI)              ? 0.5 :  // new engine, conservative
+                          (layer == LAYER_SWEEP)            ? 0.5 :  // new engine, taker — conservative
+                          (layer == LAYER_MM_PRESSURE)      ? 0.5 :  // new engine, conservative
                           (layer == LAYER_VWAP)             ? 1.0 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
@@ -2070,7 +2377,10 @@ private:
                            (layer == LAYER_NGAS)             ? "NGAS"       :
                            (layer == LAYER_ETH_LEAD)         ? "ETH-LEAD"   :
                            (layer == LAYER_SOL_LEAD)         ? "SOL-LEAD"   :
-                           (layer == LAYER_VOLSHOCK)         ? "VOLSHOCK"   : "EXPAND";
+                           (layer == LAYER_VOLSHOCK)         ? "VOLSHOCK"   :
+                           (layer == LAYER_OFI)             ? "OFI"        :
+                           (layer == LAYER_SWEEP)           ? "SWEEP"      :
+                           (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             //  MAKER MODE: post limit order 
@@ -2200,7 +2510,10 @@ private:
                             (s.pos.layer == LAYER_NGAS)           ? "NGAS"       :
                             (s.pos.layer == LAYER_ETH_LEAD)       ? "ETH-LEAD"   :
                             (s.pos.layer == LAYER_SOL_LEAD)       ? "SOL-LEAD"   :
-                            (s.pos.layer == LAYER_VOLSHOCK)       ? "VOLSHOCK"   : "UNKNOWN";
+                            (s.pos.layer == LAYER_VOLSHOCK)       ? "VOLSHOCK"   :
+                            (s.pos.layer == LAYER_OFI)             ? "OFI"        :
+                            (s.pos.layer == LAYER_SWEEP)           ? "SWEEP"      :
+                            (s.pos.layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "UNKNOWN";
         const char* win_str = pnl_net > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",

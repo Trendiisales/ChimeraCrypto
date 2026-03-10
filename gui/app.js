@@ -1,10 +1,10 @@
-// ── CHIMERA app.js ────────────────────────────────────────────────────────────
+//  CHIMERA app.js 
 // Bell fix: only fire audio/flash for trades that arrive AFTER this page load.
 
 const STORAGE_KEY = 'chimera_trades_v3';
 const BOOT_TS = Date.now();
 
-// All symbols in display order — must match SymbolIndex.hpp
+// All symbols in display order  must match SymbolIndex.hpp
 const SYMBOLS = [
   { short: 'BTC', full: 'btcusdt' },
   { short: 'ETH', full: 'ethusdt' },
@@ -23,7 +23,7 @@ SYMBOLS.forEach(s => lastPrices[s.short.toLowerCase()] = 0);
 let wins = 0, losses = 0;
 let uptimeStart = null;
 
-// ── AUDIO ─────────────────────────────────────────────────────────────────────
+//  AUDIO 
 function unlockAudio() {
   if (audioUnlocked) return;
   try {
@@ -33,7 +33,7 @@ function unlockAudio() {
     src.buffer = buf; src.connect(audioCtx.destination); src.start(0);
     audioUnlocked = true;
     const btn = document.getElementById('audio-unlock');
-    if (btn) { btn.textContent = '🔔 MUTED OFF'; btn.style.background = 'rgba(0,230,118,.1)'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'var(--green)'; }
+    if (btn) { btn.textContent = ' MUTED OFF'; btn.style.background = 'rgba(0,230,118,.1)'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'var(--green)'; }
   } catch(e) { console.warn('Audio unlock failed:', e); }
 }
 
@@ -48,7 +48,7 @@ function playWin() {
         osc.connect(gain); gain.connect(comp); comp.connect(audioCtx.destination);
         osc.type = 'sine'; osc.frequency.setValueAtTime(freq, now + t);
         gain.gain.setValueAtTime(0, now + t);
-        gain.gain.linearRampToValueAtTime(i === 0 ? 1.8 : 0.9, now + t + 0.008); // louder: 1.2→1.8
+        gain.gain.linearRampToValueAtTime(i === 0 ? 1.8 : 0.9, now + t + 0.008); // louder: 1.21.8
         gain.gain.exponentialRampToValueAtTime(0.3, now + t + 0.1);
         gain.gain.exponentialRampToValueAtTime(0.001, now + t + 1.4);
         osc.start(now + t); osc.stop(now + t + 1.5);
@@ -73,12 +73,12 @@ function playLoss() {
 function flashWin(sym, pnl) {
   const el = document.getElementById('win-flash');
   if (!el) return;
-  el.textContent = `✓ ${sym}  +${(+pnl).toFixed(2)}bp`;
+  el.textContent = ` ${sym}  +${(+pnl).toFixed(2)}bp`;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2200);
 }
 
-// ── STORAGE ───────────────────────────────────────────────────────────────────
+//  STORAGE 
 function loadTrades() {
   try { const raw = localStorage.getItem(STORAGE_KEY); localTrades = raw ? JSON.parse(raw) : []; }
   catch(e) { localTrades = []; }
@@ -92,7 +92,7 @@ window.clearTrades = function() {
   renderTradeLog(); updateWinRate();
 };
 
-// ── TRADE MERGE ───────────────────────────────────────────────────────────────
+//  TRADE MERGE 
 function mergeTrades(serverLog, isBootLoad) {
   if (!serverLog || !serverLog.length) return;
   const before = localTrades.length;
@@ -108,14 +108,14 @@ function mergeTrades(serverLog, isBootLoad) {
         // look "new" because localTrades was cleared (e.g. on restart detection)
         // Always treat server timestamps as UTC (append Z if no timezone suffix)
         // Without Z, browsers in non-UTC timezones (e.g. NZ +13) parse as local time
-        // making every trade appear 13 hours old → bell never rings
+        // making every trade appear 13 hours old  bell never rings
         const tsStr = tr.t
           ? (tr.t.length < 12
               ? new Date().toISOString().slice(0,10) + 'T' + tr.t + 'Z'
               : (tr.t.endsWith('Z') || tr.t.includes('+') ? tr.t : tr.t + 'Z'))
           : null;
         const tradeAge = tsStr ? (Date.now() - new Date(tsStr).getTime()) : 99999;
-        const isFresh = tradeAge < 60000; // widened 30s→60s: handles slow polls and slightly stale server timestamps
+        const isFresh = tradeAge < 60000; // widened 30s60s: handles slow polls and slightly stale server timestamps
         if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); } }
         else if (+tr.p < 0) { losses++; if (isFresh) playLoss(); }
         else { wins++; }
@@ -130,7 +130,7 @@ function mergeTrades(serverLog, isBootLoad) {
   }
 }
 
-// ── HELPERS ───────────────────────────────────────────────────────────────────
+//  HELPERS 
 const $ = id => document.getElementById(id);
 const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
 const fmtPnl = v => (v >= 0 ? '+' : '') + (+v).toFixed(2) + 'bp';
@@ -175,7 +175,7 @@ function renderSymbolTrades() {
         <span class="str-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
         <span class="str-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
         <span class="str-eng">${tr.e||'--'}</span>
-        <span class="str-val">${en}→${ex}</span>
+        <span class="str-val">${en}${ex}</span>
         <span class="str-val">${fmtHold(tr.hold)}</span>
         <span class="str-badge ${rc}">${why}</span>
         <span class="str-time">${time}</span>
@@ -229,7 +229,7 @@ function renderTradeLog() {
   body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
 }
 
-// ── TRADE CARDS ───────────────────────────────────────────────────────────────
+//  TRADE CARDS 
 function reasonClass(r) {
   if (!r) return 'timeout';
   const rl = r.toLowerCase();
@@ -258,7 +258,7 @@ function makeRow(tr) {
   </div>`;
 }
 
-// ── REGIME STATE ──────────────────────────────────────────────────────────────
+//  REGIME STATE 
 function regimeClass(state) {
   if (!state) return 'rs-neutral';
   const s = state.toUpperCase();
@@ -269,7 +269,7 @@ function regimeClass(state) {
   return 'rs-neutral';
 }
 
-// ── MAIN UPDATE ───────────────────────────────────────────────────────────────
+//  MAIN UPDATE 
 let firstPoll = true;
 let lastKnownUptimeHours = null;
 
@@ -277,17 +277,17 @@ function updateAll(data) {
   if (!data) return;
   if (!uptimeStart) uptimeStart = Date.now();
 
-  // ── Restart detection ───────────────────────────────────────────────────
+  //  Restart detection 
   // Server sends uptime_hours. If it goes backwards (or resets near 0),
-  // the server restarted — clear stale localStorage trades from old session.
+  // the server restarted  clear stale localStorage trades from old session.
   const serverUptime = data.uptime_hours || 0;
   if (lastKnownUptimeHours !== null && serverUptime < lastKnownUptimeHours - 0.01) {
-    // Server restarted — clear old session trades and silence bell on re-merge
+    // Server restarted  clear old session trades and silence bell on re-merge
     console.log('[Chimera] Server restart detected (uptime reset). Clearing old session trades.');
     localTrades = [];
     try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
     uptimeStart = Date.now();
-    firstPoll = true;  // treat next trade merge as boot load — no bell for old trades
+    firstPoll = true;  // treat next trade merge as boot load  no bell for old trades
   }
   lastKnownUptimeHours = serverUptime;
 
@@ -305,6 +305,35 @@ function updateAll(data) {
     updatePrice('px-' + key, px, lastPrices[key], short);
     lastPrices[key] = px;
   });
+
+//  BOOST MULTIPLIER PANEL 
+function updateBoostPanel(data) {
+  const engines = [
+    { key: 'boost_leadlag',    id: 'leadlag'    },
+    { key: 'boost_ll_eth_sol', id: 'll-eth-sol' },
+    { key: 'boost_impulse',    id: 'impulse'    },
+    { key: 'boost_expand',     id: 'expand'     },
+    { key: 'boost_liq',        id: 'liq'        },
+    { key: 'boost_fund',       id: 'fund'       },
+    { key: 'boost_ngas',       id: 'ngas'       },
+  ];
+  const MAX_BOOST = 4.0;
+  engines.forEach(({ key, id }) => {
+    const val = data[key] !== undefined ? +data[key] : 1.0;
+    const pct = Math.min(100, ((val - 1.0) / (MAX_BOOST - 1.0)) * 100);
+    const isMax = val >= MAX_BOOST - 0.05;
+    const barEl = $('bbar-' + id);
+    const valEl = $('bval-' + id);
+    if (barEl) {
+      barEl.style.width = pct + '%';
+      barEl.className = 'boost-bar-fill' + (isMax ? ' max' : '');
+    }
+    if (valEl) {
+      valEl.textContent = val.toFixed(2) + 'x';
+      valEl.className = 'boost-val' + (isMax ? ' max' : '');
+    }
+  });
+}
 
   // Top bar
   const pnl = data.pnl || 0;
@@ -331,6 +360,9 @@ function updateAll(data) {
   if (tsCountEl && data.total_trades !== undefined) tsCountEl.textContent = data.total_trades || 0;
   set('st-pos', data.open_positions || 0);
   set('st-lat', lat > 0 ? lat.toFixed(1) + 'ms' : '--ms');
+
+  // Boost multiplier panel
+  updateBoostPanel(data);
 
   // Exit breakdown
   if (data.session) {
@@ -366,7 +398,7 @@ function updateAll(data) {
     }
   }
 
-  // Per-symbol blocks — dynamic over all SYMBOLS
+  // Per-symbol blocks  dynamic over all SYMBOLS
   SYMBOLS.forEach(({ short, full }) => {
     const sym = short.toLowerCase();
     const d = data[full];
@@ -378,7 +410,7 @@ function updateAll(data) {
     const rsEl = $(`rs-${sym}`);
     if (rsEl) { rsEl.textContent = state; rsEl.className = 'regime-state ' + regimeClass(state); }
     const rmEl = $(`rm-${sym}`);
-    if (rmEl) { rmEl.textContent = '×' + mult.toFixed(2); rmEl.className = 'regime-mult ' + (mult > 1.1 ? 'hi' : mult < 0.9 ? 'lo' : ''); }
+    if (rmEl) { rmEl.textContent = '' + mult.toFixed(2); rmEl.className = 'regime-mult ' + (mult > 1.1 ? 'hi' : mult < 0.9 ? 'lo' : ''); }
 
     // Mini summary (shown when block is collapsed)
     const miniPnl = $(`mini-pnl-${sym}`);
@@ -440,7 +472,7 @@ function updateAll(data) {
   firstPoll = false;
 }
 
-// ── POLL LOOP ─────────────────────────────────────────────────────────────────
+//  POLL LOOP 
 let connected = false;
 let pollErrors = 0;
 let lastPollOk = null;
@@ -477,17 +509,17 @@ function setPollError(reason) {
   const dot = $('live-dot');
   if (dot) dot.className = 'dot';
 
-  // Error banner — always visible with full detail
+  // Error banner  always visible with full detail
   const banner = $('poll-error');
   if (banner) banner.classList.add('show');
   const msg = $('poll-error-msg');
   if (msg) msg.textContent = reason;
   const cnt = $('poll-error-count');
-  if (cnt) cnt.textContent = 'ERR×' + pollErrors;
+  if (cnt) cnt.textContent = 'ERR' + pollErrors;
   const etime = $('poll-error-time');
   if (etime) etime.textContent = 'last ok: ' + fmtAgo(lastPollOk);
 
-  // Last-poll indicator — goes red when stale
+  // Last-poll indicator  goes red when stale
   const lp = $('tb-last-poll');
   if (lp) {
     lp.textContent = fmtAgo(lastPollOk);
@@ -501,15 +533,15 @@ async function poll() {
     res = await fetch('/api/state', { cache: 'no-store', signal: AbortSignal.timeout(4000) });
   } catch(e) {
     // Network-level failure: timeout, DNS, connection refused etc
-    const reason = e.name === 'TimeoutError' ? 'Fetch timeout (>4s) — backend hung?' :
-                   e.name === 'TypeError'    ? 'Network error — backend down or unreachable' :
+    const reason = e.name === 'TimeoutError' ? 'Fetch timeout (>4s)  backend hung?' :
+                   e.name === 'TypeError'    ? 'Network error  backend down or unreachable' :
                    'Fetch failed: ' + e.message;
     setPollError(reason);
     return;
   }
 
   if (!res.ok) {
-    setPollError('HTTP ' + res.status + ' ' + res.statusText + ' — backend returned error');
+    setPollError('HTTP ' + res.status + ' ' + res.statusText + '  backend returned error');
     return;
   }
 
@@ -517,10 +549,10 @@ async function poll() {
   try {
     data = await res.json();
   } catch(e) {
-    // Got a response but it wasn't valid JSON — backend probably crashed mid-write
+    // Got a response but it wasn't valid JSON  backend probably crashed mid-write
     let raw = '';
     try { raw = await res.text(); } catch(_) {}
-    setPollError('JSON parse error — backend may have crashed. Preview: ' + raw.slice(0, 80));
+    setPollError('JSON parse error  backend may have crashed. Preview: ' + raw.slice(0, 80));
     return;
   }
 
@@ -540,7 +572,7 @@ setInterval(() => {
   }
 }, 1000);
 
-// ── INIT ──────────────────────────────────────────────────────────────────────
+//  INIT 
 loadTrades(); renderTradeLog(); updateWinRate();
 wins = 0; losses = 0;
 localTrades.filter(t => t.s !== 'SESSION').forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; });
@@ -549,7 +581,7 @@ poll();
 setInterval(poll, 1000);
 setInterval(updateUptime, 1000);
 
-// ── COLLAPSIBLE SYM-BLOCKS ────────────────────────────────────────────────────
+//  COLLAPSIBLE SYM-BLOCKS 
 function toggleBlock(sl, event) {
   // Only toggle if click was on the header itself, not on trade rows or eng-cells
   if (event) event.stopPropagation();

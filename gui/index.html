@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ω CHIMERA — Trading Desk</title>
+<title> CHIMERA  Trading Desk</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -79,6 +79,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 .rs-dead{background:rgba(255,61,87,.12);color:var(--red)}
 .regime-mult{color:var(--muted);font-size:17px;font-variant-numeric:tabular-nums;min-width:50px;text-align:right}
 .regime-mult.hi{color:var(--green)}.regime-mult.lo{color:var(--red)}
+.boost-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);gap:8px}
+.boost-row:last-child{border-bottom:none}
+.boost-eng{color:var(--muted);font-family:var(--fh);font-weight:700;font-size:12px;letter-spacing:1px;min-width:80px}
+.boost-bar-bg{flex:1;height:6px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden}
+.boost-bar-fill{height:100%;border-radius:3px;background:var(--green);transition:width 0.4s ease}
+.boost-bar-fill.max{background:#f59e0b}
+.boost-val{font-family:var(--fh);font-size:13px;font-weight:700;min-width:36px;text-align:right;color:var(--green)}
+.boost-val.max{color:#f59e0b}
 .cond-sect{font-family:var(--fh);font-size:12px;color:var(--muted);margin:10px 0 6px;letter-spacing:1px;text-transform:uppercase;opacity:.8}
 .cond-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:14px;border-bottom:1px solid rgba(28,45,63,.5)}
 .cond-row:last-child{border-bottom:none}
@@ -179,12 +187,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 </style>
 </head>
 <body>
-<div id="poll-error"><span id="poll-error-count">ERR×0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
-<div id="win-flash">✓ WIN</div>
+<div id="poll-error"><span id="poll-error-count">ERR0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
+<div id="win-flash"> WIN</div>
 <div class="topbar">
   <div class="topbar-left">
-    <span class="logo">ΩCHIMERA</span>
-    <span class="logo-sub">Quad Engine · Live Stream</span>
+    <span class="logo">CHIMERA</span>
+    <span class="logo-sub">Quad Engine  Live Stream</span>
   </div>
   <div class="topbar-center">
     <div class="tb-stat"><span class="tb-label">Equity</span><span id="tb-equity" class="tb-val">$10,000</span></div>
@@ -196,7 +204,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
     <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
   </div>
   <div class="topbar-right">
-    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:4px 10px;border-radius:2px;font-size:10px;font-family:inherit;cursor:pointer;letter-spacing:1px">🔔 UNMUTE</button>
+    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:4px 10px;border-radius:2px;font-size:10px;font-family:inherit;cursor:pointer;letter-spacing:1px"> UNMUTE</button>
     <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
     <span id="conn-badge" class="badge badge-disc">OFFLINE</span>
     <div id="live-dot" class="dot"></div>
@@ -209,7 +217,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block" id="sb-btc">
   <div class="sym-head" onclick="toggleBlock('btc')"><span class="sym-name">BTC/USDT</span><span id="px-btc" class="sym-price">--</span>
     <div class="sym-meta"><span>Vol: <strong id="vr-btc">--</strong></span><span>Disp: <strong id="dp-btc">--bp</strong></span><span>Regime: <strong id="reg-btc">--</strong></span><span>Cap: <strong id="cap-btc">--</strong>R</span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-btc-micro"><div class="signal-col" id="sc-btc-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-btc-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-btc-structural"><div class="signal-col" id="sc-btc-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-btc-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-btc-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-btc-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-btc-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-btc-structural">--</div></div></div></div></div>
@@ -231,7 +239,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block" id="sb-eth">
   <div class="sym-head" onclick="toggleBlock('eth')"><span class="sym-name">ETH/USDT</span><span id="px-eth" class="sym-price">--</span>
     <div class="sym-meta"><span>Vol: <strong id="vr-eth">--</strong></span><span>Disp: <strong id="dp-eth">--bp</strong></span><span>Regime: <strong id="reg-eth">--</strong></span><span>Cap: <strong id="cap-eth">--</strong>R</span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-eth-micro"><div class="signal-col" id="sc-eth-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-eth-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-eth-structural"><div class="signal-col" id="sc-eth-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-eth-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-eth-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-eth-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-eth-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-eth-structural">--</div></div></div></div></div>
@@ -253,7 +261,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block" id="sb-sol">
   <div class="sym-head" onclick="toggleBlock('sol')"><span class="sym-name">SOL/USDT</span><span id="px-sol" class="sym-price">--</span>
     <div class="sym-meta"><span>Vol: <strong id="vr-sol">--</strong></span><span>Disp: <strong id="dp-sol">--bp</strong></span><span>Regime: <strong id="reg-sol">--</strong></span><span>Cap: <strong id="cap-sol">--</strong>R</span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-sol-micro"><div class="signal-col" id="sc-sol-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-sol-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-sol-structural"><div class="signal-col" id="sc-sol-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-sol-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-sol-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-sol-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-sol-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-sol-structural">--</div></div></div></div></div>
@@ -275,7 +283,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block collapsed" id="sb-bnb">
   <div class="sym-head" onclick="toggleBlock('bnb')"><span class="sym-name">BNB/USDT</span><span id="px-bnb" class="sym-price">--</span>
     <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-bnb">--</strong></span><span class="sm-item">Regime: <strong id="reg-bnb">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-bnb">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-bnb">0</strong></span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-bnb-micro"><div class="signal-col" id="sc-bnb-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-bnb-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-bnb-structural"><div class="signal-col" id="sc-bnb-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-bnb-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-bnb-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-bnb-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-bnb-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-bnb-structural">--</div></div></div></div></div>
@@ -297,7 +305,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block collapsed" id="sb-avax">
   <div class="sym-head" onclick="toggleBlock('avax')"><span class="sym-name">AVAX/USDT</span><span id="px-avax" class="sym-price">--</span>
     <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-avax">--</strong></span><span class="sm-item">Regime: <strong id="reg-avax">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-avax">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-avax">0</strong></span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-avax-micro"><div class="signal-col" id="sc-avax-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-avax-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-avax-structural"><div class="signal-col" id="sc-avax-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-avax-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-avax-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-avax-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-avax-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-avax-structural">--</div></div></div></div></div>
@@ -319,7 +327,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block collapsed" id="sb-link">
   <div class="sym-head" onclick="toggleBlock('link')"><span class="sym-name">LINK/USDT</span><span id="px-link" class="sym-price">--</span>
     <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-link">--</strong></span><span class="sm-item">Regime: <strong id="reg-link">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-link">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-link">0</strong></span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-link-micro"><div class="signal-col" id="sc-link-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-link-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-link-structural"><div class="signal-col" id="sc-link-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-link-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-link-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-link-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-link-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-link-structural">--</div></div></div></div></div>
@@ -341,7 +349,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
 <div class="sym-block collapsed" id="sb-pol">
   <div class="sym-head" onclick="toggleBlock('pol')"><span class="sym-name">POL/USDT</span><span id="px-pol" class="sym-price">--</span>
     <div class="sym-mini"><span class="sm-item">Vol: <strong id="vr-pol">--</strong></span><span class="sm-item">Regime: <strong id="reg-pol">--</strong></span><span class="sm-item">P&amp;L: <strong class="sm-pnl" id="mini-pnl-pol">--</strong></span><span class="sm-item">Trades: <strong id="mini-t-pol">0</strong></span></div>
-    <span class="collapse-arrow">▼</span></div>
+    <span class="collapse-arrow"></span></div>
   <div class="eng-grid">
     <div class="eng-cell" id="ec-pol-micro"><div class="signal-col" id="sc-pol-micro"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">MICRO</span><span class="eng-badge off" id="eb-pol-micro">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-micro">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-micro">0</div></div></div></div></div>
     <div class="eng-cell" id="ec-pol-structural"><div class="signal-col" id="sc-pol-structural"></div><div class="eng-content"><div class="eng-cell-head"><span class="eng-name">STRUCTURAL</span><span class="eng-badge off" id="eb-pol-structural">OFF</span></div><div class="eng-stats"><div><div class="est-label">P&amp;L</div><div class="est-val dim" id="pnl-pol-structural">0bp</div></div><div><div class="est-label">Trades</div><div class="est-val dim" id="trades-pol-structural">0</div></div><div><div class="est-label">Win%</div><div class="est-val dim" id="wr-pol-structural">--%</div></div><div><div class="est-label">Entry</div><div class="est-val dim" id="ep-pol-structural">--</div></div></div></div></div>
@@ -393,24 +401,64 @@ body{background:var(--bg);color:var(--text);font-family:var(--fm);height:100vh;o
   <div class="rp-sec">
     <div class="rp-head">Regime Allocator</div>
     <div class="rp-body">
-      <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">×1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">×1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">×1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">BNB</span><span class="regime-state rs-neutral" id="rs-bnb">NEUTRAL</span><span class="regime-mult" id="rm-bnb">×1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">AVAX</span><span class="regime-state rs-neutral" id="rs-avax">NEUTRAL</span><span class="regime-mult" id="rm-avax">×1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">LINK</span><span class="regime-state rs-neutral" id="rs-link">NEUTRAL</span><span class="regime-mult" id="rm-link">×1.00</span></div>
-      <div class="regime-row"><span class="regime-sym">POL</span><span class="regime-state rs-neutral" id="rs-pol">NEUTRAL</span><span class="regime-mult" id="rm-pol">×1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">BTC</span><span class="regime-state rs-neutral" id="rs-btc">NEUTRAL</span><span class="regime-mult" id="rm-btc">1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">ETH</span><span class="regime-state rs-neutral" id="rs-eth">NEUTRAL</span><span class="regime-mult" id="rm-eth">1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">SOL</span><span class="regime-state rs-neutral" id="rs-sol">NEUTRAL</span><span class="regime-mult" id="rm-sol">1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">BNB</span><span class="regime-state rs-neutral" id="rs-bnb">NEUTRAL</span><span class="regime-mult" id="rm-bnb">1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">AVAX</span><span class="regime-state rs-neutral" id="rs-avax">NEUTRAL</span><span class="regime-mult" id="rm-avax">1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">LINK</span><span class="regime-state rs-neutral" id="rs-link">NEUTRAL</span><span class="regime-mult" id="rm-link">1.00</span></div>
+      <div class="regime-row"><span class="regime-sym">POL</span><span class="regime-state rs-neutral" id="rs-pol">NEUTRAL</span><span class="regime-mult" id="rm-pol">1.00</span></div>
     </div>
   </div>
   </div>
   <div class="rp-sec">
-    <div class="rp-head">Signal Conditions — BTC</div>
+    <div class="rp-head">Boost Multiplier</div>
     <div class="rp-body">
-      <div class="cond-sect">STRUCTURAL  vol≥1.4 · disp≥20bp</div>
+      <div class="boost-row">
+        <span class="boost-eng">LEADLAG</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-leadlag" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-leadlag">1.0x</span>
+      </div>
+      <div class="boost-row">
+        <span class="boost-eng">LL-ETH-SOL</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ll-eth-sol" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-ll-eth-sol">1.0x</span>
+      </div>
+      <div class="boost-row">
+        <span class="boost-eng">IMPULSE</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-impulse" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-impulse">1.0x</span>
+      </div>
+      <div class="boost-row">
+        <span class="boost-eng">EXPAND</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-expand" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-expand">1.0x</span>
+      </div>
+      <div class="boost-row">
+        <span class="boost-eng">LIQ</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-liq" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-liq">1.0x</span>
+      </div>
+      <div class="boost-row">
+        <span class="boost-eng">FUND</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-fund" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-fund">1.0x</span>
+      </div>
+      <div class="boost-row">
+        <span class="boost-eng">NGAS</span>
+        <div class="boost-bar-bg"><div class="boost-bar-fill" id="bbar-ngas" style="width:0%"></div></div>
+        <span class="boost-val" id="bval-ngas">1.0x</span>
+      </div>
+    </div>
+  </div>
+  <div class="rp-sec">
+    <div class="rp-head">Signal Conditions  BTC</div>
+    <div class="rp-body">
+      <div class="cond-sect">STRUCTURAL  vol1.4  disp20bp</div>
       <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
       <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">--bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
       <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
-      <div class="cond-sect">CONVEX  vol≥1.8 · accel≥15bp</div>
+      <div class="cond-sect">CONVEX  vol1.8  accel15bp</div>
       <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">--bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
       <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
       <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>

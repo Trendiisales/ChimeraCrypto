@@ -316,6 +316,9 @@ function updateBoostPanel(data) {
     { key: 'boost_liq',        id: 'liq'        },
     { key: 'boost_fund',       id: 'fund'       },
     { key: 'boost_ngas',       id: 'ngas'       },
+    { key: 'boost_eth_lead',   id: 'eth-lead'   },
+    { key: 'boost_sol_lead',   id: 'sol-lead'   },
+    { key: 'boost_volshock',   id: 'volshock'   },
   ];
   const MAX_BOOST = 4.0;
   engines.forEach(({ key, id }) => {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>⬡ CHIMERA — Trading Desk</title>
+<title>â¬¡ CHIMERA â Trading Desk</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;800;900&display=swap" rel="stylesheet">
@@ -18,7 +18,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--fm)}
 
-/* ── TOPBAR ─────────────────────────────────── */
+/* ââ TOPBAR âââââââââââââââââââââââââââââââââââ */
 .topbar{
   height:52px;display:flex;align-items:center;justify-content:space-between;
   padding:0 18px;background:var(--surface);border-bottom:2px solid var(--border2);
@@ -40,7 +40,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .dot.live{background:var(--green);box-shadow:0 0 10px var(--green);animation:blink 1.4s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 
-/* ── PAGE BODY ──────────────────────────────── */
+/* ââ PAGE BODY ââââââââââââââââââââââââââââââââ */
 .page-body{
   display:grid;
   grid-template-columns:1fr 340px;
@@ -48,7 +48,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   overflow:hidden;
 }
 
-/* ── LEFT: SYMBOL GRID ──────────────────────── */
+/* ââ LEFT: SYMBOL GRID ââââââââââââââââââââââââ */
 .sym-panel{
   display:flex;flex-direction:column;
   overflow:hidden;
@@ -58,10 +58,10 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 /* 7 symbol rows fill height exactly */
 .sym-rows{
   display:flex;flex-direction:column;
-  flex:1;overflow:hidden;
+  flex:1;overflow-y:auto;overflow-x:hidden;
 }
 .sym-row{
-  flex:1;
+  flex:none;
   display:flex;flex-direction:column;
   border-bottom:1px solid var(--border);
   min-height:0;overflow:hidden;
@@ -102,17 +102,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .chev{font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0}
 .sym-row.expanded .chev{transform:rotate(180deg)}
 
-/* Engine strip — compact single row */
+/* Engine strip â compact single row */
 .eng-strip{
   display:grid;
   grid-template-columns:repeat(6,1fr);
   flex:1;min-height:0;
   background:var(--bg);
+  max-height:52px;
 }
 .eng-cell{
   display:flex;flex-direction:column;justify-content:center;
-  padding:3px 6px;border-right:1px solid var(--border);
+  padding:2px 5px;border-right:1px solid var(--border);
   position:relative;overflow:hidden;min-width:0;
+  height:52px;box-sizing:border-box;
 }
 .eng-cell:last-child{border-right:none}
 .eng-cell.has-pos{background:rgba(0,230,118,.04)}
@@ -181,7 +183,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .tl-sep{width:1px;height:18px;background:var(--border);flex-shrink:0}
 .tl-clear{background:rgba(255,61,87,.1);color:var(--red);border:1px solid rgba(255,61,87,.2);padding:2px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto;flex-shrink:0}
 
-/* ── RIGHT PANEL ────────────────────────────── */
+/* ââ RIGHT PANEL ââââââââââââââââââââââââââââââ */
 .right-panel{
   display:flex;flex-direction:column;
   overflow:hidden;
@@ -283,16 +285,16 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 
 /* Right panel trade log */
-.rp-trade-row{padding:7px 10px;border-bottom:1px solid rgba(26,42,56,.7);display:flex;flex-direction:column;gap:3px}
+.rp-trade-row{padding:5px 8px;border-bottom:1px solid rgba(26,42,56,.7);display:flex;flex-direction:column;gap:2px}
 .rp-trade-row:last-child{border-bottom:none}
 .rp-trade-row.win{border-left:3px solid rgba(0,230,118,.7);background:rgba(0,230,118,.025)}
 .rp-trade-row.loss{border-left:3px solid rgba(255,61,87,.6);background:rgba(255,61,87,.02)}
 .rptr-top{display:flex;align-items:center;gap:7px}
 .rptr-tag{font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.5px;min-width:28px}
 .rptr-tag.win{color:var(--green)}.rptr-tag.loss{color:var(--red)}
-.rptr-sym{font-family:var(--fh);font-size:13px;font-weight:800;color:var(--accent);min-width:36px;letter-spacing:1px}
+.rptr-sym{font-family:var(--fh);font-size:12px;font-weight:800;color:var(--accent);min-width:32px;letter-spacing:.5px}
 .rptr-eng{font-family:var(--fh);font-size:10px;font-weight:700;color:#4a7090;flex:1}
-.rptr-pnl{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+.rptr-pnl{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
 .rptr-pnl.pos{color:var(--green)}.rptr-pnl.neg{color:var(--red)}
 .rptr-usd{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
 .rptr-usd.pos{color:rgba(0,230,118,.65)}.rptr-usd.neg{color:rgba(255,61,87,.65)}
@@ -311,9 +313,9 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 </head>
 <body>
 <div id="poll-error"><span id="poll-error-count">ERR0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
-<div id="win-flash">⬡ WIN</div>
+<div id="win-flash">â¬¡ WIN</div>
 
-<!-- ── TOPBAR ── -->
+<!-- ââ TOPBAR ââ -->
 <div class="topbar">
   <div style="display:flex;align-items:baseline;gap:4px">
     <span class="logo">CHIMERA</span>
@@ -328,14 +330,14 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
     <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
   </div>
   <div class="tb-right">
-    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:3px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px">⟨ UNMUTE</button>
+    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:3px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px">â¨ UNMUTE</button>
     <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
     <span id="conn-badge" class="badge badge-disc">OFFLINE</span>
     <div id="live-dot" class="dot"></div>
   </div>
 </div>
 
-<!-- ── PAGE BODY ── -->
+<!-- ââ PAGE BODY ââ -->
 <div class="page-body">
 
   <!-- LEFT: Symbol rows -->
@@ -356,7 +358,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-btc">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-btc">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -384,7 +386,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-eth">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-eth">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -412,7 +414,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-sol">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-sol">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -440,7 +442,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-bnb">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-bnb">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -468,7 +470,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-avax">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-avax">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -496,7 +498,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-link">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-link">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -524,7 +526,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-hd-right">
             <span class="sym-pnl-badge zero" id="mini-pnl-pol">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-pol">0T</span>
-            <span class="chev">▼</span>
+            <span class="chev">â¼</span>
           </div>
         </div>
         <div class="eng-strip">
@@ -631,13 +633,13 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
     <!-- SIGNAL TAB -->
     <div class="rp-content" id="tc-signal" style="display:none">
       <div class="rp-sec">
-        <div class="rp-head">Signal Conditions — BTC</div>
+        <div class="rp-head">Signal Conditions â BTC</div>
         <div class="rp-body">
-          <div class="cond-sect">STRUCTURAL  vol≥1.4 · disp≥20bp</div>
+          <div class="cond-sect">STRUCTURAL  volâ¥1.4 Â· dispâ¥20bp</div>
           <div class="cond-row"><span class="cond-label">Vol Ratio</span><span class="cond-val" id="cv-btc-vol">--</span><div class="cond-check off" id="cc-btc-vol"></div></div>
           <div class="cond-row"><span class="cond-label">Displacement</span><span class="cond-val" id="cv-btc-disp">--bp</span><div class="cond-check off" id="cc-btc-disp"></div></div>
           <div class="cond-row"><span class="cond-label">Buildup Ticks</span><span class="cond-val" id="cv-btc-build">0/40</span><div class="cond-check off" id="cc-btc-build"></div></div>
-          <div class="cond-sect">CONVEX  vol≥1.8 · accel≥15bp</div>
+          <div class="cond-sect">CONVEX  volâ¥1.8 Â· accelâ¥15bp</div>
           <div class="cond-row"><span class="cond-label">Acceleration</span><span class="cond-val" id="cv-btc-accel">--bp</span><div class="cond-check off" id="cc-btc-accel"></div></div>
           <div class="cond-sect">COMPRESSION  100 quiet ticks</div>
           <div class="cond-row"><span class="cond-label">Quiet Ticks</span><span class="cond-val" id="cv-btc-comp">0/100</span><div class="cond-check off" id="cc-btc-comp"></div></div>

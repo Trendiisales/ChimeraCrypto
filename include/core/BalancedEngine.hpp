@@ -491,7 +491,7 @@ public:
             s.long_returns.pop_front();
         
         // Update regime based on volatility ratio
-        Regime old_regime = s.regime;
+        (void)(s.regime);  // suppress unused-variable for old_regime
         s.regime = classify_regime(id);
         // Note: classify_regime() already logs the change with full detail
         
@@ -574,7 +574,7 @@ public:
         j << std::fixed << std::setprecision(2);
         int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
         double total_pnl=0.0;
-        for (int i=1;i<11;i++){
+        for (int i=1;i<8;i++){
             total_wins    += layer_stats_[i].wins;
             total_losses  += layer_stats_[i].losses;
             total_tp      += layer_stats_[i].tp_exits;

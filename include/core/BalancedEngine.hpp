@@ -1420,15 +1420,35 @@ private:
             sl_bp     = TradingConfig::NGAS_SL_BP;
             max_hold  = TradingConfig::NGAS_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG) {
-            // TP=14bp gross  +4bp net after 10bp costs. SL=5bp. Hold 3s max.
+            // TP=8bp ceiling. SL=3bp. Hold 5s max.
+            // TRAIL FLOOR: arm at 3bp profit, lock in 75% of peak.
+            // Rationale: 90% of trades exit TIMEOUT. avg MFE=5.9bp, avg giveback=0.9bp.
+            // Worst case: ETH MFE=7.6bp → exit=0.16bp (gave back 7.4bp).
+            // Trail floor: exit immediately if price drops below 75% of MFE peak.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_SL_BP;
             max_hold  = TradingConfig::LEADLAG_MAX_HOLD_MS;
+            if (s.pos.mfe >= 3.0 && move_bp < s.pos.mfe * 0.75) {
+                std::printf("[LEADLAG-TRAIL] %s | peak=%.2fbp floor=%.2fbp now=%.2fbp\n",
+                    sym_short(id), s.pos.mfe, s.pos.mfe * 0.75, move_bp);
+                std::fflush(stdout);
+                pending_exit_reason_ = "TRAIL_FLOOR";
+                exit(id, move_bp, ts, s);
+                return;
+            }
         } else if (s.pos.layer == LAYER_LEADLAG_ETH_SOL) {
-            // ETHSOL: TP=12bp, SL=5bp, hold 2.5s (tighter window)
+            // ETHSOL: TP=12bp, SL=5bp, hold 2.5s. Same trail floor as LEADLAG.
             tp_bp     = TradingConfig::LEADLAG_ETH_SOL_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_ETH_SOL_SL_BP;
             max_hold  = TradingConfig::LEADLAG_ETH_SOL_MAX_HOLD_MS;
+            if (s.pos.mfe >= 3.0 && move_bp < s.pos.mfe * 0.75) {
+                std::printf("[LL-ETH-SOL-TRAIL] %s | peak=%.2fbp floor=%.2fbp now=%.2fbp\n",
+                    sym_short(id), s.pos.mfe, s.pos.mfe * 0.75, move_bp);
+                std::fflush(stdout);
+                pending_exit_reason_ = "TRAIL_FLOOR";
+                exit(id, move_bp, ts, s);
+                return;
+            }
         } else if (s.pos.layer == LAYER_MICRO) {
             // TP=12bp gross  +2bp net. SL=3bp. Hold 8s max.
             tp_bp     = TradingConfig::IMBALANCE_TP_BP;

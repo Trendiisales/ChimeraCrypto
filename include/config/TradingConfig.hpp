@@ -83,6 +83,11 @@ struct TradingConfig {
     // Raised 810bp: at 8bp too many weak moves were triggering. 10bp filters
     // for genuine momentum that ETH/SOL reliably follows.
     static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 8.0;   // lowered from 10bp  catch more valid moves, sustain filter handles fakes
+    // LEADLAG confirmation gates (added Mar 2026)
+    // OB ratio: bid_size/ask_size must exceed this — filters neutral/bearish book
+    static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.2;  // bid 20% > ask
+    // Flow ratio: buy_vol_ema/sell_vol_ema must exceed this — confirms buy aggression
+    static constexpr double LEADLAG_CONFIRM_FLOW_RATIO  = 1.1;  // buy flow 10% > sell
 
     // Target already moved this much  edge consumed, don't enter
     // Tightened 32bp: if target already moved 2bp the propagation is done

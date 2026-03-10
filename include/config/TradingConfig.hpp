@@ -100,7 +100,7 @@ struct TradingConfig {
     static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;  // tightened: less loss when wrong
     static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 2500; // extended: need more time to reach 20bp TP
 
-    static constexpr double LEADLAG_TP_BP              = 15.0;  // raised: trail exits show moves go 10-15bp
+    static constexpr double LEADLAG_TP_BP              = 8.0;   // lowered: avg MFE 5.7bp, all exits TIMEOUT at 15bp -- 8bp captures the move
 
     // Stop loss for lead-lag trades
     // Tight stop  if ETH/SOL doesn't follow BTC within 5s, exit

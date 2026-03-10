@@ -201,17 +201,16 @@ int main() {
         if (tick_age_ms > 200.0) return;
 
         controller.on_tick(id, tick, now_ms, tick_age_ms);
-        // Keep GUI latency display showing true rolling p95 (not per-tick age)
-        if (g_exchange_latency.ready())
-            controller.set_lat_p95(g_exchange_latency.p95());
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n % 1000 == 0) {
-            std::printf("[TICK] n=%d | %s px=%.2f | tick_age=%.1fms | lat_p95=%.1fms | fills=%d\n",
+            double p95 = g_exchange_latency.ready() ? g_exchange_latency.p95() : 0.0;
+            // Update GUI latency display every 1000 ticks (~1s) — stable, not per-tick
+            controller.set_lat_p95(p95);
+            std::printf("[TICK] n=%d | %s px=%.2f | tick_age=%.1fms | feed_p95=%.1fms | fills=%d\n",
                 n, tick.symbol.c_str(), mid,
-                tick_age_ms,
-                g_exchange_latency.ready() ? g_exchange_latency.p95() : 0.0,
+                tick_age_ms, p95,
                 executor_ok ? executor.fills() : 0);
             std::fflush(stdout);
         }

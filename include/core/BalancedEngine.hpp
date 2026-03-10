@@ -2066,17 +2066,20 @@ private:
         total_trades_++;
         
         // Determine reason for P&L sign
-        const char* layer_label = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
-                                  (s.pos.layer == LAYER_LEADLAG)   ? "LEADLAG" :
-                                  (s.pos.layer == LAYER_VACUUM)         ? "VACUUM"    :
-                                  (s.pos.layer == LAYER_VWAP)           ? "VWAP"      :
-                                  (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                               (s.pos.layer == LAYER_LEADLAG)       ? "LEADLAG"   :
-                               (s.pos.layer == LAYER_EXPANSION)     ? "EXPAND"    :
-                                  (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
-                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
-                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
-                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "UNKNOWN";
+        const char* layer_label =
+                            (s.pos.layer == LAYER_MICRO)          ? "IMBAL"      :
+                            (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"    :
+                            (s.pos.layer == LAYER_EXPANSION)      ? "EXPAND"     :
+                            (s.pos.layer == LAYER_LEADLAG)        ? "LEADLAG"    :
+                            (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
+                            (s.pos.layer == LAYER_VACUUM)         ? "VACUUM"     :
+                            (s.pos.layer == LAYER_VWAP)           ? "VWAP"       :
+                            (s.pos.layer == LAYER_LIQUIDATION)    ? "LIQ"        :
+                            (s.pos.layer == LAYER_FUNDING)        ? "FUND"       :
+                            (s.pos.layer == LAYER_NGAS)           ? "NGAS"       :
+                            (s.pos.layer == LAYER_ETH_LEAD)       ? "ETH-LEAD"   :
+                            (s.pos.layer == LAYER_SOL_LEAD)       ? "SOL-LEAD"   :
+                            (s.pos.layer == LAYER_VOLSHOCK)       ? "VOLSHOCK"   : "UNKNOWN";
         const char* win_str = pnl > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",

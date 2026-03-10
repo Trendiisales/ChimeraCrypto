@@ -41,7 +41,7 @@ static constexpr int SOL_FOLLOWERS_N    = 2;
 
 class LeadLagEngine {
 public:
-    static constexpr double  MAX_LATENCY_MS        = 35.0;
+    static constexpr double  MAX_LATENCY_MS        = 80.0;  // data age calibrated: old 35ms < p95 36ms = all signals blocked
 
     // Tier 1: BTC -> alts
     static constexpr double  BTC_MOVE_THRESHOLD_BP = 8.0;

@@ -1,5 +1,5 @@
 // ============================================================================
-// Chimera — main entry point
+// Chimera  main entry point
 // HTTP server is owned by QuadEngineBalancedEngine (port 8080)
 // main.cpp only manages feed, executor, and signal handler.
 // ============================================================================
@@ -25,7 +25,7 @@
 #include "core/SymbolIndex.hpp"
 #include "config/TradingConfig.hpp"
 
-// ── SINGLE-INSTANCE LOCK ─────────────────────────────────────────────────────
+//  SINGLE-INSTANCE LOCK 
 // Uses an advisory flock() on a PID file.
 // The lock is automatically released by the OS if the process crashes or exits.
 static constexpr const char* PID_LOCK_FILE = "/tmp/chimera.lock";
@@ -38,32 +38,32 @@ void acquire_instance_lock() {
         std::exit(1);
     }
 
-    // Non-blocking exclusive lock — fails immediately if another instance holds it
+    // Non-blocking exclusive lock  fails immediately if another instance holds it
     if (::flock(g_lock_fd, LOCK_EX | LOCK_NB) != 0) {
         // Read the PID of the existing instance from the file
         char buf[32] = {};
-        ::read(g_lock_fd, buf, sizeof(buf) - 1);
+        (void)::read(g_lock_fd, buf, sizeof(buf) - 1);
         ::close(g_lock_fd);
         std::fprintf(stderr,
-            "\n╔══════════════════════════════════════════════════╗\n"
-            "║  CHIMERA ALREADY RUNNING — SECOND INSTANCE BLOCKED  ║\n"
-            "╠══════════════════════════════════════════════════╣\n"
-            "║  Existing PID: %-35s║\n"
-            "║  Lock file:    %-35s║\n"
-            "║  To stop the running instance: kill %s       ║\n"
-            "║  Or: pkill chimera                               ║\n"
-            "╚══════════════════════════════════════════════════╝\n",
+            "\n\n"
+            "  CHIMERA ALREADY RUNNING  SECOND INSTANCE BLOCKED  \n"
+            "\n"
+            "  Existing PID: %-35s\n"
+            "  Lock file:    %-35s\n"
+            "  To stop the running instance: kill %s       \n"
+            "  Or: pkill chimera                               \n"
+            "\n",
             buf, PID_LOCK_FILE, buf);
         std::exit(1);
     }
 
     // Write our PID into the lock file for diagnostics
-    ::ftruncate(g_lock_fd, 0);
+    (void)::ftruncate(g_lock_fd, 0);
     char pidbuf[32];
     int len = std::snprintf(pidbuf, sizeof(pidbuf), "%d\n", (int)::getpid());
-    ::write(g_lock_fd, pidbuf, len);
+    (void)::write(g_lock_fd, pidbuf, len);
     ::fsync(g_lock_fd);
-    // Note: g_lock_fd intentionally left open — closing it releases the flock
+    // Note: g_lock_fd intentionally left open  closing it releases the flock
     std::printf("[STARTUP] Instance lock acquired | PID=%d | lock=%s\n",
                 (int)::getpid(), PID_LOCK_FILE);
 }
@@ -76,7 +76,7 @@ void release_instance_lock() {
         g_lock_fd = -1;
     }
 }
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 
 chimera::ExchangeLatencyEngine g_exchange_latency;
 chimera::FundingRateFetcher    g_funding;
@@ -103,10 +103,10 @@ void signal_handler(int sig) {
     int n = g_sig_count.fetch_add(1) + 1;
     g_running = false;
     if (n == 1) {
-        // First Ctrl+C — request clean shutdown
-        std::fprintf(stderr, "\n[SHUTDOWN] Signal %d — stopping cleanly (Ctrl+C again to force kill)\n", sig);
+        // First Ctrl+C  request clean shutdown
+        std::fprintf(stderr, "\n[SHUTDOWN] Signal %d  stopping cleanly (Ctrl+C again to force kill)\n", sig);
     } else {
-        // Second Ctrl+C — something is hanging, force exit immediately
+        // Second Ctrl+C  something is hanging, force exit immediately
         std::fprintf(stderr, "\n[SHUTDOWN] Forced exit.\n");
         release_instance_lock();
         std::_Exit(0);
@@ -114,28 +114,28 @@ void signal_handler(int sig) {
 }
 
 int main() {
-    // ── 0. Single-instance lock — must be first ───────────────────────────────
+    //  0. Single-instance lock  must be first 
     acquire_instance_lock();
 
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    // ── 1. Executor / API keys ───────────────────────────────────────────────
+    //  1. Executor / API keys 
     chimera::SpotExecutor executor;
     bool executor_ok = executor.init("config/binance_credentials.json");
     if (!executor_ok) {
         std::fprintf(stderr,
-            "[STARTUP] WARNING: executor init failed — orders will be skipped.\n"
+            "[STARTUP] WARNING: executor init failed  orders will be skipped.\n"
             "[STARTUP] Edit config/binance_credentials.json with real api_key/api_secret.\n");
     }
 
-    // ── 2. Engine (owns HTTP server on port 8080) ─────────────────────────────
+    //  2. Engine (owns HTTP server on port 8080) 
     chimera::QuadEngineBalancedEngine controller;
 
     if (executor_ok) {
         controller.set_executor(&executor);
         std::printf("[STARTUP] Executor wired | shadow=%s\n",
-                    executor.is_shadow() ? "YES (paper)" : "NO — LIVE");
+                    executor.is_shadow() ? "YES (paper)" : "NO  LIVE");
         std::fflush(stdout);
     }
 
@@ -145,17 +145,17 @@ int main() {
         controller.set_funding_fetcher(&g_funding);
     }).detach();
 
-    // ── 2c. NGAS fetcher — Natural Gas macro lead-lag signal ─────────────────
+    //  2c. NGAS fetcher  Natural Gas macro lead-lag signal 
     g_ngas_engine.set_fetcher(&g_ngas_fetcher);
     controller.set_ngas_engine(&g_ngas_engine);
     g_ngas_fetcher.start();
     std::printf("[STARTUP] NGAS macro fetcher started (5-min poll, NGO.F via stooq)\n");
     std::fflush(stdout);
 
-    // ── 2b. Liquidation feed — Binance futures forceOrder stream ─────────────
+    //  2b. Liquidation feed  Binance futures forceOrder stream 
     chimera::LiquidationFeed liq_feed;
     liq_feed.set_callback([&](const chimera::LiquidationEvent& ev) {
-        // Route to engine — thread safe (atomic flag in LiquidationEngine)
+        // Route to engine  thread safe (atomic flag in LiquidationEngine)
         controller.liq_engine().on_liquidation(ev);
         if (ev.symbol_id >= 0) {
             std::printf("[LIQ] SHORT LIQ %s | $%.0f | price=%.2f\n",
@@ -167,9 +167,9 @@ int main() {
     std::printf("[STARTUP] Liquidation feed started (fstream.binance.com)\n");
     std::fflush(stdout);
 
-    // ── 3. WebSocket feed ─────────────────────────────────────────────────────
+    //  3. WebSocket feed 
     chimera::BinanceWSFeed feed;
-    // Add all symbols — order must match SymbolIndex.hpp (BTC=0, ETH=1, SOL=2, ...)
+    // Add all symbols  order must match SymbolIndex.hpp (BTC=0, ETH=1, SOL=2, ...)
     for (int i = 0; i < chimera::MAX_SYMBOLS; ++i)
         feed.add_symbol(chimera::sym_full(i));
 
@@ -206,7 +206,7 @@ int main() {
 
     feed.start();
     std::printf("[STARTUP] Feed live. Calibrating latency...\n");
-    std::printf("[CONFIG] Regime thresholds: GRIND→BUILDUP=%.2f  BUILDUP→BREAKOUT=%.2f\n",
+    std::printf("[CONFIG] Regime thresholds: GRINDBUILDUP=%.2f  BUILDUPBREAKOUT=%.2f\n",
         chimera::TradingConfig::REGIME_GRIND_EXIT_TO_BUILDUP,
         chimera::TradingConfig::REGIME_BUILDUP_TO_BREAKOUT);
     std::printf("[CONFIG] LeadLag BTC threshold: %.1fbp  Target max: %.1fbp\n",
@@ -217,12 +217,12 @@ int main() {
         chimera::TradingConfig::IMBALANCE_MAX_SPREAD_BPS);
     std::fflush(stdout);
 
-    // ── 4. Main loop ──────────────────────────────────────────────────────────
+    //  4. Main loop 
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // ── 5. Shutdown ───────────────────────────────────────────────────────────
+    //  5. Shutdown 
     std::printf("\n[SHUTDOWN] Stopping feed...\n");
     std::fflush(stdout);
 
@@ -233,7 +233,7 @@ int main() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (shutdown_done) return;
         }
-        std::fprintf(stderr, "[SHUTDOWN] Feed stop timeout — forcing exit\n");
+        std::fprintf(stderr, "[SHUTDOWN] Feed stop timeout  forcing exit\n");
         release_instance_lock();
         std::_Exit(0);
     });

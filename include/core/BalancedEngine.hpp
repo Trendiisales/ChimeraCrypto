@@ -1741,8 +1741,17 @@ private:
         double unrealized_bp = 0.0;
         double drawdown_bp = 0.0;
         
+        // Derive engine label for per-engine win-rate boost
+        const char* ccl_engine =
+            (layer == LAYER_LEADLAG)         ? "LEADLAG"    :
+            (layer == LAYER_LEADLAG_ETH_SOL) ? "LL-ETH-SOL" :
+            (layer == LAYER_IMPULSE)         ? "IMPULSE"    :
+            (layer == LAYER_EXPANSION)       ? "EXPAND"     :
+            (layer == LAYER_LIQUIDATION)     ? "LIQ"        :
+            (layer == LAYER_FUNDING)         ? "FUND"       :
+            (layer == LAYER_NGAS)            ? "NGAS"       : "UNKNOWN";
         double final_size = capital_control_.compute_final_size(
-            final_weight, cap_env, unrealized_bp, drawdown_bp
+            final_weight, cap_env, unrealized_bp, drawdown_bp, ccl_engine
         );
         
         double vol_score = vol_scoring_[id].get_vol_score();
@@ -1929,7 +1938,7 @@ private:
 
         // Record per-layer session stats (visible in GUI Session Stats panel)
         stats_for(s.pos.layer).record(pnl, exit_reason, s.pos.mfe, s.pos.mae);
-        capital_control_.record_trade_result(pnl > 0.0);  // win-rate boost tracker
+        capital_control_.record_trade_result(std::string(layer_label), pnl > 0.0);  // per-engine win-rate boost
 
         // Shadow log  structured CSV for edge measurement
         {
@@ -1963,7 +1972,7 @@ private:
             double exit_px = s.pos.entry_price * (1.0 + pnl / 10000.0);
             double qty = (s.pos.entry_price > 0.0)
                 ? (capital_control_.compute_final_size(0.5,
-                      CapitalControlLayer::MarketEnv{}, 0.0, 0.0) / s.pos.entry_price)
+                      CapitalControlLayer::MarketEnv{}, 0.0, 0.0, "UNKNOWN") / s.pos.entry_price)
                 : 0.0;
             // Spot long-only: always SELL to close
             executor_->execute(sym, false /*sell*/, qty, exit_px);

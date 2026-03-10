@@ -1917,7 +1917,7 @@ private:
                           (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE  slow-burn, less timing edge
                           (layer == LAYER_NGAS)             ? 1.5 :  // MODERATE  macro signal, decent but slow
                           (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE  proven near-100% WR
-                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
+                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 4.0 :  // MAX LEVERAGE  100% WR 6/6 trades, same edge class as LEADLAG
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
                           (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal  neutral size
                           (layer == LAYER_ETH_LEAD)         ? 3.0 :  // same edge as LEADLAG, tier 2
@@ -1926,6 +1926,13 @@ private:
                           (layer == LAYER_VWAP)             ? 1.1 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
+
+        // LEADLAG + LL-ETH-SOL: apply off-peak size reduction (set in signal gate above)
+        // ll_offpeak_size_mult_ = 1.0 during Asia 01-05 UTC, 0.5 off-peak
+        if (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL ||
+            layer == LAYER_ETH_LEAD || layer == LAYER_SOL_LEAD) {
+            legacy_size_mult *= ll_offpeak_size_mult_;
+        }
 
         // Per-symbol multiplier  data driven
         // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.

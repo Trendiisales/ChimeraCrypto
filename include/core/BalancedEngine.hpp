@@ -145,6 +145,12 @@ struct SymbolState {
     // NGAS lead-lag: track last entry time per symbol
     int64_t last_ngas_entry_ts = 0;
 
+    // Aggressive flow EMAs — used for LEADLAG confirmation gate
+    // Alpha=0.05 → ~20-tick window (~200-500ms at typical tick rate)
+    double buy_vol_ema  = 0.0;   // EMA of agg_buy_volume per tick
+    double sell_vol_ema = 0.0;   // EMA of agg_sell_volume per tick
+    bool   flow_ema_init = false;
+
     void reset() {
         last_price = 0;
         short_returns.clear();
@@ -163,6 +169,9 @@ struct SymbolState {
         vwap_session_start = 0;
         ask_depth_ema = 0.0;
         ask_depth_init = false;
+        buy_vol_ema   = 0.0;
+        sell_vol_ema  = 0.0;
+        flow_ema_init = false;
         pos.reset();
     }
 };
@@ -751,6 +760,20 @@ private:
         alloc_env.latency_ms  = latency_ms;
         alloc_env.net_clean   = market_env_.net_clean;
         adaptive_allocator_.tick(alloc_env);
+
+        // Update aggressive flow EMAs for LEADLAG confirmation gate
+        // Alpha=0.05 → ~20-tick smoothing window
+        constexpr double FLOW_EMA_ALPHA = 0.05;
+        if (!symbols_[id].flow_ema_init) {
+            symbols_[id].buy_vol_ema  = tick.agg_buy_volume;
+            symbols_[id].sell_vol_ema = tick.agg_sell_volume;
+            symbols_[id].flow_ema_init = true;
+        } else {
+            symbols_[id].buy_vol_ema  = FLOW_EMA_ALPHA * tick.agg_buy_volume
+                                       + (1.0 - FLOW_EMA_ALPHA) * symbols_[id].buy_vol_ema;
+            symbols_[id].sell_vol_ema = FLOW_EMA_ALPHA * tick.agg_sell_volume
+                                       + (1.0 - FLOW_EMA_ALPHA) * symbols_[id].sell_vol_ema;
+        }
     }
     
     void report_phase2_metrics() {
@@ -1212,8 +1235,34 @@ private:
         // Don't enter if already in a position on this symbol
         if (s.pos.state == POS_OPEN) return false;
 
-        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | latency=%.1fms | ENTERING LONG\n",
-                    sym, leadlag_.btc_move_bp(), btc_now_bp, latency_ms);
+        // ── CONFIRMATION GATE 1: Orderbook imbalance ──────────────────────
+        // Require bid pressure > ask pressure before riding BTC lead move.
+        // Filters setups where book is neutral or leaning short — those tend
+        // to produce SL hits even when BTC move is real.
+        const MarketTick& t = symbols_[id].last_tick;
+        double ob_imbalance = 0.0;
+        if (t.ask_size > 1e-9) {
+            ob_imbalance = t.bid_size / t.ask_size;
+        }
+        if (ob_imbalance < TradingConfig::LEADLAG_CONFIRM_OB_RATIO) {
+            rejection_throttle_.record(key, "ob_imbalance_weak");
+            return false;
+        }
+
+        // ── CONFIRMATION GATE 2: Aggressive buy flow ──────────────────────
+        // Require recent buy aggression to be elevated vs sell aggression.
+        // Prevents entries when BTC moved but local order flow is net-sell.
+        double flow_ratio = 0.0;
+        if (symbols_[id].sell_vol_ema > 1e-9) {
+            flow_ratio = symbols_[id].buy_vol_ema / symbols_[id].sell_vol_ema;
+        }
+        if (flow_ratio < TradingConfig::LEADLAG_CONFIRM_FLOW_RATIO) {
+            rejection_throttle_.record(key, "flow_ratio_weak");
+            return false;
+        }
+
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | ob_imbal=%.2f | flow=%.2f | latency=%.1fms | ENTERING LONG\n",
+                    sym, leadlag_.btc_move_bp(), btc_now_bp, ob_imbalance, flow_ratio, latency_ms);
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_LEADLAG, true);

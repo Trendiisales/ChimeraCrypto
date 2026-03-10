@@ -70,6 +70,16 @@ function playLoss() {
   } catch(e) {}
 }
 
+function flashSymRow(sym, isWin) {
+  const s = (sym || '').replace('USDT','').replace('/','').toLowerCase();
+  const row = document.getElementById('sb-' + s);
+  if (!row) return;
+  const hd = row.querySelector('.sym-hd');
+  if (!hd) return;
+  const cls = isWin ? 'flash-win' : 'flash-loss';
+  hd.classList.add(cls);
+  setTimeout(() => hd.classList.remove(cls), 800);
+}
 function flashWin(sym, pnl) {
   const el = document.getElementById('win-flash');
   if (!el) return;
@@ -116,8 +126,8 @@ function mergeTrades(serverLog, isBootLoad) {
           : null;
         const tradeAge = tsStr ? (Date.now() - new Date(tsStr).getTime()) : 99999;
         const isFresh = tradeAge < 60000; // widened 30s60s: handles slow polls and slightly stale server timestamps
-        if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); } }
-        else if (+tr.p < 0) { losses++; if (isFresh) playLoss(); }
+        if (+tr.p > 0) { wins++; if (isFresh) { playWin(); flashWin(tr.s, tr.p); flashSymRow(tr.s, true); } }
+        else if (+tr.p < 0) { losses++; if (isFresh) { playLoss(); flashSymRow(tr.s, false); } }
         else { wins++; }
       } else {
         if (+tr.p > 0) wins++; else if (+tr.p < 0) losses++;

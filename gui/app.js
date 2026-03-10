@@ -479,7 +479,7 @@ function updateBoostPanel(data) {
   set('tb-trades', data.total_trades || 0);
   set('tb-positions', data.open_positions || 0);
   const lat = data.latency_p95 || 0;
-  // Feed age p95: Binance WS data age. ~36ms normal (Binance internal delay ~30ms + network ~2ms).
+  // WS Delay p95: Binance WS gateway delay. Same AWS Tokyo: our net ~0.5ms, Binance pipeline ~35ms = ~36ms total. Normal.
   // Green <25ms, amber 25-50ms, red >50ms = genuine feed problem.
   const latColour = lat <= 0 ? '' : lat < 25 ? 'pos' : lat < 50 ? 'warn' : 'neg';
   const latEl = $('tb-latency');

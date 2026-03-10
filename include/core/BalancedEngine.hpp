@@ -1001,10 +1001,8 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
 
-        // EXPAND: BTC(0) ONLY -- 60% WR +13.65bp, +1.36bp/trade
-        // SOL(2): 60% WR but -4.70bp total (-0.94bp/trade) -- winners avg +4.27bp, losers avg -8.75bp, inverted R:R
-        // ETH(1): 42% WR -69bp -- already dead
-        if (id != 0) {
+        // EXPAND: BTC(0) 60% WR +13bp, SOL(2) 60% WR. All others net negative.
+        if (id != 0 && id != 2) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
         }
@@ -1460,7 +1458,7 @@ private:
         } else {
             // IMPULSE: alt coins (AVAX/LINK/POL) get wider TP -- thin books, moves run to 20bp+
             // SOL: standard TP (moves are shallower than micro-caps)
-            bool is_alt_impulse = (s.pos.symbol_id == 4 || s.pos.symbol_id == 5 || s.pos.symbol_id == 6);
+            bool is_alt_impulse = (id == 4 || id == 5 || id == 6);
             tp_bp     = is_alt_impulse ? TradingConfig::IMPULSE_ALT_TP_BP : TradingConfig::IMPULSE_TP_BP;
             sl_bp     = TradingConfig::IMPULSE_SL_BP;
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;

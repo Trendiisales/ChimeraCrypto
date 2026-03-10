@@ -564,11 +564,15 @@ public:
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
-        if (check_eth_lead(id, price, ts, s, latency_ms)) return;
-        if (check_sol_lead(id, price, ts, s, latency_ms)) return;
-        if (check_impulse(id, price, ts, s, latency_ms)) return;
+        // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
+        // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
+        // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
+        // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
+        // DISABLED: IMPULSE net -833bp across 105 trades (avg gross +0.07bp, taker cost -8bp/trade)
+        // if (check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_vol_shock(id, price, ts, s, latency_ms)) return;
-        if (check_expansion(id, price, ts, s, latency_ms)) return;
+        // DISABLED: EXPAND 45% WR, gross -60bp, net -460bp across 100 trades
+        // if (check_expansion(id, price, ts, s, latency_ms)) return;
         if (check_vacuum(id, price, ts, s, latency_ms)) return;
         if (check_imbalance(id, price, ts, s, latency_ms)) return;
         if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
@@ -1859,18 +1863,19 @@ private:
         //   LEADLAG, IMPULSE, ETH_LEAD, SOL_LEAD, VOLSHOCK, LIQUIDATION
         // MAKER layers (post below mid, rebate): ~4bp cost → 4bp floor
         //   IMBALANCE, EXPANSION, VWAP, VACUUM
-        bool is_taker_layer = (layer == LAYER_LEADLAG        ||
-                               layer == LAYER_IMPULSE        ||
+        // LEADLAG/LL-ETH-SOL now use aggressive maker entry — cost ~4bp, floor = MAKER
+        // Pure taker layers (IMPULSE etc disabled but kept for correctness if re-enabled)
+        bool is_taker_layer = (layer == LAYER_IMPULSE        ||
                                layer == LAYER_ETH_LEAD       ||
                                layer == LAYER_SOL_LEAD       ||
                                layer == LAYER_VOLSHOCK       ||
-                               layer == LAYER_LIQUIDATION    ||
-                               layer == LAYER_LEADLAG_ETH_SOL);
-        double cost_floor = is_taker_layer
-            ? TradingConfig::COST_FLOOR_BP              // 12bp — taker round trip
-            : (layer == LAYER_EXPANSION)
-                ? TradingConfig::EXPANSION_COST_FLOOR_BP // 8bp — BUG10: EXPANSION net-negative at 4bp floor
-                : TradingConfig::MAKER_COST_FLOOR_BP;    // 4bp  — maker rebate (IMBALANCE, VWAP, VACUUM)
+                               layer == LAYER_LIQUIDATION);
+        bool is_leadlag_layer = (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL);
+        double cost_floor = is_taker_layer  ? TradingConfig::COST_FLOOR_BP          // 12bp — taker
+                          : is_leadlag_layer ? TradingConfig::MAKER_COST_FLOOR_BP    // 4bp  — aggressive maker
+                          : (layer == LAYER_EXPANSION)
+                              ? TradingConfig::EXPANSION_COST_FLOOR_BP               // 8bp  — disabled but correct
+                              : TradingConfig::MAKER_COST_FLOOR_BP;                  // 4bp  — IMBALANCE/VWAP/VACUUM
         if (sig.expected_bps < cost_floor) {
             std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
@@ -2027,15 +2032,15 @@ private:
 
             // Map LayerMode to int id expected by LimitOrderManager
             // 0=IMBALANCE(maker/bid), 1=IMPULSE(taker/ask), 2=EXPANSION(maker/mid), 3=LEADLAG(taker/ask)
-            // All taker layers (LEADLAG, ETH_LEAD, SOL_LEAD, VOLSHOCK, LL_ETH_SOL) map to 3 = post at ask
+            // 4=LEADLAG-MAKER: post at ask-0.1*spread (aggressive maker, ~4bp saving vs taker)
             int layer_int = (layer == LAYER_MICRO)              ? 0 :  // maker: post at bid
-                            (layer == LAYER_IMPULSE)             ? 1 :  // taker: post at ask
-                            (layer == LAYER_EXPANSION)           ? 2 :  // maker: post at mid-0.3*spread
-                            (layer == LAYER_LEADLAG)             ? 3 :  // taker: post at ask
-                            (layer == LAYER_LEADLAG_ETH_SOL)     ? 3 :  // taker: post at ask
-                            (layer == LAYER_ETH_LEAD)            ? 3 :  // taker: post at ask (BUG7 FIX)
-                            (layer == LAYER_SOL_LEAD)            ? 3 :  // taker: post at ask (BUG7 FIX)
-                            (layer == LAYER_VOLSHOCK)            ? 3 :  // taker: post at ask (BUG7 FIX)
+                            (layer == LAYER_IMPULSE)             ? 1 :  // taker: post at ask (DISABLED)
+                            (layer == LAYER_EXPANSION)           ? 2 :  // maker: post at mid-0.3*spread (DISABLED)
+                            (layer == LAYER_LEADLAG)             ? 4 :  // MAKER: post at ask-0.1*spread (saves 4bp)
+                            (layer == LAYER_LEADLAG_ETH_SOL)     ? 4 :  // MAKER: same aggressive maker
+                            (layer == LAYER_ETH_LEAD)            ? 3 :  // taker (DISABLED)
+                            (layer == LAYER_SOL_LEAD)            ? 3 :  // taker (DISABLED)
+                            (layer == LAYER_VOLSHOCK)            ? 3 :  // taker
                                                                    3;   // default taker
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
@@ -2106,16 +2111,19 @@ private:
         // NET PnL: subtract round-trip cost based on actual execution model
         // Taker layers (post at ask): 8bp round trip (4bp/side at VIP0)
         // Maker layers (post below mid): 4bp round trip (rebate ~1bp/side, spread ~2bp)
-        bool is_taker_exit = (s.pos.layer == LAYER_LEADLAG         ||
-                              s.pos.layer == LAYER_IMPULSE         ||
-                              s.pos.layer == LAYER_ETH_LEAD        ||
-                              s.pos.layer == LAYER_SOL_LEAD        ||
+        // LEADLAG and LL-ETH-SOL now use aggressive maker entry (layer_id=4)
+        // Cost ~4bp round trip (maker rebate), not 8bp taker
+        bool is_taker_exit = (s.pos.layer == LAYER_IMPULSE         ||  // disabled but kept for correctness
+                              s.pos.layer == LAYER_ETH_LEAD        ||  // disabled
+                              s.pos.layer == LAYER_SOL_LEAD        ||  // disabled
                               s.pos.layer == LAYER_VOLSHOCK        ||
-                              s.pos.layer == LAYER_LIQUIDATION     ||
-                              s.pos.layer == LAYER_LEADLAG_ETH_SOL);
-        double round_trip_cost = is_taker_exit
-            ? TradingConfig::TAKER_ROUND_TRIP_BP   // 8bp
-            : TradingConfig::MAKER_ROUND_TRIP_BP;  // 4bp
+                              s.pos.layer == LAYER_LIQUIDATION);
+        // LEADLAG/LL-ETH-SOL: aggressive maker — same cost tier as other maker layers
+        bool is_leadlag_maker = (s.pos.layer == LAYER_LEADLAG ||
+                                 s.pos.layer == LAYER_LEADLAG_ETH_SOL);
+        double round_trip_cost = is_taker_exit    ? TradingConfig::TAKER_ROUND_TRIP_BP   // 8bp
+                               : is_leadlag_maker ? TradingConfig::MAKER_ROUND_TRIP_BP   // 4bp (aggressive maker)
+                               :                    TradingConfig::MAKER_ROUND_TRIP_BP;  // 4bp
         double pnl_net = pnl - round_trip_cost;
 
         int64_t hold_time_ms = ts - s.pos.entry_ts;  // ts is already milliseconds

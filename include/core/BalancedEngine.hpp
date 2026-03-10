@@ -307,7 +307,7 @@ public:
         
         // Periodic reporting
         static int64_t last_report_ts = 0;
-        if (ts - last_report_ts > 5000) {
+        if (ts - last_report_ts > 60000) {
             std::printf("%s", pnl_by_band_.generate_report().c_str());
             std::printf("%s", stall_detector_.generate_report().c_str());
             
@@ -420,25 +420,7 @@ public:
                 10000.0 + total_pnl_, total_pnl_, total_trades_, 
                 open_positions_, loss_streak_
             ));
-
-            // Broadcast boost multipliers every 10s so GUI panel stays current
-            {
-                std::ostringstream bst;
-                bst << std::fixed << std::setprecision(3);
-                bst << "{\"type\":\"boost_update\","
-                    << "\"boost_leadlag\":"    << capital_control_.win_boost_for("LEADLAG")    << ","
-                    << "\"boost_ll_eth_sol\":" << capital_control_.win_boost_for("LL-ETH-SOL") << ","
-                    << "\"boost_impulse\":"    << capital_control_.win_boost_for("IMPULSE")    << ","
-                    << "\"boost_expand\":"     << capital_control_.win_boost_for("EXPAND")     << ","
-                    << "\"boost_liq\":"        << capital_control_.win_boost_for("LIQ")        << ","
-                    << "\"boost_fund\":"       << capital_control_.win_boost_for("FUND")       << ","
-                    << "\"boost_ngas\":"       << capital_control_.win_boost_for("NGAS")       << ","
-                    << "\"boost_eth_lead\":"   << capital_control_.win_boost_for("ETH-LEAD")   << ","
-                    << "\"boost_sol_lead\":"   << capital_control_.win_boost_for("SOL-LEAD")   << ","
-                    << "\"boost_volshock\":"   << capital_control_.win_boost_for("VOLSHOCK")   << "}";
-                broadcast_to_gui(bst.str());
-            }
-
+            
             std::fflush(stdout);
             last_pos_diag = ts;
         }
@@ -588,12 +570,28 @@ public:
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
+    // Boost multiplier values exposed for /api/state polling
+    std::string get_boost_json() const {
+        std::ostringstream j;
+        j << std::fixed << std::setprecision(4);
+        j << "\"boost_leadlag\":"    << capital_control_.win_boost_for("LEADLAG")    << ",";
+        j << "\"boost_ll_eth_sol\":" << capital_control_.win_boost_for("LL-ETH-SOL") << ",";
+        j << "\"boost_impulse\":"    << capital_control_.win_boost_for("IMPULSE")    << ",";
+        j << "\"boost_expand\":"     << capital_control_.win_boost_for("EXPAND")     << ",";
+        j << "\"boost_liq\":"        << capital_control_.win_boost_for("LIQ")        << ",";
+        j << "\"boost_fund\":"       << capital_control_.win_boost_for("FUND")       << ",";
+        j << "\"boost_ngas\":"       << capital_control_.win_boost_for("NGAS");
+        return j.str();
+    }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
+    double get_win_boost_for(const std::string& engine) const {
+        return capital_control_.win_boost_for(engine);
+    }
     int    get_total_trades()   const { return total_trades_; }
     int    get_open_positions() const { return open_positions_; }
 

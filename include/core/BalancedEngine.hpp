@@ -5,6 +5,7 @@
 #include "LatencyGovernor.hpp"
 #include "RegimeTypes.hpp"
 #include "LeadLagEngine.hpp"
+#include "core/VolumeShockEngine.hpp"
 #include "LiquidationEngine.hpp"
 #include "VolatilityScoring.hpp"
 #include "StatefulGovernor.hpp"
@@ -52,7 +53,10 @@ enum LayerMode {
     LAYER_VWAP,          // VWAP Reversion  buy dip back to session VWAP
     LAYER_LIQUIDATION,   // Liquidation Cascade  short liq on perp  spot long
     LAYER_FUNDING,       // Funding Rate Signal  deeply negative funding  sustained long
-    LAYER_NGAS           // NGAS Lead-Lag  Natural Gas drop  risk-on crypto LONG
+    LAYER_NGAS,          // NGAS Lead-Lag  Natural Gas drop  risk-on crypto LONG
+    LAYER_ETH_LEAD,      // ETH leads SOL/BNB/AVAX/LINK/POL (Tier 2 lead-lag)
+    LAYER_SOL_LEAD,      // SOL leads AVAX/POL (Tier 3 lead-lag)
+    LAYER_VOLSHOCK       // Volume Shock Continuation -- spike + displacement
 };
 
 enum PosState {
@@ -555,7 +559,10 @@ public:
         if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
         if (check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
+        if (check_eth_lead(id, price, ts, s, latency_ms)) return;
+        if (check_sol_lead(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
+        if (check_vol_shock(id, price, ts, s, latency_ms)) return;
         if (check_expansion(id, price, ts, s, latency_ms)) return;
         if (check_vacuum(id, price, ts, s, latency_ms)) return;
         if (check_imbalance(id, price, ts, s, latency_ms)) return;
@@ -575,13 +582,13 @@ public:
     // Full session breakdown  auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
         int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
         double total_pnl=0.0;
-        for (int i=1;i<8;i++){
+        for (int i=1;i<14;i++){
             total_wins    += layer_stats_[i].wins;
             total_losses  += layer_stats_[i].losses;
             total_tp      += layer_stats_[i].tp_exits;
@@ -1294,7 +1301,10 @@ private:
                                (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
                                (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
                                (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
-                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      : "EXPAND";
+                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      :
+                               (s.pos.layer == LAYER_ETH_LEAD)      ? "ETH-LEAD"  :
+                               (s.pos.layer == LAYER_SOL_LEAD)      ? "SOL-LEAD"  :
+                               (s.pos.layer == LAYER_VOLSHOCK)      ? "VOLSHOCK"  : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -1403,6 +1413,18 @@ private:
             tp_bp    = TradingConfig::EXPANSION_TP_BP;
             sl_bp    = TradingConfig::EXPANSION_SL_BP;
             max_hold = TradingConfig::EXPANSION_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_ETH_LEAD) {
+            tp_bp    = TradingConfig::ETH_LEAD_TP_BP;
+            sl_bp    = TradingConfig::ETH_LEAD_SL_BP;
+            max_hold = TradingConfig::ETH_LEAD_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_SOL_LEAD) {
+            tp_bp    = TradingConfig::SOL_LEAD_TP_BP;
+            sl_bp    = TradingConfig::SOL_LEAD_SL_BP;
+            max_hold = TradingConfig::SOL_LEAD_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_VOLSHOCK) {
+            tp_bp    = TradingConfig::VOLSHOCK_TP_BP;
+            sl_bp    = TradingConfig::VOLSHOCK_SL_BP;
+            max_hold = TradingConfig::VOLSHOCK_MAX_HOLD_MS;
         } else {
             // IMPULSE: TP=20bp gross  +10bp net. SL=7bp. Hold 30s.
             tp_bp     = TradingConfig::IMPULSE_TP_BP;
@@ -1538,7 +1560,92 @@ private:
         enter(id, price, ts, s, LAYER_LEADLAG_ETH_SOL, true);
         return true;
     }
-    // Edge: ask-side depth drains >40% vs EMA baseline without price moving.
+    // ======================================================================
+    // TIER 2: ETH -> SOL/BNB/AVAX/LINK/POL lead-lag
+    // Same edge mechanism as BTC->alts but ETH as leader.
+    // ETH moves propagate to alts in 30-100ms.
+    // Threshold 10bp (ETH moves slower than BTC, need bigger signal).
+    // ======================================================================
+    bool check_eth_lead(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // ETH (id=1) cannot follow itself, BTC cannot follow ETH
+        if (id <= 1) return false;
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (ts < layer_lock_until_) return false;
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
+
+        int direction = 0;
+        if (!leadlag_.check_signal_eth_lead(id, latency_ms, direction)) return false;
+        if (direction < 0) return false; // long only
+
+        // Sustain filter -- ETH move must still be >= 60% of threshold
+        double eth_now_bp = leadlag_.eth_move_bp();
+        double sustain = TradingConfig::LEADLAG_ETH_SOL_THRESHOLD_BP * 0.6;
+        if (std::fabs(eth_now_bp) < sustain) return false;
+
+        std::printf("[ETH-LEAD] %s | eth_move=%.2fbp | sustain=%.2fbp | latency=%.1fms | ENTERING LONG\n",
+                    sym_short(id), eth_now_bp, sustain, latency_ms);
+        std::fflush(stdout);
+
+        enter(id, price, ts, s, LAYER_ETH_LEAD, true);
+        return true;
+    }
+
+    // ======================================================================
+    // TIER 3: SOL -> AVAX/POL lead-lag
+    // SOL is the fastest L1 and leads AVAX and POL by 20-60ms.
+    // Threshold 12bp (SOL is volatile, need stronger signal).
+    // ======================================================================
+    bool check_sol_lead(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Only AVAX (4) and POL (6) follow SOL
+        if (id != 4 && id != 6) return false;
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (ts < layer_lock_until_) return false;
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
+
+        int direction = 0;
+        if (!leadlag_.check_signal_sol_lead(id, latency_ms, direction)) return false;
+        if (direction < 0) return false; // long only
+
+        // Sustain filter
+        double sol_now_bp = leadlag_.sol_move_bp();
+        double sustain = 7.0; // 12bp threshold * 0.6
+        if (std::fabs(sol_now_bp) < sustain) return false;
+
+        std::printf("[SOL-LEAD] %s | sol_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
+                    sym_short(id), sol_now_bp, latency_ms);
+        std::fflush(stdout);
+
+        enter(id, price, ts, s, LAYER_SOL_LEAD, true);
+        return true;
+    }
+
+    // ======================================================================
+    // VOLUME SHOCK CONTINUATION
+    // Volume spike (3x+ baseline) + price displacement (8bp+) = continuation.
+    // Requires both volume AND price to confirm -- filters EXPAND noise.
+    // Conservative params: TP=10bp, SL=4bp, hold=6s, 8s cooldown.
+    // ======================================================================
+    bool check_vol_shock(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+        if (t.spread_bps > VolumeShockEngine::MAX_SPREAD_BPS) return false;
+
+        double volume = t.bid_size + t.ask_size;
+        int direction = 0;
+        if (!vol_shock_.on_tick(id, price, volume, t.spread_bps, ts, direction)) return false;
+
+        std::printf("[VOLSHOCK] %s | vol_ratio=%.2f | price=%.4f | latency=%.1fms | ENTERING LONG\n",
+                    sym_short(id), vol_shock_.get_vol_ratio(id), price, latency_ms);
+        std::fflush(stdout);
+
+        enter(id, price, ts, s, LAYER_VOLSHOCK, true);
+        return true;
+    }
+
+        // Edge: ask-side depth drains >40% vs EMA baseline without price moving.
     // When the ask wall disappears, price gaps up through the vacuum.
     // Fires in GRIND or BUILDUP  best in calmer regimes where a sudden
     // ask drain is structural, not just noise.
@@ -1661,6 +1768,9 @@ private:
         sig.symbol = sym_full(id);
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
                     (layer == LAYER_EXPANSION) ? LayerType::EXPAND :
+                    (layer == LAYER_ETH_LEAD)  ? LayerType::EXPAND :
+                    (layer == LAYER_SOL_LEAD)  ? LayerType::EXPAND :
+                    (layer == LAYER_VOLSHOCK)  ? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
         // Expected gross edge per layer (gross TP targets from TradingConfig)
         sig.expected_bps = (layer == LAYER_LIQUIDATION) ? TradingConfig::LIQ_TP_BP :
@@ -1756,7 +1866,10 @@ private:
             (layer == LAYER_EXPANSION)       ? "EXPAND"     :
             (layer == LAYER_LIQUIDATION)     ? "LIQ"        :
             (layer == LAYER_FUNDING)         ? "FUND"       :
-            (layer == LAYER_NGAS)            ? "NGAS"       : "UNKNOWN";
+            (layer == LAYER_NGAS)            ? "NGAS"       :
+            (layer == LAYER_ETH_LEAD)        ? "ETH-LEAD"   :
+            (layer == LAYER_SOL_LEAD)        ? "SOL-LEAD"   :
+            (layer == LAYER_VOLSHOCK)        ? "VOLSHOCK"   : "UNKNOWN";
         double final_size = capital_control_.compute_final_size(
             final_weight, cap_env, unrealized_bp, drawdown_bp, ccl_engine
         );
@@ -1781,6 +1894,9 @@ private:
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
                           (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal  neutral size
+                          (layer == LAYER_ETH_LEAD)         ? 3.0 :  // same edge as LEADLAG, tier 2
+                          (layer == LAYER_SOL_LEAD)         ? 2.5 :  // tier 3, slightly less data
+                          (layer == LAYER_VOLSHOCK)         ? 2.0 :  // new engine, conservative start
                           (layer == LAYER_VWAP)             ? 1.1 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
@@ -1816,7 +1932,10 @@ private:
                            (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" :
                            (layer == LAYER_LIQUIDATION)      ? "LIQ"        :
                            (layer == LAYER_FUNDING)          ? "FUND"       :
-                           (layer == LAYER_NGAS)             ? "NGAS"       : "EXPAND";
+                           (layer == LAYER_NGAS)             ? "NGAS"       :
+                           (layer == LAYER_ETH_LEAD)         ? "ETH-LEAD"   :
+                           (layer == LAYER_SOL_LEAD)         ? "SOL-LEAD"   :
+                           (layer == LAYER_VOLSHOCK)         ? "VOLSHOCK"   : "EXPAND";
 
         if (TradingConfig::MAKER_MODE) {
             //  MAKER MODE: post limit order 
@@ -2090,8 +2209,9 @@ private:
     
     SymbolState symbols_[MAX_SYMBOLS];
     LatencyGovernor latency_gov_;
-    LeadLagEngine     leadlag_;
-    LiquidationEngine liq_engine_;
+    LeadLagEngine      leadlag_;
+    LiquidationEngine  liq_engine_;
+    VolumeShockEngine  vol_shock_;
     LimitOrderManager limit_orders_[MAX_SYMBOLS];  // One per symbol
     ShadowLogger shadow_log_;
     FundingRateFetcher*  funding_ = nullptr;  // optional  set from main()
@@ -2169,11 +2289,11 @@ private:
         double avg_mfe()  const { return total() > 0 ? sum_mfe / total() : 0.0; }
         double avg_mae()  const { return total() > 0 ? sum_mae / total() : 0.0; }
     };
-    LayerStats layer_stats_[8];  // indexed by LayerMode enum value
+    LayerStats layer_stats_[14]; // indexed by LayerMode enum value (0..13)
 
     LayerStats& stats_for(LayerMode m) {
         int idx = (int)m;
-        return layer_stats_[(idx >= 0 && idx < 8) ? idx : 0];
+        return layer_stats_[(idx >= 0 && idx < 14) ? idx : 0];
     }
     
     GuiBroadcastCallback gui_broadcast_;

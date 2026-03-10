@@ -941,8 +941,12 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMPULSE";
 
-        // ETH(1) 54% WR -10bp, BNB(3) 28% WR -17bp -> filtered out
-        if (id == 1 || id == 3) {
+        // SYMBOL FILTER for IMPULSE:
+        // BTC(0): 56.7% WR +0.53bp/trade -- deep books eat the edge, 20% MFE capture, -2.72bp avg MAE. Not worth it.
+        // ETH(1): 54% WR -10bp -- net loser
+        // BNB(3): 28% WR -17bp -- active money destruction
+        // WINNERS: SOL(2), AVAX(4), LINK(5), POL(6) -- thin books, explosive moves, TP in <1s
+        if (id == 0 || id == 1 || id == 3) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
         }
@@ -1452,8 +1456,10 @@ private:
             sl_bp    = TradingConfig::VOLSHOCK_SL_BP;
             max_hold = TradingConfig::VOLSHOCK_MAX_HOLD_MS;
         } else {
-            // IMPULSE: TP=20bp gross  +10bp net. SL=7bp. Hold 30s.
-            tp_bp     = TradingConfig::IMPULSE_TP_BP;
+            // IMPULSE: alt coins (AVAX/LINK/POL) get wider TP -- thin books, moves run to 20bp+
+            // SOL: standard TP (moves are shallower than micro-caps)
+            bool is_alt_impulse = (s.pos.symbol_id == 4 || s.pos.symbol_id == 5 || s.pos.symbol_id == 6);
+            tp_bp     = is_alt_impulse ? TradingConfig::IMPULSE_ALT_TP_BP : TradingConfig::IMPULSE_TP_BP;
             sl_bp     = TradingConfig::IMPULSE_SL_BP;
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
         }
@@ -1917,7 +1923,7 @@ private:
                           (layer == LAYER_FUNDING)          ? 2.0 :  // MODERATE  slow-burn, less timing edge
                           (layer == LAYER_NGAS)             ? 1.5 :  // MODERATE  macro signal, decent but slow
                           (layer == LAYER_LEADLAG)          ? 4.0 :  // MAX LEVERAGE  proven near-100% WR
-                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 4.0 :  // MAX LEVERAGE  100% WR 6/6 trades, same edge class as LEADLAG
+                          (layer == LAYER_LEADLAG_ETH_SOL)  ? 1.2 :  // decent but less data
                           (layer == LAYER_IMPULSE)          ? 1.5 :  // strong EV
                           (layer == LAYER_EXPANSION)        ? 1.0 :  // marginal  neutral size
                           (layer == LAYER_ETH_LEAD)         ? 3.0 :  // same edge as LEADLAG, tier 2
@@ -1927,18 +1933,12 @@ private:
                                                               1.0;
         legacy_size_mult *= eng_mult;
 
-        // LEADLAG + LL-ETH-SOL: apply off-peak size reduction (set in signal gate above)
-        // ll_offpeak_size_mult_ = 1.0 during Asia 01-05 UTC, 0.5 off-peak
-        if (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL ||
-            layer == LAYER_ETH_LEAD || layer == LAYER_SOL_LEAD) {
-            legacy_size_mult *= ll_offpeak_size_mult_;
-        }
-
         // Per-symbol multiplier  data driven
         // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.
-        double sym_mult = (id == 2) ? 1.4 :   // SOL  consistently best WR
-                          (id == 1) ? 0.7 :   // ETH  weakest, EXPAND disabled
-                                      1.0;    // BTC + new symbols  neutral
+        double sym_mult = (id == 4 || id == 5 || id == 6) ? 4.0 :  // AVAX/LINK/POL: 100% WR IMPULSE, thin books, TP in <1s, near-zero MAE
+                          (id == 2) ? 1.4 :   // SOL: consistently best WR across engines
+                          (id == 1) ? 0.7 :   // ETH: filtered from most engines
+                                      1.0;    // others: neutral
         legacy_size_mult *= sym_mult;
 
         if (consecutive_losses_ >= 2) {

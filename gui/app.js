@@ -161,24 +161,24 @@ function renderSymbolTrades() {
     const el = $('str-' + short.toLowerCase());
     if (!el) return;
     const trades = localTrades.filter(t => (t.s || '').replace('USDT', '').toUpperCase() === short).slice(0, 8);
-    if (!trades.length) { el.className = 'sym-trades-empty'; el.innerHTML = 'No trades yet'; return; }
-    el.className = '';
+    if (!trades.length) { el.className = 'trades-empty'; el.innerHTML = 'No trades yet'; return; }
+    el.className = 'sym-trades-body';
     el.innerHTML = trades.map(tr => {
       const pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
       const rc = reasonClass(tr.why || tr.reason || '');
       const en = tr.en ? fmtPrice(tr.en, short) : '--';
       const ex = tr.ex ? fmtPrice(tr.ex, short) : '--';
       const why = (tr.why || tr.reason || '?').toUpperCase();
-      const time = tr.t ? tr.t.substring(11, 19) : '--';
-      return `<div class="sym-trade-row ${isWin?'win':'loss'}">
-        <span class="str-tag ${isWin?'win':'loss'}">${isWin?'WIN':'LOSS'}</span>
-        <span class="str-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
-        <span class="str-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
-        <span class="str-eng">${tr.e||'--'}</span>
-        <span class="str-val">${en}${ex}</span>
-        <span class="str-val">${fmtHold(tr.hold)}</span>
-        <span class="str-badge ${rc}">${why}</span>
-        <span class="str-time">${time}</span>
+      const time = tr.t ? (tr.t.length > 8 ? tr.t.substring(11, 19) : tr.t) : '--';
+      return `<div class="trade-row ${isWin?'win':'loss'}">
+        <span class="tr-tag ${isWin?'win':'loss'}">${isWin?'WIN':'LOSS'}</span>
+        <span class="tr-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
+        <span class="tr-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
+        <span class="tr-eng">${tr.e||'--'}</span>
+        <span class="tr-val">${en}→${ex}</span>
+        <span class="tr-val">${fmtHold(tr.hold)}</span>
+        <span class="tr-badge ${rc}">${why}</span>
+        <span class="tr-time">${time}</span>
       </div>`;
     }).join('');
   });
@@ -189,7 +189,7 @@ function updateWinRate() {
   const wr = t > 0 ? (wins / t * 100).toFixed(0) + '%' : '--%';
   set('ts-wr', wr);
   const tswr = $('ts-wr');
-  if (tswr) tswr.className = 'ts-val ' + (t > 0 ? (wins >= losses ? 'ts-pos' : 'ts-neg') : '');
+  if (tswr) tswr.className = 'tl-stat-val ' + (t > 0 ? (wins >= losses ? 'pos' : 'neg') : '');
 }
 
 function updateUptime() {
@@ -585,19 +585,29 @@ setInterval(poll, 1000);
 setInterval(updateUptime, 1000);
 
 //  COLLAPSIBLE SYM-BLOCKS 
-function toggleBlock(sl, event) {
-  // Only toggle if click was on the header itself, not on trade rows or eng-cells
+function toggleSym(sl, event) {
   if (event) event.stopPropagation();
   const block = document.getElementById('sb-' + sl);
   if (!block) return;
-  block.classList.toggle('collapsed');
+  block.classList.toggle('expanded');
 }
+// Legacy alias
+function toggleBlock(sl, event) { toggleSym(sl, event); }
 
 // Auto-expand a block when it has an active trade
 function autoExpandIfActive(sl, isActive) {
   const block = document.getElementById('sb-' + sl);
   if (!block) return;
-  if (isActive && block.classList.contains('collapsed')) {
-    block.classList.remove('collapsed');
+  if (isActive && !block.classList.contains('expanded')) {
+    block.classList.add('expanded');
   }
+}
+
+function switchTab(name) {
+  ['regime','boost','engine','signal'].forEach(t => {
+    const tab = document.getElementById('tab-' + t);
+    const content = document.getElementById('tc-' + t);
+    if (tab) tab.classList.toggle('active', t === name);
+    if (content) content.style.display = t === name ? 'flex' : 'none';
+  });
 }

@@ -479,7 +479,15 @@ function updateBoostPanel(data) {
   set('tb-trades', data.total_trades || 0);
   set('tb-positions', data.open_positions || 0);
   const lat = data.latency_p95 || 0;
-  set('tb-latency', lat > 0 ? lat.toFixed(1) + 'ms' : '--ms');
+  const tickAge = data.tick_age_ms || 0;
+  // Feed age = Binance WS data age p95 (~36ms normal = Binance internal delay, not our network)
+  // Colour: green <25ms, amber 25-50ms, red >50ms (genuine feed issue)
+  const latColour = lat <= 0 ? '' : lat < 25 ? 'pos' : lat < 50 ? 'warn' : 'neg';
+  const latEl = $('tb-latency');
+  if (latEl) {
+    latEl.textContent = lat > 0 ? lat.toFixed(1) + 'ms' : '--ms';
+    latEl.className = 'tb-val accent ' + latColour;
+  }
 
   set('st-pnl', fmtPnl(pnl));
   const stpnl = $('st-pnl'); if (stpnl) stpnl.className = 'sr-val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '');
@@ -494,7 +502,11 @@ function updateBoostPanel(data) {
   const tsCountEl = $('ts-count');
   if (tsCountEl && data.total_trades !== undefined) tsCountEl.textContent = data.total_trades || 0;
   set('st-pos', data.open_positions || 0);
-  set('st-lat', lat > 0 ? lat.toFixed(1) + 'ms' : '--ms');
+  const stLatEl = $('st-lat');
+  if (stLatEl) {
+    stLatEl.textContent = lat > 0 ? lat.toFixed(1) + 'ms' : '--ms';
+    stLatEl.className = stLatEl.className.replace(/\b(pos|warn|neg)\b/g,'').trim() + ' ' + latColour;
+  }
 
   // Boost multiplier panel
   updateBoostPanel(data);

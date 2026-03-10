@@ -97,11 +97,11 @@ struct TradingConfig {
     // Hold tightened 25001500ms: if SOL hasn't moved in 1.5s, the propagation is done.
     // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 12.0; // min ETH move to signal
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 8.0;   // lowered: MFE shows 8bp reachable, 20bp was never hit
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 14.0;   // lowered: MFE shows 8bp reachable, 20bp was never hit
     static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;  // tightened: less loss when wrong
     static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 2500; // extended: need more time to reach 20bp TP
 
-    static constexpr double LEADLAG_TP_BP              = 8.0;   // lowered: avg MFE 5.7bp, all exits TIMEOUT at 15bp -- 8bp captures the move
+    static constexpr double LEADLAG_TP_BP              = 14.0;   // lowered: avg MFE 5.7bp, all exits TIMEOUT at 15bp -- 8bp captures the move
 
     // Stop loss for lead-lag trades
     // Tight stop  if ETH/SOL doesn't follow BTC within 5s, exit
@@ -166,13 +166,13 @@ struct TradingConfig {
     // Our latency (18-25ms) is fast enough to catch early breakouts.
     //
     // TP wide enough to justify being a taker: net 10bp+ after costs
-    static constexpr double IMPULSE_TP_BP              = 10.0;  // BTC/SOL: shallow moves, 10bp is ceiling
+    static constexpr double IMPULSE_TP_BP              = 14.0;  // BTC/SOL: shallow moves, 10bp is ceiling
     static constexpr double IMPULSE_ALT_TP_BP          = 20.0;  // AVAX/LINK/POL: thin books, moves run further (AVAX hit 10.5bp with zero resistance)
     static constexpr double IMPULSE_SL_BP              = 5.0;   // tightened 75bp: 9 SL hits all -7bp, 7/9 had MFE<0.6 (never moved right)  bad entries not noise. Cuts 2bp per SL hit.
     static constexpr int64_t IMPULSE_MAX_HOLD_MS       = 20000; // extended 1520s: timeouts suggest moves need more time
 
     // EXPANSION has own tighter parameters  weaker edge than IMPULSE
-    static constexpr double EXPANSION_TP_BP             = 6.0;   // BTC: moves are shallow, 6bp is correct ceiling
+    static constexpr double EXPANSION_TP_BP             = 10.0;   // BTC: moves are shallow, 6bp is correct ceiling
     static constexpr double EXPANSION_ALT_TP_BP         = 25.0;  // LINK/AVAX/POL: thin books, moves run 11-22bp consistently (3 trades: +22, +11, +22bp)
     static constexpr double EXPANSION_SL_BP             = 3.0;   // tightened 5->3bp: avg SL loss was -8bp, tighter with higher vol filter
     static constexpr int64_t EXPANSION_MAX_HOLD_MS      = 8000;  // tightened 12->8s: cut dead trades faster, timeout losses were drift
@@ -352,13 +352,13 @@ struct TradingConfig {
     static constexpr double  ETH_LEAD_SUSTAIN_MULT  =  0.6;  // sustain filter: 60% of threshold
 
     // SOL LEAD-LAG (Tier 3) ENGINE
-    static constexpr double  SOL_LEAD_TP_BP         = 10.0;  // SOL->alts moves ~8-12bp
+    static constexpr double  SOL_LEAD_TP_BP         = 14.0;  // SOL->alts moves ~8-12bp
     static constexpr double  SOL_LEAD_SL_BP         =  3.5;  // slightly wider: SOL is more volatile
     static constexpr int64_t SOL_LEAD_MAX_HOLD_MS   = 4000;  // 4s -- SOL propagation is fastest
     static constexpr double  SOL_LEAD_SUSTAIN_MULT  =  0.58; // sustain: 7/12bp threshold
 
     // VOLUME SHOCK CONTINUATION ENGINE
-    static constexpr double  VOLSHOCK_TP_BP         = 10.0;  // conservative: new engine, no data yet
+    static constexpr double  VOLSHOCK_TP_BP         = 14.0;  // conservative: new engine, no data yet
     static constexpr double  VOLSHOCK_SL_BP         =  4.0;  // 2.5:1 gross R:R
     static constexpr int64_t VOLSHOCK_MAX_HOLD_MS   = 6000;  // 6s -- let continuation develop
 

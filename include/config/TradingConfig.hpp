@@ -403,6 +403,11 @@ struct TradingConfig {
     static constexpr double OFI_RATIO_THRESHOLD    = 0.25;  // (buy_ema - sell_ema) / total > 0.25
     static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.5;   // current volume > 1.5x EMA baseline
     static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.10;  // book_imbalance > 0.10 (bid-heavy)
+    // BTC/ETH are deeper books; require stronger confirmation to avoid chop entries.
+    static constexpr double OFI_MAJOR_RATIO_THRESHOLD    = 0.32;
+    static constexpr double OFI_MAJOR_VOLUME_SPIKE_MULT  = 2.0;
+    static constexpr double OFI_MAJOR_BOOK_CONFIRM_IMBAL = 0.18;
+    static constexpr double OFI_MAJOR_FLOW_MIN           = 0.58;
     static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
     static constexpr double OFI_TP_BP              = 18.0;  // conservative: new engine, calibrate later
     static constexpr double OFI_SL_BP              = 6.0;   // 3:1 gross R:R

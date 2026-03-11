@@ -675,7 +675,9 @@ public:
         // if (check_expansion(id, price, ts, s, latency_ms)) return;
         // SHADOW fallback: conservative probe (BTC/ETH only), infrequent and only
         // with positive book pressure. This keeps observability without runaway bleed.
-        if (shadow_mode && id <= 1) {
+        // Startup probe is for cold-start observability only.
+        // Once real trades start, do not keep injecting probe trades.
+        if (shadow_mode && id <= 1 && total_trades_ == 0) {
             if (startup_ts_ms_ == 0) startup_ts_ms_ = ts;
             const MarketTick& t = s.last_tick;
             const bool startup_starved =
@@ -1835,11 +1837,24 @@ private:
         }
 
         if (executor_ && executor_->is_shadow()) {
+            const bool shadow_scalper_layer =
+                (s.pos.layer == LAYER_LIQUIDATION) ||
+                (s.pos.layer == LAYER_LEADLAG) ||
+                (s.pos.layer == LAYER_LEADLAG_ETH_SOL) ||
+                (s.pos.layer == LAYER_MICRO) ||
+                (s.pos.layer == LAYER_IMPULSE) ||
+                (s.pos.layer == LAYER_EXPANSION) ||
+                (s.pos.layer == LAYER_ETH_LEAD) ||
+                (s.pos.layer == LAYER_SOL_LEAD) ||
+                (s.pos.layer == LAYER_VOLSHOCK) ||
+                (s.pos.layer == LAYER_SWEEP);
+            if (shadow_scalper_layer) {
             // SHADOW scalper profile: faster close cycle and smaller targets for
             // high sample throughput during tuning.
             tp_bp = std::max(2.0, tp_bp * 0.55);
             sl_bp = std::max(2.5, sl_bp * 0.80);
             max_hold = std::min<int64_t>(max_hold, 2500);
+            }
         }
 
         // Hard take-profit
@@ -2192,6 +2207,7 @@ private:
         const bool starved = startup_starved_mode(ts);
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
+        const bool major_symbol = (id == 0 || id == 1);
 
         // Regime: GRIND or BUILDUP only
         const bool regime_block = (s.regime == REGIME_DEAD) || (!starved && s.regime == REGIME_BREAKOUT);
@@ -2214,7 +2230,10 @@ private:
         double ofi_ratio = (s.ofi_buy_ema - s.ofi_sell_ema) / total_flow;
 
         // Must exceed threshold in the long direction only (spot = long bias)
-        const double min_ofi_ratio = starved ? 0.18 : TradingConfig::OFI_RATIO_THRESHOLD;
+        double min_ofi_ratio = starved ? 0.18 : TradingConfig::OFI_RATIO_THRESHOLD;
+        if (major_symbol) {
+            min_ofi_ratio = std::max(min_ofi_ratio, TradingConfig::OFI_MAJOR_RATIO_THRESHOLD);
+        }
         if (ofi_ratio < min_ofi_ratio) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "ofi_weak");
             return false;
@@ -2226,21 +2245,35 @@ private:
             return false;
         }
         double vol_ratio = (t.agg_buy_volume + t.agg_sell_volume) / s.trade_size_ema;
-        const double min_vol_spike = starved ? 1.2 : TradingConfig::OFI_VOLUME_SPIKE_MULT;
+        double min_vol_spike = starved ? 1.2 : TradingConfig::OFI_VOLUME_SPIKE_MULT;
+        if (major_symbol) {
+            min_vol_spike = std::max(min_vol_spike, TradingConfig::OFI_MAJOR_VOLUME_SPIKE_MULT);
+        }
         if (vol_ratio < min_vol_spike) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "volume_low");
             return false;
         }
 
         // Book must also lean long (bid depth >= ask depth)
-        const double min_book_imbal = starved ? 0.05 : TradingConfig::OFI_BOOK_CONFIRM_IMBAL;
+        double min_book_imbal = starved ? 0.05 : TradingConfig::OFI_BOOK_CONFIRM_IMBAL;
+        if (major_symbol) {
+            min_book_imbal = std::max(min_book_imbal, TradingConfig::OFI_MAJOR_BOOK_CONFIRM_IMBAL);
+        }
         if (t.book_imbalance < min_book_imbal) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "book_neutral");
             return false;
         }
 
-        std::printf("[OFI] %s | ofi=%.3f | vol_spike=%.2fx | book=%.3f | lat=%.1fms | LONG\n",
-                    sym_short(id), ofi_ratio, vol_ratio, t.book_imbalance, latency_ms);
+        double flow = compute_flow_ratio(id);
+        double min_flow = major_symbol ? TradingConfig::OFI_MAJOR_FLOW_MIN
+                                       : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+        if (flow < min_flow) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "flow_weak");
+            return false;
+        }
+
+        std::printf("[OFI] %s | ofi=%.3f | vol_spike=%.2fx | flow=%.2f | book=%.3f | lat=%.1fms | LONG\n",
+                    sym_short(id), ofi_ratio, vol_ratio, flow, t.book_imbalance, latency_ms);
         std::fflush(stdout);
         enter(id, price, ts, s, LAYER_OFI, true);
         return true;

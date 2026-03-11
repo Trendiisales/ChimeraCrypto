@@ -272,6 +272,39 @@ function renderTradeLog() {
       }).join('');
     }
   }
+
+  // Bottom feed — 10 trade rows with full columns
+  const btmRows = $('btm-trade-rows');
+  if (btmRows) {
+    const trades = currentSessionTrades();
+    if (!trades.length) {
+      btmRows.innerHTML = '<div style="padding:5px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet this session</div>';
+    } else {
+      btmRows.innerHTML = trades.slice(0, 10).map(tr => {
+        const p = +tr.p || 0, isWin = p >= 0;
+        const sym = (tr.s || '').replace('USDT','').replace('/','');
+        const eng = (tr.e || '?').toUpperCase();
+        const why = (tr.why || tr.reason || '?').toUpperCase();
+        const whyCls = why==='TP'?'why-tp':why==='SL'?'why-sl':why==='TRAIL'?'why-trail':'why-to';
+        const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(11,16) : tr.t) : '--';
+        const mfe = tr.mfe != null ? '+' + (+tr.mfe).toFixed(1) + 'bp' : '--';
+        const mae = tr.mae != null ? (+tr.mae).toFixed(1) + 'bp' : '--';
+        const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
+        const usd = bpToUsd(p);
+        return `<div class="btm-trade-row ${isWin?'btr-win':'btr-loss'}">
+          <span class="btr-time">${time}</span>
+          <span class="btr-sym">${sym}</span>
+          <span class="btr-eng">${eng}</span>
+          <span class="btr-why ${whyCls}">${why}</span>
+          <span class="btr-pnl ${isWin?'pos':'neg'}">${isWin?'+':''}${p.toFixed(2)}bp</span>
+          <span class="btr-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
+          <span class="btr-mfe">${mfe}</span>
+          <span class="btr-mae">${mae}</span>
+          <span class="btr-hold">${hold}</span>
+        </div>`;
+      }).join('');
+    }
+  }
 }
 
 

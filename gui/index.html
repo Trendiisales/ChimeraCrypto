@@ -169,13 +169,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .trades-empty{padding:6px 12px;font-size:10px;color:var(--muted);font-style:italic}
 
 /* Trade log bar at bottom */
-.trade-log-bar{
-  height:32px;flex-shrink:0;
-  display:flex;align-items:center;
-  background:var(--surface);
-  border-top:2px solid var(--border2);
-  padding:0 14px;gap:18px;overflow:hidden;
-}
+.btm-feed{flex-shrink:0;background:var(--surface);border-top:2px solid var(--border2);}
+.btm-stats-row{height:28px;display:flex;align-items:center;padding:0 12px;gap:14px;border-bottom:1px solid var(--border2);overflow:hidden;}
+.btm-trades-hdr{display:grid;grid-template-columns:58px 44px 90px 62px 72px 72px 58px 58px 52px;padding:2px 12px;background:var(--dim);font-family:var(--fh);font-size:9px;letter-spacing:1.2px;color:var(--muted);border-bottom:1px solid var(--border);}
+.btm-trade-row{display:grid;grid-template-columns:58px 44px 90px 62px 72px 72px 58px 58px 52px;padding:3px 12px;border-bottom:1px solid rgba(26,42,56,.5);font-size:12px;font-variant-numeric:tabular-nums;align-items:center;}
+.btm-trade-row:hover{background:rgba(0,212,255,.03);}
+.btm-trade-row.btr-win{border-left:3px solid var(--green);}
+.btm-trade-row.btr-loss{border-left:3px solid var(--red);}
+.btr-time{color:var(--muted);font-size:11px;}
+.btr-sym{font-family:var(--fh);font-weight:700;font-size:11px;}
+.btr-eng{font-family:var(--fh);font-size:10px;color:var(--accent);letter-spacing:.5px;}
+.btr-why{font-size:10px;font-family:var(--fh);}
+.btr-why.why-tp{color:var(--green);}.btr-why.why-sl{color:var(--red);}.btr-why.why-trail{color:var(--accent);}.btr-why.why-to{color:var(--yellow);}
+.btr-pnl{font-weight:700;}.btr-usd{color:var(--muted);font-size:11px;}.btr-mfe{color:rgba(0,230,118,.8);font-size:11px;}.btr-mae{color:rgba(255,61,87,.7);font-size:11px;}.btr-hold{color:var(--muted);font-size:11px;}
 .tl-label{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);flex-shrink:0}
 .tl-stat{display:flex;align-items:baseline;gap:5px;flex-shrink:0}
 .tl-stat-label{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:var(--fh)}
@@ -583,26 +589,32 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     </div><!-- /sym-rows -->
 
-    <!-- Trade log strip at bottom -->
-    <div class="trade-log-bar">
-      <span class="tl-label">ALL TRADES</span>
-      <div class="tl-stat"><span class="tl-stat-label">Trades</span><span class="tl-stat-val accent" id="ts-count">0</span></div>
-      <div class="tl-sep"></div>
-      <div class="tl-stat"><span class="tl-stat-label">WR</span><span class="tl-stat-val" id="ts-wr">--%</span></div>
-      <div class="tl-stat"><span class="tl-stat-val" style="color:var(--green);font-size:11px" id="ts-wins">0</span><span class="tl-stat-label">/</span><span class="tl-stat-val" style="color:var(--red);font-size:11px" id="ts-losses">0</span></div>
-      <div class="tl-sep"></div>
-      <div class="tl-stat"><span class="tl-stat-label">P&L</span><span class="tl-stat-val" id="ts-pnl">+0.00bp</span></div>
-      <div class="tl-stat"><span class="tl-stat-label">USD</span><span class="tl-stat-val" id="ts-usd">+$0.00</span></div>
-      <div class="tl-sep"></div>
-      <div class="tl-stat"><span class="tl-stat-label">Avg Win</span><span class="tl-stat-val pos" id="ts-avgwin">--</span></div>
-      <div class="tl-stat"><span class="tl-stat-label">Avg Loss</span><span class="tl-stat-val neg" id="ts-avgloss">--</span></div>
-      <div class="tl-stat"><span class="tl-stat-label">Exp</span><span class="tl-stat-val" id="ts-exp">--</span></div>
-      <div class="tl-sep"></div>
-      <div class="tl-stat"><span class="tl-stat-label">TP</span><span class="tl-stat-val pos" id="st-tp">0</span></div>
-      <div class="tl-stat"><span class="tl-stat-label">SL</span><span class="tl-stat-val neg" id="st-sl">0</span></div>
-      <div class="tl-stat"><span class="tl-stat-label">TR</span><span class="tl-stat-val accent" id="st-trail">0</span></div>
-      <div class="tl-stat"><span class="tl-stat-label">TO</span><span class="tl-stat-val" style="color:var(--yellow)" id="st-timeout">0</span></div>
-      <button class="tl-clear" onclick="clearTrades()">CLEAR</button>
+    <!-- Bottom feed: stats row + 10 recent trades -->
+    <div class="btm-feed">
+      <div class="btm-stats-row">
+        <span class="tl-label">SESSION</span>
+        <div class="tl-stat"><span class="tl-stat-label">T</span><span class="tl-stat-val accent" id="ts-count">0</span></div>
+        <div class="tl-sep"></div>
+        <div class="tl-stat"><span class="tl-stat-label">WR</span><span class="tl-stat-val" id="ts-wr">--%</span></div>
+        <div class="tl-stat"><span class="tl-stat-val" style="color:var(--green);font-size:11px" id="ts-wins">0</span><span class="tl-stat-label">/</span><span class="tl-stat-val" style="color:var(--red);font-size:11px" id="ts-losses">0</span></div>
+        <div class="tl-sep"></div>
+        <div class="tl-stat"><span class="tl-stat-label">P&L</span><span class="tl-stat-val" id="ts-pnl">+0.00bp</span></div>
+        <div class="tl-stat"><span class="tl-stat-label">USD</span><span class="tl-stat-val" id="ts-usd">+$0.00</span></div>
+        <div class="tl-sep"></div>
+        <div class="tl-stat"><span class="tl-stat-label">AvgW</span><span class="tl-stat-val pos" id="ts-avgwin">--</span></div>
+        <div class="tl-stat"><span class="tl-stat-label">AvgL</span><span class="tl-stat-val neg" id="ts-avgloss">--</span></div>
+        <div class="tl-stat"><span class="tl-stat-label">Exp</span><span class="tl-stat-val" id="ts-exp">--</span></div>
+        <div class="tl-sep"></div>
+        <div class="tl-stat"><span class="tl-stat-label">TP</span><span class="tl-stat-val pos" id="st-tp">0</span></div>
+        <div class="tl-stat"><span class="tl-stat-label">SL</span><span class="tl-stat-val neg" id="st-sl">0</span></div>
+        <div class="tl-stat"><span class="tl-stat-label">TR</span><span class="tl-stat-val accent" id="st-trail">0</span></div>
+        <div class="tl-stat"><span class="tl-stat-label">TO</span><span class="tl-stat-val" style="color:var(--yellow)" id="st-timeout">0</span></div>
+        <button class="tl-clear" onclick="clearTrades()">CLEAR</button>
+      </div>
+      <div class="btm-trades-hdr">
+        <span>TIME</span><span>SYM</span><span>ENGINE</span><span>EXIT</span><span>P&L</span><span>USD</span><span>MFE</span><span>MAE</span><span>HOLD</span>
+      </div>
+      <div id="btm-trade-rows"></div>
     </div>
   </div><!-- /sym-panel -->
 

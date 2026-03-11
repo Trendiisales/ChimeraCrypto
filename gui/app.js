@@ -269,22 +269,22 @@ function renderRpTrades() {
     const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
     return `<div class="rp-trade-row ${isWin?'win':'loss'}">
       <div class="rptr-top">
-        <span class="rptr-tag \${isWin?'win':'loss'}">\${isWin?'WIN':'LOSS'}</span>
-        <span class="rptr-sym">\${sym}</span>
-        <span class="rptr-eng">\${tr.e||'--'}</span>
-        <span class="rptr-pnl \${isWin?'pos':'neg'}">\${fmtPnl(pnl)}</span>
-        <span class="rptr-usd \${isWin?'pos':'neg'}">\${fmtUsd(usd)}</span>
-        <span class="rptr-badge \${rc}">\${why}</span>
+        <span class="rptr-tag ${isWin?'win':'loss'}">${isWin?'WIN':'LOSS'}</span>
+        <span class="rptr-sym">${sym}</span>
+        <span class="rptr-eng">${tr.e||'--'}</span>
+        <span class="rptr-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
+        <span class="rptr-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
+        <span class="rptr-badge ${rc}">${why}</span>
       </div>
       <div class="rptr-mid">
-        <span>Entry: <strong>\${en}</strong></span>
-        <span>Exit: <strong>\${ex}</strong></span>
-        <span>Hold: <strong>\${hold}</strong></span>
+        <span>Entry: <strong>${en}</strong></span>
+        <span>Exit: <strong>${ex}</strong></span>
+        <span>Hold: <strong>${hold}</strong></span>
       </div>
       <div class="rptr-bot">
-        <span class="rptr-mfe">MFE \${mfe}</span>
-        <span class="rptr-mae">MAE \${mae}</span>
-        <span class="rptr-time">\${time}</span>
+        <span class="rptr-mfe">MFE ${mfe}</span>
+        <span class="rptr-mae">MAE ${mae}</span>
+        <span class="rptr-time">${time}</span>
       </div>
     </div>`;
   }).join('');
@@ -355,7 +355,7 @@ function updateAll(data) {
   const updatePrice = (id, val, prev, sym) => {
     const el = $(id); if (!el) return;
     el.textContent = fmtPrice(val, sym);
-    el.className = 'sym-price' + (val > prev ? ' up' : val < prev ? ' down' : '');
+    el.className = 'sym-px' + (val > prev ? ' up' : val < prev ? ' down' : '');
   };
 
   // Update all symbol prices dynamically

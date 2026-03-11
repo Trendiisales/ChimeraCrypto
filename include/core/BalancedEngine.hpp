@@ -325,6 +325,7 @@ public:
         total_pnl_ = 0.0;
         realized_pnl_ = 0.0;
         total_trades_ = 0;
+        startup_ts_ms_ = 0;
         consecutive_losses_ = 0;
         last_loss_ts_ = 0;
         for (int i = 0; i < MAX_SYMBOLS; ++i) {
@@ -674,21 +675,33 @@ public:
         // SHADOW fallback: conservative probe (BTC/ETH only), infrequent and only
         // with positive book pressure. This keeps observability without runaway bleed.
         if (shadow_mode && id <= 1) {
+            if (startup_ts_ms_ == 0) startup_ts_ms_ = ts;
             const MarketTick& t = s.last_tick;
-            const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= 120000;
-            const bool vol_ok = (s.vol_ratio_ema >= 0.90 && s.vol_ratio_ema <= 1.40);
+            const bool startup_starved =
+                (total_trades_ == 0) && (startup_ts_ms_ > 0) && ((ts - startup_ts_ms_) >= 15 * 60 * 1000LL);
+            const int64_t probe_cooldown_ms = startup_starved ? 45000LL : 120000LL;
+            const double vol_low  = startup_starved ? 0.85 : 0.90;
+            const double vol_high = startup_starved ? 1.60 : 1.40;
+            const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= probe_cooldown_ms;
+            const bool vol_ok = (s.vol_ratio_ema >= vol_low && s.vol_ratio_ema <= vol_high);
             if (cooldown_ok && vol_ok) {
                 bool spread_ok = true;
                 bool pressure_ok = true;
                 if (t.bid > 0.0 && t.ask > 0.0) {
                     const double flow = compute_flow_ratio(id);
-                    spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 2.0);
-                    pressure_ok = (t.book_imbalance >= 0.10 && flow >= 0.53);
+                    const double max_spread = startup_starved ? 2.5 : 2.0;
+                    const double min_imbal  = startup_starved ? 0.03 : 0.10;
+                    const double min_flow   = startup_starved ? 0.51 : 0.53;
+                    spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= max_spread);
+                    pressure_ok = (t.book_imbalance >= min_imbal && flow >= min_flow);
                 }
                 if (spread_ok && pressure_ok) {
                     shadow_probe_last_ms_[id] = ts;
-                    rejection_throttle_.record(std::string(sym_short(id)) + " SHADOW-PROBE", "fired");
-                    enter(id, price, ts, s, LAYER_MICRO, true);
+                    rejection_throttle_.record(std::string(sym_short(id)) + " SHADOW-PROBE",
+                                               startup_starved ? "fired_starved" : "fired");
+                    // Route probe through OFI layer so governor can evaluate it.
+                    // MICRO is intentionally parked in StatefulGovernor.
+                    enter(id, price, ts, s, LAYER_OFI, true);
                     return;
                 }
             }
@@ -2879,6 +2892,7 @@ private:
     int     sym_consecutive_sl_[MAX_SYMBOLS];
     int64_t sym_sl_cooldown_[MAX_SYMBOLS];
     int64_t shadow_probe_last_ms_[MAX_SYMBOLS] = {};
+    int64_t startup_ts_ms_ = 0;
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
 

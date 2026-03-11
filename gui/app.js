@@ -267,7 +267,7 @@ function renderRpTrades() {
     const mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
     const mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
     const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
-    return \`<div class="rp-trade-row \${isWin?'win':'loss'}">
+    return `<div class="rp-trade-row ${isWin?'win':'loss'}">
       <div class="rptr-top">
         <span class="rptr-tag \${isWin?'win':'loss'}">\${isWin?'WIN':'LOSS'}</span>
         <span class="rptr-sym">\${sym}</span>
@@ -286,7 +286,7 @@ function renderRpTrades() {
         <span class="rptr-mae">MAE \${mae}</span>
         <span class="rptr-time">\${time}</span>
       </div>
-    </div>\`;
+    </div>`;
   }).join('');
 }
 

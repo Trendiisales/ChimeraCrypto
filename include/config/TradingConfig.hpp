@@ -31,6 +31,22 @@ namespace chimera {
 // ============================================================================
 
 struct TradingConfig {
+    // -------------------------------------------------------------------------
+    // PROFIT PROTECTION PROFILE (default ON for current live stabilization)
+    // -------------------------------------------------------------------------
+    // Keep only core higher-quality paths enabled until expectancy is positive.
+    static constexpr bool ENABLE_LIQUIDATION     = true;
+    static constexpr bool ENABLE_FUNDING         = false;
+    static constexpr bool ENABLE_NGAS            = false;
+    static constexpr bool ENABLE_LEADLAG         = true;
+    static constexpr bool ENABLE_LEADLAG_ETH_SOL = true;
+    static constexpr bool ENABLE_VOLSHOCK        = false;
+    static constexpr bool ENABLE_VACUUM          = false;
+    static constexpr bool ENABLE_IMBALANCE       = false;
+    static constexpr bool ENABLE_VWAP            = false;
+    static constexpr bool ENABLE_OFI             = false;
+    static constexpr bool ENABLE_SWEEP           = false;
+    static constexpr bool ENABLE_MM_PRESSURE     = false;
 
     // -------------------------------------------------------------------------
     // LATENCY LIMITS  calibrated to Tokyo VPS measurements

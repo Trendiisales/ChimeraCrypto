@@ -652,33 +652,45 @@ public:
 
         // Try signals in priority order
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
-        if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
-        if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_LIQUIDATION &&
+            try_liquidation_entry(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_FUNDING &&
+            try_funding_entry(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_NGAS &&
+            try_ngas_entry(id, price, ts, s, latency_ms)) return;
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
-        if (check_leadlag(id, price, ts, s, latency_ms)) return;
-        if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_LEADLAG &&
+            check_leadlag(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_LEADLAG_ETH_SOL &&
+            check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: IMPULSE net -833bp across 105 trades (avg gross +0.07bp, taker cost -8bp/trade)
         // if (check_impulse(id, price, ts, s, latency_ms)) return;
-        if (check_vol_shock(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_VOLSHOCK &&
+            check_vol_shock(id, price, ts, s, latency_ms)) return;
         // DISABLED: EXPAND 45% WR, gross -60bp, net -460bp across 100 trades
         // if (check_expansion(id, price, ts, s, latency_ms)) return;
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker and
         // would otherwise generate persistent no_book_data rejections.
         if (s.last_tick.bid <= 0.0 || s.last_tick.ask <= 0.0) return;
-        if (check_vacuum(id, price, ts, s, latency_ms)) return;
-        if (check_imbalance(id, price, ts, s, latency_ms)) return;
-        if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-        if (check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-        if (check_sweep(id, price, ts, s, latency_ms)) return;
-        if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_VACUUM &&
+            check_vacuum(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_IMBALANCE &&
+            check_imbalance(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_VWAP &&
+            check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_OFI &&
+            check_ofi_pressure(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_SWEEP &&
+            check_sweep(id, price, ts, s, latency_ms)) return;
+        if (TradingConfig::ENABLE_MM_PRESSURE &&
+            check_mm_pressure(id, price, ts, s, latency_ms)) return;
     }
     
     std::string get_rejection_stats() const {

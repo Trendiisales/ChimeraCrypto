@@ -329,6 +329,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .etd-pnl{font-weight:700}.etd-pnl.pos{color:var(--green)}.etd-pnl.neg{color:var(--red)}
 .etd-wr.pos{color:var(--green)}.etd-wr.neg{color:var(--red)}
 .trades-panel-body{overflow-y:auto;flex:1;min-height:0;}
+.rt-row{display:grid;grid-template-columns:52px 52px 80px 1fr 70px 60px;align-items:center;padding:5px 12px;border-bottom:1px solid rgba(26,42,56,.6);font-size:12px;font-variant-numeric:tabular-nums;}
+.rt-row:hover{background:rgba(0,212,255,.03);}
+.rt-row.rt-win{border-left:2px solid var(--green);}
+.rt-row.rt-loss{border-left:2px solid var(--red);}
+.rt-time{color:var(--muted);font-size:11px;}
+.rt-sym{font-family:var(--fh);font-weight:700;font-size:11px;color:var(--text);}
+.rt-eng{font-family:var(--fh);font-size:10px;letter-spacing:.5px;color:var(--accent);}
+.rt-why{font-size:10px;color:var(--muted);text-align:center;}
+.rt-why.why-tp{color:var(--green);}
+.rt-why.why-sl{color:var(--red);}
+.rt-why.why-trail{color:var(--accent);}
+.rt-pnl{font-weight:700;text-align:right;}
+.rt-hold{color:var(--muted);font-size:10px;text-align:right;}
 .tp-empty{padding:10px 14px;color:var(--muted);font-size:11px;font-style:italic}
 .la-mult{font-family:var(--fh);font-size:13px;font-weight:700}
 .la-mult.pos{color:var(--green)}.la-mult.neg{color:var(--red)}.la-mult.muted{color:var(--muted)}
@@ -613,30 +626,9 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
       </div>
     </div>
     <div class="trades-panel-body">
-      <table class="eng-tbl">
-        <thead>
-          <tr>
-            <th>ENGINE</th>
-            <th>TRADES</th>
-            <th>WINS</th>
-            <th>LOSSES</th>
-            <th>WR%</th>
-            <th>TOTAL P&L</th>
-            <th>AVG WIN</th>
-            <th>AVG LOSS</th>
-            <th>EXPECTANCY</th>
-            <th>AVG MFE</th>
-            <th>AVG MAE</th>
-            <th>TP</th>
-            <th>SL</th>
-            <th>TRAIL</th>
-            <th>TIMEOUT</th>
-          </tr>
-        </thead>
-        <tbody id="trade-table-body">
-          <tr><td colspan="15" class="tp-empty">Waiting for first trade...</td></tr>
-        </tbody>
-      </table>
+      <div id="recent-trades-list" style="padding:4px 0">
+        <div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">Waiting for first trade...</div>
+      </div>
     </div>
 
     <!-- Session by-layer breakdown (fed from get_session_stats_json) -->

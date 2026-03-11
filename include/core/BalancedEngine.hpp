@@ -1751,6 +1751,14 @@ private:
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
         }
 
+        if (executor_ && executor_->is_shadow()) {
+            // SHADOW scalper profile: faster close cycle and smaller targets for
+            // high sample throughput during tuning.
+            tp_bp = std::max(2.0, tp_bp * 0.55);
+            sl_bp = std::max(2.5, sl_bp * 0.80);
+            max_hold = std::min<int64_t>(max_hold, 2500);
+        }
+
         // Hard take-profit
         if (move_bp >= tp_bp) {
             std::printf("[TP-HIT] %s | layer=%s | move=%.2fbp >= tp=%.2fbp\n",
@@ -2485,7 +2493,9 @@ private:
                            (layer == LAYER_SWEEP)           ? "SWEEP"      :
                            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
 
-        if (TradingConfig::MAKER_MODE) {
+        const bool shadow_mode = (executor_ && executor_->is_shadow());
+        const bool use_maker = TradingConfig::MAKER_MODE && !shadow_mode;
+        if (use_maker) {
             //  MAKER MODE: post limit order 
             // Do NOT open position yet. Set state to PENDING.
             // manage_pending() will open position when/if limit is filled.

@@ -655,37 +655,32 @@ public:
 
         // Try signals in priority order
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
-        if ((TradingConfig::ENABLE_LIQUIDATION || shadow_mode) &&
-            try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_FUNDING || shadow_mode) &&
-            try_funding_entry(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_NGAS || shadow_mode) &&
-            try_ngas_entry(id, price, ts, s, latency_ms)) return;
+        if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
+        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+        if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
-        if ((TradingConfig::ENABLE_LEADLAG || shadow_mode) &&
-            check_leadlag(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_LEADLAG_ETH_SOL || shadow_mode) &&
-            check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
+        if (check_leadlag(id, price, ts, s, latency_ms)) return;
+        if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
         // Keep LIVE profile conservative, but allow these paths in SHADOW research mode.
         if (shadow_mode && check_impulse(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_VOLSHOCK || shadow_mode) && check_vol_shock(id, price, ts, s, latency_ms)) return;
+        if (check_vol_shock(id, price, ts, s, latency_ms)) return;
         if (shadow_mode && check_expansion(id, price, ts, s, latency_ms)) return;
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker and
         // would otherwise generate persistent no_book_data rejections.
         if (s.last_tick.bid <= 0.0 || s.last_tick.ask <= 0.0) return;
-        if ((TradingConfig::ENABLE_VACUUM || shadow_mode) && check_vacuum(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_IMBALANCE || shadow_mode) && check_imbalance(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_VWAP || shadow_mode) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_OFI || shadow_mode) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_SWEEP || shadow_mode) && check_sweep(id, price, ts, s, latency_ms)) return;
-        if ((TradingConfig::ENABLE_MM_PRESSURE || shadow_mode) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+        if (check_vacuum(id, price, ts, s, latency_ms)) return;
+        if (check_imbalance(id, price, ts, s, latency_ms)) return;
+        if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+        if (check_ofi_pressure(id, price, ts, s, latency_ms)) return;
+        if (check_sweep(id, price, ts, s, latency_ms)) return;
+        if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
 
         // SHADOW fallback: controlled micro-probe in flat/compression tape.
         // Purpose: keep sample throughput non-zero when high-conviction layers are quiet.

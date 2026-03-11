@@ -220,8 +220,9 @@ void BinanceWSFeed::handle_agg_trade(const std::string& msg, int64_t recv_ms) {
     t.rtt_ms     = g_exchange_latency.p95();
     st.trade_ready = true;
 
-    // Fire callback - trade data has arrived
-    if (callback_) {
+    // Fire callback only after first book snapshot is known for this symbol.
+    // This avoids feeding trade-only ticks into book-dependent signal gates.
+    if (callback_ && st.book_ready) {
         callback_(t);
     }
 }

@@ -669,6 +669,10 @@ public:
         if (check_vol_shock(id, price, ts, s, latency_ms)) return;
         // DISABLED: EXPAND 45% WR, gross -60bp, net -460bp across 100 trades
         // if (check_expansion(id, price, ts, s, latency_ms)) return;
+        // Book-dependent engines require a valid top-of-book snapshot.
+        // During warm-up, aggTrade ticks can arrive before first bookTicker and
+        // would otherwise generate persistent no_book_data rejections.
+        if (s.last_tick.bid <= 0.0 || s.last_tick.ask <= 0.0) return;
         if (check_vacuum(id, price, ts, s, latency_ms)) return;
         if (check_imbalance(id, price, ts, s, latency_ms)) return;
         if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
@@ -2052,8 +2056,8 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        // Baseline: allow GRIND and BUILDUP. Keep BREAKOUT blocked.
-        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
+        // Baseline-v3: allow VWAP in non-breakout regimes.
+        if (s.regime == REGIME_BREAKOUT) {
             rejection_throttle_.record(key, "not_grind");
             return false;
         }

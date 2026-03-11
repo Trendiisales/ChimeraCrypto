@@ -126,7 +126,7 @@ function mergeTrades(serverLog, isBootLoad) {
   });
   if (newCount > 0 || before === 0) {
     localTrades = localTrades.slice(0, 200);
-    saveTrades(); renderTradeLog(); renderSymbolTrades(); updateWinRate();
+    saveTrades(); renderTradeLog(); renderSymbolTrades(); renderRpTrades(); updateWinRate();
   }
 }
 
@@ -175,7 +175,7 @@ function renderSymbolTrades() {
         <span class="tr-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
         <span class="tr-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
         <span class="tr-eng">${tr.e||'--'}</span>
-        <span class="tr-val">${en}â†’${ex}</span>
+        <span class="tr-val">${en}→${ex}</span>
         <span class="tr-val">${fmtHold(tr.hold)}</span>
         <span class="tr-badge ${rc}">${why}</span>
         <span class="tr-time">${time}</span>
@@ -201,7 +201,8 @@ function updateUptime() {
 }
 
 function renderTradeLog() {
-  const body = $('trade-table-body'); // may be null in new layout - stats still run
+  const body = $('trade-table-body');
+  if (!body) return;
   let totalPnl = 0, winPnl = 0, lossPnl = 0, winCount = 0, lossCount = 0;
   localTrades.filter(t => t.s !== 'SESSION').forEach(t => {
     const p = +t.p || 0; totalPnl += p;
@@ -215,102 +216,39 @@ function renderTradeLog() {
 
   set('ts-count', total); set('ts-wins', winCount); set('ts-losses', lossCount);
   const pnlEl = $('ts-pnl');
-  if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.className = 'tl-stat-val ' + (totalPnl >= 0 ? 'pos' : 'neg'); }
+  if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.className = 'ts-val ' + (totalPnl >= 0 ? 'ts-pos' : 'ts-neg'); }
   const usdEl = $('ts-usd');
-  if (usdEl) { usdEl.textContent = fmtUsd(bpToUsd(totalPnl)); usdEl.className = 'tl-stat-val ' + (totalPnl >= 0 ? 'pos' : 'neg'); }
+  if (usdEl) { usdEl.textContent = fmtUsd(bpToUsd(totalPnl)); usdEl.className = 'ts-val ' + (totalPnl >= 0 ? 'ts-pos' : 'ts-neg'); }
   const wrEl = $('ts-wr');
-  if (wrEl) { wrEl.textContent = wr !== null ? (wr*100).toFixed(0)+'%' : '--%'; wrEl.className = 'tl-stat-val ' + (wr !== null ? (wr >= 0.5 ? 'pos' : 'neg') : ''); }
+  if (wrEl) { wrEl.textContent = wr !== null ? (wr*100).toFixed(0)+'%' : '--%'; wrEl.className = 'ts-val ' + (wr !== null ? (wr >= 0.5 ? 'ts-pos' : 'ts-neg') : ''); }
   const awEl = $('ts-avgwin'); if (awEl) awEl.textContent = avgWin !== null ? '+' + avgWin.toFixed(2) + 'bp' : '--';
   const alEl = $('ts-avgloss'); if (alEl) alEl.textContent = avgLoss !== null ? avgLoss.toFixed(2) + 'bp' : '--';
   const expEl = $('ts-exp');
-  if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'tl-stat-val ' + (exp !== null ? (exp >= 0 ? 'pos' : 'neg') : ''); }
-  if (body) {
-    var trades = localTrades.filter(function(t){ return t.s !== 'SESSION'; });
-    if (!trades.length) {
-      body.innerHTML = '<tr><td colspan="15" class="tp-empty">Waiting for first trade...</td></tr>';
-      return;
-    }
-    // Group by engine
-    var engines = ['LEADLAG','LL-ETH-SOL','IMPULSE','EXPAND','LIQUIDATION','FUNDING','NGAS','ETH-LEAD','SOL-LEAD','VOLSHOCK','VWAP','VACUUM','MICRO','OFI','SWEEP','MM-PRESSURE'];
-    var groups = {};
-    engines.forEach(function(e){ groups[e] = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0}; });
-    var other = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0};
-    trades.forEach(function(t) {
-      var e = (t.e||'OTHER').toUpperCase();
-      var g = groups[e] || other;
-      if (!groups[e]) { other.trades++; } else { g.trades++; }
-      var p = +t.p || 0; g.pnl += p;
-      if (p >= 0) { g.wins++; g.winPnl += p; } else { g.losses++; g.lossPnl += p; }
-      g.mfe += (+t.mfe || 0); g.mae += (+t.mae || 0);
-      var why = (t.why||t.reason||'').toLowerCase();
-      if (why==='tp') g.tp++; else if (why==='sl') g.sl++; else if (why==='trail') g.trail++; else g.timeout++;
-    });
-    // Totals row
-    var tot = {trades:0,wins:0,losses:0,pnl:0,winPnl:0,lossPnl:0,mfe:0,mae:0,tp:0,sl:0,trail:0,timeout:0};
-    var rows = '';
-    engines.forEach(function(e) {
-      var g = groups[e]; if (!g || g.trades === 0) return;
-      var wr = g.wins/g.trades; var avgW = g.wins>0?g.winPnl/g.wins:null; var avgL = g.losses>0?g.lossPnl/g.losses:null;
-      var exp = (avgW!==null&&avgL!==null) ? wr*avgW+(1-wr)*avgL : null;
-      var avgMfe = g.mfe/g.trades; var avgMae = g.mae/g.trades;
-      var pc = g.pnl>=0?'pos':'neg'; var wrc = wr>=0.5?'pos':'neg';
-      rows += '<tr>';
-      rows += '<td>' + e + '</td>';
-      rows += '<td>' + g.trades + '</td>';
-      rows += '<td style="color:var(--green)">' + g.wins + '</td>';
-      rows += '<td style="color:var(--red)">' + g.losses + '</td>';
-      rows += '<td class="etd-wr ' + wrc + '">' + (wr*100).toFixed(0) + '%</td>';
-      rows += '<td class="etd-pnl ' + pc + '">' + (g.pnl>=0?'+':'') + g.pnl.toFixed(2) + 'bp</td>';
-      rows += '<td style="color:var(--green)">' + (avgW!==null?'+'+avgW.toFixed(2)+'bp':'--') + '</td>';
-      rows += '<td style="color:var(--red)">' + (avgL!==null?avgL.toFixed(2)+'bp':'--') + '</td>';
-      rows += '<td class="etd-pnl ' + (exp!==null?(exp>=0?'pos':'neg'):'') + '">' + (exp!==null?(exp>=0?'+':'')+exp.toFixed(2)+'bp':'--') + '</td>';
-      rows += '<td style="color:rgba(0,230,118,.7)">+' + avgMfe.toFixed(2) + 'bp</td>';
-      rows += '<td style="color:rgba(255,61,87,.7)">' + avgMae.toFixed(2) + 'bp</td>';
-      rows += '<td>' + g.tp + '</td><td>' + g.sl + '</td><td>' + g.trail + '</td><td>' + g.timeout + '</td>';
-      rows += '</tr>';
-      ['trades','wins','losses','pnl','winPnl','lossPnl','mfe','mae','tp','sl','trail','timeout'].forEach(function(k){ tot[k]+=g[k]; });
-    });
-    // Total row
-    var twr = tot.wins/tot.trades; var tpc = tot.pnl>=0?'pos':'neg'; var twrc = twr>=0.5?'pos':'neg';
-    var tAvgW = tot.wins>0?tot.winPnl/tot.wins:null; var tAvgL = tot.losses>0?tot.lossPnl/tot.losses:null;
-    var tExp = (tAvgW!==null&&tAvgL!==null)?twr*tAvgW+(1-twr)*tAvgL:null;
-    rows += '<tr class="total-row">';
-    rows += '<td>TOTAL</td><td>' + tot.trades + '</td>';
-    rows += '<td style="color:var(--green)">' + tot.wins + '</td>';
-    rows += '<td style="color:var(--red)">' + tot.losses + '</td>';
-    rows += '<td class="etd-wr ' + twrc + '">' + (twr*100).toFixed(0) + '%</td>';
-    rows += '<td class="etd-pnl ' + tpc + '">' + (tot.pnl>=0?'+':'') + tot.pnl.toFixed(2) + 'bp</td>';
-    rows += '<td style="color:var(--green)">' + (tAvgW!==null?'+'+tAvgW.toFixed(2)+'bp':'--') + '</td>';
-    rows += '<td style="color:var(--red)">' + (tAvgL!==null?tAvgL.toFixed(2)+'bp':'--') + '</td>';
-    rows += '<td class="etd-pnl ' + (tExp!==null?(tExp>=0?'pos':'neg'):'') + '">' + (tExp!==null?(tExp>=0?'+':'')+tExp.toFixed(2)+'bp':'--') + '</td>';
-    rows += '<td>+' + (tot.mfe/tot.trades).toFixed(2) + 'bp</td>';
-    rows += '<td>' + (tot.mae/tot.trades).toFixed(2) + 'bp</td>';
-    rows += '<td>' + tot.tp + '</td><td>' + tot.sl + '</td><td>' + tot.trail + '</td><td>' + tot.timeout + '</td>';
-    rows += '</tr>';
-    body.innerHTML = rows;
-  }
+  if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'ts-val ' + (exp !== null ? (exp >= 0 ? 'ts-pos' : 'ts-neg') : ''); }
+  if (!localTrades.length) { body.innerHTML = '<div class="tli-empty">Waiting for first trade...</div>'; return; }
+  body.innerHTML = localTrades.filter(t => t.s !== 'SESSION').slice(0, 80).map(makeRow).join('');
 }
 
 
 //  RIGHT PANEL TRADE LOG
 function renderRpTrades() {
-  var list = document.getElementById('rp-trade-list');
+  const list = document.getElementById('rp-trade-list');
   if (!list) return;
-  var trades = localTrades.filter(function(t){ return t.s !== 'SESSION'; });
+  const trades = localTrades.filter(t => t.s !== 'SESSION');
   if (!trades.length) {
     list.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet</div>';
     return;
   }
-  var wins = 0, losses = 0, totalPnl = 0;
-  trades.forEach(function(t) {
-    var p = +t.p || 0; totalPnl += p;
+  let wins = 0, losses = 0, totalPnl = 0;
+  trades.forEach(t => {
+    const p = +t.p || 0; totalPnl += p;
     if (p >= 0) wins++; else losses++;
   });
-  var total = wins + losses;
-  var wrEl = document.getElementById('rp-wr');
-  var wEl  = document.getElementById('rp-wins');
-  var lEl  = document.getElementById('rp-losses');
-  var pEl  = document.getElementById('rp-pnl');
+  const total = wins + losses;
+  const wrEl = document.getElementById('rp-wr');
+  const wEl  = document.getElementById('rp-wins');
+  const lEl  = document.getElementById('rp-losses');
+  const pEl  = document.getElementById('rp-pnl');
   if (wEl) wEl.textContent = wins;
   if (lEl) lEl.textContent = losses;
   if (wrEl) wrEl.textContent = total > 0 ? (wins/total*100).toFixed(0)+'%' : '--%';
@@ -318,40 +256,37 @@ function renderRpTrades() {
     pEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + 'bp';
     pEl.style.color = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
   }
-  list.innerHTML = trades.slice(0, 100).map(function(tr) {
-    var pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
-    var rc  = reasonClass(tr.why || tr.reason || '');
-    var sym = (tr.s || '').replace('USDT','').replace('/','');
-    var en  = tr.en ? fmtPrice(tr.en, sym) : '--';
-    var ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
-    var why = (tr.why || tr.reason || '?').toUpperCase();
-    var time = tr.t ? (tr.t.length > 10 ? tr.t.substring(0,16).replace('T',' ') : tr.t) : '--';
-    var mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
-    var mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
-    var hold = tr.hold != null ? fmtHold(tr.hold) : '--';
-    var winCls = isWin ? 'win' : 'loss';
-    var pnlCls = isWin ? 'pos' : 'neg';
-    var html  = '<div class="rp-trade-row ' + winCls + '">';
-    html += '<div class="rptr-top">';
-    html += '<span class="rptr-tag ' + winCls + '">' + (isWin?'WIN':'LOSS') + '</span>';
-    html += '<span class="rptr-sym">' + sym + '</span>';
-    html += '<span class="rptr-eng">' + (tr.e||'--') + '</span>';
-    html += '<span class="rptr-pnl ' + pnlCls + '">' + fmtPnl(pnl) + '</span>';
-    html += '<span class="rptr-usd ' + pnlCls + '">' + fmtUsd(usd) + '</span>';
-    html += '<span class="rptr-badge ' + rc + '">' + why + '</span>';
-    html += '</div>';
-    html += '<div class="rptr-mid">';
-    html += '<span>Entry: <strong>' + en + '</strong></span>';
-    html += '<span>Exit: <strong>' + ex + '</strong></span>';
-    html += '<span>Hold: <strong>' + hold + '</strong></span>';
-    html += '</div>';
-    html += '<div class="rptr-bot">';
-    html += '<span class="rptr-mfe">MFE ' + mfe + '</span>';
-    html += '<span class="rptr-mae">MAE ' + mae + '</span>';
-    html += '<span class="rptr-time">' + time + '</span>';
-    html += '</div>';
-    html += '</div>';
-    return html;
+  list.innerHTML = trades.slice(0, 100).map(tr => {
+    const pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
+    const rc  = reasonClass(tr.why || tr.reason || '');
+    const sym = (tr.s || '').replace('USDT','').replace('/','');
+    const en  = tr.en ? fmtPrice(tr.en, sym) : '--';
+    const ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
+    const why = (tr.why || tr.reason || '?').toUpperCase();
+    const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(0,16).replace('T',' ') : tr.t) : '--';
+    const mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
+    const mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
+    const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
+    return \`<div class="rp-trade-row \${isWin?'win':'loss'}">
+      <div class="rptr-top">
+        <span class="rptr-tag \${isWin?'win':'loss'}">\${isWin?'WIN':'LOSS'}</span>
+        <span class="rptr-sym">\${sym}</span>
+        <span class="rptr-eng">\${tr.e||'--'}</span>
+        <span class="rptr-pnl \${isWin?'pos':'neg'}">\${fmtPnl(pnl)}</span>
+        <span class="rptr-usd \${isWin?'pos':'neg'}">\${fmtUsd(usd)}</span>
+        <span class="rptr-badge \${rc}">\${why}</span>
+      </div>
+      <div class="rptr-mid">
+        <span>Entry: <strong>\${en}</strong></span>
+        <span>Exit: <strong>\${ex}</strong></span>
+        <span>Hold: <strong>\${hold}</strong></span>
+      </div>
+      <div class="rptr-bot">
+        <span class="rptr-mfe">MFE \${mfe}</span>
+        <span class="rptr-mae">MAE \${mae}</span>
+        <span class="rptr-time">\${time}</span>
+      </div>
+    </div>\`;
   }).join('');
 }
 
@@ -364,30 +299,24 @@ function reasonClass(r) {
 }
 
 function makeRow(tr) {
-  var pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
-  var rc  = reasonClass(tr.why || tr.reason || '');
-  var sym = (tr.s || '').replace('USDT','').replace('/','');
-  var en  = tr.en ? fmtPrice(tr.en, sym) : '--';
-  var ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
-  var why = (tr.why || tr.reason || '?').toUpperCase();
-  var time = tr.t ? tr.t.substring(0,16).replace('T',' ') : '--';
-  var mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
-  var mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
-  var hold = tr.hold != null ? fmtHold(tr.hold) : '--';
-  var wc = isWin ? 'win' : 'loss', pc = isWin ? 'pos' : 'neg';
-  var h = '<div class="tl-row ' + wc + '">';
-  h += '<div class="tl-r1"><span class="tl-tag ' + wc + '">' + (isWin?'W':'L') + '</span>';
-  h += '<span class="tl-sym">' + sym + '</span><span class="tl-eng">' + (tr.e||'--') + '</span>';
-  h += '<span class="tl-pnl ' + pc + '">' + fmtPnl(pnl) + '</span></div>';
-  h += '<div class="tl-r2"><span>In:<strong>' + en + '</strong></span>';
-  h += '<span>Out:<strong>' + ex + '</strong></span>';
-  h += '<span>Hold:<strong>' + hold + '</strong></span></div>';
-  h += '<div class="tl-r3"><span class="tl-mfe">MFE ' + mfe + '</span>';
-  h += '<span class="tl-mae">MAE ' + mae + '</span>';
-  h += '<span class="tl-why ' + rc + '">' + why + '</span>';
-  h += '<span class="tl-time">' + time + '</span></div>';
-  h += '</div>';
-  return h;
+  const pnl = +tr.p || 0, isWin = pnl >= 0, usd = bpToUsd(pnl);
+  const rc = reasonClass(tr.why || tr.reason || '');
+  const sym = (tr.s || '').replace('USDT', '');
+  const en = tr.en ? fmtPrice(tr.en, sym) : '--';
+  const ex = tr.ex ? fmtPrice(tr.ex, sym) : '--';
+  const why = (tr.why || tr.reason || '?').toUpperCase();
+  const time = tr.t ? tr.t.substring(11, 19) : '--';
+  return `<div class="tl-row ${isWin?'win':'loss'}">
+    <span class="tl-tag ${isWin?'win':'loss'}">${isWin?'W':'L'}</span>
+    <span class="tl-sym">${sym}</span>
+    <span class="tl-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
+    <span class="tl-pnl ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
+    <span class="tl-eng">${tr.e||'--'}</span>
+    <span class="tl-val">${en}</span>
+    <span class="tl-val">${ex}</span>
+    <span class="tl-reason ${rc}">${why}</span>
+    <span class="tl-time">${time}</span>
+  </div>`;
 }
 
 //  REGIME STATE 
@@ -426,7 +355,7 @@ function updateAll(data) {
   const updatePrice = (id, val, prev, sym) => {
     const el = $(id); if (!el) return;
     el.textContent = fmtPrice(val, sym);
-    el.className = 'sym-px' + (val > prev ? ' up' : val < prev ? ' down' : '');
+    el.className = 'sym-price' + (val > prev ? ' up' : val < prev ? ' down' : '');
   };
 
   // Update all symbol prices dynamically
@@ -451,11 +380,8 @@ function updateBoostPanel(data) {
     { key: 'boost_eth_lead',   id: 'eth-lead'   },
     { key: 'boost_sol_lead',   id: 'sol-lead'   },
     { key: 'boost_volshock',   id: 'volshock'   },
-    { key: 'boost_ofi',        id: 'ofi'        },
-    { key: 'boost_sweep',      id: 'sweep'      },
-    { key: 'boost_mm',         id: 'mm'         },
   ];
-  const MAX_BOOST = 2.5;
+  const MAX_BOOST = 4.0;
   engines.forEach(({ key, id }) => {
     const val = data[key] !== undefined ? +data[key] : 1.0;
     const pct = Math.min(100, ((val - 1.0) / (MAX_BOOST - 1.0)) * 100);
@@ -471,41 +397,6 @@ function updateBoostPanel(data) {
       valEl.className = 'boost-val' + (isMax ? ' max' : '');
     }
   });
-
-  // Layer Adapt Panel — shows LayerPerformanceTracker state for OFI/SWEEP/MM-PRESSURE
-  const la = data.layer_adapt;
-  if (la) {
-    const ADAPT_LAYERS = [
-      { key: 'ofi',   label: 'OFI'         },
-      { key: 'sweep', label: 'SWEEP'        },
-      { key: 'mm',    label: 'MM-PRESS'     },
-    ];
-    ADAPT_LAYERS.forEach(({ key, label }) => {
-      const d = la[key];
-      if (!d) return;
-      const trades  = d.trades || 0;
-      const pnlEma  = d.pnl_ema || 0;
-      const mult    = d.mult || 1.0;
-      const active  = trades >= 10;  // MIN_TRADES from LayerPerformanceTracker
-      const multEl  = $('la-mult-' + key);
-      const tradesEl = $('la-trades-' + key);
-      const emaEl   = $('la-ema-' + key);
-      const statusEl = $('la-status-' + key);
-      if (multEl) {
-        multEl.textContent = mult.toFixed(2) + 'x';
-        multEl.className = 'la-mult ' + (mult > 1.0 ? 'pos' : mult < 1.0 ? 'neg' : 'muted');
-      }
-      if (tradesEl) tradesEl.textContent = trades + 'T';
-      if (emaEl) {
-        emaEl.textContent = (pnlEma >= 0 ? '+' : '') + pnlEma.toFixed(1) + 'bp';
-        emaEl.className = 'la-ema ' + (pnlEma >= 0 ? 'pos' : 'neg');
-      }
-      if (statusEl) {
-        statusEl.textContent = active ? 'ACTIVE' : 'WARMUP';
-        statusEl.className = 'la-status ' + (active ? 'la-active' : 'la-warmup');
-      }
-    });
-  }
 }
 
   // Top bar
@@ -517,14 +408,7 @@ function updateBoostPanel(data) {
   set('tb-trades', data.total_trades || 0);
   set('tb-positions', data.open_positions || 0);
   const lat = data.latency_p95 || 0;
-  // WS Delay p95: Binance WS gateway delay. Same AWS Tokyo: our net ~0.5ms, Binance pipeline ~35ms = ~36ms total. Normal.
-  // Green <25ms, amber 25-50ms, red >50ms = genuine feed problem.
-  const latColour = lat <= 0 ? '' : lat < 25 ? 'pos' : lat < 50 ? 'warn' : 'neg';
-  const latEl = $('tb-latency');
-  if (latEl) {
-    latEl.textContent = lat > 0 ? lat.toFixed(1) + 'ms' : '--ms';
-    latEl.className = 'tb-val accent ' + latColour;
-  }
+  set('tb-latency', lat > 0 ? lat.toFixed(1) + 'ms' : '--ms');
 
   set('st-pnl', fmtPnl(pnl));
   const stpnl = $('st-pnl'); if (stpnl) stpnl.className = 'sr-val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '');
@@ -539,11 +423,7 @@ function updateBoostPanel(data) {
   const tsCountEl = $('ts-count');
   if (tsCountEl && data.total_trades !== undefined) tsCountEl.textContent = data.total_trades || 0;
   set('st-pos', data.open_positions || 0);
-  const stLatEl = $('st-lat');
-  if (stLatEl) {
-    stLatEl.textContent = lat > 0 ? lat.toFixed(1) + 'ms' : '--ms';
-    stLatEl.className = stLatEl.className.replace(/\b(pos|warn|neg)\b/g,'').trim() + ' ' + latColour;
-  }
+  set('st-lat', lat > 0 ? lat.toFixed(1) + 'ms' : '--ms');
 
   // Boost multiplier panel
   updateBoostPanel(data);

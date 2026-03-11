@@ -667,24 +667,23 @@ public:
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
-        // Keep LIVE profile conservative, but allow these paths in SHADOW research mode.
-        if (shadow_mode && check_impulse(id, price, ts, s, latency_ms)) return;
+        // Keep IMPULSE/EXPANSION disabled until edge is net-positive again.
         if (check_vol_shock(id, price, ts, s, latency_ms)) return;
-        if (shadow_mode && check_expansion(id, price, ts, s, latency_ms)) return;
-        // SHADOW fallback: controlled micro-probe in flat/compression tape.
-        // Purpose: keep sample throughput non-zero when high-conviction layers are quiet.
-        // LIVE mode never uses this path.
-        if (shadow_mode) {
+        // if (check_impulse(id, price, ts, s, latency_ms)) return;
+        // if (check_expansion(id, price, ts, s, latency_ms)) return;
+        // SHADOW fallback: conservative probe (BTC/ETH only), infrequent and only
+        // with positive book pressure. This keeps observability without runaway bleed.
+        if (shadow_mode && id <= 1) {
             const MarketTick& t = s.last_tick;
-            const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= 20000;
-            const bool vol_ok = (s.vol_ratio_ema >= 0.75 && s.vol_ratio_ema <= 2.20);
+            const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= 120000;
+            const bool vol_ok = (s.vol_ratio_ema >= 0.90 && s.vol_ratio_ema <= 1.40);
             if (cooldown_ok && vol_ok) {
                 bool spread_ok = true;
                 bool pressure_ok = true;
                 if (t.bid > 0.0 && t.ask > 0.0) {
                     const double flow = compute_flow_ratio(id);
-                    spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 6.0);
-                    pressure_ok = (t.book_imbalance >= -0.05 && flow >= 0.48);
+                    spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 2.0);
+                    pressure_ok = (t.book_imbalance >= 0.10 && flow >= 0.53);
                 }
                 if (spread_ok && pressure_ok) {
                     shadow_probe_last_ms_[id] = ts;
@@ -2342,7 +2341,7 @@ private:
                           : (layer == LAYER_EXPANSION)
                               ? TradingConfig::EXPANSION_COST_FLOOR_BP               // 8bp  — disabled but correct
                               : TradingConfig::MAKER_COST_FLOOR_BP;                  // 4bp  — IMBALANCE/VWAP/VACUUM
-        if (!shadow_mode && sig.expected_bps < cost_floor) {
+        if (sig.expected_bps < cost_floor) {
             std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
                                     (layer == LAYER_IMPULSE)   ? "IMPULSE" :
@@ -2354,7 +2353,7 @@ private:
             return;
         }
 
-        if (!shadow_mode && !governor_.approve(sig)) {
+        if (!governor_.approve(sig)) {
             return;
         }
         

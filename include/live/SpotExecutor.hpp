@@ -19,6 +19,8 @@
 #include <cstdio>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
+#include <vector>
 
 namespace chimera {
 
@@ -29,11 +31,43 @@ public:
     // Returns false if credentials file is missing or keys are invalid.
     // -----------------------------------------------------------------------
     bool init(const std::string& credentials_path = "config/binance_credentials.json") {
-        if (!rest_.load_credentials(credentials_path)) {
-            std::fprintf(stderr, "[EXECUTOR] Failed to load credentials from %s\n",
-                         credentials_path.c_str());
+        std::vector<std::string> candidates;
+        candidates.push_back(credentials_path);
+        if (credentials_path == "config/binance_credentials.json") {
+            // Allow launches from repo root, build/, and build/Release/.
+            candidates.emplace_back("../config/binance_credentials.json");
+            candidates.emplace_back("../../config/binance_credentials.json");
+        }
+
+        std::string loaded_path;
+        bool loaded = false;
+        bool attempted_existing = false;
+        for (const auto& path : candidates) {
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec)) continue;
+            attempted_existing = true;
+            if (rest_.load_credentials(path)) {
+                loaded = true;
+                loaded_path = path;
+                break;
+            }
+        }
+
+        if (!loaded) {
+            if (!attempted_existing) {
+                std::fprintf(stderr,
+                             "[EXECUTOR] Credentials file not found. Tried: %s, %s, %s\n",
+                             candidates.size() > 0 ? candidates[0].c_str() : "-",
+                             candidates.size() > 1 ? candidates[1].c_str() : "-",
+                             candidates.size() > 2 ? candidates[2].c_str() : "-");
+            } else {
+                std::fprintf(stderr, "[EXECUTOR] Failed to load credentials from available path(s)\n");
+            }
             return false;
         }
+
+        std::printf("[EXECUTOR] Credentials path: %s\n", loaded_path.c_str());
+        std::fflush(stdout);
 
         // Fetch and log account balance to confirm API key is valid
         auto bal = rest_.get_account_balance();

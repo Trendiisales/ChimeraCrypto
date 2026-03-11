@@ -354,17 +354,27 @@ function updateAll(data) {
 
   const updatePrice = (id, val, prev, sym) => {
     const el = $(id); if (!el) return;
+    // Keep the last valid value and direction when a poll is missing/unchanged.
+    if (!(val > 0)) return;
     el.textContent = fmtPrice(val, sym);
-    el.className = 'sym-px' + (val > prev ? ' up' : val < prev ? ' down' : '');
+    if (prev > 0) {
+      if (val > prev) el.className = 'sym-px up';
+      else if (val < prev) el.className = 'sym-px down';
+    }
   };
 
   // Update all symbol prices dynamically
   SYMBOLS.forEach(({ short, full }) => {
     const key = short.toLowerCase();
     // Backend emits full symbol price keys: btcusdt_price, ethusdt_price etc
-    const px = data[full + '_price'] || data[short.toUpperCase() + '_price'] || data[short.toLowerCase() + '_price'] || 0;
-    updatePrice('px-' + key, px, lastPrices[key], short);
-    lastPrices[key] = px;
+    const raw =
+      data[full + '_price'] ??
+      data[short.toUpperCase() + '_price'] ??
+      data[short.toLowerCase() + '_price'];
+    const px = Number(raw);
+    const next = Number.isFinite(px) && px > 0 ? px : lastPrices[key];
+    updatePrice('px-' + key, next, lastPrices[key], short);
+    if (next > 0) lastPrices[key] = next;
   });
 
 //  BOOST MULTIPLIER PANEL 

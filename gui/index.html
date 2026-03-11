@@ -54,21 +54,22 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   overflow:hidden;
   border-bottom:2px solid var(--border2);
   flex:none;
-  max-height:58vh;
 }
 
 /* 7 symbol rows fill height exactly */
-.sym-rows{display:flex;flex-direction:column;flex:none;overflow:auto;}
+.sym-rows{
+  display:flex;flex-direction:column;
+  flex:none;overflow:hidden;
+}
 .sym-row{
   flex:none;
   display:flex;flex-direction:column;
   border-bottom:1px solid var(--border);
-  min-height:80px;overflow:hidden;
+  height:80px;overflow:hidden;
   transition:flex .25s ease;
 }
 .sym-row:last-child{border-bottom:none}
-.sym-row:not(.expanded){height:80px}
-.sym-row.expanded{height:auto;overflow:visible}
+.sym-row.expanded{flex:3}
 
 /* Symbol header row */
 .sym-hd{
@@ -310,7 +311,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .rptr-mfe{color:rgba(0,230,118,.6)}.rptr-mae{color:rgba(255,61,87,.6)}
 .rptr-time{margin-left:auto;color:#2d4558}
 
-.trades-panel{display:flex;flex-direction:column;flex:1;min-height:280px;background:var(--surface);border-top:2px solid var(--border2);}
+.trades-panel{display:flex;flex-direction:column;flex:1;min-height:0;background:var(--surface);border-top:2px solid var(--border2);}
 .trades-panel-hd{display:flex;align-items:center;gap:16px;padding:5px 12px;background:var(--dim);border-bottom:1px solid var(--border2);flex-shrink:0;}
 .tp-label{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:2px;color:var(--muted);flex-shrink:0}
 .tp-stats{display:flex;gap:14px;font-size:11px;color:var(--muted)}
@@ -383,18 +384,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-btc">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-btc">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-btc">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-btc">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-btc-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-btc-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-micro">--</span><span class="eng-sub" id="trades-btc-micro">0T</span><span class="eng-wr" id="wr-btc-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-btc-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-btc-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-structural">--</span><span class="eng-sub" id="trades-btc-structural">0T</span><span class="eng-wr" id="wr-btc-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-btc-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-btc-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-convex">--</span><span class="eng-sub" id="trades-btc-convex">0T</span><span class="eng-wr" id="wr-btc-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-btc-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-btc-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-compression">--</span><span class="eng-sub" id="cticks-btc">0/100</span></div></div>
-          <div class="eng-cell" id="ec-btc-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-btc-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-vacuum">--</span><span class="eng-sub" id="drain-btc">0%</span></div></div>
-          <div class="eng-cell" id="ec-btc-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-btc-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-vwap">--</span><span class="eng-sub" id="vwapdev-btc">0bp</span></div></div>
+          <div class="eng-cell" id="ec-btc-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-btc-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-micro">+0bp</span><span class="eng-sub" id="trades-btc-micro">0T</span><span class="eng-wr" id="wr-btc-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-btc-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-btc-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-structural">+0bp</span><span class="eng-sub" id="trades-btc-structural">0T</span><span class="eng-wr" id="wr-btc-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-btc-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-btc-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-convex">+0bp</span><span class="eng-sub" id="trades-btc-convex">0T</span><span class="eng-wr" id="wr-btc-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-btc-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-btc-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-compression">+0bp</span><span class="eng-sub" id="cticks-btc">0/100</span></div></div>
+          <div class="eng-cell" id="ec-btc-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-btc-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-vacuum">+0bp</span><span class="eng-sub" id="drain-btc">0%</span></div></div>
+          <div class="eng-cell" id="ec-btc-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-btc-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-btc-vwap">+0bp</span><span class="eng-sub" id="vwapdev-btc">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-btc" class="trades-empty">No trades yet</div></div>
       </div>
@@ -411,18 +412,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-eth">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-eth">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-eth">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-eth">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-eth-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-eth-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-micro">--</span><span class="eng-sub" id="trades-eth-micro">0T</span><span class="eng-wr" id="wr-eth-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-eth-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-eth-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-structural">--</span><span class="eng-sub" id="trades-eth-structural">0T</span><span class="eng-wr" id="wr-eth-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-eth-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-eth-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-convex">--</span><span class="eng-sub" id="trades-eth-convex">0T</span><span class="eng-wr" id="wr-eth-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-eth-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-eth-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-compression">--</span><span class="eng-sub" id="cticks-eth">0/100</span></div></div>
-          <div class="eng-cell" id="ec-eth-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-eth-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-vacuum">--</span><span class="eng-sub" id="drain-eth">0%</span></div></div>
-          <div class="eng-cell" id="ec-eth-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-eth-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-vwap">--</span><span class="eng-sub" id="vwapdev-eth">0bp</span></div></div>
+          <div class="eng-cell" id="ec-eth-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-eth-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-micro">+0bp</span><span class="eng-sub" id="trades-eth-micro">0T</span><span class="eng-wr" id="wr-eth-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-eth-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-eth-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-structural">+0bp</span><span class="eng-sub" id="trades-eth-structural">0T</span><span class="eng-wr" id="wr-eth-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-eth-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-eth-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-convex">+0bp</span><span class="eng-sub" id="trades-eth-convex">0T</span><span class="eng-wr" id="wr-eth-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-eth-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-eth-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-compression">+0bp</span><span class="eng-sub" id="cticks-eth">0/100</span></div></div>
+          <div class="eng-cell" id="ec-eth-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-eth-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-vacuum">+0bp</span><span class="eng-sub" id="drain-eth">0%</span></div></div>
+          <div class="eng-cell" id="ec-eth-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-eth-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-eth-vwap">+0bp</span><span class="eng-sub" id="vwapdev-eth">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-eth" class="trades-empty">No trades yet</div></div>
       </div>
@@ -439,18 +440,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-sol">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-sol">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-sol">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-sol">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-sol-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-sol-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-micro">--</span><span class="eng-sub" id="trades-sol-micro">0T</span><span class="eng-wr" id="wr-sol-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-sol-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-sol-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-structural">--</span><span class="eng-sub" id="trades-sol-structural">0T</span><span class="eng-wr" id="wr-sol-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-sol-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-sol-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-convex">--</span><span class="eng-sub" id="trades-sol-convex">0T</span><span class="eng-wr" id="wr-sol-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-sol-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-sol-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-compression">--</span><span class="eng-sub" id="cticks-sol">0/100</span></div></div>
-          <div class="eng-cell" id="ec-sol-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-sol-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-vacuum">--</span><span class="eng-sub" id="drain-sol">0%</span></div></div>
-          <div class="eng-cell" id="ec-sol-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-sol-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-vwap">--</span><span class="eng-sub" id="vwapdev-sol">0bp</span></div></div>
+          <div class="eng-cell" id="ec-sol-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-sol-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-micro">+0bp</span><span class="eng-sub" id="trades-sol-micro">0T</span><span class="eng-wr" id="wr-sol-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-sol-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-sol-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-structural">+0bp</span><span class="eng-sub" id="trades-sol-structural">0T</span><span class="eng-wr" id="wr-sol-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-sol-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-sol-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-convex">+0bp</span><span class="eng-sub" id="trades-sol-convex">0T</span><span class="eng-wr" id="wr-sol-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-sol-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-sol-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-compression">+0bp</span><span class="eng-sub" id="cticks-sol">0/100</span></div></div>
+          <div class="eng-cell" id="ec-sol-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-sol-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-vacuum">+0bp</span><span class="eng-sub" id="drain-sol">0%</span></div></div>
+          <div class="eng-cell" id="ec-sol-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-sol-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-sol-vwap">+0bp</span><span class="eng-sub" id="vwapdev-sol">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-sol" class="trades-empty">No trades yet</div></div>
       </div>
@@ -467,18 +468,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-bnb">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-bnb">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-bnb">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-bnb">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-bnb-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-bnb-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-micro">--</span><span class="eng-sub" id="trades-bnb-micro">0T</span><span class="eng-wr" id="wr-bnb-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-bnb-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-bnb-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-structural">--</span><span class="eng-sub" id="trades-bnb-structural">0T</span><span class="eng-wr" id="wr-bnb-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-bnb-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-bnb-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-convex">--</span><span class="eng-sub" id="trades-bnb-convex">0T</span><span class="eng-wr" id="wr-bnb-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-bnb-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-bnb-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-compression">--</span><span class="eng-sub" id="cticks-bnb">0/100</span></div></div>
-          <div class="eng-cell" id="ec-bnb-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-bnb-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-vacuum">--</span><span class="eng-sub" id="drain-bnb">0%</span></div></div>
-          <div class="eng-cell" id="ec-bnb-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-bnb-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-vwap">--</span><span class="eng-sub" id="vwapdev-bnb">0bp</span></div></div>
+          <div class="eng-cell" id="ec-bnb-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-bnb-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-micro">+0bp</span><span class="eng-sub" id="trades-bnb-micro">0T</span><span class="eng-wr" id="wr-bnb-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-bnb-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-bnb-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-structural">+0bp</span><span class="eng-sub" id="trades-bnb-structural">0T</span><span class="eng-wr" id="wr-bnb-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-bnb-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-bnb-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-convex">+0bp</span><span class="eng-sub" id="trades-bnb-convex">0T</span><span class="eng-wr" id="wr-bnb-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-bnb-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-bnb-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-compression">+0bp</span><span class="eng-sub" id="cticks-bnb">0/100</span></div></div>
+          <div class="eng-cell" id="ec-bnb-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-bnb-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-vacuum">+0bp</span><span class="eng-sub" id="drain-bnb">0%</span></div></div>
+          <div class="eng-cell" id="ec-bnb-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-bnb-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-bnb-vwap">+0bp</span><span class="eng-sub" id="vwapdev-bnb">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-bnb" class="trades-empty">No trades yet</div></div>
       </div>
@@ -495,18 +496,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-avax">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-avax">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-avax">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-avax">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-avax-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-avax-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-micro">--</span><span class="eng-sub" id="trades-avax-micro">0T</span><span class="eng-wr" id="wr-avax-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-avax-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-avax-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-structural">--</span><span class="eng-sub" id="trades-avax-structural">0T</span><span class="eng-wr" id="wr-avax-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-avax-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-avax-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-convex">--</span><span class="eng-sub" id="trades-avax-convex">0T</span><span class="eng-wr" id="wr-avax-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-avax-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-avax-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-compression">--</span><span class="eng-sub" id="cticks-avax">0/100</span></div></div>
-          <div class="eng-cell" id="ec-avax-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-avax-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-vacuum">--</span><span class="eng-sub" id="drain-avax">0%</span></div></div>
-          <div class="eng-cell" id="ec-avax-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-avax-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-vwap">--</span><span class="eng-sub" id="vwapdev-avax">0bp</span></div></div>
+          <div class="eng-cell" id="ec-avax-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-avax-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-micro">+0bp</span><span class="eng-sub" id="trades-avax-micro">0T</span><span class="eng-wr" id="wr-avax-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-avax-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-avax-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-structural">+0bp</span><span class="eng-sub" id="trades-avax-structural">0T</span><span class="eng-wr" id="wr-avax-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-avax-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-avax-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-convex">+0bp</span><span class="eng-sub" id="trades-avax-convex">0T</span><span class="eng-wr" id="wr-avax-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-avax-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-avax-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-compression">+0bp</span><span class="eng-sub" id="cticks-avax">0/100</span></div></div>
+          <div class="eng-cell" id="ec-avax-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-avax-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-vacuum">+0bp</span><span class="eng-sub" id="drain-avax">0%</span></div></div>
+          <div class="eng-cell" id="ec-avax-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-avax-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-avax-vwap">+0bp</span><span class="eng-sub" id="vwapdev-avax">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-avax" class="trades-empty">No trades yet</div></div>
       </div>
@@ -523,18 +524,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-link">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-link">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-link">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-link">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-link-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-link-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-micro">--</span><span class="eng-sub" id="trades-link-micro">0T</span><span class="eng-wr" id="wr-link-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-link-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-link-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-structural">--</span><span class="eng-sub" id="trades-link-structural">0T</span><span class="eng-wr" id="wr-link-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-link-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-link-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-convex">--</span><span class="eng-sub" id="trades-link-convex">0T</span><span class="eng-wr" id="wr-link-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-link-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-link-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-compression">--</span><span class="eng-sub" id="cticks-link">0/100</span></div></div>
-          <div class="eng-cell" id="ec-link-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-link-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-vacuum">--</span><span class="eng-sub" id="drain-link">0%</span></div></div>
-          <div class="eng-cell" id="ec-link-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-link-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-vwap">--</span><span class="eng-sub" id="vwapdev-link">0bp</span></div></div>
+          <div class="eng-cell" id="ec-link-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-link-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-micro">+0bp</span><span class="eng-sub" id="trades-link-micro">0T</span><span class="eng-wr" id="wr-link-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-link-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-link-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-structural">+0bp</span><span class="eng-sub" id="trades-link-structural">0T</span><span class="eng-wr" id="wr-link-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-link-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-link-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-convex">+0bp</span><span class="eng-sub" id="trades-link-convex">0T</span><span class="eng-wr" id="wr-link-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-link-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-link-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-compression">+0bp</span><span class="eng-sub" id="cticks-link">0/100</span></div></div>
+          <div class="eng-cell" id="ec-link-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-link-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-vacuum">+0bp</span><span class="eng-sub" id="drain-link">0%</span></div></div>
+          <div class="eng-cell" id="ec-link-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-link-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-link-vwap">+0bp</span><span class="eng-sub" id="vwapdev-link">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-link" class="trades-empty">No trades yet</div></div>
       </div>
@@ -551,24 +552,45 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
             <span>Cap:<strong id="cap-pol">--</strong></span>
           </div>
           <div class="sym-hd-right">
-            <span class="sym-pnl-badge zero" id="mini-pnl-pol">--</span>
+            <span class="sym-pnl-badge zero" id="mini-pnl-pol">+0.00bp</span>
             <span class="sym-trades-count" id="mini-t-pol">0T</span>
             <span class="chev">Ã¢ÂÂ¼</span>
           </div>
         </div>
         <div class="eng-strip">
-          <div class="eng-cell" id="ec-pol-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-pol-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-micro">--</span><span class="eng-sub" id="trades-pol-micro">0T</span><span class="eng-wr" id="wr-pol-micro">--%</span></div></div>
-          <div class="eng-cell" id="ec-pol-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-pol-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-structural">--</span><span class="eng-sub" id="trades-pol-structural">0T</span><span class="eng-wr" id="wr-pol-structural">--%</span></div></div>
-          <div class="eng-cell" id="ec-pol-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-pol-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-convex">--</span><span class="eng-sub" id="trades-pol-convex">0T</span><span class="eng-wr" id="wr-pol-convex">--%</span></div></div>
-          <div class="eng-cell" id="ec-pol-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-pol-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-compression">--</span><span class="eng-sub" id="cticks-pol">0/100</span></div></div>
-          <div class="eng-cell" id="ec-pol-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-pol-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-vacuum">--</span><span class="eng-sub" id="drain-pol">0%</span></div></div>
-          <div class="eng-cell" id="ec-pol-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-pol-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-vwap">--</span><span class="eng-sub" id="vwapdev-pol">0bp</span></div></div>
+          <div class="eng-cell" id="ec-pol-micro"><div class="eng-cell-top"><span class="eng-nm">MICRO</span><span class="eng-badge eb-off" id="eb-pol-micro">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-micro">+0bp</span><span class="eng-sub" id="trades-pol-micro">0T</span><span class="eng-wr" id="wr-pol-micro">--%</span></div></div>
+          <div class="eng-cell" id="ec-pol-structural"><div class="eng-cell-top"><span class="eng-nm">STRUCT</span><span class="eng-badge eb-off" id="eb-pol-structural">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-structural">+0bp</span><span class="eng-sub" id="trades-pol-structural">0T</span><span class="eng-wr" id="wr-pol-structural">--%</span></div></div>
+          <div class="eng-cell" id="ec-pol-convex"><div class="eng-cell-top"><span class="eng-nm">CONVEX</span><span class="eng-badge eb-off" id="eb-pol-convex">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-convex">+0bp</span><span class="eng-sub" id="trades-pol-convex">0T</span><span class="eng-wr" id="wr-pol-convex">--%</span></div></div>
+          <div class="eng-cell" id="ec-pol-compression"><div class="eng-cell-top"><span class="eng-nm">COMPR</span><span class="eng-badge eb-off" id="eb-pol-compression">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-compression">+0bp</span><span class="eng-sub" id="cticks-pol">0/100</span></div></div>
+          <div class="eng-cell" id="ec-pol-vacuum"><div class="eng-cell-top"><span class="eng-nm">VACUUM</span><span class="eng-badge eb-off" id="eb-pol-vacuum">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-vacuum">+0bp</span><span class="eng-sub" id="drain-pol">0%</span></div></div>
+          <div class="eng-cell" id="ec-pol-vwap"><div class="eng-cell-top"><span class="eng-nm">VWAP</span><span class="eng-badge eb-off" id="eb-pol-vwap">OFF</span></div><div class="eng-stats-row"><span class="eng-pnl zero" id="pnl-pol-vwap">+0bp</span><span class="eng-sub" id="vwapdev-pol">0bp</span></div></div>
         </div>
         <div class="sym-trades-exp"><div id="str-pol" class="trades-empty">No trades yet</div></div>
       </div>
 
     </div><!-- /sym-rows -->
 
+    <!-- Trade log strip at bottom -->
+    <div class="trade-log-bar">
+      <span class="tl-label">ALL TRADES</span>
+      <div class="tl-stat"><span class="tl-stat-label">Trades</span><span class="tl-stat-val accent" id="ts-count">0</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">WR</span><span class="tl-stat-val" id="ts-wr">--%</span></div>
+      <div class="tl-stat"><span class="tl-stat-val" style="color:var(--green);font-size:11px" id="ts-wins">0</span><span class="tl-stat-label">/</span><span class="tl-stat-val" style="color:var(--red);font-size:11px" id="ts-losses">0</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">P&L</span><span class="tl-stat-val" id="ts-pnl">+0.00bp</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">USD</span><span class="tl-stat-val" id="ts-usd">+$0.00</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">Avg Win</span><span class="tl-stat-val pos" id="ts-avgwin">--</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">Avg Loss</span><span class="tl-stat-val neg" id="ts-avgloss">--</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">Exp</span><span class="tl-stat-val" id="ts-exp">--</span></div>
+      <div class="tl-sep"></div>
+      <div class="tl-stat"><span class="tl-stat-label">TP</span><span class="tl-stat-val pos" id="st-tp">0</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">SL</span><span class="tl-stat-val neg" id="st-sl">0</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">TR</span><span class="tl-stat-val accent" id="st-trail">0</span></div>
+      <div class="tl-stat"><span class="tl-stat-label">TO</span><span class="tl-stat-val" style="color:var(--yellow)" id="st-timeout">0</span></div>
+      <button class="tl-clear" onclick="clearTrades()">CLEAR</button>
+    </div>
   </div><!-- /sym-panel -->
 
   <!-- TRADES PANEL -->

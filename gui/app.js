@@ -676,10 +676,9 @@ setInterval(updateUptime, 1000);
 
 //  COLLAPSIBLE SYM-BLOCKS 
 function toggleSym(sl, event) {
+  // Disabled: expansion was crowding out the main trade panel.
   if (event) event.stopPropagation();
-  const block = document.getElementById('sb-' + sl);
-  if (!block) return;
-  block.classList.toggle('expanded');
+  return;
 }
 // Legacy alias
 function toggleBlock(sl, event) { toggleSym(sl, event); }

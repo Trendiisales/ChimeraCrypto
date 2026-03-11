@@ -261,25 +261,21 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
                                       now_sys.time_since_epoch()).count();
 
                 std::string msg(static_cast<char*>(in), len);
-
-                // Combined stream wraps each event in: {"stream":"btcusdt@bookTicker","data":{...}}
-                // Find the "data" object
-                size_t data_pos = msg.find("\"data\":");
-                if (data_pos == std::string::npos) break;
-                std::string data = msg.substr(data_pos + 7); // skip "data":
-
-                // Identify event type from "e" field
-                size_t e_pos = data.find("\"e\":\"");
-                if (e_pos == std::string::npos) break;
-                e_pos += 5;
-                size_t e_end = data.find('"', e_pos);
-                if (e_end == std::string::npos) break;
-                std::string event_type = data.substr(e_pos, e_end - e_pos);
-
-                if (event_type == "bookTicker") {
-                    g_feed->handle_book_ticker(data, recv_ms);
-                } else if (event_type == "aggTrade") {
-                    g_feed->handle_agg_trade(data, recv_ms);
+                // Prefer routing by top-level stream key:
+                // {"stream":"btcusdt@bookTicker","data":{...}}
+                std::string stream = extract_str(msg, "stream");
+                if (stream.find("@bookTicker") != std::string::npos) {
+                    g_feed->handle_book_ticker(msg, recv_ms);
+                } else if (stream.find("@aggTrade") != std::string::npos) {
+                    g_feed->handle_agg_trade(msg, recv_ms);
+                } else {
+                    // Fallback: route by nested event type if stream key absent.
+                    std::string event_type = extract_str(msg, "e");
+                    if (event_type == "bookTicker") {
+                        g_feed->handle_book_ticker(msg, recv_ms);
+                    } else if (event_type == "aggTrade") {
+                        g_feed->handle_agg_trade(msg, recv_ms);
+                    }
                 }
                 break;
             }

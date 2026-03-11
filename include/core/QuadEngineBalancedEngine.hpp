@@ -218,6 +218,7 @@ public:
         json << "\"latency_p95\":" << lat_p95_display_ << ",";
         json << balanced_.get_boost_json() << ",";
         json << balanced_.get_layer_adapt_json() << ",";
+        json << "\"rejections\":" << balanced_.get_rejection_stats() << ",";
 
         // Full session stats  per-layer wins/losses/tp/sl/trail/timeout
         json << balanced_.get_session_stats_json() << ",";

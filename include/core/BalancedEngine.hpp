@@ -694,10 +694,12 @@ public:
             const MarketTick& t = s.last_tick;
             if (t.bid > 0.0 && t.ask > 0.0) {
                 const double flow = compute_flow_ratio(id);
-                const bool spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 2.5);
-                const bool vol_ok = (s.vol_ratio_ema >= 0.90 && s.vol_ratio_ema <= 1.35);
-                const bool pressure_ok = (t.book_imbalance >= 0.08 && flow >= 0.51);
-                if (spread_ok && vol_ok && pressure_ok) {
+                const bool spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 3.0);
+                const bool vol_ok = (s.vol_ratio_ema >= 0.80 && s.vol_ratio_ema <= 1.60);
+                const bool pressure_ok = (t.book_imbalance >= 0.02 && flow >= 0.50);
+                const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= 15000;
+                if (spread_ok && vol_ok && pressure_ok && cooldown_ok) {
+                    shadow_probe_last_ms_[id] = ts;
                     rejection_throttle_.record(std::string(sym_short(id)) + " SHADOW-PROBE", "fired");
                     enter(id, price, ts, s, LAYER_MICRO, true);
                     return;
@@ -2877,6 +2879,7 @@ private:
     // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
     int     sym_consecutive_sl_[MAX_SYMBOLS];
     int64_t sym_sl_cooldown_[MAX_SYMBOLS];
+    int64_t shadow_probe_last_ms_[MAX_SYMBOLS] = {};
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
 

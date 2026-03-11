@@ -224,6 +224,14 @@ function renderTradeLog() {
   const alEl = $('ts-avgloss'); if (alEl) alEl.textContent = avgLoss !== null ? avgLoss.toFixed(2) + 'bp' : '--';
   const expEl = $('ts-exp');
   if (expEl) { expEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; expEl.className = 'tl-stat-val ' + (exp !== null ? (exp >= 0 ? 'pos' : 'neg') : ''); }
+  // Mirror to trades-panel header (tp- IDs) — avoids duplicate ID issues
+  set('tp-wins', winCount); set('tp-losses', lossCount);
+  const tpWrEl = $('tp-wr'); if (tpWrEl) { tpWrEl.textContent = wr !== null ? (wr*100).toFixed(0)+'%' : '--%'; tpWrEl.className = 'tp-val ' + (wr !== null ? (wr >= 0.5 ? 'pos' : 'neg') : ''); }
+  const tpPnlEl = $('tp-pnl'); if (tpPnlEl) { tpPnlEl.textContent = fmtPnl(totalPnl); tpPnlEl.className = 'tp-val ' + (totalPnl >= 0 ? 'pos' : 'neg'); }
+  const tpUsdEl = $('tp-usd'); if (tpUsdEl) { tpUsdEl.textContent = fmtUsd(bpToUsd(totalPnl)); tpUsdEl.className = 'tp-val ' + (totalPnl >= 0 ? 'pos' : 'neg'); }
+  const tpAwEl = $('tp-avgwin'); if (tpAwEl) tpAwEl.textContent = avgWin !== null ? '+' + avgWin.toFixed(2) + 'bp' : '--';
+  const tpAlEl = $('tp-avgloss'); if (tpAlEl) tpAlEl.textContent = avgLoss !== null ? avgLoss.toFixed(2) + 'bp' : '--';
+  const tpExpEl = $('tp-exp'); if (tpExpEl) { tpExpEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; tpExpEl.className = 'tp-val ' + (exp !== null ? (exp >= 0 ? 'pos' : 'neg') : ''); }
   if (body) {
     var trades = localTrades.filter(function(t){ return t.s !== 'SESSION'; });
     if (!trades.length) {
@@ -394,10 +402,11 @@ function makeRow(tr) {
 function regimeClass(state) {
   if (!state) return 'rs-neutral';
   const s = state.toUpperCase();
-  if (s.includes('COMPRESSION')) return 'rs-compression';
   if (s.includes('BREAKOUT') || s.includes('BURST')) return 'rs-burst';
-  if (s.includes('TREND') || s.includes('BUILDUP')) return 'rs-trending';
-  if (s.includes('DEAD') || s.includes('GRIND')) return 'rs-dead';
+  if (s.includes('BUILDUP') || s.includes('TREND')) return 'rs-trending';
+  if (s.includes('COMPRESSION')) return 'rs-compression';
+  if (s.includes('DEAD')) return 'rs-dead';
+  if (s.includes('GRIND')) return 'rs-neutral';
   return 'rs-neutral';
 }
 
@@ -553,6 +562,9 @@ function updateBoostPanel(data) {
     const s = data.session;
     set('st-tp', s.tp_exits || 0); set('st-sl', s.sl_exits || 0);
     set('st-trail', s.trail_exits || 0); set('st-timeout', s.timeout_exits || 0);
+    // Mirror to trades-panel header
+    set('tp-tp', s.tp_exits || 0); set('tp-sl', s.sl_exits || 0);
+    set('tp-trail', s.trail_exits || 0); set('tp-timeout', s.timeout_exits || 0);
     const wr = s.total_trades > 0 ? s.win_rate.toFixed(0) + '%' : '--%';
     const wrEl = $('st-wr');
     if (wrEl) { wrEl.textContent = wr; wrEl.className = 'sr-val ' + (s.wins >= s.losses ? 'pos' : 'neg'); }

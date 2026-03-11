@@ -1336,6 +1336,8 @@ private:
     //   Threshold 0.45 filters to highest-quality setups
     // ======================================================================
     bool check_imbalance(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Quality filter: disable thin-tail symbols for imbalance (AVAX/LINK/POL).
+        if (id > 3) return false;
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMBAL";
 
@@ -1994,6 +1996,8 @@ private:
     // EV: TP=16bp gross (+6bp net), SL=6bp, win rate target ~65%
     // ======================================================================
     bool check_vacuum(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Quality filter: run vacuum only on deepest books (BTC/ETH).
+        if (id > 1) return false;
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " VACUUM";
 
@@ -2115,6 +2119,8 @@ private:
     // EV at 45% WR: 0.45*18 - 0.55*6 = 8.1 - 3.3 = +4.8bp net (after ~4bp maker cost)
     // =========================================================================
     bool check_ofi_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Quality filter: disable thin-tail symbols for OFI.
+        if (id > 3) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
@@ -2238,6 +2244,8 @@ private:
     // EV at 50% WR: 0.50*20 - 0.50*7 = 10 - 3.5 = +6.5bp net (after ~4bp maker)
     // =========================================================================
     bool check_mm_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Quality filter: disable thin-tail symbols for MM inventory pressure.
+        if (id > 3) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
@@ -2286,6 +2294,13 @@ private:
     }
 
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
+        // Auto-disable persistently losing layers in-session.
+        auto& ls_guard = stats_for(layer);
+        if (ls_guard.total() >= 8 && ls_guard.avg_pnl() < -1.0) {
+            std::string key = std::string(sym_short(id)) + " LAYER";
+            rejection_throttle_.record(key, "layer_disabled_negative");
+            return;
+        }
         Signal sig;
         sig.symbol = sym_full(id);
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :

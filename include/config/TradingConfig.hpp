@@ -153,7 +153,7 @@ struct TradingConfig {
 
     // Take-profit for imbalance trades (gross)
     // Net after 10bp costs = +2bp. Needs very high win rate.
-    static constexpr double IMBALANCE_TP_BP            = 12.0;
+    static constexpr double IMBALANCE_TP_BP            = 8.0;   // quality: capture shallower micro moves before timeout drift
 
     // Stop loss for imbalance trades
     // 3bp was too tight  getting stopped by tick noise. 4bp gives trade more room
@@ -161,7 +161,7 @@ struct TradingConfig {
     static constexpr double IMBALANCE_SL_BP            = 4.0;
 
     // Max hold time for imbalance trade
-    static constexpr int64_t IMBALANCE_MAX_HOLD_MS     = 8000;
+    static constexpr int64_t IMBALANCE_MAX_HOLD_MS     = 4000;  // quality: cut stagnant entries faster
 
 
     // -------------------------------------------------------------------------
@@ -193,9 +193,9 @@ struct TradingConfig {
     static constexpr double VACUUM_ASK_DRAIN_RATIO     = 0.40;  // ask depth drops 40%+
     static constexpr double VACUUM_MIN_IMBALANCE       = 0.20;  // bid must be present
     static constexpr double VACUUM_MAX_SPREAD_BPS      = 2.0;   // don't enter wide spreads
-    static constexpr double VACUUM_TP_BP               = 16.0;
+    static constexpr double VACUUM_TP_BP               = 10.0;  // quality: realistic target for current tape
     static constexpr double VACUUM_SL_BP               = 6.0;
-    static constexpr int64_t VACUUM_MAX_HOLD_MS        = 12000;
+    static constexpr int64_t VACUUM_MAX_HOLD_MS        = 7000;  // quality: reduce timeout bleed
     static constexpr double LATENCY_VACUUM_MAX_MS      = 60.0;  // data age calibrated: old 30ms blocked p95 ticks
 
     // -------------------------------------------------------------------------
@@ -398,9 +398,9 @@ struct TradingConfig {
     static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.15;  // throughput baseline
     static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.05;  // throughput baseline
     static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
-    static constexpr double OFI_TP_BP              = 18.0;  // conservative: new engine, calibrate later
+    static constexpr double OFI_TP_BP              = 12.0;  // quality: monetize smaller continuations
     static constexpr double OFI_SL_BP              = 6.0;   // 3:1 gross R:R
-    static constexpr int64_t OFI_MAX_HOLD_MS       = 10000; // 10s: OFI moves are medium-speed
+    static constexpr int64_t OFI_MAX_HOLD_MS       = 7000; // quality: cut dead OFI entries faster
 
     // -------------------------------------------------------------------------
     // LIQUIDITY SWEEP (LAYER_SWEEP)

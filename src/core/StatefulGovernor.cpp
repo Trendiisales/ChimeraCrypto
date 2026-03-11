@@ -93,9 +93,10 @@ void StatefulGovernor::log_reject(const Signal& signal,
 
 bool StatefulGovernor::approve(Signal& signal)
 {
-    // CRITICAL: MICRO layer is PARKED - reject all MICRO signals
-    if (signal.layer == LayerType::MICRO) {
-        log_reject(signal, "MICRO_PARKED");
+    // MICRO is allowed again, but only when volatility is not dead.
+    // This prevents imbalance-style entries in flat/noise tape.
+    if (signal.layer == LayerType::MICRO && current_vol_score_ < 0.85) {
+        log_reject(signal, "MICRO_LOW_VOL");
         return false;
     }
 

@@ -93,8 +93,8 @@ void StatefulGovernor::log_reject(const Signal& signal,
 
 bool StatefulGovernor::approve(Signal& signal)
 {
-    // CRITICAL: MICRO layer is PARKED - reject all MICRO signals
-    if (signal.layer == LayerType::MICRO) {
+    // Optional micro parking switch for emergency disable.
+    if (config_.park_micro_layer && signal.layer == LayerType::MICRO) {
         log_reject(signal, "MICRO_PARKED");
         return false;
     }

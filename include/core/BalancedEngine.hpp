@@ -382,6 +382,8 @@ public:
         
         // PHASE 2: Update microstructure engines
         update_market_data(id, tick, ts, latency_ms);
+        governor_.update_latency(latency_ms);
+        governor_.update_volatility(std::max(0.8, symbols_[id].vol_ratio_ema));
         // Only update last_tick when bookTicker data is present (bid > 0)
         // aggTrade fires with bid=0 and would corrupt the stored book state
         if (tick.bid > 0.0 && tick.ask > 0.0) {
@@ -675,7 +677,26 @@ public:
         if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
     }
     
-    std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
+    std::string get_rejection_stats() const {
+        std::ostringstream j;
+        j << "{";
+        bool first = true;
+        for (const auto& kv : rejection_throttle_.rejection_counts) {
+            if (!first) j << ",";
+            first = false;
+            const std::string& key = kv.first;
+            const std::string reason =
+                (rejection_throttle_.last_rejection_reason.count(key) > 0)
+                    ? rejection_throttle_.last_rejection_reason.at(key)
+                    : "unknown";
+            j << "\"" << key << "\":{"
+              << "\"count\":" << kv.second << ","
+              << "\"last_reason\":\"" << reason << "\""
+              << "}";
+        }
+        j << "}";
+        return j.str();
+    }
     // Boost multiplier values exposed for /api/state polling
     std::string get_boost_json() const {
         std::ostringstream j;
@@ -2273,6 +2294,7 @@ private:
                            (layer == LAYER_IMPULSE)            ? TradingConfig::IMPULSE_TP_BP :
                                                                  TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
+        sig.latency_ms = market_env_.latency_ms;
 
         // HARD LATENCY BACKSTOP  never enter on stale data regardless of engine
         if (market_env_.latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {

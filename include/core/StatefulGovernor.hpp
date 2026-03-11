@@ -38,6 +38,7 @@ struct GovernorConfig {
     int    symbol_rank_interval_sec = 60;
 
     double strength_alpha      = 6.0;
+    bool   park_micro_layer    = false; // baseline: allow MICRO layer unless explicitly parked
 };
 
 class StatefulGovernor {

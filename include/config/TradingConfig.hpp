@@ -85,9 +85,9 @@ struct TradingConfig {
     static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 8.0;   // lowered from 10bp  catch more valid moves, sustain filter handles fakes
     // LEADLAG confirmation gates (added Mar 2026)
     // OB ratio: bid_size/ask_size must exceed this — filters neutral/bearish book
-    static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.2;  // bid 20% > ask
+    static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.08; // baseline: avoid over-filtering valid lead-lag moves
     // Flow ratio: buy_vol_ema/sell_vol_ema must exceed this — confirms buy aggression
-    static constexpr double LEADLAG_CONFIRM_FLOW_RATIO  = 1.1;  // buy flow 10% > sell
+    static constexpr double LEADLAG_CONFIRM_FLOW_RATIO  = 1.03; // baseline: keep confirmation but reduce false rejects
 
     // Target already moved this much  edge consumed, don't enter
     // Tightened 32bp: if target already moved 2bp the propagation is done
@@ -145,11 +145,11 @@ struct TradingConfig {
     // Minimum |book_imbalance| to fire: (bid_size - ask_size)/(bid_size + ask_size)
     // 0.42 = bids must be 2.45x asks. Restored toward original 0.45  at 0.30 the
     // signal fired on noise and WR dropped to ~50%. Need 79%+ WR at this TP/SL.
-    static constexpr double IMBALANCE_THRESHOLD        = 0.42;
+    static constexpr double IMBALANCE_THRESHOLD        = 0.34;
 
     // Reject if spread too wide  wide spread means fills are poor
     // BTC normal spread: 0.1-0.5bp. Above 1.5bp = unusually wide, skip.
-    static constexpr double IMBALANCE_MAX_SPREAD_BPS   = 1.5;
+    static constexpr double IMBALANCE_MAX_SPREAD_BPS   = 2.0;
 
     // Take-profit for imbalance trades (gross)
     // Net after 10bp costs = +2bp. Needs very high win rate.
@@ -294,7 +294,7 @@ struct TradingConfig {
     // 0.55 = slight buy majority. 0.60 = clear buy pressure.
     // Filters breakouts where smart money is actually selling into retail buyers.
     // Set to 0.0 to disable (useful when testing new signals).
-    static constexpr double FLOW_CONFIRM_THRESHOLD = 0.55;
+    static constexpr double FLOW_CONFIRM_THRESHOLD = 0.52;
 
     // -------------------------------------------------------------------------
     // MAKER ORDER MODE
@@ -394,8 +394,8 @@ struct TradingConfig {
     // Edge: 33-tick OFI ratio > 0.25 + volume spike + book confirmation
     // Maker entry. TP=18bp, SL=6bp → EV +4.8bp at 45% WR after ~4bp cost.
     // Only fires in GRIND/BUILDUP to avoid chasing breakout momentum.
-    static constexpr double OFI_RATIO_THRESHOLD    = 0.25;  // (buy_ema - sell_ema) / total > 0.25
-    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.5;   // current volume > 1.5x EMA baseline
+    static constexpr double OFI_RATIO_THRESHOLD    = 0.20;  // baseline: activate OFI earlier while retaining directional bias
+    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.3;   // baseline: reduce missed setups during moderate expansion
     static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.10;  // book_imbalance > 0.10 (bid-heavy)
     static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
     static constexpr double OFI_TP_BP              = 18.0;  // conservative: new engine, calibrate later
@@ -408,7 +408,7 @@ struct TradingConfig {
     // Edge: trade size spike >5x + ask depth collapse >40% + buyer aggression
     // Taker entry (edge decays fast, <200ms window). TP=22bp, SL=8bp.
     // EV at 55% WR: 0.55*22 - 0.45*8 = +8.5bp net after ~8bp taker cost.
-    static constexpr double SWEEP_SIZE_SPIKE_MULT     = 5.0;  // trade qty > 5x EMA baseline
+    static constexpr double SWEEP_SIZE_SPIKE_MULT     = 3.8;  // baseline: preserve spike quality but reduce starvation
     static constexpr double SWEEP_DEPTH_COLLAPSE_RATIO = 0.40; // ask depth drops >40% vs prev tick
     static constexpr double SWEEP_MAX_SPREAD_BPS      = 3.0;  // wider allowed: sweeps happen in volatile books
     static constexpr double SWEEP_TP_BP               = 22.0; // sweeps produce 30-120bp raw, 22bp is conservative
@@ -449,7 +449,7 @@ struct TradingConfig {
     static constexpr int SESSION_DEAD_START_UTC   = 20;
     static constexpr int SESSION_DEAD_END_UTC     = 23;
     // In dead zone: max 1 position, raise imbalance threshold by this factor
-    static constexpr double DEAD_ZONE_IMBAL_MULT  = 1.5;
+    static constexpr double DEAD_ZONE_IMBAL_MULT  = 1.25;
     static constexpr int    DEAD_ZONE_MAX_POS     = 1;
     static constexpr int    MAX_CONCURRENT_POSITIONS = 5;
     static constexpr int    LEADLAG_PRIME_START_UTC   = 1;

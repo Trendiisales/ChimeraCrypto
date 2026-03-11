@@ -420,7 +420,8 @@ function updateBoostPanel(data) {
   const pnlEl = $('tb-pnl');
   if (pnlEl) { pnlEl.textContent = fmtPnl(pnl); pnlEl.className = 'tb-val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''); }
   const equity = $('tb-equity');
-  if (equity) equity.textContent = '$' + (10000 + pnl).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+  // pnl is in bps; convert to USD before showing equity.
+  if (equity) equity.textContent = '$' + (10000 + bpToUsd(pnl)).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
   set('tb-trades', data.total_trades || 0);
   set('tb-positions', data.open_positions || 0);
   const lat = data.latency_p95 || 0;
@@ -496,7 +497,10 @@ function updateBoostPanel(data) {
     const miniPnl = $(`mini-pnl-${sym}`);
     const microPnl = d.micro_total_pnl_bp || 0;
     const microT   = d.micro_total_trades || 0;
-    if (miniPnl) { miniPnl.textContent = (microPnl >= 0 ? '+' : '') + microPnl.toFixed(2) + 'bp'; miniPnl.className = 'sm-pnl ' + (microPnl > 0 ? 'pos' : microPnl < 0 ? 'neg' : ''); }
+    if (miniPnl) {
+      miniPnl.textContent = (microPnl >= 0 ? '+' : '') + microPnl.toFixed(2) + 'bp';
+      miniPnl.className = 'sym-pnl-badge ' + (microPnl > 0 ? 'pos' : microPnl < 0 ? 'neg' : 'zero');
+    }
     set(`mini-t-${sym}`, microT);
     // Auto-expand if micro engine goes active
     autoExpandIfActive(sym, d.micro_active);
@@ -544,10 +548,16 @@ function updateBoostPanel(data) {
       if (pEl) {
         const inactiveZero = !active && (pnlBp == null || Math.abs(+pnlBp) < 1e-9);
         pEl.textContent = inactiveZero ? '--' : (pnlBp != null ? fmtPnl(pnlBp) : '--');
-        pEl.className = 'est-val ' + (inactiveZero ? 'dim' : (pnlBp > 0 ? 'pos' : pnlBp < 0 ? 'neg' : 'dim'));
+        pEl.className = 'eng-pnl ' + (inactiveZero ? 'zero' : (pnlBp > 0 ? 'pos' : pnlBp < 0 ? 'neg' : 'zero'));
       }
       set(`trades-${sym}-${eng}`, trades != null ? trades : 0);
-      if (wr != null) { const wrEl = $(`wr-${sym}-${eng}`); if (wrEl) { wrEl.textContent = (wr * 100).toFixed(0) + '%'; wrEl.className = 'est-val ' + (wr >= 0.5 ? 'pos' : 'neg'); } }
+      if (wr != null) {
+        const wrEl = $(`wr-${sym}-${eng}`);
+        if (wrEl) {
+          wrEl.textContent = (wr * 100).toFixed(0) + '%';
+          wrEl.className = 'eng-wr ' + (wr >= 0.5 ? 'pos' : 'neg');
+        }
+      }
       if (entry != null && entry > 0) set(`ep-${sym}-${eng}`, fmtPrice(entry, sym));
     });
   });

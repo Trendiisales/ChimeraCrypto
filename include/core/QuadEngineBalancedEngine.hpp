@@ -420,6 +420,17 @@ private:
           << "\"mae\":" << r.mae_bp << ","
           << "\"hold\":" << r.hold_ms << ","
           << "\"why\":\"" << r.reason << "\"}\n";
+        f.close();
+
+        // Push to git repo so remote (Claude/GUI) can see live trades
+        // Engine runs from build/ so we copy up to repo root data/ then push
+        { int _r = ::system(
+            "cp data/trade_log.json ../data/trade_log.json 2>/dev/null && "
+            "cd .. && "
+            "git add data/trade_log.json 2>/dev/null && "
+            "git commit -m 'data: live trade' --quiet 2>/dev/null && "
+            "git push origin main --quiet 2>/dev/null &"
+          ); (void)_r; }
     }
 
     static std::string now_hms() {

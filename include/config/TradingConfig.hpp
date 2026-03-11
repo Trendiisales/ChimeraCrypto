@@ -145,7 +145,7 @@ struct TradingConfig {
     // Minimum |book_imbalance| to fire: (bid_size - ask_size)/(bid_size + ask_size)
     // 0.42 = bids must be 2.45x asks. Restored toward original 0.45  at 0.30 the
     // signal fired on noise and WR dropped to ~50%. Need 79%+ WR at this TP/SL.
-    static constexpr double IMBALANCE_THRESHOLD        = 0.28;  // quality pass: reduce low-conviction micro entries
+    static constexpr double IMBALANCE_THRESHOLD        = 0.32;  // quality hardening
 
     // Reject if spread too wide  wide spread means fills are poor
     // BTC normal spread: 0.1-0.5bp. Above 1.5bp = unusually wide, skip.
@@ -325,7 +325,7 @@ struct TradingConfig {
     // Slippage: ~0.5bp (limit fills at our price, minimal slip)
     // Total maker round-trip cost: ~3-4bp
     // Use 4bp as conservative floor.
-    static constexpr double MAKER_COST_FLOOR_BP = 4.0;
+    static constexpr double MAKER_COST_FLOOR_BP = 5.5; // quality hardening: avoid fee-only timeout trades
     // Round-trip costs used in exit() net PnL calculation (BUG4 FIX)
     static constexpr double TAKER_ROUND_TRIP_BP = 8.0;  // 4bp/side VIP0 taker fee (IMPULSE/ETH-LEAD when active)
     static constexpr double MAKER_ROUND_TRIP_BP = 4.0;  // ~1bp rebate/side + ~2bp spread
@@ -394,7 +394,7 @@ struct TradingConfig {
     // Edge: 33-tick OFI ratio > 0.25 + volume spike + book confirmation
     // Maker entry. TP=18bp, SL=6bp → EV +4.8bp at 45% WR after ~4bp cost.
     // Only fires in GRIND/BUILDUP to avoid chasing breakout momentum.
-    static constexpr double OFI_RATIO_THRESHOLD    = 0.20;  // quality pass
+    static constexpr double OFI_RATIO_THRESHOLD    = 0.24;  // quality hardening
     static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.15;  // throughput baseline
     static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.05;  // throughput baseline
     static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
@@ -422,7 +422,7 @@ struct TradingConfig {
     // Maker entry. TP=20bp, SL=7bp → EV +6.5bp at 50% WR after ~4bp maker cost.
     // Only fires in GRIND regime — MM rebalancing is a ranging-market phenomenon.
     static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.12;  // throughput baseline
-    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 2.2;   // quality pass
+    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 3.0;   // quality hardening
     static constexpr double MM_MAX_SPREAD_BPS       = 2.0;   // tight spread required
     static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
     static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise
@@ -451,7 +451,7 @@ struct TradingConfig {
     // In dead zone: max 1 position, raise imbalance threshold by this factor
     static constexpr double DEAD_ZONE_IMBAL_MULT  = 1.25;
     static constexpr int    DEAD_ZONE_MAX_POS     = 1;
-    static constexpr int    MAX_CONCURRENT_POSITIONS = 5;
+    static constexpr int    MAX_CONCURRENT_POSITIONS = 2;
     static constexpr int    LEADLAG_PRIME_START_UTC   = 1;
     static constexpr int    LEADLAG_PRIME_END_UTC     = 5;
     static constexpr double LEADLAG_OFFPEAK_SIZE_MULT = 0.5;

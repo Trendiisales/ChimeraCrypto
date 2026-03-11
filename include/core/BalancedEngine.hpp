@@ -1347,7 +1347,7 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        if (s.regime == REGIME_BREAKOUT) {
+        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
             rejection_throttle_.record(key, "not_grind");
             return false;
         }
@@ -2119,7 +2119,7 @@ private:
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
         // Regime: GRIND or BUILDUP only
-        if (s.regime == REGIME_BREAKOUT) {
+        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "wrong_regime");
             return false;
         }
@@ -2242,7 +2242,7 @@ private:
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
         // Baseline: allow GRIND and BUILDUP while keeping DEAD/BREAKOUT blocked.
-        if (s.regime == REGIME_BREAKOUT) {
+        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
             return false;
         }

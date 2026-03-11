@@ -2291,6 +2291,7 @@ private:
     }
 
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
+        const bool shadow_mode = (executor_ && executor_->is_shadow());
         Signal sig;
         sig.symbol = sym_full(id);
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
@@ -2341,7 +2342,7 @@ private:
                           : (layer == LAYER_EXPANSION)
                               ? TradingConfig::EXPANSION_COST_FLOOR_BP               // 8bp  — disabled but correct
                               : TradingConfig::MAKER_COST_FLOOR_BP;                  // 4bp  — IMBALANCE/VWAP/VACUUM
-        if (sig.expected_bps < cost_floor) {
+        if (!shadow_mode && sig.expected_bps < cost_floor) {
             std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
                                     (layer == LAYER_IMPULSE)   ? "IMPULSE" :
@@ -2352,8 +2353,8 @@ private:
             rejection_throttle_.record(key, "cost_floor");
             return;
         }
-        
-        if (!governor_.approve(sig)) {
+
+        if (!shadow_mode && !governor_.approve(sig)) {
             return;
         }
         
@@ -2513,7 +2514,6 @@ private:
                            (layer == LAYER_SWEEP)           ? "SWEEP"      :
                            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
 
-        const bool shadow_mode = (executor_ && executor_->is_shadow());
         const bool use_maker = TradingConfig::MAKER_MODE && !shadow_mode;
         if (use_maker) {
             //  MAKER MODE: post limit order 

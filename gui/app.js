@@ -357,7 +357,6 @@ function updateAll(data) {
     // Keep the last valid value and direction when a poll is missing/unchanged.
     if (!(val > 0)) return;
     el.textContent = fmtPrice(val, sym);
-    el.className = 'sym-px';
     if (prev > 0) {
       if (val > prev) {
         el.className = 'sym-px up';

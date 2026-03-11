@@ -121,13 +121,19 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Short liquidation on perp = forced buy on perp = spot follows up 50-200ms later
     // Min notional filters noise  only meaningful liquidations move spot
-    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 200000.0; // 00k min  smaller liq don't move spot
-    static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 4.0;      // if spot already moved 4bp, we're chasing  skip
-    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 400;      // signal expires after 400ms  propagation window
-    static constexpr int64_t LIQ_COOLDOWN_MS        = 3000;     // 3s between liq trades per symbol  no stacking
-    static constexpr double  LIQ_TP_BP              = 12.0;     // TP: slightly tighter than LEADLAG (liq moves ~8-15bp)
-    static constexpr double  LIQ_SL_BP              = 4.0;      // SL: slightly wider than LEADLAG (more volatile entry)
-    static constexpr int64_t LIQ_MAX_HOLD_MS        = 5000;     // max hold 5s same as LEADLAG
+    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 350000.0; // stricter: ignore small liquidation noise
+    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD = 500000.0; // alts are noisier than BTC/ETH/SOL; require larger cascade
+    static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 2.5;      // tighter anti-chase window
+    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 250;      // edge decays fast; stale liq signals are net-negative
+    static constexpr int64_t LIQ_COOLDOWN_MS        = 10000;    // avoid repeated liq stabs in chop
+    static constexpr double  LIQ_MAX_SPREAD_BPS     = 2.0;      // don't chase liquidation when book widens
+    static constexpr double  LIQ_MIN_FLOW_RATIO     = 0.56;     // require aggressive buy flow confirmation
+    static constexpr double  LIQ_MIN_BOOK_IMBALANCE = 0.08;     // require at least mild bid pressure
+    static constexpr double  LIQ_MIN_VOL_RATIO      = 0.90;     // avoid dead tape
+    static constexpr double  LIQ_MAX_VOL_RATIO      = 2.40;     // avoid panic blow-off fills
+    static constexpr double  LIQ_TP_BP              = 10.0;     // smaller target to reduce timeout drift
+    static constexpr double  LIQ_SL_BP              = 3.0;      // tighter loss cap: reduce -12bp style hits
+    static constexpr int64_t LIQ_MAX_HOLD_MS        = 3000;     // faster invalidation if continuation doesn't appear
 
 
     // -------------------------------------------------------------------------

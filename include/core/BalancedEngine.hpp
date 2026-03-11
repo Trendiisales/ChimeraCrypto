@@ -1510,12 +1510,50 @@ private:
     bool try_liquidation_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         if (id == 0) return false; // BTC too fast  liquidation already in price by the time we enter
         if (s.pos.state == POS_OPEN) return false;
+        const char* sym = sym_short(id);
+        std::string key = std::string(sym) + " LIQ";
 
         if (!liq_engine_.check_signal(id, price, ts, latency_ms)) return false;
 
         double notional = liq_engine_.get_notional(id);
-        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | price=%.4f | latency=%.1fms | ENTERING LONG\n",
-            sym_short(id), notional, price, latency_ms);
+        const double min_notional = (id >= 3) ? TradingConfig::LIQ_MIN_NOTIONAL_ALT_USD
+                                               : TradingConfig::LIQ_MIN_NOTIONAL_USD;
+        if (notional < min_notional) {
+            rejection_throttle_.record(key, "notional_too_small");
+            return false;
+        }
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0 || t.spread_bps <= 0.0) {
+            rejection_throttle_.record(key, "no_book_data");
+            return false;
+        }
+        if (t.spread_bps > TradingConfig::LIQ_MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_wide");
+            return false;
+        }
+        if (s.regime == REGIME_DEAD) {
+            rejection_throttle_.record(key, "regime_dead");
+            return false;
+        }
+        if (s.vol_ratio_ema < TradingConfig::LIQ_MIN_VOL_RATIO ||
+            s.vol_ratio_ema > TradingConfig::LIQ_MAX_VOL_RATIO) {
+            rejection_throttle_.record(key, "vol_out_of_band");
+            return false;
+        }
+
+        const double flow = compute_flow_ratio(id);
+        if (flow < TradingConfig::LIQ_MIN_FLOW_RATIO) {
+            rejection_throttle_.record(key, "flow_weak");
+            return false;
+        }
+        if (t.book_imbalance < TradingConfig::LIQ_MIN_BOOK_IMBALANCE) {
+            rejection_throttle_.record(key, "book_weak");
+            return false;
+        }
+
+        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | flow=%.2f | imbal=%.2f | spread=%.2fbp | vr=%.2f | latency=%.1fms | ENTERING LONG\n",
+            sym, notional, flow, t.book_imbalance, t.spread_bps, s.vol_ratio_ema, latency_ms);
         std::fflush(stdout);
 
         liq_engine_.consume_signal(id, ts);
@@ -2480,7 +2518,7 @@ private:
         // eng_mult: position size multiplier per layer
         // All aggressive multipliers removed until net-positive edge confirmed
         // over 50+ trades. LEADLAG was 4x on gross-positive/net-negative edge.
-        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 2.0 :  // event-driven, capped until live confirmed
+        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 0.6 :  // event-driven but noisy in shadow: downsize until proven net-positive
                           (layer == LAYER_FUNDING)          ? 1.5 :  // slow-burn
                           (layer == LAYER_NGAS)             ? 1.0 :  // macro, unproven net
                           (layer == LAYER_LEADLAG)          ? 1.0 :  // BUG5 FIX: was 4x, net-negative at 47% WR

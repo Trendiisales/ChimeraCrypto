@@ -2363,6 +2363,28 @@ private:
             rejection_throttle_.record(key, "cost_floor");
             return;
         }
+        // NET EDGE FLOOR: enforce gross edge above known costs with safety buffer.
+        // This blocks fee-level timeout churn where TP barely exceeds round-trip cost.
+        double net_buffer = is_taker_layer ? 3.0 : 2.0;
+        if (s.regime == REGIME_DEAD) net_buffer += 2.0;
+        if (layer == LAYER_MICRO || layer == LAYER_VACUUM || layer == LAYER_OFI) {
+            net_buffer += 1.0;
+        }
+        double required_edge = cost_floor + net_buffer;
+        if (sig.expected_bps < required_edge) {
+            std::string key = std::string(sym_short(id)) +
+                             " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
+                                    (layer == LAYER_IMPULSE)   ? "IMPULSE" :
+                                    (layer == LAYER_EXPANSION) ? "EXPAND"  :
+                                    (layer == LAYER_VACUUM)    ? "VACUUM"  :
+                                    (layer == LAYER_VWAP)      ? "VWAP"    :
+                                    (layer == LAYER_LEADLAG_ETH_SOL) ? "LL-ETH-SOL" :
+                                    (layer == LAYER_OFI)       ? "OFI"     :
+                                    (layer == LAYER_SWEEP)     ? "SWEEP"   :
+                                    (layer == LAYER_MM_PRESSURE)? "MM"     : "IMBAL");
+            rejection_throttle_.record(key, "net_edge_floor");
+            return;
+        }
         
         if (!governor_.approve(sig)) {
             return;

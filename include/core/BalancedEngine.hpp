@@ -692,13 +692,17 @@ public:
         // LIVE mode never uses this path.
         if (shadow_mode) {
             const MarketTick& t = s.last_tick;
-            if (t.bid > 0.0 && t.ask > 0.0) {
-                const double flow = compute_flow_ratio(id);
-                const bool spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 3.0);
-                const bool vol_ok = (s.vol_ratio_ema >= 0.80 && s.vol_ratio_ema <= 1.60);
-                const bool pressure_ok = (t.book_imbalance >= 0.02 && flow >= 0.50);
-                const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= 15000;
-                if (spread_ok && vol_ok && pressure_ok && cooldown_ok) {
+            const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= 20000;
+            const bool vol_ok = (s.vol_ratio_ema >= 0.75 && s.vol_ratio_ema <= 2.20);
+            if (cooldown_ok && vol_ok) {
+                bool spread_ok = true;
+                bool pressure_ok = true;
+                if (t.bid > 0.0 && t.ask > 0.0) {
+                    const double flow = compute_flow_ratio(id);
+                    spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 6.0);
+                    pressure_ok = (t.book_imbalance >= -0.05 && flow >= 0.48);
+                }
+                if (spread_ok && pressure_ok) {
                     shadow_probe_last_ms_[id] = ts;
                     rejection_throttle_.record(std::string(sym_short(id)) + " SHADOW-PROBE", "fired");
                     enter(id, price, ts, s, LAYER_MICRO, true);

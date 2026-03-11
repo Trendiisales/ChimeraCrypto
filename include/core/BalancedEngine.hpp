@@ -1336,7 +1336,7 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        if (s.regime != REGIME_GRIND) {
+        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
             rejection_throttle_.record(key, "not_grind");
             return false;
         }
@@ -2048,8 +2048,8 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        // Only fires in GRIND  VWAP reversion fails in trending regimes
-        if (s.regime != REGIME_GRIND) {
+        // Baseline: allow GRIND and BUILDUP. Keep BREAKOUT blocked.
+        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
             rejection_throttle_.record(key, "not_grind");
             return false;
         }
@@ -2226,8 +2226,8 @@ private:
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
-        // Best in GRIND — MM rebalancing is a ranging-market phenomenon
-        if (s.regime != REGIME_GRIND) {
+        // Baseline: allow GRIND and BUILDUP while keeping DEAD/BREAKOUT blocked.
+        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
             return false;
         }

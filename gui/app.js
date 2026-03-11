@@ -92,6 +92,17 @@ window.clearTrades = function() {
   renderTradeLog(); updateWinRate();
 };
 
+// Returns only trades from the most recent engine session (after last SESSION START marker)
+function currentSessionTrades() {
+  // localTrades is newest-first. Find the first SESSION entry (most recent session boundary).
+  const allNonSession = [];
+  for (const t of localTrades) {
+    if (t.s === 'SESSION' || t.e === 'START') break; // stop at session boundary
+    allNonSession.push(t);
+  }
+  return allNonSession;
+}
+
 //  TRADE MERGE 
 function mergeTrades(serverLog, isBootLoad) {
   if (!serverLog || !serverLog.length) return;
@@ -160,7 +171,7 @@ function renderSymbolTrades() {
   SYMBOLS.forEach(({ short }) => {
     const el = $('str-' + short.toLowerCase());
     if (!el) return;
-    const trades = localTrades.filter(t => (t.s || '').replace('USDT', '').toUpperCase() === short).slice(0, 8);
+    const trades = currentSessionTrades().filter(t => (t.s || '').replace('USDT', '').toUpperCase() === short).slice(0, 8);
     if (!trades.length) { el.className = 'trades-empty'; el.innerHTML = 'No trades yet'; return; }
     el.className = 'sym-trades-body';
     el.innerHTML = trades.map(tr => {
@@ -175,7 +186,7 @@ function renderSymbolTrades() {
         <span class="tr-pnl ${isWin?'pos':'neg'}">${fmtPnl(pnl)}</span>
         <span class="tr-usd ${isWin?'pos':'neg'}">${fmtUsd(usd)}</span>
         <span class="tr-eng">${tr.e||'--'}</span>
-        <span class="tr-val">${en}â†’${ex}</span>
+        <span class="tr-val">${en}→${ex}</span>
         <span class="tr-val">${fmtHold(tr.hold)}</span>
         <span class="tr-badge ${rc}">${why}</span>
         <span class="tr-time">${time}</span>
@@ -202,7 +213,7 @@ function updateUptime() {
 
 function renderTradeLog() {
   let totalPnl = 0, winPnl = 0, lossPnl = 0, winCount = 0, lossCount = 0;
-  localTrades.filter(t => t.s !== 'SESSION').forEach(t => {
+  currentSessionTrades().forEach(t => {
     const p = +t.p || 0; totalPnl += p;
     if (p >= 0) { winPnl += p; winCount++; } else { lossPnl += p; lossCount++; }
   });
@@ -232,10 +243,10 @@ function renderTradeLog() {
   const tpAlEl = $('tp-avgloss'); if (tpAlEl) tpAlEl.textContent = avgLoss !== null ? avgLoss.toFixed(2) + 'bp' : '--';
   const tpExpEl = $('tp-exp'); if (tpExpEl) { tpExpEl.textContent = exp !== null ? (exp >= 0 ? '+' : '') + exp.toFixed(2) + 'bp' : '--'; tpExpEl.className = 'tp-val ' + (exp !== null ? (exp >= 0 ? 'pos' : 'neg') : ''); }
 
-  // Recent trades list — last 10 trades, most recent first
+  // Recent trades list — last 10 trades from current session, most recent first
   const rtList = $('recent-trades-list');
   if (rtList) {
-    const trades = localTrades.filter(t => t.s !== 'SESSION');
+    const trades = currentSessionTrades();
     if (!trades.length) {
       rtList.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">Waiting for first trade...</div>';
     } else {
@@ -572,12 +583,13 @@ function updateBoostPanel(data) {
     const rmEl = $(`rm-${sym}`);
     if (rmEl) { rmEl.textContent = '' + mult.toFixed(2); rmEl.className = 'regime-mult ' + (mult > 1.1 ? 'hi' : mult < 0.9 ? 'lo' : ''); }
 
-    // Mini summary (shown when block is collapsed)
+    // Mini summary — symbol total P&L + trade count from localStorage
     const miniPnl = $(`mini-pnl-${sym}`);
-    const microPnl = d.micro_total_pnl_bp || 0;
-    const microT   = d.micro_total_trades || 0;
-    if (miniPnl) { miniPnl.textContent = (microPnl >= 0 ? '+' : '') + microPnl.toFixed(2) + 'bp'; miniPnl.className = 'sm-pnl ' + (microPnl > 0 ? 'pos' : microPnl < 0 ? 'neg' : ''); }
-    set(`mini-t-${sym}`, microT);
+    const symTrades = currentSessionTrades().filter(t => (t.s || '').replace('USDT','').toUpperCase() === short);
+    const symPnl = symTrades.reduce((acc, t) => acc + (+t.p || 0), 0);
+    const symT   = symTrades.length;
+    if (miniPnl) { miniPnl.textContent = (symPnl >= 0 ? '+' : '') + symPnl.toFixed(2) + 'bp'; miniPnl.className = 'sym-pnl-badge ' + (symPnl > 0 ? 'pos' : symPnl < 0 ? 'neg' : 'zero'); }
+    set(`mini-t-${sym}`, symT ? symT + 'T' : '0T');
     // Auto-expand if micro engine goes active
     autoExpandIfActive(sym, d.micro_active);
 
@@ -735,7 +747,7 @@ setInterval(() => {
 //  INIT 
 loadTrades(); renderTradeLog(); updateWinRate();
 wins = 0; losses = 0;
-localTrades.filter(t => t.s !== 'SESSION').forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; });
+currentSessionTrades().forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; });
 updateWinRate();
 poll();
 setInterval(poll, 1000);

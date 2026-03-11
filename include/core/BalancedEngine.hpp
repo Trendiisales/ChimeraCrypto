@@ -686,6 +686,24 @@ public:
         if ((TradingConfig::ENABLE_OFI || shadow_mode) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
         if ((TradingConfig::ENABLE_SWEEP || shadow_mode) && check_sweep(id, price, ts, s, latency_ms)) return;
         if ((TradingConfig::ENABLE_MM_PRESSURE || shadow_mode) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+
+        // SHADOW fallback: controlled micro-probe in flat/compression tape.
+        // Purpose: keep sample throughput non-zero when high-conviction layers are quiet.
+        // LIVE mode never uses this path.
+        if (shadow_mode) {
+            const MarketTick& t = s.last_tick;
+            if (t.bid > 0.0 && t.ask > 0.0) {
+                const double flow = compute_flow_ratio(id);
+                const bool spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= 2.5);
+                const bool vol_ok = (s.vol_ratio_ema >= 0.90 && s.vol_ratio_ema <= 1.35);
+                const bool pressure_ok = (t.book_imbalance >= 0.08 && flow >= 0.51);
+                if (spread_ok && vol_ok && pressure_ok) {
+                    rejection_throttle_.record(std::string(sym_short(id)) + " SHADOW-PROBE", "fired");
+                    enter(id, price, ts, s, LAYER_MICRO, true);
+                    return;
+                }
+            }
+        }
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }

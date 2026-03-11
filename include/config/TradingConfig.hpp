@@ -102,19 +102,19 @@ struct TradingConfig {
     // Hold tightened 25001500ms: if SOL hasn't moved in 1.5s, the propagation is done.
     // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 12.0; // min ETH move to signal
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 14.0;   // lowered: MFE shows 8bp reachable, 20bp was never hit
-    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;  // tightened: less loss when wrong
-    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 2500; // extended: need more time to reach 20bp TP
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 7.0;   // matches avg MFE 4.75bp — was 14bp (100% TIMEOUT)
+    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 2.0;  // tightened to match LEADLAG
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 6000; // extended from 2500ms to give time to hit 7bp TP
 
-    static constexpr double LEADLAG_TP_BP              = 14.0;   // lowered: avg MFE 5.7bp, all exits TIMEOUT at 15bp -- 8bp captures the move
+    static constexpr double LEADLAG_TP_BP              = 8.0;    // matches avg MFE 5.7bp p50=4.7bp — was 14bp (too far, 88% TIMEOUT)
 
     // Stop loss for lead-lag trades
     // Tight stop  if ETH/SOL doesn't follow BTC within 5s, exit
-    static constexpr double LEADLAG_SL_BP              = 3.0;   // tightened: timing edge  wrong = exit immediately
+    static constexpr double LEADLAG_SL_BP              = 2.0;   // tightened: avg MAE only -0.35bp, wrong entries exit faster
 
     // Maximum hold time for lead-lag before forced flat
-    // Propagation completes within ~200ms. 3s is generous timeout.
-    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 5000;
+    // Extended: trades need time to reach 8bp TP
+    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 8000;
 
     // -------------------------------------------------------------------------
     // LIQUIDATION CASCADE ENGINE  spot long on short liquidations from perp

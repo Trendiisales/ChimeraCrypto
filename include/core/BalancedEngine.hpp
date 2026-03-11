@@ -671,17 +671,6 @@ public:
         if (shadow_mode && check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_vol_shock(id, price, ts, s, latency_ms)) return;
         if (shadow_mode && check_expansion(id, price, ts, s, latency_ms)) return;
-        // Book-dependent engines require a valid top-of-book snapshot.
-        // During warm-up, aggTrade ticks can arrive before first bookTicker and
-        // would otherwise generate persistent no_book_data rejections.
-        if (s.last_tick.bid <= 0.0 || s.last_tick.ask <= 0.0) return;
-        if (check_vacuum(id, price, ts, s, latency_ms)) return;
-        if (check_imbalance(id, price, ts, s, latency_ms)) return;
-        if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-        if (check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-        if (check_sweep(id, price, ts, s, latency_ms)) return;
-        if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
-
         // SHADOW fallback: controlled micro-probe in flat/compression tape.
         // Purpose: keep sample throughput non-zero when high-conviction layers are quiet.
         // LIVE mode never uses this path.
@@ -704,6 +693,18 @@ public:
                     return;
                 }
             }
+        }
+
+        // Book-dependent engines require a valid top-of-book snapshot.
+        // During warm-up, aggTrade ticks can arrive before first bookTicker.
+        const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
+        if (has_book) {
+            if (check_vacuum(id, price, ts, s, latency_ms)) return;
+            if (check_imbalance(id, price, ts, s, latency_ms)) return;
+            if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+            if (check_ofi_pressure(id, price, ts, s, latency_ms)) return;
+            if (check_sweep(id, price, ts, s, latency_ms)) return;
+            if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
         }
     }
     

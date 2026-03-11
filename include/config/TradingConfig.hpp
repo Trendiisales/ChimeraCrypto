@@ -121,7 +121,7 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Short liquidation on perp = forced buy on perp = spot follows up 50-200ms later
     // Min notional filters noise  only meaningful liquidations move spot
-    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 200000.0; // 00k min  smaller liq don't move spot
+    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 1000.0;   // baseline shadow mode: allow smaller cascades for signal throughput
     static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 4.0;      // if spot already moved 4bp, we're chasing  skip
     static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 400;      // signal expires after 400ms  propagation window
     static constexpr int64_t LIQ_COOLDOWN_MS        = 3000;     // 3s between liq trades per symbol  no stacking
@@ -294,7 +294,7 @@ struct TradingConfig {
     // 0.55 = slight buy majority. 0.60 = clear buy pressure.
     // Filters breakouts where smart money is actually selling into retail buyers.
     // Set to 0.0 to disable (useful when testing new signals).
-    static constexpr double FLOW_CONFIRM_THRESHOLD = 0.52;
+    static constexpr double FLOW_CONFIRM_THRESHOLD = 0.50;
 
     // -------------------------------------------------------------------------
     // MAKER ORDER MODE

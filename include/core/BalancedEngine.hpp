@@ -1336,7 +1336,7 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
+        if (s.regime == REGIME_BREAKOUT) {
             rejection_throttle_.record(key, "not_grind");
             return false;
         }
@@ -1359,6 +1359,10 @@ private:
                            utc_hour_imbal <  TradingConfig::SESSION_DEAD_END_UTC);
         double imbal_thresh = TradingConfig::IMBALANCE_THRESHOLD *
                               (dead_imbal ? TradingConfig::DEAD_ZONE_IMBAL_MULT : 1.0);
+        // In DEAD regime require slightly stronger imbalance to offset lower follow-through.
+        if (s.regime == REGIME_DEAD) {
+            imbal_thresh *= 1.15;
+        }
         if (std::abs(imbalance) < imbal_thresh) {
             rejection_throttle_.record(key, "weak_imbalance");
             return false;
@@ -2054,7 +2058,7 @@ private:
             return false;
         }
         // Need established VWAP
-        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) {
+        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 5.0) {
             rejection_throttle_.record(key, "vwap_not_ready");
             return false;
         }
@@ -2104,7 +2108,7 @@ private:
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
         // Regime: GRIND or BUILDUP only
-        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
+        if (s.regime == REGIME_BREAKOUT) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "wrong_regime");
             return false;
         }
@@ -2227,7 +2231,7 @@ private:
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
         // Baseline: allow GRIND and BUILDUP while keeping DEAD/BREAKOUT blocked.
-        if (s.regime != REGIME_GRIND && s.regime != REGIME_BUILDUP) {
+        if (s.regime == REGIME_BREAKOUT) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
             return false;
         }

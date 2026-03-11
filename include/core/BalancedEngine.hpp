@@ -726,6 +726,13 @@ public:
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
+    double get_symbol_price(int id) const {
+        if (id < 0 || id >= MAX_SYMBOLS) return 0.0;
+        const auto& t = symbols_[id].last_tick;
+        if (t.mid_price > 0.0) return t.mid_price;
+        if (t.last_price > 0.0) return t.last_price;
+        return symbols_[id].last_price;
+    }
     double get_win_boost_for(const std::string& engine) const {
         return capital_control_.win_boost_for(engine);
     }

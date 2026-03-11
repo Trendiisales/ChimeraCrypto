@@ -145,7 +145,7 @@ struct TradingConfig {
     // Minimum |book_imbalance| to fire: (bid_size - ask_size)/(bid_size + ask_size)
     // 0.42 = bids must be 2.45x asks. Restored toward original 0.45  at 0.30 the
     // signal fired on noise and WR dropped to ~50%. Need 79%+ WR at this TP/SL.
-    static constexpr double IMBALANCE_THRESHOLD        = 0.34;
+    static constexpr double IMBALANCE_THRESHOLD        = 0.24;  // throughput baseline: increase signal frequency in shadow mode
 
     // Reject if spread too wide  wide spread means fills are poor
     // BTC normal spread: 0.1-0.5bp. Above 1.5bp = unusually wide, skip.
@@ -203,9 +203,9 @@ struct TradingConfig {
     // Edge: in GRIND regime, price >20bp below session VWAP + bid imbalance = buy
     // Mean reversion back toward VWAP. High win rate in ranging markets.
     // -------------------------------------------------------------------------
-    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 20.0;  // min distance below VWAP
+    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 10.0;  // baseline: allow shallower reversion entries
     static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
-    static constexpr double VWAP_MIN_IMBALANCE         = 0.15;  // bid pressure must confirm
+    static constexpr double VWAP_MIN_IMBALANCE         = 0.08;  // baseline: keep directional bias while reducing misses
     static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
     static constexpr double VWAP_TP_BP                 = 18.0;
     static constexpr double VWAP_SL_BP                 = 7.0;
@@ -394,9 +394,9 @@ struct TradingConfig {
     // Edge: 33-tick OFI ratio > 0.25 + volume spike + book confirmation
     // Maker entry. TP=18bp, SL=6bp → EV +4.8bp at 45% WR after ~4bp cost.
     // Only fires in GRIND/BUILDUP to avoid chasing breakout momentum.
-    static constexpr double OFI_RATIO_THRESHOLD    = 0.20;  // baseline: activate OFI earlier while retaining directional bias
-    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.3;   // baseline: reduce missed setups during moderate expansion
-    static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.10;  // book_imbalance > 0.10 (bid-heavy)
+    static constexpr double OFI_RATIO_THRESHOLD    = 0.15;  // throughput baseline
+    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.15;  // throughput baseline
+    static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.05;  // throughput baseline
     static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
     static constexpr double OFI_TP_BP              = 18.0;  // conservative: new engine, calibrate later
     static constexpr double OFI_SL_BP              = 6.0;   // 3:1 gross R:R
@@ -408,7 +408,7 @@ struct TradingConfig {
     // Edge: trade size spike >5x + ask depth collapse >40% + buyer aggression
     // Taker entry (edge decays fast, <200ms window). TP=22bp, SL=8bp.
     // EV at 55% WR: 0.55*22 - 0.45*8 = +8.5bp net after ~8bp taker cost.
-    static constexpr double SWEEP_SIZE_SPIKE_MULT     = 3.8;  // baseline: preserve spike quality but reduce starvation
+    static constexpr double SWEEP_SIZE_SPIKE_MULT     = 2.8;  // throughput baseline
     static constexpr double SWEEP_DEPTH_COLLAPSE_RATIO = 0.40; // ask depth drops >40% vs prev tick
     static constexpr double SWEEP_MAX_SPREAD_BPS      = 3.0;  // wider allowed: sweeps happen in volatile books
     static constexpr double SWEEP_TP_BP               = 22.0; // sweeps produce 30-120bp raw, 22bp is conservative
@@ -421,8 +421,8 @@ struct TradingConfig {
     // Edge: persistent slow book imbalance + upward price drift + OFI confirmation
     // Maker entry. TP=20bp, SL=7bp → EV +6.5bp at 50% WR after ~4bp maker cost.
     // Only fires in GRIND regime — MM rebalancing is a ranging-market phenomenon.
-    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.20;  // slow imbal EMA > 0.20 (bid-heavy)
-    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 3.0;   // cumulative drift > 3bp over window
+    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.12;  // throughput baseline
+    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 1.5;   // throughput baseline
     static constexpr double MM_MAX_SPREAD_BPS       = 2.0;   // tight spread required
     static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
     static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise

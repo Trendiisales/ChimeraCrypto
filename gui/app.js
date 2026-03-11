@@ -179,7 +179,7 @@ function renderSymbolTrades() {
       const rc = reasonClass(tr.why || tr.reason || '');
       const en = tr.en ? fmtPrice(tr.en, short) : '--';
       const ex = tr.ex ? fmtPrice(tr.ex, short) : '--';
-      const why = (tr.why || tr.reason || '?').toUpperCase();
+      const why = normalizeReason(tr.why || tr.reason || '?');
       const time = tr.t ? (tr.t.length > 8 ? tr.t.substring(11, 19) : tr.t) : '--';
       return `<div class="trade-row ${isWin?'win':'loss'}">
         <span class="tr-tag ${isWin?'win':'loss'}">${isWin?'WIN':'LOSS'}</span>
@@ -256,7 +256,7 @@ function renderTradeLog() {
         const isWin = p >= 0;
         const sym = (tr.s || '').replace('USDT','').replace('/','');
         const eng = (tr.e || '?').toUpperCase();
-        const why = (tr.why || tr.reason || '?').toUpperCase();
+        const why = normalizeReason(tr.why || tr.reason || '?');
         const whyCls = why === 'TP' ? 'why-tp' : why === 'SL' ? 'why-sl' : why === 'TRAIL' ? 'why-trail' : '';
         const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(11,16) : tr.t) : '--';
         const hold = tr.hold != null ? fmtHold(tr.hold) : '--';
@@ -284,7 +284,7 @@ function renderTradeLog() {
         const p = +tr.p || 0, isWin = p >= 0;
         const sym = (tr.s || '').replace('USDT','').replace('/','');
         const eng = (tr.e || '?').toUpperCase();
-        const why = (tr.why || tr.reason || '?').toUpperCase();
+        const why = normalizeReason(tr.why || tr.reason || '?');
         const whyCls = why==='TP'?'why-tp':why==='SL'?'why-sl':why==='TRAIL'?'why-trail':'why-to';
         const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(11,16) : tr.t) : '--';
         const mfe = tr.mfe != null ? '+' + (+tr.mfe).toFixed(1) + 'bp' : '--';
@@ -340,7 +340,7 @@ function renderRpTrades() {
     var sym = (tr.s || '').replace('USDT','').replace('/','');
     var en  = tr.en ? fmtPrice(tr.en, sym) : '--';
     var ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
-    var why = (tr.why || tr.reason || '?').toUpperCase();
+    var why = normalizeReason(tr.why || tr.reason || '?');
     var time = tr.t ? (tr.t.length > 10 ? tr.t.substring(0,16).replace('T',' ') : tr.t) : '--';
     var mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
     var mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';
@@ -375,8 +375,20 @@ function renderRpTrades() {
 function reasonClass(r) {
   if (!r) return 'timeout';
   const rl = r.toLowerCase();
-  if (rl === 'tp') return 'tp'; if (rl === 'sl') return 'sl';
-  if (rl === 'trail') return 'trail'; return 'timeout';
+  if (rl === 'tp') return 'tp';
+  if (rl === 'sl' || rl === 'sc') return 'sl';
+  if (rl === 'trail' || rl.startsWith('trail')) return 'trail';
+  if (rl === 'timeout' || rl === 'to') return 'timeout';
+  return 'timeout';
+}
+
+function normalizeReason(r) {
+  if (!r) return 'TO';
+  const ru = r.toUpperCase();
+  if (ru === 'SC') return 'SL';
+  if (ru.startsWith('TRAIL')) return 'TRAIL';
+  if (ru === 'TIMEOUT') return 'TO';
+  return ru;
 }
 
 function makeRow(tr) {
@@ -385,7 +397,7 @@ function makeRow(tr) {
   var sym = (tr.s || '').replace('USDT','').replace('/','');
   var en  = tr.en ? fmtPrice(tr.en, sym) : '--';
   var ex  = tr.ex ? fmtPrice(tr.ex, sym) : '--';
-  var why = (tr.why || tr.reason || '?').toUpperCase();
+  var why = normalizeReason(tr.why || tr.reason || '?');
   var time = tr.t ? tr.t.substring(0,16).replace('T',' ') : '--';
   var mfe  = tr.mfe != null ? '+' + (+tr.mfe).toFixed(2) + 'bp' : '--';
   var mae  = tr.mae != null ? (+tr.mae).toFixed(2) + 'bp' : '--';

@@ -86,6 +86,7 @@ public:
     }
     
     void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        std::lock_guard<std::mutex> engine_lk(engine_mutex_);
         last_latency_ms_ = latency_ms;  // raw per-tick age for signal gating
         // Derive scalar price for engines that don't need full tick
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
@@ -205,6 +206,7 @@ public:
     void set_lat_p95(double ms)  { lat_p95_display_  = ms; }
     
     std::string generate_state_json() {
+        std::lock_guard<std::mutex> engine_lk(engine_mutex_);
         std::ostringstream json;
         json << std::fixed << std::setprecision(2);
         json << "{";
@@ -330,6 +332,7 @@ private:
     CompressionBreakoutEngine compression_[MAX_SYMBOLS];
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
+    mutable std::mutex engine_mutex_;
 
     double last_latency_ms_  = 0.0;  // per-tick age for signal gating
     double lat_p95_display_  = 0.0;  // rolling p95 for GUI display only

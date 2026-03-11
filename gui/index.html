@@ -65,11 +65,12 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   flex:none;
   display:flex;flex-direction:column;
   border-bottom:1px solid var(--border);
-  height:80px;overflow:hidden;
+  min-height:80px;overflow:hidden;
   transition:flex .25s ease;
 }
 .sym-row:last-child{border-bottom:none}
-.sym-row.expanded{flex:3}
+.sym-row:not(.expanded){height:80px}
+.sym-row.expanded{height:auto;overflow:visible}
 
 /* Symbol header row */
 .sym-hd{

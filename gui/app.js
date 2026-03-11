@@ -357,9 +357,15 @@ function updateAll(data) {
     // Keep the last valid value and direction when a poll is missing/unchanged.
     if (!(val > 0)) return;
     el.textContent = fmtPrice(val, sym);
+    el.className = 'sym-px';
     if (prev > 0) {
-      if (val > prev) el.className = 'sym-px up';
-      else if (val < prev) el.className = 'sym-px down';
+      if (val > prev) {
+        el.className = 'sym-px up';
+        el.style.color = 'var(--green)';
+      } else if (val < prev) {
+        el.className = 'sym-px down';
+        el.style.color = 'var(--red)';
+      }
     }
   };
 
@@ -535,7 +541,11 @@ function updateBoostPanel(data) {
       const sc = $(`sc-${sym}-${eng}`);
       if (sc) sc.style.background = active ? 'var(--green)' : '#0d2030';
       const pEl = $(`pnl-${sym}-${eng}`);
-      if (pEl) { pEl.textContent = pnlBp != null ? fmtPnl(pnlBp) : '0bp'; pEl.className = 'est-val ' + (pnlBp > 0 ? 'pos' : pnlBp < 0 ? 'neg' : 'dim'); }
+      if (pEl) {
+        const inactiveZero = !active && (pnlBp == null || Math.abs(+pnlBp) < 1e-9);
+        pEl.textContent = inactiveZero ? '--' : (pnlBp != null ? fmtPnl(pnlBp) : '--');
+        pEl.className = 'est-val ' + (inactiveZero ? 'dim' : (pnlBp > 0 ? 'pos' : pnlBp < 0 ? 'neg' : 'dim'));
+      }
       set(`trades-${sym}-${eng}`, trades != null ? trades : 0);
       if (wr != null) { const wrEl = $(`wr-${sym}-${eng}`); if (wrEl) { wrEl.textContent = (wr * 100).toFixed(0) + '%'; wrEl.className = 'est-val ' + (wr >= 0.5 ? 'pos' : 'neg'); } }
       if (entry != null && entry > 0) set(`ep-${sym}-${eng}`, fmtPrice(entry, sym));
@@ -666,13 +676,7 @@ function toggleSym(sl, event) {
 function toggleBlock(sl, event) { toggleSym(sl, event); }
 
 // Auto-expand a block when it has an active trade
-function autoExpandIfActive(sl, isActive) {
-  const block = document.getElementById('sb-' + sl);
-  if (!block) return;
-  if (isActive && !block.classList.contains('expanded')) {
-    block.classList.add('expanded');
-  }
-}
+function autoExpandIfActive(sl, isActive) { /* disabled: user controls expansion manually */ }
 
 function switchTab(name) {
   ['regime','boost','engine','signal','trades'].forEach(t => {

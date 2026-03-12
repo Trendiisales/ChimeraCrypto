@@ -82,12 +82,12 @@ struct TradingConfig {
     // BTC must move at least this many bp in the lookback window to signal
     // Raised 810bp: at 8bp too many weak moves were triggering. 10bp filters
     // for genuine momentum that ETH/SOL reliably follows.
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 8.0;   // lowered from 10bp  catch more valid moves, sustain filter handles fakes
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 6.0;   // softer trigger to avoid dry spells; confirmation gates still filter weak moves
     // LEADLAG confirmation gates (added Mar 2026)
     // OB ratio: bid_size/ask_size must exceed this — filters neutral/bearish book
-    static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.2;  // bid 20% > ask
+    static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.08; // bid 8% > ask
     // Flow ratio: buy_vol_ema/sell_vol_ema must exceed this — confirms buy aggression
-    static constexpr double LEADLAG_CONFIRM_FLOW_RATIO  = 1.1;  // buy flow 10% > sell
+    static constexpr double LEADLAG_CONFIRM_FLOW_RATIO  = 1.04; // buy flow 4% > sell
 
     // Target already moved this much  edge consumed, don't enter
     // Tightened 32bp: if target already moved 2bp the propagation is done
@@ -101,10 +101,10 @@ struct TradingConfig {
     // Raised ETH threshold 812bp: at 8bp too many small ETH moves that SOL ignores.
     // Hold tightened 25001500ms: if SOL hasn't moved in 1.5s, the propagation is done.
     // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
-    static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 12.0; // min ETH move to signal
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 7.0;   // matches avg MFE 4.75bp — was 14bp (100% TIMEOUT)
+    static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0; // min ETH move to signal
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 6.0; // target lowered to reduce timeout churn
     static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 2.0;  // tightened to match LEADLAG
-    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 6000; // extended from 2500ms to give time to hit 7bp TP
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 4000; // shorter validity window
 
     static constexpr double LEADLAG_TP_BP              = 8.0;    // matches avg MFE 5.7bp p50=4.7bp — was 14bp (too far, 88% TIMEOUT)
 
@@ -114,7 +114,7 @@ struct TradingConfig {
 
     // Maximum hold time for lead-lag before forced flat
     // Extended: trades need time to reach 8bp TP
-    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 8000;
+    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 4000;
 
     // -------------------------------------------------------------------------
     // LIQUIDATION CASCADE ENGINE  spot long on short liquidations from perp
@@ -213,10 +213,24 @@ struct TradingConfig {
     static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
     static constexpr double VWAP_MIN_IMBALANCE         = 0.15;  // bid pressure must confirm
     static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
-    static constexpr double VWAP_TP_BP                 = 18.0;
-    static constexpr double VWAP_SL_BP                 = 7.0;
-    static constexpr int64_t VWAP_MAX_HOLD_MS          = 45000; // slower mean reversion
+    static constexpr double VWAP_TP_BP                 = 12.0;
+    static constexpr double VWAP_SL_BP                 = 4.5;
+    static constexpr int64_t VWAP_MAX_HOLD_MS          = 12000; // avoid long timeout bleed
     static constexpr double LATENCY_VWAP_MAX_MS        = 50.0;  // not latency sensitive
+
+    // -------------------------------------------------------------------------
+    // EDGE PROMOTION / DEMOTION GATES
+    // -------------------------------------------------------------------------
+    // Layers start either enabled or parked (set in BalancedEngine).
+    // Parked layers are only promoted after proving edge on rolling shadow sample.
+    static constexpr int    EDGE_WINDOW_TRADES           = 30;
+    static constexpr int    EDGE_PROMOTE_MIN_TRADES      = 30;
+    static constexpr int    EDGE_DEMOTE_MIN_TRADES       = 20;
+    static constexpr double EDGE_PROMOTE_MIN_AVG_PNL_BP  = 0.8;
+    static constexpr double EDGE_PROMOTE_MAX_TIMEOUT_RT  = 0.55;
+    static constexpr double EDGE_PROMOTE_MFE_BUFFER_BP   = 1.0; // p50 MFE must exceed cost + buffer
+    static constexpr double EDGE_DEMOTE_AVG_PNL_BP       = -0.5;
+    static constexpr int64_t EDGE_DISABLE_MS             = 30 * 60 * 1000LL; // 30 minutes
 
 
     // -------------------------------------------------------------------------

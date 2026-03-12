@@ -35,8 +35,11 @@
 #include <string>
 #include <functional>
 #include <deque>
+#include <vector>
+#include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <array>
 #include "logging/ShadowLogger.hpp"
 #include "core/LimitOrderManager.hpp"
 #include "core/PnLGovernor.hpp"
@@ -73,6 +76,29 @@ enum SystemState {
     SYS_IDLE,
     SYS_IMPULSE,
     SYS_EXPANSION
+};
+
+enum EdgeEngineKey {
+    EDGE_LEADLAG = 0,
+    EDGE_VWAP    = 1,
+    EDGE_LIQ     = 2,
+    EDGE_OFI     = 3,
+    EDGE_VACUUM  = 4,
+    EDGE_SWEEP   = 5,
+    EDGE_MM      = 6,
+    EDGE_ENGINE_COUNT = 7
+};
+
+struct EdgeSample {
+    double pnl_bp = 0.0;
+    double mfe_bp = 0.0;
+    bool timeout = false;
+};
+
+struct EdgeGateState {
+    bool enabled = false;
+    int64_t disabled_until = 0;
+    std::deque<EdgeSample> samples;
 };
 
 struct Position {
@@ -346,6 +372,16 @@ public:
             sym_sl_cooldown_[i]    = 0;
             depth_baseline_[i]     = 0.0;
         }
+
+        for (auto& gate : edge_gate_) {
+            gate.enabled = false;
+            gate.disabled_until = 0;
+            gate.samples.clear();
+        }
+        // Edge-first defaults: only engines with plausible post-cost edge stay active.
+        edge_gate_[EDGE_LEADLAG].enabled = true;
+        edge_gate_[EDGE_VWAP].enabled    = true;
+        edge_gate_[EDGE_LIQ].enabled     = true;
         
         // Phase 2: Initialize capital control
         capital_control_.set_base_capital(10000.0);
@@ -360,8 +396,8 @@ public:
         std::printf(" Capital Control Layer: ENABLED                                \n");
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
-        std::printf(" Engines: LEADLAG BTCETH/SOL | ETHSOL | IMPULSE | EXPAND    \n");
-        std::printf("          VACUUM | VWAP-REV | IMBAL (6 engines, long-only)     \n");
+        std::printf(" Active Engines: LEADLAG | LIQ | VWAP-REV (long-only)          \n");
+        std::printf(" Parked Engines: OFI | VACUUM | IMBAL | SWEEP | MM | VOLSHOCK  \n");
         std::printf(" Multi-position: UP TO 3 (1 per symbol)                        \n");
         std::printf(" Dead zone (20-23 UTC): max 1 pos, raised thresholds           \n");
         std::printf("\n");
@@ -630,7 +666,7 @@ public:
         int utc_hour = (int)((ts / 3600000LL) % 24);
         bool dead_zone = (utc_hour >= TradingConfig::SESSION_DEAD_START_UTC &&
                           utc_hour <  TradingConfig::SESSION_DEAD_END_UTC);
-        const bool shadow_mode = (executor_ && executor_->is_shadow());
+        const bool shadow_mode = is_shadow_mode();
         if (shadow_mode && startup_ts_ms_ == 0) startup_ts_ms_ = ts;
         int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : TradingConfig::MAX_CONCURRENT_POSITIONS;
         if (shadow_mode) {
@@ -657,20 +693,21 @@ public:
 
         // Try signals in priority order
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
-        if (try_liquidation_entry(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         if (try_funding_entry(id, price, ts, s, latency_ms)) return;
         if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
-        if (check_leadlag(id, price, ts, s, latency_ms)) return;
-        if (check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_LEADLAG, ts) && check_leadlag(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_LEADLAG, ts) && check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
         // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
         // Keep IMPULSE/EXPANSION disabled until edge is net-positive again.
-        if (check_vol_shock(id, price, ts, s, latency_ms)) return;
+        // Park VOLSHOCK until a positive rolling edge is demonstrated.
+        // if (check_vol_shock(id, price, ts, s, latency_ms)) return;
         // if (check_impulse(id, price, ts, s, latency_ms)) return;
         // if (check_expansion(id, price, ts, s, latency_ms)) return;
         // SHADOW fallback: conservative probe (BTC/ETH only), infrequent and only
@@ -714,12 +751,13 @@ public:
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
         const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
         if (has_book) {
-            if (check_vacuum(id, price, ts, s, latency_ms)) return;
-            if (check_imbalance(id, price, ts, s, latency_ms)) return;
-            if (check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-            if (check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-            if (check_sweep(id, price, ts, s, latency_ms)) return;
-            if (check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            if (edge_gate_allows(id, EDGE_VACUUM, ts) && check_vacuum(id, price, ts, s, latency_ms)) return;
+            // Park IMBAL until it proves positive edge in this venue.
+            // if (check_imbalance(id, price, ts, s, latency_ms)) return;
+            if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+            if (edge_gate_allows(id, EDGE_OFI, ts) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
+            if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
+            if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
         }
     }
     
@@ -1187,9 +1225,116 @@ private:
     // Shadow starvation detector: no trades for an extended period after startup.
     // Used to relax selected thresholds slightly so the system can sample edge.
     bool startup_starved_mode(int64_t ts) const {
-        const bool shadow_mode = (executor_ && executor_->is_shadow());
+        const bool shadow_mode = is_shadow_mode();
         return shadow_mode && startup_ts_ms_ > 0 && total_trades_ == 0 &&
                (ts - startup_ts_ms_) >= 8 * 60 * 1000LL;
+    }
+
+    bool is_shadow_mode() const {
+        // If executor is unavailable we are effectively in simulation mode.
+        return (executor_ == nullptr) || executor_->is_shadow();
+    }
+
+    const char* edge_name(EdgeEngineKey k) const {
+        switch (k) {
+            case EDGE_LEADLAG: return "LEADLAG";
+            case EDGE_VWAP:    return "VWAP";
+            case EDGE_LIQ:     return "LIQ";
+            case EDGE_OFI:     return "OFI";
+            case EDGE_VACUUM:  return "VACUUM";
+            case EDGE_SWEEP:   return "SWEEP";
+            case EDGE_MM:      return "MM-PRESSURE";
+            default:           return "UNKNOWN";
+        }
+    }
+
+    bool layer_to_edge(LayerMode layer, EdgeEngineKey& out) const {
+        switch (layer) {
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL: out = EDGE_LEADLAG; return true;
+            case LAYER_VWAP:            out = EDGE_VWAP;    return true;
+            case LAYER_LIQUIDATION:     out = EDGE_LIQ;     return true;
+            case LAYER_OFI:             out = EDGE_OFI;     return true;
+            case LAYER_VACUUM:          out = EDGE_VACUUM;  return true;
+            case LAYER_SWEEP:           out = EDGE_SWEEP;   return true;
+            case LAYER_MM_PRESSURE:     out = EDGE_MM;      return true;
+            default: return false;
+        }
+    }
+
+    double edge_round_trip_cost_bp(EdgeEngineKey k) const {
+        if (k == EDGE_LIQ || k == EDGE_SWEEP) return TradingConfig::TAKER_ROUND_TRIP_BP;
+        return TradingConfig::MAKER_ROUND_TRIP_BP;
+    }
+
+    double edge_p50_mfe(const EdgeGateState& g) const {
+        if (g.samples.empty()) return 0.0;
+        std::vector<double> vals;
+        vals.reserve(g.samples.size());
+        for (const auto& s : g.samples) vals.push_back(s.mfe_bp);
+        std::sort(vals.begin(), vals.end());
+        return vals[vals.size() / 2];
+    }
+
+    void evaluate_edge_gate(EdgeEngineKey key, int64_t ts) {
+        auto& g = edge_gate_[key];
+        const int n = static_cast<int>(g.samples.size());
+        if (n <= 0) return;
+
+        double pnl_sum = 0.0;
+        int timeout_n = 0;
+        for (const auto& s : g.samples) {
+            pnl_sum += s.pnl_bp;
+            timeout_n += s.timeout ? 1 : 0;
+        }
+        const double avg_pnl = pnl_sum / n;
+        const double timeout_rt = static_cast<double>(timeout_n) / std::max(1, n);
+        const double p50_mfe = edge_p50_mfe(g);
+        const double min_mfe = edge_round_trip_cost_bp(key) + TradingConfig::EDGE_PROMOTE_MFE_BUFFER_BP;
+
+        if (g.enabled) {
+            if (n >= TradingConfig::EDGE_DEMOTE_MIN_TRADES &&
+                avg_pnl <= TradingConfig::EDGE_DEMOTE_AVG_PNL_BP) {
+                g.enabled = false;
+                g.disabled_until = ts + TradingConfig::EDGE_DISABLE_MS;
+                std::printf("[EDGE-GATE] %s DEMOTED | n=%d avg=%.2fbp timeout=%.0f%% p50mfe=%.2fbp disabled=%.0fmin\n",
+                            edge_name(key), n, avg_pnl, timeout_rt * 100.0, p50_mfe,
+                            TradingConfig::EDGE_DISABLE_MS / 60000.0);
+                std::fflush(stdout);
+            }
+            return;
+        }
+
+        if (ts < g.disabled_until) return;
+
+        if (n >= TradingConfig::EDGE_PROMOTE_MIN_TRADES &&
+            avg_pnl >= TradingConfig::EDGE_PROMOTE_MIN_AVG_PNL_BP &&
+            timeout_rt <= TradingConfig::EDGE_PROMOTE_MAX_TIMEOUT_RT &&
+            p50_mfe >= min_mfe) {
+            g.enabled = true;
+            std::printf("[EDGE-GATE] %s PROMOTED | n=%d avg=%.2fbp timeout=%.0f%% p50mfe=%.2fbp\n",
+                        edge_name(key), n, avg_pnl, timeout_rt * 100.0, p50_mfe);
+            std::fflush(stdout);
+        }
+    }
+
+    bool edge_gate_allows(int id, EdgeEngineKey key, int64_t ts) {
+        (void)id;
+        auto& g = edge_gate_[key];
+        evaluate_edge_gate(key, ts);
+        if (g.enabled) return true;
+        return false;
+    }
+
+    void edge_gate_record(LayerMode layer, double pnl_bp, double mfe_bp, bool timeout, int64_t ts) {
+        EdgeEngineKey key;
+        if (!layer_to_edge(layer, key)) return;
+        auto& g = edge_gate_[key];
+        g.samples.push_back({pnl_bp, mfe_bp, timeout});
+        while ((int)g.samples.size() > TradingConfig::EDGE_WINDOW_TRADES) {
+            g.samples.pop_front();
+        }
+        evaluate_edge_gate(key, ts);
     }
 
     // ======================================================================
@@ -1836,7 +1981,7 @@ private:
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
         }
 
-        if (executor_ && executor_->is_shadow()) {
+        if (is_shadow_mode()) {
             const bool shadow_scalper_layer =
                 (s.pos.layer == LAYER_LIQUIDATION) ||
                 (s.pos.layer == LAYER_LEADLAG) ||
@@ -1888,6 +2033,27 @@ private:
             return;
         }
 
+        const int64_t age_ms = ts - s.pos.entry_ts;
+        const bool is_leadlag_layer =
+            (s.pos.layer == LAYER_LEADLAG || s.pos.layer == LAYER_LEADLAG_ETH_SOL);
+
+        // No-followthrough kill: if the expected impulse never appears, exit fast.
+        if (is_leadlag_layer && age_ms >= 1200 && s.pos.mfe < 1.0) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
+        if (s.pos.layer == LAYER_VWAP && age_ms >= 3000 && s.pos.mfe < 1.8) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
+        if (s.pos.layer == LAYER_LIQUIDATION && age_ms >= 1200 && s.pos.mfe < 1.2) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
+
         // Breakeven protection for EXPANSION  if trade peaked at 2bp profit, floor at entry
         // For LONG: move_bp positive = profit. For SHORT: move_bp negative = profit.
         // peak_profit_bp = max favorable move regardless of direction.
@@ -1913,6 +2079,23 @@ private:
                         sym_short(id),
                         peak_profit_bp, trail_distance / price * 10000.0, move_bp);
                     std::fflush(stdout);
+                    pending_exit_reason_ = "TRAIL";
+                    exit(id, move_bp, ts, s);
+                    return;
+                }
+            }
+        }
+
+        // Cost-aware fast trail for active quality layers.
+        if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION) {
+            const double round_trip_cost =
+                (s.pos.layer == LAYER_LIQUIDATION)
+                    ? TradingConfig::TAKER_ROUND_TRIP_BP
+                    : TradingConfig::MAKER_ROUND_TRIP_BP;
+            const double arm_bp = round_trip_cost + 1.0;
+            if (peak_profit_bp >= arm_bp) {
+                const double floor_bp = std::max(round_trip_cost + 0.25, peak_profit_bp - 1.25);
+                if (move_bp <= floor_bp) {
                     pending_exit_reason_ = "TRAIL";
                     exit(id, move_bp, ts, s);
                     return;
@@ -2404,7 +2587,6 @@ private:
     }
 
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
-        const bool shadow_mode = (executor_ && executor_->is_shadow());
         Signal sig;
         sig.symbol = sym_full(id);
         sig.layer = (layer == LAYER_IMPULSE) ? LayerType::IMPULSE :
@@ -2627,7 +2809,7 @@ private:
                            (layer == LAYER_SWEEP)           ? "SWEEP"      :
                            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
 
-        const bool use_maker = TradingConfig::MAKER_MODE && !shadow_mode;
+        const bool use_maker = TradingConfig::MAKER_MODE;
         if (use_maker) {
             //  MAKER MODE: post limit order 
             // Do NOT open position yet. Set state to PENDING.
@@ -2880,6 +3062,7 @@ private:
 
         // Per-layer performance EMA — feeds sizing multiplier in enter()
         layer_tracker_.record(s.pos.layer, pnl_net);
+        edge_gate_record(s.pos.layer, pnl_net, s.pos.mfe, exit_reason == "TIMEOUT", ts);
         
         // Update allocator metrics
         if (s.pos.layer == LAYER_IMPULSE || s.pos.layer == LAYER_EXPANSION) {
@@ -2904,7 +3087,7 @@ private:
             if (exit_reason == "SL") {
                 sym_consecutive_sl_[id]++;
                 if (sym_consecutive_sl_[id] >= SYM_SL_STREAK_LIMIT) {
-                    const bool shadow_mode = (executor_ && executor_->is_shadow());
+                    const bool shadow_mode = is_shadow_mode();
                     const int64_t pause_ms = shadow_mode ? 45000LL : SYM_SL_PAUSE_MS;
                     sym_sl_cooldown_[id] = ts + pause_ms;
                     const char* sym = sym_short(id);
@@ -3058,6 +3241,7 @@ private:
     ExecutionOptimizer execution_optimizer_;
     AdaptiveReinforcementLayer reinforcement_;
     LayerPerformanceTracker    layer_tracker_;  // per-layer EMA sizing feedback
+    std::array<EdgeGateState, EDGE_ENGINE_COUNT> edge_gate_;
 
     // Depth baseline per symbol  used for real queue_density in cap_env
     double depth_baseline_[MAX_SYMBOLS];

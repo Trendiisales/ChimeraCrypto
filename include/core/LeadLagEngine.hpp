@@ -44,21 +44,21 @@ public:
     static constexpr double  MAX_LATENCY_MS        = 80.0;  // data age calibrated: old 35ms < p95 36ms = all signals blocked
 
     // Tier 1: BTC -> alts
-    static constexpr double  BTC_MOVE_THRESHOLD_BP = 8.0;
-    static constexpr double  TARGET_MOVED_MAX_BP   = 3.0;
-    static constexpr int64_t LOOKBACK_MS           = 100;
+    static constexpr double  BTC_MOVE_THRESHOLD_BP = 6.0;
+    static constexpr double  TARGET_MOVED_MAX_BP   = 2.5;
+    static constexpr int64_t LOOKBACK_MS           = 140;
     static constexpr int     MIN_BTC_SAMPLES       = 3;
 
     // Tier 2: ETH -> alts (slightly wider window, ETH is slower leader)
-    static constexpr double  ETH_MOVE_THRESHOLD_BP = 10.0;
-    static constexpr double  ETH_TARGET_MOVED_MAX_BP = 3.0;
-    static constexpr int64_t ETH_LOOKBACK_MS       = 120;
+    static constexpr double  ETH_MOVE_THRESHOLD_BP = 8.0;
+    static constexpr double  ETH_TARGET_MOVED_MAX_BP = 2.5;
+    static constexpr int64_t ETH_LOOKBACK_MS       = 160;
     static constexpr int     MIN_ETH_SAMPLES       = 3;
 
     // Tier 3: SOL -> alts (tightest window, SOL is fast L1)
-    static constexpr double  SOL_MOVE_THRESHOLD_BP = 12.0;
-    static constexpr double  SOL_TARGET_MOVED_MAX_BP = 3.0;
-    static constexpr int64_t SOL_LOOKBACK_MS       = 80;
+    static constexpr double  SOL_MOVE_THRESHOLD_BP = 9.0;
+    static constexpr double  SOL_TARGET_MOVED_MAX_BP = 2.5;
+    static constexpr int64_t SOL_LOOKBACK_MS       = 120;
     static constexpr int     MIN_SOL_SAMPLES       = 3;
 
     LeadLagEngine() {}

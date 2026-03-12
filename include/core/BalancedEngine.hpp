@@ -378,10 +378,8 @@ public:
             gate.disabled_until = 0;
             gate.samples.clear();
         }
-        // Edge-first defaults: only engines with plausible post-cost edge stay active.
+        // Edge-first defaults: keep only candidate edges active by default.
         edge_gate_[EDGE_LEADLAG].enabled = true;
-        edge_gate_[EDGE_VWAP].enabled    = true;
-        edge_gate_[EDGE_LIQ].enabled     = true;
         
         // Phase 2: Initialize capital control
         capital_control_.set_base_capital(10000.0);
@@ -700,52 +698,15 @@ public:
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
         if (edge_gate_allows(id, EDGE_LEADLAG, ts) && check_leadlag(id, price, ts, s, latency_ms)) return;
-        if (edge_gate_allows(id, EDGE_LEADLAG, ts) && check_leadlag_eth_sol(id, price, ts, s, latency_ms)) return;
+        if (check_impulse(id, price, ts, s, latency_ms)) return;
+        if (check_expansion(id, price, ts, s, latency_ms)) return;
         // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
-        // Keep IMPULSE/EXPANSION disabled until edge is net-positive again.
         // Park VOLSHOCK until a positive rolling edge is demonstrated.
         // if (check_vol_shock(id, price, ts, s, latency_ms)) return;
-        // if (check_impulse(id, price, ts, s, latency_ms)) return;
-        // if (check_expansion(id, price, ts, s, latency_ms)) return;
-        // SHADOW fallback: conservative probe (BTC/ETH only), infrequent and only
-        // with positive book pressure. This keeps observability without runaway bleed.
-        // Startup probe is for cold-start observability only.
-        // Once real trades start, do not keep injecting probe trades.
-        if (shadow_mode && id <= 1 && total_trades_ == 0) {
-            if (startup_ts_ms_ == 0) startup_ts_ms_ = ts;
-            const MarketTick& t = s.last_tick;
-            const bool startup_starved =
-                (total_trades_ == 0) && (startup_ts_ms_ > 0) && ((ts - startup_ts_ms_) >= 15 * 60 * 1000LL);
-            const int64_t probe_cooldown_ms = startup_starved ? 45000LL : 120000LL;
-            const double vol_low  = startup_starved ? 0.85 : 0.90;
-            const double vol_high = startup_starved ? 1.60 : 1.40;
-            const bool cooldown_ok = (ts - shadow_probe_last_ms_[id]) >= probe_cooldown_ms;
-            const bool vol_ok = (s.vol_ratio_ema >= vol_low && s.vol_ratio_ema <= vol_high);
-            if (cooldown_ok && vol_ok) {
-                bool spread_ok = true;
-                bool pressure_ok = true;
-                if (t.bid > 0.0 && t.ask > 0.0) {
-                    const double flow = compute_flow_ratio(id);
-                    const double max_spread = startup_starved ? 2.5 : 2.0;
-                    const double min_imbal  = startup_starved ? 0.03 : 0.10;
-                    const double min_flow   = startup_starved ? 0.51 : 0.53;
-                    spread_ok = (t.spread_bps > 0.0 && t.spread_bps <= max_spread);
-                    pressure_ok = (t.book_imbalance >= min_imbal && flow >= min_flow);
-                }
-                if (spread_ok && pressure_ok) {
-                    shadow_probe_last_ms_[id] = ts;
-                    rejection_throttle_.record(std::string(sym_short(id)) + " SHADOW-PROBE",
-                                               startup_starved ? "fired_starved" : "fired");
-                    // Route probe through OFI layer so governor can evaluate it.
-                    // MICRO is intentionally parked in StatefulGovernor.
-                    enter(id, price, ts, s, LAYER_OFI, true);
-                    return;
-                }
-            }
-        }
+        // No synthetic startup probes. Discovery must come from real edges only.
 
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
@@ -1267,6 +1228,27 @@ private:
         return TradingConfig::MAKER_ROUND_TRIP_BP;
     }
 
+    bool layer_uses_taker_entry(LayerMode layer) const {
+        switch (layer) {
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_LIQUIDATION:
+            case LAYER_IMPULSE:
+            case LAYER_EXPANSION:
+            case LAYER_ETH_LEAD:
+            case LAYER_SOL_LEAD:
+            case LAYER_VOLSHOCK:
+            case LAYER_SWEEP:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool layer_uses_maker_entry(LayerMode layer) const {
+        return TradingConfig::MAKER_MODE && !layer_uses_taker_entry(layer);
+    }
+
     double edge_p50_mfe(const EdgeGateState& g) const {
         if (g.samples.empty()) return 0.0;
         std::vector<double> vals;
@@ -1319,10 +1301,15 @@ private:
     }
 
     bool edge_gate_allows(int id, EdgeEngineKey key, int64_t ts) {
-        (void)id;
         auto& g = edge_gate_[key];
         evaluate_edge_gate(key, ts);
         if (g.enabled) return true;
+        const std::string rkey = std::string(sym_short(id)) + " " + edge_name(key);
+        if (ts < g.disabled_until) {
+            rejection_throttle_.record(rkey, "edge_cooldown");
+        } else {
+            rejection_throttle_.record(rkey, "edge_parked");
+        }
         return false;
     }
 
@@ -1389,7 +1376,8 @@ private:
         // Require majority of recent volume to be in the signal direction.
         // Breakout with opposing flow = likely false breakout / stop hunt.
         double flow = compute_flow_ratio(id);
-        if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
+        double min_flow = startup_starved_mode(ts) ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+        if (flow < min_flow) {
             rejection_throttle_.record(key, "weak_flow");
             return false;
         }
@@ -1406,15 +1394,13 @@ private:
     bool check_expansion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
+        const bool starved = startup_starved_mode(ts);
 
         // EXPAND symbol filter:
-        //   BTC(0):  60% WR +13.65bp -- deep books, confirmed edge
-        //   SOL(2):  blocked -- 60% WR but inverted R:R (-8.75bp losers vs +4.27bp winners)
+        //   Focus only on the thin alts where expansion moves are large enough
+        //   to beat spot costs cleanly.
         //   AVAX(4), LINK(5), POL(6): thin books, explosive moves, 3 live trades +22/+11/+22bp
-        //     EXPAND requires REGIME_BREAKOUT (vol_ratio > 1.75x) -- very high bar on thin books
-        //     When LINK/AVAX/POL reach BREAKOUT regime they run hard. EXPANSION_ALT_TP_BP=25bp.
-        //   ETH(1), BNB(3): remain blocked -- net negative EV
-        if (id == 1 || id == 2 || id == 3) {
+        if (id != 4 && id != 5 && id != 6) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
         }
@@ -1426,9 +1412,8 @@ private:
             rejection_throttle_.record(key, "already_in_expand");
             return false;
         }
-        if (s.regime != REGIME_BREAKOUT) {
-            // Was: BUILDUP || BREAKOUT  BUILDUP entries were failing too often.
-            // BREAKOUT-only: vol_ratio already > 1.65, genuine expansion confirmed.
+        const bool regime_ok = (s.regime == REGIME_BREAKOUT) || (starved && s.regime == REGIME_BUILDUP);
+        if (!regime_ok) {
             rejection_throttle_.record(key, "weak_regime");
             return false;
         }
@@ -1442,7 +1427,9 @@ private:
         }
 
         double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
-        if (vol_ratio <= TradingConfig::EXPANSION_VOL_RATIO) {
+        const double min_vol_ratio = starved ? (TradingConfig::EXPANSION_VOL_RATIO - 0.10)
+                                             : TradingConfig::EXPANSION_VOL_RATIO;
+        if (vol_ratio <= min_vol_ratio) {
             expand_confirm_ticks_[id] = 0;  // reset consecutive counter on weak tick
             rejection_throttle_.record(key, "weak_volatility");
             return false;
@@ -1450,8 +1437,10 @@ private:
 
         // CONSECUTIVE TICK CONFIRMATION  require N ticks above threshold before entry
         // One tick above vol_ratio is noise. N consecutive ticks = genuine expansion.
+        const int confirm_ticks = starved ? std::max(1, TradingConfig::EXPANSION_CONFIRM_TICKS - 1)
+                                          : TradingConfig::EXPANSION_CONFIRM_TICKS;
         expand_confirm_ticks_[id]++;
-        if (expand_confirm_ticks_[id] < TradingConfig::EXPANSION_CONFIRM_TICKS) {
+        if (expand_confirm_ticks_[id] < confirm_ticks) {
             rejection_throttle_.record(key, "confirm_ticks_pending");
             return false;
         }
@@ -1464,7 +1453,9 @@ private:
             return false;
         }
 
-        if ((int)s.short_returns.size() < TradingConfig::EXPANSION_MIN_SHORT_TICKS) {
+        const int min_short_ticks = starved ? std::max(8, TradingConfig::EXPANSION_MIN_SHORT_TICKS - 2)
+                                            : TradingConfig::EXPANSION_MIN_SHORT_TICKS;
+        if ((int)s.short_returns.size() < min_short_ticks) {
             rejection_throttle_.record(key, "insufficient_ticks");
             return false;
         }
@@ -1483,7 +1474,8 @@ private:
 
         // ORDER FLOW CONFIRMATION
         double flow = compute_flow_ratio(id);
-        if (flow < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
+        double min_flow = starved ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+        if (flow < min_flow) {
             rejection_throttle_.record(key, "weak_flow");
             return false;
         }
@@ -1578,6 +1570,14 @@ private:
 
         const char* sym = sym_short(id);  // was hardcoded ETH/SOL  now works for all 7 symbols
         std::string key = std::string(sym) + " LEADLAG";
+
+        // Spot HFT does not have enough post-cost edge on BTC/ETH/SOL follow trades.
+        // Restrict to higher-beta followers where a BTC burst can still produce a
+        // double-digit move after we pay entry/exit friction.
+        if (id < 3) {
+            rejection_throttle_.record(key, "symbol_filtered");
+            return false;
+        }
 
         if (ts < layer_lock_until_) {
             rejection_throttle_.record(key, "layer_locked");
@@ -2599,16 +2599,26 @@ private:
                     (layer == LAYER_MM_PRESSURE)? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
         // Expected gross edge per layer (gross TP targets from TradingConfig)
-        sig.expected_bps = (layer == LAYER_LIQUIDATION) ? TradingConfig::LIQ_TP_BP :
-                           (layer == LAYER_FUNDING)     ? TradingConfig::FUNDING_SIG_TP_BP :
-                           (layer == LAYER_NGAS)         ? TradingConfig::NGAS_TP_BP :
-                           (layer == LAYER_LEADLAG) ? TradingConfig::LEADLAG_TP_BP :
-                           (layer == LAYER_MICRO)   ? TradingConfig::IMBALANCE_TP_BP :
-                           (layer == LAYER_VACUUM)          ? TradingConfig::VACUUM_TP_BP :
-                           (layer == LAYER_VWAP)              ? TradingConfig::VWAP_TP_BP :
-                           (layer == LAYER_LEADLAG_ETH_SOL)   ? TradingConfig::LEADLAG_ETH_SOL_TP_BP :
-                           (layer == LAYER_IMPULSE)            ? TradingConfig::IMPULSE_TP_BP :
-                                                                 TradingConfig::IMPULSE_TP_BP;
+        const bool alt_symbol = (id == 4 || id == 5 || id == 6);
+        sig.expected_bps = (layer == LAYER_LIQUIDATION)      ? TradingConfig::LIQ_TP_BP :
+                           (layer == LAYER_FUNDING)          ? TradingConfig::FUNDING_SIG_TP_BP :
+                           (layer == LAYER_NGAS)             ? TradingConfig::NGAS_TP_BP :
+                           (layer == LAYER_LEADLAG)          ? TradingConfig::LEADLAG_TP_BP :
+                           (layer == LAYER_MICRO)            ? TradingConfig::IMBALANCE_TP_BP :
+                           (layer == LAYER_VACUUM)           ? TradingConfig::VACUUM_TP_BP :
+                           (layer == LAYER_VWAP)             ? TradingConfig::VWAP_TP_BP :
+                           (layer == LAYER_LEADLAG_ETH_SOL)  ? TradingConfig::LEADLAG_ETH_SOL_TP_BP :
+                           (layer == LAYER_EXPANSION)        ? (alt_symbol ? TradingConfig::EXPANSION_ALT_TP_BP
+                                                                              : TradingConfig::EXPANSION_TP_BP) :
+                           (layer == LAYER_IMPULSE)          ? (alt_symbol ? TradingConfig::IMPULSE_ALT_TP_BP
+                                                                              : TradingConfig::IMPULSE_TP_BP) :
+                           (layer == LAYER_ETH_LEAD)         ? TradingConfig::ETH_LEAD_TP_BP :
+                           (layer == LAYER_SOL_LEAD)         ? TradingConfig::SOL_LEAD_TP_BP :
+                           (layer == LAYER_VOLSHOCK)         ? TradingConfig::VOLSHOCK_TP_BP :
+                           (layer == LAYER_OFI)              ? TradingConfig::OFI_TP_BP :
+                           (layer == LAYER_SWEEP)            ? TradingConfig::SWEEP_TP_BP :
+                           (layer == LAYER_MM_PRESSURE)      ? TradingConfig::MM_TP_BP :
+                                                                TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
 
         // HARD LATENCY BACKSTOP  never enter on stale data regardless of engine
@@ -2625,18 +2635,9 @@ private:
         //   IMBALANCE, EXPANSION, VWAP, VACUUM
         // LEADLAG/LL-ETH-SOL now use aggressive maker entry — cost ~4bp, floor = MAKER
         // Pure taker layers (IMPULSE etc disabled but kept for correctness if re-enabled)
-        bool is_taker_layer = (layer == LAYER_IMPULSE        ||
-                               layer == LAYER_ETH_LEAD       ||
-                               layer == LAYER_SOL_LEAD       ||
-                               layer == LAYER_VOLSHOCK       ||
-                               layer == LAYER_LIQUIDATION ||
-                               layer == LAYER_SWEEP);
-        bool is_leadlag_layer = (layer == LAYER_LEADLAG || layer == LAYER_LEADLAG_ETH_SOL);
-        double cost_floor = is_taker_layer  ? TradingConfig::COST_FLOOR_BP          // 12bp — taker
-                          : is_leadlag_layer ? TradingConfig::MAKER_COST_FLOOR_BP    // 4bp  — aggressive maker
-                          : (layer == LAYER_EXPANSION)
-                              ? TradingConfig::EXPANSION_COST_FLOOR_BP               // 8bp  — disabled but correct
-                              : TradingConfig::MAKER_COST_FLOOR_BP;                  // 4bp  — IMBALANCE/VWAP/VACUUM
+        double cost_floor = layer_uses_taker_entry(layer)
+                          ? TradingConfig::COST_FLOOR_BP
+                          : TradingConfig::MAKER_COST_FLOOR_BP;
         if (sig.expected_bps < cost_floor) {
             std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
@@ -2809,7 +2810,7 @@ private:
                            (layer == LAYER_SWEEP)           ? "SWEEP"      :
                            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
 
-        const bool use_maker = TradingConfig::MAKER_MODE;
+        const bool use_maker = layer_uses_maker_entry(layer);
         if (use_maker) {
             //  MAKER MODE: post limit order 
             // Do NOT open position yet. Set state to PENDING.
@@ -2820,15 +2821,10 @@ private:
             // Map LayerMode to int id expected by LimitOrderManager
             // 0=IMBALANCE(maker/bid), 1=IMPULSE(taker/ask), 2=EXPANSION(maker/mid), 3=LEADLAG(taker/ask)
             // 4=LEADLAG-MAKER: post at ask-0.1*spread (aggressive maker, ~4bp saving vs taker)
-            int layer_int = (layer == LAYER_MICRO)              ? 0 :  // maker: post at bid
-                            (layer == LAYER_IMPULSE)             ? 1 :  // taker: post at ask (DISABLED)
-                            (layer == LAYER_EXPANSION)           ? 2 :  // maker: post at mid-0.3*spread (DISABLED)
-                            (layer == LAYER_LEADLAG)             ? 4 :  // MAKER: post at ask-0.1*spread (saves 4bp)
-                            (layer == LAYER_LEADLAG_ETH_SOL)     ? 4 :  // MAKER: same aggressive maker
-                            (layer == LAYER_ETH_LEAD)            ? 3 :  // taker (DISABLED)
-                            (layer == LAYER_SOL_LEAD)            ? 3 :  // taker (DISABLED)
-                            (layer == LAYER_VOLSHOCK)            ? 3 :  // taker
-                                                                   3;   // default taker
+            int layer_int = (layer == LAYER_MICRO)          ? 0 :
+                            (layer == LAYER_EXPANSION)      ? 2 :
+                            (layer == LAYER_LEADLAG)        ? 4 :
+                            (layer == LAYER_LEADLAG_ETH_SOL)? 4 : 0;
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
 
@@ -2900,17 +2896,9 @@ private:
         // Maker layers (post below mid): 4bp round trip (rebate ~1bp/side, spread ~2bp)
         // LEADLAG and LL-ETH-SOL now use aggressive maker entry (layer_id=4)
         // Cost ~4bp round trip (maker rebate), not 8bp taker
-        bool is_taker_exit = (s.pos.layer == LAYER_IMPULSE         ||  // disabled but kept for correctness
-                              s.pos.layer == LAYER_ETH_LEAD        ||  // disabled
-                              s.pos.layer == LAYER_SOL_LEAD        ||  // disabled
-                              s.pos.layer == LAYER_VOLSHOCK        ||
-                              s.pos.layer == LAYER_LIQUIDATION);
-        // LEADLAG/LL-ETH-SOL: aggressive maker — same cost tier as other maker layers
-        bool is_leadlag_maker = (s.pos.layer == LAYER_LEADLAG ||
-                                 s.pos.layer == LAYER_LEADLAG_ETH_SOL);
-        double round_trip_cost = is_taker_exit    ? TradingConfig::TAKER_ROUND_TRIP_BP   // 8bp
-                               : is_leadlag_maker ? TradingConfig::MAKER_ROUND_TRIP_BP   // 4bp (aggressive maker)
-                               :                    TradingConfig::MAKER_ROUND_TRIP_BP;  // 4bp
+        double round_trip_cost = layer_uses_taker_entry(s.pos.layer)
+                               ? TradingConfig::TAKER_ROUND_TRIP_BP
+                               : TradingConfig::MAKER_ROUND_TRIP_BP;
         double pnl_net = pnl - round_trip_cost;
 
         int64_t hold_time_ms = ts - s.pos.entry_ts;  // ts is already milliseconds
@@ -3175,7 +3163,6 @@ private:
     // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
     int     sym_consecutive_sl_[MAX_SYMBOLS];
     int64_t sym_sl_cooldown_[MAX_SYMBOLS];
-    int64_t shadow_probe_last_ms_[MAX_SYMBOLS] = {};
     int64_t startup_ts_ms_ = 0;
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;

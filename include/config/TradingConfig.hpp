@@ -82,7 +82,7 @@ struct TradingConfig {
     // BTC must move at least this many bp in the lookback window to signal
     // Raised 810bp: at 8bp too many weak moves were triggering. 10bp filters
     // for genuine momentum that ETH/SOL reliably follows.
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 6.0;   // softer trigger to avoid dry spells; confirmation gates still filter weak moves
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 5.0;   // crypto spot needs more signals; still gated by flow/book confirmation
     // LEADLAG confirmation gates (added Mar 2026)
     // OB ratio: bid_size/ask_size must exceed this — filters neutral/bearish book
     static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.08; // bid 8% > ask
@@ -91,7 +91,7 @@ struct TradingConfig {
 
     // Target already moved this much  edge consumed, don't enter
     // Tightened 32bp: if target already moved 2bp the propagation is done
-    static constexpr double LEADLAG_TARGET_MAX_BP      = 2.0;
+    static constexpr double LEADLAG_TARGET_MAX_BP      = 3.0;
 
     // Take-profit for lead-lag trades (gross, before costs)
     // Net profit after 10bp costs = +4bp. Worth it if win rate > 70%.
@@ -102,19 +102,19 @@ struct TradingConfig {
     // Hold tightened 25001500ms: if SOL hasn't moved in 1.5s, the propagation is done.
     // Flow confirm added: requires SOL buy pressure to confirm ETH signal not yet absorbed.
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0; // min ETH move to signal
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 6.0; // target lowered to reduce timeout churn
-    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 2.0;  // tightened to match LEADLAG
-    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 4000; // shorter validity window
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP        = 10.0; // if we pay taker cost the move must be worth taking
+    static constexpr double  LEADLAG_ETH_SOL_SL_BP        = 3.0;
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS  = 3000;
 
-    static constexpr double LEADLAG_TP_BP              = 8.0;    // matches avg MFE 5.7bp p50=4.7bp — was 14bp (too far, 88% TIMEOUT)
+    static constexpr double LEADLAG_TP_BP              = 12.0;   // fast momentum must clear taker cost, not just maker cost
 
     // Stop loss for lead-lag trades
     // Tight stop  if ETH/SOL doesn't follow BTC within 5s, exit
-    static constexpr double LEADLAG_SL_BP              = 2.0;   // tightened: avg MAE only -0.35bp, wrong entries exit faster
+    static constexpr double LEADLAG_SL_BP              = 3.0;
 
     // Maximum hold time for lead-lag before forced flat
     // Extended: trades need time to reach 8bp TP
-    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 4000;
+    static constexpr int64_t LEADLAG_MAX_HOLD_MS       = 5000;
 
     // -------------------------------------------------------------------------
     // LIQUIDATION CASCADE ENGINE  spot long on short liquidations from perp
@@ -280,9 +280,9 @@ struct TradingConfig {
     // 1.55 = genuine expansion, not just minor vol uptick.
     // BREAKOUT-only enforced in check_expansion (removed BUILDUP).
     // -------------------------------------------------------------------------
-    static constexpr double EXPANSION_VOL_RATIO       = 1.75;  // raised 1.55->1.75: only enter strong expansions, reduces false breakouts
-    static constexpr int    EXPANSION_CONFIRM_TICKS   = 3;   // raised 2->3: extra confirmation reduces noise entries
-    static constexpr int    EXPANSION_MIN_SHORT_TICKS = 12;  // was 8  need more confirmation ticks
+    static constexpr double EXPANSION_VOL_RATIO       = 1.60;  // slightly earlier breakout participation on thin alts
+    static constexpr int    EXPANSION_CONFIRM_TICKS   = 2;
+    static constexpr int    EXPANSION_MIN_SHORT_TICKS = 10;
 
 
     // -------------------------------------------------------------------------

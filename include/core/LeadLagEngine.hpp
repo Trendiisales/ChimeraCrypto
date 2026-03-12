@@ -44,9 +44,9 @@ public:
     static constexpr double  MAX_LATENCY_MS        = 80.0;  // data age calibrated: old 35ms < p95 36ms = all signals blocked
 
     // Tier 1: BTC -> alts
-    static constexpr double  BTC_MOVE_THRESHOLD_BP = 6.0;
-    static constexpr double  TARGET_MOVED_MAX_BP   = 2.5;
-    static constexpr int64_t LOOKBACK_MS           = 140;
+    static constexpr double  BTC_MOVE_THRESHOLD_BP = 5.0;
+    static constexpr double  TARGET_MOVED_MAX_BP   = 3.0;
+    static constexpr int64_t LOOKBACK_MS           = 180;
     static constexpr int     MIN_BTC_SAMPLES       = 3;
 
     // Tier 2: ETH -> alts (slightly wider window, ETH is slower leader)

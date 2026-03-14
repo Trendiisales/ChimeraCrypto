@@ -9,7 +9,7 @@ set(CMAKE_BUILD_TYPE Release)
 
 find_package(OpenSSL REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LWS REQUIRED libwebsockets)
+pkg_check_modules(LWS REQUIRED IMPORTED_TARGET libwebsockets)
 
 # CURL — headers at arch-specific location on Ubuntu 24
 find_path(CURL_INCLUDE_DIR curl/curl.h
@@ -30,7 +30,6 @@ include_directories(
     include
     ${OPENSSL_INCLUDE_DIR}
     ${CURL_INCLUDE_DIR}
-    ${LWS_INCLUDE_DIRS}
 )
 
 set(CHIMERA_SOURCES
@@ -47,7 +46,7 @@ target_link_libraries(chimera
     OpenSSL::SSL
     OpenSSL::Crypto
     ${CURL_LIBRARY}
-    ${LWS_LIBRARIES}
+    PkgConfig::LWS
     pthread
 )
 

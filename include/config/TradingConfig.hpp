@@ -124,9 +124,10 @@ struct TradingConfig {
     static constexpr double  LIQ_MIN_NOTIONAL_USD   = 350000.0; // stricter: ignore small liquidation noise
     static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD = 500000.0; // alts are noisier than BTC/ETH/SOL; require larger cascade
     static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 2.5;      // tighter anti-chase window
-    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 250;      // edge decays fast; stale liq signals are net-negative
+    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 500;      // reclaim-style maker entry needs a slightly wider validation window
     static constexpr int64_t LIQ_COOLDOWN_MS        = 10000;    // avoid repeated liq stabs in chop
     static constexpr double  LIQ_MAX_SPREAD_BPS     = 2.0;      // don't chase liquidation when book widens
+    static constexpr double  LIQ_RECLAIM_MIN_BP     = 0.35;     // require an initial local reclaim before posting maker
     static constexpr double  LIQ_MIN_FLOW_RATIO     = 0.56;     // require aggressive buy flow confirmation
     static constexpr double  LIQ_MIN_BOOK_IMBALANCE = 0.08;     // require at least mild bid pressure
     static constexpr double  LIQ_MIN_VOL_RATIO      = 0.90;     // avoid dead tape
@@ -316,6 +317,26 @@ struct TradingConfig {
     // Set to 0.0 to disable (useful when testing new signals).
     static constexpr double FLOW_CONFIRM_THRESHOLD = 0.55;
 
+    // Secondary continuation confirmations reused from the old book-only stack.
+    // These are now context filters, not standalone entry engines.
+    static constexpr int    CONTINUATION_CONFIRM_MIN_COUNT      = 1;
+    static constexpr double CONTINUATION_OFI_RATIO_MIN          = 0.10;
+    static constexpr double CONTINUATION_FLOW_MIN               = 0.53;
+    static constexpr double CONTINUATION_BOOK_IMBAL_MIN         = 0.05;
+    static constexpr double CONTINUATION_VWAP_MAX_UNDERWATER_BP = 12.0;
+    static constexpr double CONTINUATION_VACUUM_DRAIN_RATIO     = 0.25;
+
+    // Paper-only research mode:
+    // after a prolonged dry spell, relax the continuation stack modestly and
+    // allow the dormant VOLSHOCK engine to sample trades. This only applies
+    // in shadow mode and leaves live behavior unchanged.
+    static constexpr int64_t PAPER_RESEARCH_IDLE_MS                = 2 * 60 * 1000LL;
+    static constexpr double  PAPER_RESEARCH_FLOW_CONFIRM_THRESHOLD = 0.51;
+    static constexpr double  PAPER_RESEARCH_DISPLACEMENT_MULT      = 0.55;
+    static constexpr double  PAPER_RESEARCH_EXPANSION_VOL_RATIO    = 1.45;
+    static constexpr double  PAPER_RESEARCH_LEADLAG_OB_RATIO       = 1.04;
+    static constexpr double  PAPER_RESEARCH_LEADLAG_FLOW_RATIO     = 1.01;
+
     // -------------------------------------------------------------------------
     // MAKER ORDER MODE
     // -------------------------------------------------------------------------
@@ -349,6 +370,10 @@ struct TradingConfig {
     // Round-trip costs used in exit() net PnL calculation (BUG4 FIX)
     static constexpr double TAKER_ROUND_TRIP_BP = 8.0;  // 4bp/side VIP0 taker fee (IMPULSE/ETH-LEAD when active)
     static constexpr double MAKER_ROUND_TRIP_BP = 4.0;  // ~1bp rebate/side + ~2bp spread
+    // Research mode now assumes maker entry with market-style exit until a
+    // full maker-exit lifecycle is implemented.
+    static constexpr double MAKER_ENTRY_MARKET_EXIT_BP = 6.5;
+    static constexpr double MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP = 8.0;
 
     // -------------------------------------------------------------------------
     // FUNDING RATE SIGNAL ENGINE  spot long when shorts crowded on perp

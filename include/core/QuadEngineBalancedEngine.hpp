@@ -216,9 +216,12 @@ public:
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         json << "\"latency_p95\":" << lat_p95_display_ << ",";
+        json << "\"paper_research_mode\":" << (balanced_.paper_research_mode_active() ? "true" : "false") << ",";
+        json << "\"paper_research_idle_ms\":" << balanced_.paper_research_idle_ms() << ",";
         json << balanced_.get_boost_json() << ",";
         json << balanced_.get_layer_adapt_json() << ",";
         json << "\"rejections\":" << balanced_.get_rejection_stats() << ",";
+        json << "\"signal_rejections\":" << balanced_.get_signal_rejection_stats() << ",";
 
         // Full session stats  per-layer wins/losses/tp/sl/trail/timeout
         json << balanced_.get_session_stats_json() << ",";

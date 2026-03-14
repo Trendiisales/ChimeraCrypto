@@ -5,10 +5,9 @@
 // Implements maker-order entry for the Chimera engine.
 //
 // COST IMPACT:
-//   Taker (current):  fee=4bp/side → 8bp round trip + spread ~1bp = ~10bp total
-//   Maker (this):     fee=1bp rebate/side → -2bp + spread 0bp = ~4bp total
-//   Saving per trade: ~6bp — at 1 trade/day that is the difference between
-//   a marginally losing and marginally winning system.
+//   Taker entry:      fee=4bp/side → not acceptable for this strategy set
+//   Maker entry:      fee/rebate profile keeps entry cost low enough to study
+//                     real queue behavior without assuming instant taker fills
 //
 // HOW IT WORKS:
 //   1. Signal fires → enter_pending() posts a limit bid at limit_price
@@ -18,11 +17,12 @@
 //   3. On fill → returns FILLED with actual fill price
 //   4. On stale/timeout → returns CANCELLED, engine tries again next signal
 //
-// LIMIT PLACEMENT BY STRATEGY:
-//   IMBALANCE : bid price         (buy pressure — sellers will come to us)
-//   LEAD-LAG  : mid - 0.4*spread  (fast edge window — can't afford to miss)
-//   IMPULSE   : mid - 0.25*spread (breakout — fills quickly or not at all)
-//   EXPANSION : mid - 0.3*spread
+// LIMIT PLACEMENT PROFILES:
+//   0 PASSIVE_BID:     bid price
+//   1 FAST_INSIDE:     inside spread, closer to ask but still maker-safe
+//   2 MID_INSIDE:      inside spread, moderate aggression
+//   3 LEAD_INSIDE:     tighter lead-lag profile
+//   4 AGGRESSIVE_MAKER: near-ask inside spread for momentum layers
 //
 // SHADOW MODE:
 //   No real orders are sent. Fill detection uses ask_price crossing our bid.
@@ -70,45 +70,31 @@ public:
         int64_t timeout  = 0;
         double stale_bp  = 0.0;
 
-        // LAYER_MICRO (imbalance): post at bid
-        //   Strong buy pressure — sellers will come to us at bid price
-        //   Wide timeout: 5s (imbalance can persist)
-        //   Stale if ask rises 3bp above our limit (we missed the move)
-        if (layer_id == 0) {  // LAYER_MICRO
+        if (layer_id == 0) {  // PASSIVE_BID
             limit_px  = bid;
             timeout   = TradingConfig::MAKER_IMBALANCE_TIMEOUT_MS;
             stale_bp  = TradingConfig::MAKER_STALE_BP;
         }
-        // LAYER_LEADLAG: post at ask (cross the spread — aggressive fill)
-        //   LEADLAG fires when BTC moves and ETH/SOL is RISING. Price moves UP.
-        //   A limit BELOW mid will never fill — ask moves away from us immediately.
-        //   We must cross the spread and fill at ask. The 6bp maker saving is worthless
-        //   if the order never fills. LEADLAG edge (8bp net) > spread cost (~0.5bp).
-        //   Timeout: 200ms still valid — if ask has moved far above our fill, stale exit.
-        else if (layer_id == 3) {  // LAYER_LEADLAG — aggressive: fill at ask
-            limit_px  = ask;  // cross the spread — guarantees immediate fill on rising price
-            timeout   = TradingConfig::MAKER_LEADLAG_TIMEOUT_MS;
-            stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;  // allow more drift — we're filling into a move
-        }
-        // LAYER_IMPULSE: post at ask (aggressive fill — breakout price is moving UP)
-        //   Same logic as LEADLAG: price is expanding upward on a breakout.
-        //   Posting below mid means ask is running away. Fill at ask immediately.
-        //   Timeout: 500ms — if not filled at ask, price has moved too far.
-        else if (layer_id == 1) {  // LAYER_IMPULSE — aggressive: fill at ask
-            limit_px  = ask;  // cross the spread — breakout price is moving fast
+        else if (layer_id == 1) {  // FAST_INSIDE
+            limit_px  = bid + 0.75 * spread;
             timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;
             stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;
         }
-        // LAYER_LEADLAG aggressive maker (layer_id=4): post at ask - 0.1*spread
-        // Sits just inside the spread. Fills when a seller hits slightly below ask.
-        // Saves ~4bp vs taker (no crossing fee), fills ~70% of time given 300ms window.
-        // If price runs away (ask rises 2bp) = stale, signal is gone anyway.
+        else if (layer_id == 2) {  // MID_INSIDE
+            limit_px  = mid - 0.15 * spread;
+            timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;
+            stale_bp  = TradingConfig::MAKER_STALE_BP;
+        }
+        else if (layer_id == 3) {  // LEAD_INSIDE
+            limit_px  = bid + 0.85 * spread;
+            timeout   = TradingConfig::MAKER_LEADLAG_TIMEOUT_MS;
+            stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;
+        }
         else if (layer_id == 4) {
             limit_px  = ask - 0.1 * spread;
             timeout   = 300;   // 300ms: LEADLAG edge window ~80ms, 3x buffer
             stale_bp  = 2.0;   // cancel if ask rises 2bp — move has started without us
         }
-        // LAYER_EXPANSION: post at mid - 0.3 * spread (kept for reference, currently disabled)
         else {
             limit_px  = mid - 0.3 * spread;
             timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;

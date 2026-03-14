@@ -53,8 +53,13 @@ public:
 
         auto bal = rest_.get_account_balance();
         if (!bal.ok) {
-            std::fprintf(stderr, "[EXECUTOR] Cannot fetch account balance - check API key permissions\n");
-            return false;
+            if (rest_.is_shadow()) {
+                std::fprintf(stderr,
+                             "[EXECUTOR] Shadow mode: account balance unavailable, continuing with paper trading\n");
+            } else {
+                std::fprintf(stderr, "[EXECUTOR] Cannot fetch account balance - check API key permissions\n");
+                return false;
+            }
         }
 
         std::printf("[EXECUTOR] Ready. shadow=%s\n",

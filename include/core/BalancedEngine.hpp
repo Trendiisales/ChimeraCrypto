@@ -277,6 +277,23 @@ struct RejectionThrottle {
         rejection_counts.clear();
         last_summary_ts = ts;
     }
+
+    std::string build_json_snapshot() const {
+        std::ostringstream oss;
+        oss << "{";
+        bool first = true;
+        for (const auto& kv : rejection_counts) {
+            if (!first) oss << ",";
+            first = false;
+            auto it = last_rejection_reason.find(kv.first);
+            const std::string reason = (it != last_rejection_reason.end()) ? it->second : "";
+            oss << "\"" << kv.first << "\":{"
+                << "\"count\":" << kv.second << ","
+                << "\"reason\":\"" << reason << "\"}";
+        }
+        oss << "}";
+        return oss.str();
+    }
 };
 
 // =============================================================================
@@ -389,6 +406,7 @@ public:
             gate.samples.clear();
         }
         // Edge-first defaults: keep only candidate edges active by default.
+        edge_gate_[EDGE_LIQ].enabled = true;
         edge_gate_[EDGE_LEADLAG].enabled = true;
         
         // Phase 2: Initialize capital control
@@ -404,8 +422,11 @@ public:
         std::printf(" Capital Control Layer: ENABLED                                \n");
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
-        std::printf(" Active Engines: LEADLAG | LIQ | VWAP-REV (long-only)          \n");
-        std::printf(" Parked Engines: OFI | VACUUM | IMBAL | SWEEP | MM | VOLSHOCK  \n");
+        std::printf(" Active Engines: LEADLAG | IMPULSE | EXPANSION | LIQ-RECLAIM   \n");
+        std::printf(" Macro Engines: FUNDING | NGAS                                  \n");
+        std::printf(" Support Only: OFI | VWAP | VACUUM                              \n");
+        std::printf(" Parked Engines: IMBAL | SWEEP | MM                             \n");
+        std::printf(" Paper Research: idle dry-spell auto-arms VOLSHOCK + relaxers  \n");
         std::printf(" Multi-position: UP TO 3 (1 per symbol)                        \n");
         std::printf(" Dead zone (20-23 UTC): max 1 pos, raised thresholds           \n");
         std::printf("\n");
@@ -413,6 +434,7 @@ public:
     }
 
     inline void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        last_tick_ts_ms_ = ts;
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         stall_detector_.on_ws_receive();
         stall_detector_.on_eval_start();
@@ -675,7 +697,23 @@ public:
         bool dead_zone = (utc_hour >= TradingConfig::SESSION_DEAD_START_UTC &&
                           utc_hour <  TradingConfig::SESSION_DEAD_END_UTC);
         const bool shadow_mode = is_shadow_mode();
-        if (shadow_mode && startup_ts_ms_ == 0) startup_ts_ms_ = ts;
+        if (shadow_mode && startup_ts_ms_ == 0) {
+            startup_ts_ms_ = ts;
+            if (last_trade_activity_ts_ms_ == 0) {
+                last_trade_activity_ts_ms_ = ts;
+            }
+        }
+        if (shadow_mode) {
+            const bool research_now = paper_research_mode(ts);
+            if (research_now != paper_research_mode_logged_) {
+                std::printf("[PAPER-RESEARCH] %s | idle=%.1fs | threshold=%.1fs\n",
+                            research_now ? "ARMED" : "DISARMED",
+                            paper_research_idle_elapsed_ms(ts) / 1000.0,
+                            TradingConfig::PAPER_RESEARCH_IDLE_MS / 1000.0);
+                std::fflush(stdout);
+                paper_research_mode_logged_ = research_now;
+            }
+        }
         int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : TradingConfig::MAX_CONCURRENT_POSITIONS;
         if (shadow_mode) {
             // Shadow research mode: do not throttle opportunity discovery too hard.
@@ -699,8 +737,9 @@ public:
             return;
         }
 
-        // Try signals in priority order
-        // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
+        // Try signals in priority order.
+        // The engine is intentionally continuation-first: the old book-only
+        // baselines now act as secondary confirmations instead of primary entries.
         if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         if (try_funding_entry(id, price, ts, s, latency_ms)) return;
         if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
@@ -710,29 +749,19 @@ public:
         if (edge_gate_allows(id, EDGE_LEADLAG, ts) && check_leadlag(id, price, ts, s, latency_ms)) return;
         if (check_impulse(id, price, ts, s, latency_ms)) return;
         if (check_expansion(id, price, ts, s, latency_ms)) return;
+        if (paper_research_mode(ts) && check_vol_shock(id, price, ts, s, latency_ms)) return;
         // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
-        // Park VOLSHOCK until a positive rolling edge is demonstrated.
-        // if (check_vol_shock(id, price, ts, s, latency_ms)) return;
         // No synthetic startup probes. Discovery must come from real edges only.
 
-        // Book-dependent engines require a valid top-of-book snapshot.
-        // During warm-up, aggTrade ticks can arrive before first bookTicker.
-        const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
-        if (has_book) {
-            if (edge_gate_allows(id, EDGE_VACUUM, ts) && check_vacuum(id, price, ts, s, latency_ms)) return;
-            // Park IMBAL until it proves positive edge in this venue.
-            // if (check_imbalance(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_OFI, ts) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
-        }
+        // Park old book-only primary entries. Their state is still maintained
+        // and reused inside the active continuation engines as context.
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
+    std::string get_signal_rejection_stats() const { return rejection_throttle_.build_json_snapshot(); }
     // Boost multiplier values exposed for /api/state polling
     std::string get_boost_json() const {
         std::ostringstream j;
@@ -763,6 +792,8 @@ public:
     }
     int    get_total_trades()   const { return total_trades_; }
     int    get_open_positions() const { return open_positions_; }
+    bool   paper_research_mode_active() const { return paper_research_mode(last_tick_ts_ms_); }
+    int64_t paper_research_idle_ms() const { return paper_research_idle_elapsed_ms(last_tick_ts_ms_); }
 
     // Per-layer adaptive sizing state — for GUI layer-adapt panel
     // Returns JSON fragment (no outer braces) ready to embed in telemetry payload
@@ -1193,12 +1224,319 @@ private:
         return buy / total;
     }
 
+    struct SecondaryLongConfirmations {
+        int  count  = 0;
+        bool ofi    = false;
+        bool vwap   = false;
+        bool vacuum = false;
+    };
+
+    double current_ofi_ratio(const SymbolState& s) const {
+        const double total = s.ofi_buy_ema + s.ofi_sell_ema;
+        if (total < 1e-9) return 0.0;
+        return (s.ofi_buy_ema - s.ofi_sell_ema) / total;
+    }
+
+    bool continuation_ofi_support(int id, const SymbolState& s, double latency_ms) const {
+        const MarketTick& t = s.last_tick;
+        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
+        if (!s.ofi_ema_init || t.bid <= 0.0 || t.ask <= 0.0) return false;
+        if (t.spread_bps > TradingConfig::OFI_MAX_SPREAD_BPS) return false;
+        if (current_ofi_ratio(s) < TradingConfig::CONTINUATION_OFI_RATIO_MIN) return false;
+        if (compute_flow_ratio(id) < TradingConfig::CONTINUATION_FLOW_MIN) return false;
+        return t.book_imbalance >= TradingConfig::CONTINUATION_BOOK_IMBAL_MIN;
+    }
+
+    bool continuation_vwap_support(double price, const SymbolState& s) const {
+        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) return false;
+        const double underwater_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
+        return underwater_bp <= TradingConfig::CONTINUATION_VWAP_MAX_UNDERWATER_BP;
+    }
+
+    bool continuation_vacuum_support(int id, const SymbolState& s) const {
+        const MarketTick& t = s.last_tick;
+        if (!s.ask_depth_init || s.ask_depth_ema <= 0.0) return false;
+        if (t.bid <= 0.0 || t.ask <= 0.0 || t.ask_size <= 0.0) return false;
+        if (t.spread_bps > TradingConfig::VACUUM_MAX_SPREAD_BPS) return false;
+        const double drain_ratio = 1.0 - (t.ask_size / s.ask_depth_ema);
+        if (drain_ratio < TradingConfig::CONTINUATION_VACUUM_DRAIN_RATIO) return false;
+        if (compute_flow_ratio(id) < TradingConfig::CONTINUATION_FLOW_MIN) return false;
+        return t.book_imbalance >= TradingConfig::CONTINUATION_BOOK_IMBAL_MIN;
+    }
+
+    SecondaryLongConfirmations collect_secondary_long_confirmations(
+        int id,
+        double price,
+        const SymbolState& s,
+        double latency_ms) const {
+        SecondaryLongConfirmations confirms;
+        confirms.ofi = continuation_ofi_support(id, s, latency_ms);
+        confirms.vwap = continuation_vwap_support(price, s);
+        confirms.vacuum = continuation_vacuum_support(id, s);
+        confirms.count = static_cast<int>(confirms.ofi) +
+                         static_cast<int>(confirms.vwap) +
+                         static_cast<int>(confirms.vacuum);
+        return confirms;
+    }
+
+    bool pending_fill_requires_revalidation(LayerMode layer) const {
+        switch (layer) {
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_LIQUIDATION:
+            case LAYER_IMPULSE:
+            case LAYER_EXPANSION:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool pending_fill_still_valid(
+        int id,
+        double price,
+        int64_t ts,
+        int64_t posted_ts,
+        const SymbolState& s,
+        LayerMode layer,
+        std::string& reason) const {
+        const double latency_ms = market_env_.latency_ms;
+        const bool starved = startup_starved_mode(ts);
+
+        auto require_secondary_support = [&](const char* missing_reason) {
+            const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+            if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+                reason = missing_reason;
+                return false;
+            }
+            return true;
+        };
+
+        switch (layer) {
+            case LAYER_IMPULSE: {
+                if (latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
+                    reason = "fill_latency_high";
+                    return false;
+                }
+                if (s.regime != REGIME_BREAKOUT) {
+                    reason = "fill_regime_lost";
+                    return false;
+                }
+                if ((int)s.short_returns.size() < TradingConfig::IMPULSE_MIN_SHORT_TICKS) {
+                    reason = "fill_ticks_low";
+                    return false;
+                }
+                const double long_vol = s.long_vol_ema;
+                if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+                    reason = "fill_vol_low";
+                    return false;
+                }
+                const double displacement = std::abs(price - s.regime_anchor_price);
+                if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
+                    reason = "fill_displacement_lost";
+                    return false;
+                }
+                const double min_flow = starved ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+                if (compute_flow_ratio(id) < min_flow) {
+                    reason = "fill_flow_weak";
+                    return false;
+                }
+                return require_secondary_support("fill_secondary_lost");
+            }
+
+            case LAYER_EXPANSION: {
+                const bool regime_ok = (s.regime == REGIME_BREAKOUT) || (starved && s.regime == REGIME_BUILDUP);
+                if (!regime_ok) {
+                    reason = "fill_regime_lost";
+                    return false;
+                }
+                const double long_vol = s.long_vol_ema;
+                if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+                    reason = "fill_vol_low";
+                    return false;
+                }
+                const double short_vol = compute_volatility(s.short_returns);
+                const double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
+                const double min_vol_ratio = starved ? (TradingConfig::EXPANSION_VOL_RATIO - 0.10)
+                                                     : TradingConfig::EXPANSION_VOL_RATIO;
+                if (vol_ratio <= min_vol_ratio) {
+                    reason = "fill_vol_ratio_lost";
+                    return false;
+                }
+                const int min_short_ticks = starved ? std::max(8, TradingConfig::EXPANSION_MIN_SHORT_TICKS - 2)
+                                                    : TradingConfig::EXPANSION_MIN_SHORT_TICKS;
+                if ((int)s.short_returns.size() < min_short_ticks) {
+                    reason = "fill_ticks_low";
+                    return false;
+                }
+                const double displacement = std::abs(price - s.regime_anchor_price);
+                if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
+                    reason = "fill_displacement_lost";
+                    return false;
+                }
+                if (latency_ms > TradingConfig::LATENCY_NET_CLEAN_MS) {
+                    reason = "fill_latency_high";
+                    return false;
+                }
+                const double min_flow = starved ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+                if (compute_flow_ratio(id) < min_flow) {
+                    reason = "fill_flow_weak";
+                    return false;
+                }
+                return require_secondary_support("fill_secondary_lost");
+            }
+
+            case LAYER_LEADLAG: {
+                if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) {
+                    reason = "fill_latency_high";
+                    return false;
+                }
+                int direction = 0;
+                if (!leadlag_.check_signal(id, latency_ms, direction) || direction < 0) {
+                    reason = "fill_signal_gone";
+                    return false;
+                }
+                const double btc_now_bp = leadlag_.btc_move_bp();
+                const double sustain_threshold = TradingConfig::LEADLAG_BTC_THRESHOLD_BP * 0.6;
+                if (std::fabs(btc_now_bp) < sustain_threshold) {
+                    reason = "fill_btc_unsustained";
+                    return false;
+                }
+                const MarketTick& t = s.last_tick;
+                double ob_ratio = 0.0;
+                if (t.ask_size > 1e-9) {
+                    ob_ratio = t.bid_size / t.ask_size;
+                }
+                if (ob_ratio < TradingConfig::LEADLAG_CONFIRM_OB_RATIO) {
+                    reason = "fill_book_weak";
+                    return false;
+                }
+                double flow_ratio = 0.0;
+                if (s.sell_vol_ema > 1e-9) {
+                    flow_ratio = s.buy_vol_ema / s.sell_vol_ema;
+                }
+                if (flow_ratio < TradingConfig::LEADLAG_CONFIRM_FLOW_RATIO) {
+                    reason = "fill_flow_weak";
+                    return false;
+                }
+                return require_secondary_support("fill_secondary_lost");
+            }
+
+            case LAYER_LEADLAG_ETH_SOL: {
+                if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
+                    reason = "fill_latency_high";
+                    return false;
+                }
+                int direction = 0;
+                if (!leadlag_.check_signal_eth_sol(latency_ms, direction) || direction < 0) {
+                    reason = "fill_signal_gone";
+                    return false;
+                }
+                if (compute_flow_ratio(id) < TradingConfig::FLOW_CONFIRM_THRESHOLD) {
+                    reason = "fill_flow_weak";
+                    return false;
+                }
+                return require_secondary_support("fill_secondary_lost");
+            }
+
+            case LAYER_LIQUIDATION: {
+                const int64_t age_ms = ts - posted_ts;
+                if (age_ms > TradingConfig::LIQ_SIGNAL_WINDOW_MS) {
+                    reason = "fill_signal_old";
+                    return false;
+                }
+                const MarketTick& t = s.last_tick;
+                if (t.bid <= 0.0 || t.ask <= 0.0 || t.spread_bps <= 0.0) {
+                    reason = "fill_no_book";
+                    return false;
+                }
+                if (t.spread_bps > TradingConfig::LIQ_MAX_SPREAD_BPS) {
+                    reason = "fill_spread_wide";
+                    return false;
+                }
+                if (s.regime == REGIME_DEAD) {
+                    reason = "fill_regime_dead";
+                    return false;
+                }
+                if (s.vol_ratio_ema < TradingConfig::LIQ_MIN_VOL_RATIO ||
+                    s.vol_ratio_ema > TradingConfig::LIQ_MAX_VOL_RATIO) {
+                    reason = "fill_vol_out_of_band";
+                    return false;
+                }
+                if (liq_engine_.spot_move_bp(id, price) < TradingConfig::LIQ_RECLAIM_MIN_BP) {
+                    reason = "fill_reclaim_lost";
+                    return false;
+                }
+                if (compute_flow_ratio(id) < TradingConfig::LIQ_MIN_FLOW_RATIO) {
+                    reason = "fill_flow_weak";
+                    return false;
+                }
+                if (t.book_imbalance < TradingConfig::LIQ_MIN_BOOK_IMBALANCE) {
+                    reason = "fill_book_weak";
+                    return false;
+                }
+                return require_secondary_support("fill_secondary_lost");
+            }
+
+            default:
+                return true;
+        }
+    }
+
     // Shadow starvation detector: no trades for an extended period after startup.
     // Used to relax selected thresholds slightly so the system can sample edge.
     bool startup_starved_mode(int64_t ts) const {
         const bool shadow_mode = is_shadow_mode();
         return shadow_mode && startup_ts_ms_ > 0 && total_trades_ == 0 &&
                (ts - startup_ts_ms_) >= 8 * 60 * 1000LL;
+    }
+
+    int64_t paper_research_idle_elapsed_ms(int64_t ts) const {
+        if (ts <= 0) return 0;
+        const int64_t anchor = (last_trade_activity_ts_ms_ > 0)
+            ? last_trade_activity_ts_ms_
+            : startup_ts_ms_;
+        return (anchor > 0 && ts > anchor) ? (ts - anchor) : 0;
+    }
+
+    bool paper_research_mode(int64_t ts) const {
+        return is_shadow_mode() &&
+               open_positions_ == 0 &&
+               paper_research_idle_elapsed_ms(ts) >= TradingConfig::PAPER_RESEARCH_IDLE_MS;
+    }
+
+    double active_flow_confirm_threshold(int64_t ts) const {
+        if (paper_research_mode(ts)) {
+            return TradingConfig::PAPER_RESEARCH_FLOW_CONFIRM_THRESHOLD;
+        }
+        return startup_starved_mode(ts) ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+    }
+
+    double active_displacement_mult(int64_t ts) const {
+        return paper_research_mode(ts)
+            ? TradingConfig::PAPER_RESEARCH_DISPLACEMENT_MULT
+            : TradingConfig::MIN_DISPLACEMENT_LONG_MULT;
+    }
+
+    double active_expansion_vol_ratio(int64_t ts) const {
+        if (paper_research_mode(ts)) {
+            return TradingConfig::PAPER_RESEARCH_EXPANSION_VOL_RATIO;
+        }
+        return startup_starved_mode(ts)
+            ? (TradingConfig::EXPANSION_VOL_RATIO - 0.10)
+            : TradingConfig::EXPANSION_VOL_RATIO;
+    }
+
+    double active_leadlag_ob_ratio(int64_t ts) const {
+        return paper_research_mode(ts)
+            ? TradingConfig::PAPER_RESEARCH_LEADLAG_OB_RATIO
+            : TradingConfig::LEADLAG_CONFIRM_OB_RATIO;
+    }
+
+    double active_leadlag_flow_ratio(int64_t ts) const {
+        return paper_research_mode(ts)
+            ? TradingConfig::PAPER_RESEARCH_LEADLAG_FLOW_RATIO
+            : TradingConfig::LEADLAG_CONFIRM_FLOW_RATIO;
     }
 
     bool is_shadow_mode() const {
@@ -1234,29 +1572,55 @@ private:
     }
 
     double edge_round_trip_cost_bp(EdgeEngineKey k) const {
-        if (k == EDGE_LIQ || k == EDGE_SWEEP) return TradingConfig::TAKER_ROUND_TRIP_BP;
-        return TradingConfig::MAKER_ROUND_TRIP_BP;
+        (void)k;
+        return TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP;
     }
 
     bool layer_uses_taker_entry(LayerMode layer) const {
+        (void)layer;
+        return false;
+    }
+
+    bool layer_uses_maker_entry(LayerMode layer) const {
+        (void)layer;
+        return TradingConfig::MAKER_MODE;
+    }
+
+    double layer_round_trip_cost_bp(LayerMode layer) const {
+        (void)layer;
+        return TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP;
+    }
+
+    double layer_cost_floor_bp(LayerMode layer) const {
+        (void)layer;
+        return TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP;
+    }
+
+    int maker_profile_for_layer(LayerMode layer) const {
         switch (layer) {
             case LAYER_LEADLAG:
             case LAYER_LEADLAG_ETH_SOL:
+                return 3;  // tight maker for short-lived propagation trades
             case LAYER_LIQUIDATION:
+                return 2;  // reclaim entry: let the post-liq pullback come to us
             case LAYER_IMPULSE:
-            case LAYER_EXPANSION:
+            case LAYER_VACUUM:
             case LAYER_ETH_LEAD:
             case LAYER_SOL_LEAD:
             case LAYER_VOLSHOCK:
             case LAYER_SWEEP:
-                return true;
+                return 4;  // aggressive maker, still rests inside the spread
+            case LAYER_EXPANSION:
+            case LAYER_VWAP:
+                return 2;  // moderate inside-spread posting
+            case LAYER_FUNDING:
+            case LAYER_NGAS:
+            case LAYER_OFI:
+            case LAYER_MM_PRESSURE:
+            case LAYER_MICRO:
             default:
-                return false;
+                return 0;  // patient bid-side maker
         }
-    }
-
-    bool layer_uses_maker_entry(LayerMode layer) const {
-        return TradingConfig::MAKER_MODE && !layer_uses_taker_entry(layer);
     }
 
     double edge_p50_mfe(const EdgeGateState& g) const {
@@ -1343,6 +1707,7 @@ private:
     bool check_impulse(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMPULSE";
+        const bool research = paper_research_mode(ts);
 
         // SYMBOL FILTER for IMPULSE:
         // BTC(0): 56.7% WR +0.53bp/trade -- deep books eat the edge, 20% MFE capture, -2.72bp avg MAE. Not worth it.
@@ -1361,11 +1726,15 @@ private:
             rejection_throttle_.record(key, "high_latency");
             return false;
         }
-        if (s.regime != REGIME_BREAKOUT) {
+        const bool regime_ok = (s.regime == REGIME_BREAKOUT) || (research && s.regime == REGIME_BUILDUP);
+        if (!regime_ok) {
             rejection_throttle_.record(key, "no_breakout");
             return false;
         }
-        if ((int)s.short_returns.size() < TradingConfig::IMPULSE_MIN_SHORT_TICKS) {
+        const int min_short_ticks = research
+            ? std::max(3, TradingConfig::IMPULSE_MIN_SHORT_TICKS - 2)
+            : TradingConfig::IMPULSE_MIN_SHORT_TICKS;
+        if ((int)s.short_returns.size() < min_short_ticks) {
             rejection_throttle_.record(key, "insufficient_ticks");
             return false;
         }
@@ -1377,7 +1746,7 @@ private:
         }
 
         double displacement = std::abs(price - s.regime_anchor_price);
-        if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
+        if (displacement < active_displacement_mult(ts) * long_vol) {
             rejection_throttle_.record(key, "insufficient_displacement");
             return false;
         }
@@ -1386,12 +1755,21 @@ private:
         // Require majority of recent volume to be in the signal direction.
         // Breakout with opposing flow = likely false breakout / stop hunt.
         double flow = compute_flow_ratio(id);
-        double min_flow = startup_starved_mode(ts) ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+        double min_flow = active_flow_confirm_threshold(ts);
         if (flow < min_flow) {
             rejection_throttle_.record(key, "weak_flow");
             return false;
         }
 
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        std::printf("[IMPULSE] %s | flow=%.2f | confirms=%d(ofi=%d vwap=%d vacuum=%d) | ENTERING LONG\n",
+                    sym, flow, confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum);
+        std::fflush(stdout);
         enter(id, price, ts, s, LAYER_IMPULSE, true);
         return true;
     }
@@ -1405,6 +1783,7 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
         const bool starved = startup_starved_mode(ts);
+        const bool research = paper_research_mode(ts);
 
         // EXPAND symbol filter:
         //   Focus only on the thin alts where expansion moves are large enough
@@ -1422,7 +1801,8 @@ private:
             rejection_throttle_.record(key, "already_in_expand");
             return false;
         }
-        const bool regime_ok = (s.regime == REGIME_BREAKOUT) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (s.regime == REGIME_BREAKOUT) ||
+                               ((starved || research) && s.regime == REGIME_BUILDUP);
         if (!regime_ok) {
             rejection_throttle_.record(key, "weak_regime");
             return false;
@@ -1437,8 +1817,7 @@ private:
         }
 
         double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
-        const double min_vol_ratio = starved ? (TradingConfig::EXPANSION_VOL_RATIO - 0.10)
-                                             : TradingConfig::EXPANSION_VOL_RATIO;
+        const double min_vol_ratio = active_expansion_vol_ratio(ts);
         if (vol_ratio <= min_vol_ratio) {
             expand_confirm_ticks_[id] = 0;  // reset consecutive counter on weak tick
             rejection_throttle_.record(key, "weak_volatility");
@@ -1447,8 +1826,9 @@ private:
 
         // CONSECUTIVE TICK CONFIRMATION  require N ticks above threshold before entry
         // One tick above vol_ratio is noise. N consecutive ticks = genuine expansion.
-        const int confirm_ticks = starved ? std::max(1, TradingConfig::EXPANSION_CONFIRM_TICKS - 1)
-                                          : TradingConfig::EXPANSION_CONFIRM_TICKS;
+        const int confirm_ticks = research ? 1 :
+                                  (starved ? std::max(1, TradingConfig::EXPANSION_CONFIRM_TICKS - 1)
+                                           : TradingConfig::EXPANSION_CONFIRM_TICKS);
         expand_confirm_ticks_[id]++;
         if (expand_confirm_ticks_[id] < confirm_ticks) {
             rejection_throttle_.record(key, "confirm_ticks_pending");
@@ -1463,15 +1843,16 @@ private:
             return false;
         }
 
-        const int min_short_ticks = starved ? std::max(8, TradingConfig::EXPANSION_MIN_SHORT_TICKS - 2)
-                                            : TradingConfig::EXPANSION_MIN_SHORT_TICKS;
+        const int min_short_ticks = research ? std::max(6, TradingConfig::EXPANSION_MIN_SHORT_TICKS - 4) :
+                                   (starved ? std::max(8, TradingConfig::EXPANSION_MIN_SHORT_TICKS - 2)
+                                            : TradingConfig::EXPANSION_MIN_SHORT_TICKS);
         if ((int)s.short_returns.size() < min_short_ticks) {
             rejection_throttle_.record(key, "insufficient_ticks");
             return false;
         }
 
         double displacement = std::abs(price - s.regime_anchor_price);
-        if (displacement < TradingConfig::MIN_DISPLACEMENT_LONG_MULT * long_vol) {
+        if (displacement < active_displacement_mult(ts) * long_vol) {
             rejection_throttle_.record(key, "insufficient_displacement");
             return false;
         }
@@ -1484,13 +1865,22 @@ private:
 
         // ORDER FLOW CONFIRMATION
         double flow = compute_flow_ratio(id);
-        double min_flow = starved ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+        double min_flow = active_flow_confirm_threshold(ts);
         if (flow < min_flow) {
             rejection_throttle_.record(key, "weak_flow");
             return false;
         }
 
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
         expand_confirm_ticks_[id] = 0;  // reset after entry  fresh confirmation needed next time
+        std::printf("[EXPAND] %s | flow=%.2f | confirms=%d(ofi=%d vwap=%d vacuum=%d) | ENTERING LONG\n",
+                    sym, flow, confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum);
+        std::fflush(stdout);
         enter(id, price, ts, s, LAYER_EXPANSION, true);
         return true;
     }
@@ -1560,7 +1950,7 @@ private:
     }
 
     // ======================================================================
-    // LEAD-LAG  BTC leads ETH and SOL by 50-200ms
+    // LEAD-LAG  BTC leads higher-beta followers by 50-200ms
     // Latency requirement: < 35ms (LATENCY_LEADLAG_MAX_MS)
     //
     // MEASURED EDGE at our latency:
@@ -1572,7 +1962,8 @@ private:
     //   Minimum win rate for positive EV = 73%
     //   (only fires on 12bp BTC move AND target hasn't moved 4bp yet)
     //
-    // Only fires on ETH (id=1) and SOL (id=2)  BTC IS the leader
+    // BTC is always the leader. The live continuation stack only follows the
+    // higher-beta alts where post-cost move size is still large enough.
     // ======================================================================
     bool check_leadlag(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         // BTC does not follow itself
@@ -1580,6 +1971,7 @@ private:
 
         const char* sym = sym_short(id);  // was hardcoded ETH/SOL  now works for all 7 symbols
         std::string key = std::string(sym) + " LEADLAG";
+        const bool research = paper_research_mode(ts);
 
         // Spot HFT does not have enough post-cost edge on BTC/ETH/SOL follow trades.
         // Restrict to higher-beta followers where a BTC burst can still produce a
@@ -1635,7 +2027,7 @@ private:
         if (t.ask_size > 1e-9) {
             ob_imbalance = t.bid_size / t.ask_size;
         }
-        if (ob_imbalance < TradingConfig::LEADLAG_CONFIRM_OB_RATIO) {
+        if (ob_imbalance < active_leadlag_ob_ratio(ts)) {
             rejection_throttle_.record(key, "ob_imbalance_weak");
             return false;
         }
@@ -1647,13 +2039,21 @@ private:
         if (symbols_[id].sell_vol_ema > 1e-9) {
             flow_ratio = symbols_[id].buy_vol_ema / symbols_[id].sell_vol_ema;
         }
-        if (flow_ratio < TradingConfig::LEADLAG_CONFIRM_FLOW_RATIO) {
+        if (flow_ratio < active_leadlag_flow_ratio(ts)) {
             rejection_throttle_.record(key, "flow_ratio_weak");
             return false;
         }
 
-        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | ob_imbal=%.2f | flow=%.2f | latency=%.1fms | ENTERING LONG\n",
-                    sym, leadlag_.btc_move_bp(), btc_now_bp, ob_imbalance, flow_ratio, latency_ms);
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | ob_imbal=%.2f | flow=%.2f | confirms=%d(ofi=%d vwap=%d vacuum=%d) | latency=%.1fms | research=%s | ENTERING LONG\n",
+                    sym, leadlag_.btc_move_bp(), btc_now_bp, ob_imbalance, flow_ratio,
+                    confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum, latency_ms,
+                    research ? "YES" : "NO");
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_LEADLAG, true);
@@ -1661,8 +2061,11 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // try_liquidation_entry  spot long on short liquidation cascade
-    // Called from on_tick when liq_engine_ has a pending valid signal
+    // try_liquidation_entry  spot long on short liquidation reclaim
+    // Called from on_tick when liq_engine_ has a pending valid signal.
+    // We no longer post on the first touch. The move must show a small reclaim
+    // and pass the same secondary continuation confirmations as the other
+    // active entry families.
     // -----------------------------------------------------------------------
     bool try_liquidation_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         if (id == 0) return false; // BTC too fast  liquidation already in price by the time we enter
@@ -1699,6 +2102,12 @@ private:
             return false;
         }
 
+        const double spot_moved_bp = liq_engine_.spot_move_bp(id, price);
+        if (spot_moved_bp < TradingConfig::LIQ_RECLAIM_MIN_BP) {
+            rejection_throttle_.record(key, "reclaim_not_ready");
+            return false;
+        }
+
         const double flow = compute_flow_ratio(id);
         if (flow < TradingConfig::LIQ_MIN_FLOW_RATIO) {
             rejection_throttle_.record(key, "flow_weak");
@@ -1709,8 +2118,16 @@ private:
             return false;
         }
 
-        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | flow=%.2f | imbal=%.2f | spread=%.2fbp | vr=%.2f | latency=%.1fms | ENTERING LONG\n",
-            sym, notional, flow, t.book_imbalance, t.spread_bps, s.vol_ratio_ema, latency_ms);
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | reclaim=%.2fbp | flow=%.2f | imbal=%.2f | confirms=%d(ofi=%d vwap=%d vacuum=%d) | spread=%.2fbp | vr=%.2f | latency=%.1fms | ENTERING LONG\n",
+            sym, notional, spot_moved_bp, flow, t.book_imbalance,
+            confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum,
+            t.spread_bps, s.vol_ratio_ema, latency_ms);
         std::fflush(stdout);
 
         liq_engine_.consume_signal(id, ts);
@@ -1733,6 +2150,7 @@ private:
         if (id != 0 && id != 1) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (!funding_ || !funding_->ready()) return false;
+        const std::string key = std::string(sym_short(id)) + " FUND";
 
         // Cooldown  funding changes slowly, 4h between entries
         if (ts - s.last_funding_entry_ts < TradingConfig::FUNDING_SIG_COOLDOWN_MS) return false;
@@ -1745,8 +2163,15 @@ private:
         // Latency not critical for this engine  it's a slow signal
         if (latency_ms > TradingConfig::FUNDING_SIG_LATENCY_MAX) return false;
 
-        std::printf("[FUNDING-SIGNAL] %s | rate=%.5f%% (%.1fbp/8h) | ENTERING LONG\n",
-            sym_short(id), rate * 100.0, rate * 10000.0);
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        std::printf("[FUNDING-SIGNAL] %s | rate=%.5f%% (%.1fbp/8h) | confirms=%d(ofi=%d vwap=%d vacuum=%d) | ENTERING LONG\n",
+            sym_short(id), rate * 100.0, rate * 10000.0,
+            confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum);
         std::fflush(stdout);
 
         s.last_funding_entry_ts = ts;
@@ -1767,6 +2192,7 @@ private:
         if (!ngas_) return false;
         if (id != 0 && id != 1) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        const std::string key = std::string(sym_short(id)) + " NGAS";
 
         // Per-symbol cooldown (stored in SymbolState, not NGASEngine  consistent with funding)
         if (ts - s.last_ngas_entry_ts < TradingConfig::NGAS_COOLDOWN_MS) return false;
@@ -1779,8 +2205,15 @@ private:
 
         if (!ngas_->check_long_signal(id, price, ts, latency_ms)) return false;
 
-        std::printf("[NGAS-ENTRY] %s | ngas_px=%.4f | ngas_chg=%.2f%% | crypto=%.4f | latency=%.1fms | ENTERING LONG\n",
-            sym_short(id), ngas_->ngas_price(), ngas_->ngas_change_pct(), price, latency_ms);
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        std::printf("[NGAS-ENTRY] %s | ngas_px=%.4f | ngas_chg=%.2f%% | crypto=%.4f | confirms=%d(ofi=%d vwap=%d vacuum=%d) | latency=%.1fms | ENTERING LONG\n",
+            sym_short(id), ngas_->ngas_price(), ngas_->ngas_change_pct(), price,
+            confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum, latency_ms);
         std::fflush(stdout);
 
         ngas_->consume_signal(id, ts);
@@ -1819,7 +2252,15 @@ private:
                            ((ask - working.limit_price) / working.limit_price * 10000.0) > working.stale_bp;
         const bool timed_out = working.status == LimitStatus::PENDING &&
                                (ts - working.posted_ts) > working.timeout_ms;
-        const char* cancel_reason = stale ? "stale" : (timed_out ? "timeout" : "cancelled");
+        std::string revalidate_reason;
+        const bool signal_invalid =
+            working.status == LimitStatus::PENDING &&
+            pending_fill_requires_revalidation(s.pos.pending_layer) &&
+            !pending_fill_still_valid(id, price, ts, working.posted_ts, s, s.pos.pending_layer, revalidate_reason);
+        const std::string cancel_reason = stale ? "stale"
+                                      : timed_out ? "timeout"
+                                      : signal_invalid ? revalidate_reason
+                                                       : "cancelled";
 
         auto clear_expand_pending = [&]() {
             if (s.pos.pending_layer == LAYER_EXPANSION) {
@@ -1836,6 +2277,14 @@ private:
             s.pos.pending_limit_price = 0.0;
             s.pos.pending_client_id.clear();
             s.pos.last_order_poll_ts = 0;
+        };
+
+        auto cancel_pending_state = [&]() {
+            clear_expand_pending();
+            s.pos.state = POS_FLAT;
+            s.pos.reset();
+            limit_orders_[id].reset();
+            open_positions_--;
         };
 
         auto capture_entry_context = [&]() {
@@ -1865,6 +2314,18 @@ private:
             clear_pending_metadata();
         };
 
+        auto flatten_stale_live_fill = [&](double fill_px, double fill_qty, const char* tag) {
+            open_from_fill(fill_px, fill_qty, tag);
+            const double move_bp = s.pos.entry_price > 0.0
+                ? ((price - s.pos.entry_price) / s.pos.entry_price * 10000.0)
+                : 0.0;
+            std::printf("[STALE-FILL] %s | %s | reason=%s | flattening immediately\n",
+                        sym, mode, revalidate_reason.c_str());
+            std::fflush(stdout);
+            pending_exit_reason_ = "STALE_FILL";
+            exit(id, move_bp, ts, s);
+        };
+
         if (executor_ && !executor_->is_shadow()) {
             if (s.pos.last_order_poll_ts == 0 || ts - s.pos.last_order_poll_ts >= 150) {
                 s.pos.last_order_poll_ts = ts;
@@ -1874,7 +2335,8 @@ private:
                         if (executor_->cancel_working_order(sym_lower(id),
                                                             s.pos.pending_client_id,
                                                             s.pos.pending_limit_price,
-                                                            "partial_fill_cancel_remainder")) {
+                                                            signal_invalid ? cancel_reason.c_str()
+                                                                           : "partial_fill_cancel_remainder")) {
                             std::printf("[LIVE-MAKER-PARTIAL] %s | %s | qty=%.8f | awaiting final cancel\n",
                                         sym, mode, live.executed_qty);
                             std::fflush(stdout);
@@ -1882,49 +2344,51 @@ private:
                         return;
                     }
                     if (live.status == "FILLED" && live.executed_qty > 0.0) {
-                        open_from_fill(live.avg_price > 0.0 ? live.avg_price : s.pos.pending_limit_price,
-                                       live.executed_qty,
-                                       "LIVE-MAKER-FILL");
+                        const double fill_px = live.avg_price > 0.0 ? live.avg_price : s.pos.pending_limit_price;
+                        if (signal_invalid) {
+                            flatten_stale_live_fill(fill_px, live.executed_qty, "LIVE-MAKER-STALE");
+                        } else {
+                            open_from_fill(fill_px, live.executed_qty, "LIVE-MAKER-FILL");
+                        }
                         return;
                     }
                     if (live.status == "CANCELED" || live.status == "EXPIRED" || live.status == "REJECTED") {
                         if (live.executed_qty > 0.0) {
-                            open_from_fill(live.avg_price > 0.0 ? live.avg_price : s.pos.pending_limit_price,
-                                           live.executed_qty,
-                                           "LIVE-MAKER-FINAL");
+                            const double fill_px = live.avg_price > 0.0 ? live.avg_price : s.pos.pending_limit_price;
+                            if (signal_invalid) {
+                                flatten_stale_live_fill(fill_px, live.executed_qty, "LIVE-MAKER-STALE");
+                            } else {
+                                open_from_fill(fill_px, live.executed_qty, "LIVE-MAKER-FINAL");
+                            }
                             return;
                         }
                         std::printf("[LIVE-MAKER-CANCEL] %s | %s | status=%s\n",
                                     sym, mode, live.status.c_str());
                         std::fflush(stdout);
-                        clear_expand_pending();
-                        s.pos.state = POS_FLAT;
-                        s.pos.reset();
-                        limit_orders_[id].reset();
-                        open_positions_--;
+                        cancel_pending_state();
                         return;
                     }
                 }
             }
 
-            if ((stale || timed_out) &&
+            if ((stale || timed_out || signal_invalid) &&
                 executor_->cancel_working_order(sym_lower(id),
                                                 s.pos.pending_client_id,
                                                 s.pos.pending_limit_price,
-                                                cancel_reason)) {
+                                                cancel_reason.c_str())) {
                 std::printf("[LIVE-MAKER-CANCEL] %s | %s | limit=%.4f | reason=%s\n",
-                            sym, mode, s.pos.pending_limit_price, cancel_reason);
+                            sym, mode, s.pos.pending_limit_price, cancel_reason.c_str());
                 std::fflush(stdout);
-                clear_expand_pending();
-                s.pos.state = POS_FLAT;
-                s.pos.reset();
-                limit_orders_[id].reset();
-                open_positions_--;
+                cancel_pending_state();
             }
             return;
         }
 
-        LimitStatus status = limit_orders_[id].update(ask, bid, ts);
+        LimitStatus status = signal_invalid ? LimitStatus::CANCELLED
+                                            : limit_orders_[id].update(ask, bid, ts);
+        if (signal_invalid) {
+            limit_orders_[id].cancel();
+        }
         if (status == LimitStatus::FILLED) {
             const double fill_px = limit_orders_[id].fill_price();
             if (executor_) {
@@ -1940,13 +2404,9 @@ private:
                 executor_->cancel_working_order(sym_lower(id),
                                                 s.pos.pending_client_id,
                                                 s.pos.pending_limit_price,
-                                                cancel_reason);
+                                                cancel_reason.c_str());
             }
-            clear_expand_pending();
-            s.pos.state = POS_FLAT;
-            s.pos.reset();
-            limit_orders_[id].reset();
-            open_positions_--;
+            cancel_pending_state();
         }
     }
 
@@ -2089,26 +2549,8 @@ private:
             max_hold  = TradingConfig::IMPULSE_MAX_HOLD_MS;
         }
 
-        if (is_shadow_mode()) {
-            const bool shadow_scalper_layer =
-                (s.pos.layer == LAYER_LIQUIDATION) ||
-                (s.pos.layer == LAYER_LEADLAG) ||
-                (s.pos.layer == LAYER_LEADLAG_ETH_SOL) ||
-                (s.pos.layer == LAYER_MICRO) ||
-                (s.pos.layer == LAYER_IMPULSE) ||
-                (s.pos.layer == LAYER_EXPANSION) ||
-                (s.pos.layer == LAYER_ETH_LEAD) ||
-                (s.pos.layer == LAYER_SOL_LEAD) ||
-                (s.pos.layer == LAYER_VOLSHOCK) ||
-                (s.pos.layer == LAYER_SWEEP);
-            if (shadow_scalper_layer) {
-            // SHADOW scalper profile: faster close cycle and smaller targets for
-            // high sample throughput during tuning.
-            tp_bp = std::max(2.0, tp_bp * 0.55);
-            sl_bp = std::max(2.5, sl_bp * 0.80);
-            max_hold = std::min<int64_t>(max_hold, 2500);
-            }
-        }
+        // Paper mode now preserves live-style TP/SL/hold parameters so the
+        // shadow journal reflects the strategies we actually intend to deploy.
 
         // Hard take-profit
         if (move_bp >= tp_bp) {
@@ -2196,10 +2638,7 @@ private:
 
         // Cost-aware fast trail for active quality layers.
         if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION) {
-            const double round_trip_cost =
-                (s.pos.layer == LAYER_LIQUIDATION)
-                    ? TradingConfig::TAKER_ROUND_TRIP_BP
-                    : TradingConfig::MAKER_ROUND_TRIP_BP;
+            const double round_trip_cost = layer_round_trip_cost_bp(s.pos.layer);
             const double arm_bp = round_trip_cost + 1.0;
             if (peak_profit_bp >= arm_bp) {
                 const double floor_bp = std::max(round_trip_cost + 0.25, peak_profit_bp - 1.25);
@@ -2342,19 +2781,49 @@ private:
     // Conservative params: TP=10bp, SL=4bp, hold=6s, 8s cooldown.
     // ======================================================================
     bool check_vol_shock(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        const bool research = paper_research_mode(ts);
+        if (!research) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
+        if (id != 2 && id != 4 && id != 5 && id != 6) return false;
+        if (s.regime == REGIME_DEAD) return false;
+
+        const char* sym = sym_short(id);
+        std::string key = std::string(sym) + " VOLSHOCK";
 
         const MarketTick& t = s.last_tick;
-        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
-        if (t.spread_bps > VolumeShockEngine::MAX_SPREAD_BPS) return false;
+        if (t.bid <= 0.0 || t.ask <= 0.0) {
+            rejection_throttle_.record(key, "no_book_data");
+            return false;
+        }
+        if (t.spread_bps > VolumeShockEngine::MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_wide");
+            return false;
+        }
 
         double volume = t.bid_size + t.ask_size;
         int direction = 0;
-        if (!vol_shock_.on_tick(id, price, volume, t.spread_bps, ts, direction)) return false;
+        if (!vol_shock_.on_tick(id, price, volume, t.spread_bps, ts, direction)) {
+            rejection_throttle_.record(key, "no_volume_shock");
+            return false;
+        }
 
-        std::printf("[VOLSHOCK] %s | vol_ratio=%.2f | price=%.4f | latency=%.1fms | ENTERING LONG\n",
-                    sym_short(id), vol_shock_.get_vol_ratio(id), price, latency_ms);
+        const double flow = compute_flow_ratio(id);
+        if (flow < active_flow_confirm_threshold(ts)) {
+            rejection_throttle_.record(key, "weak_flow");
+            return false;
+        }
+
+        const auto confirms = collect_secondary_long_confirmations(id, price, s, latency_ms);
+        if (confirms.count < TradingConfig::CONTINUATION_CONFIRM_MIN_COUNT) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        std::printf("[VOLSHOCK] %s | vol_base=%.2f | flow=%.2f | confirms=%d(ofi=%d vwap=%d vacuum=%d) | price=%.4f | latency=%.1fms | ENTERING LONG\n",
+                    sym, vol_shock_.get_vol_ratio(id), flow,
+                    confirms.count, confirms.ofi, confirms.vwap, confirms.vacuum,
+                    price, latency_ms);
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_VOLSHOCK, true);
@@ -2736,16 +3205,9 @@ private:
             return;
         }
 
-        // COST FLOOR GATE — per-layer, based on actual execution model
-        // TAKER layers (post at ask, guaranteed fill): 8bp round trip cost → 12bp floor
-        //   LEADLAG, IMPULSE, ETH_LEAD, SOL_LEAD, VOLSHOCK, LIQUIDATION
-        // MAKER layers (post below mid, rebate): ~4bp cost → 4bp floor
-        //   IMBALANCE, EXPANSION, VWAP, VACUUM
-        // LEADLAG/LL-ETH-SOL now use aggressive maker entry — cost ~4bp, floor = MAKER
-        // Pure taker layers (IMPULSE etc disabled but kept for correctness if re-enabled)
-        double cost_floor = layer_uses_taker_entry(layer)
-                          ? TradingConfig::COST_FLOOR_BP
-                          : TradingConfig::MAKER_COST_FLOOR_BP;
+        // COST FLOOR GATE — this research build is maker-entry only.
+        // Net logs assume maker entry plus market-style exit until maker exits exist.
+        double cost_floor = layer_cost_floor_bp(layer);
         if (sig.expected_bps < cost_floor) {
             std::string key = std::string(sym_short(id)) +
                              " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
@@ -2931,13 +3393,8 @@ private:
             double bid = s.last_tick.bid > 0.0 ? s.last_tick.bid : price;
             double ask = s.last_tick.ask > 0.0 ? s.last_tick.ask : price * 1.0001;
 
-            // Map LayerMode to int id expected by LimitOrderManager
-            // 0=IMBALANCE(maker/bid), 1=IMPULSE(taker/ask), 2=EXPANSION(maker/mid), 3=LEADLAG(taker/ask)
-            // 4=LEADLAG-MAKER: post at ask-0.1*spread (aggressive maker, ~4bp saving vs taker)
-            int layer_int = (layer == LAYER_MICRO)          ? 0 :
-                            (layer == LAYER_EXPANSION)      ? 2 :
-                            (layer == LAYER_LEADLAG)        ? 4 :
-                            (layer == LAYER_LEADLAG_ETH_SOL)? 4 : 0;
+            // All entries are maker-only. Choose how aggressively to sit inside the spread.
+            int layer_int = maker_profile_for_layer(layer);
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
             const double limit_px = limit_orders_[id].order().limit_price;
@@ -2962,6 +3419,7 @@ private:
             s.pos.pending_client_id = maker_order.client_id;
             s.pos.last_order_poll_ts = 0;
             open_positions_++;  // Reserve  decremented if cancelled
+            last_trade_activity_ts_ms_ = ts;
 
             if (layer == LAYER_EXPANSION) {
                 expand_state_[id] = 1;
@@ -3017,6 +3475,7 @@ private:
             }
 
             open_positions_++;
+            last_trade_activity_ts_ms_ = ts;
 
             std::printf("[ENTER] %s | %s | %s | regime=%s | px=%.4f | qty=%.8f | weight=%.3f | mult=%.2f\n",
                 sym, mode, is_long ? "LONG" : "SHORT", regime_name(s.regime),
@@ -3034,14 +3493,9 @@ private:
         const char* sym = sym_short(id);
         std::string symbol_full = sym_full(id);
 
-        // NET PnL: subtract round-trip cost based on actual execution model
-        // Taker layers (post at ask): 8bp round trip (4bp/side at VIP0)
-        // Maker layers (post below mid): 4bp round trip (rebate ~1bp/side, spread ~2bp)
-        // LEADLAG and LL-ETH-SOL now use aggressive maker entry (layer_id=4)
-        // Cost ~4bp round trip (maker rebate), not 8bp taker
-        double round_trip_cost = layer_uses_taker_entry(s.pos.layer)
-                               ? TradingConfig::TAKER_ROUND_TRIP_BP
-                               : TradingConfig::MAKER_ROUND_TRIP_BP;
+        // NET PnL: all entries are maker-only in this build.
+        // Exits remain market-style, so use the mixed entry/exit cost model.
+        double round_trip_cost = layer_round_trip_cost_bp(s.pos.layer);
         double pnl_net = pnl - round_trip_cost;
 
         int64_t hold_time_ms = ts - s.pos.entry_ts;  // ts is already milliseconds
@@ -3053,6 +3507,7 @@ private:
         realized_pnl_ += pnl_net;
         total_pnl_ = realized_pnl_;
         total_trades_++;
+        last_trade_activity_ts_ms_ = ts;
         
         // From here on, use pnl_net for all recording/display
         // pnl (raw gross move) kept only for price reconstruction in shadow log
@@ -3312,6 +3767,9 @@ private:
     int     sym_consecutive_sl_[MAX_SYMBOLS];
     int64_t sym_sl_cooldown_[MAX_SYMBOLS];
     int64_t startup_ts_ms_ = 0;
+    int64_t last_trade_activity_ts_ms_ = 0;
+    int64_t last_tick_ts_ms_ = 0;
+    bool paper_research_mode_logged_ = false;
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
 

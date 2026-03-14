@@ -131,6 +131,13 @@ public:
         return pending_[id].notional;
     }
 
+    double spot_move_bp(int id, double spot_price) const {
+        if (id < 0 || id >= MAX_SYMBOLS) return 0.0;
+        const double baseline = spot_price_at_liq_[id];
+        if (baseline <= 0.0) return 0.0;
+        return (spot_price - baseline) / baseline * 10000.0;
+    }
+
 private:
     std::array<LiquidationSignal, MAX_SYMBOLS> pending_;
     std::array<int64_t, MAX_SYMBOLS>           last_entry_ts_;

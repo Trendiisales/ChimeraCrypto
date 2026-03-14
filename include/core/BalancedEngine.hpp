@@ -109,13 +109,18 @@ struct Position {
     bool is_long = true;     // Trade direction: true=LONG, false=SHORT
     int open_ticks;      // Ticks since position opened (for minimum hold time)
     double peak_price;   // Highest favorable price since entry (for trailing)
-    
+    double entered_qty = 0.0;     // Actual filled quantity that must be closed on exit
+
     // Phase 2: MFE/MAE tracking
     double mfe;
     double mae;
 
     // Maker limit order fields
     LayerMode pending_layer = LAYER_NONE;  // layer that triggered the limit
+    double pending_qty = 0.0;
+    double pending_limit_price = 0.0;
+    std::string pending_client_id;
+    int64_t last_order_poll_ts = 0;
 
     void reset() {
         state = POS_FLAT;
@@ -124,9 +129,14 @@ struct Position {
         layer = LAYER_NONE;
         open_ticks = 0;
         peak_price = 0.0;
+        entered_qty = 0.0;
         mfe = 0.0;
         mae = 0.0;
         pending_layer = LAYER_NONE;
+        pending_qty = 0.0;
+        pending_limit_price = 0.0;
+        pending_client_id.clear();
+        last_order_poll_ts = 0;
     }
 };
 
@@ -1785,61 +1795,159 @@ private:
     // -----------------------------------------------------------------------
     void manage_pending(int id, double price, int64_t ts, SymbolState& s) {
         const MarketTick& t = s.last_tick;
-        double ask = t.ask > 0.0 ? t.ask : price;
-        double bid = t.bid > 0.0 ? t.bid : price;
+        const double ask = t.ask > 0.0 ? t.ask : price;
+        const double bid = t.bid > 0.0 ? t.bid : price;
+        const char* sym  = sym_short(id);
+        const char* mode = (s.pos.pending_layer == LAYER_MICRO)            ? "IMBAL"      :
+                           (s.pos.pending_layer == LAYER_LEADLAG)          ? "LEADLAG"    :
+                           (s.pos.pending_layer == LAYER_VACUUM)           ? "VACUUM"     :
+                           (s.pos.pending_layer == LAYER_VWAP)             ? "VWAP"       :
+                           (s.pos.pending_layer == LAYER_LEADLAG_ETH_SOL)  ? "LL-ETH-SOL" :
+                           (s.pos.pending_layer == LAYER_IMPULSE)          ? "IMPULSE"    :
+                           (s.pos.pending_layer == LAYER_LIQUIDATION)      ? "LIQ"        :
+                           (s.pos.pending_layer == LAYER_FUNDING)          ? "FUND"       :
+                           (s.pos.pending_layer == LAYER_NGAS)             ? "NGAS"       :
+                           (s.pos.pending_layer == LAYER_ETH_LEAD)         ? "ETH-LEAD"   :
+                           (s.pos.pending_layer == LAYER_SOL_LEAD)         ? "SOL-LEAD"   :
+                           (s.pos.pending_layer == LAYER_VOLSHOCK)         ? "VOLSHOCK"   :
+                           (s.pos.pending_layer == LAYER_OFI)              ? "OFI"        :
+                           (s.pos.pending_layer == LAYER_SWEEP)            ? "SWEEP"      :
+                           (s.pos.pending_layer == LAYER_MM_PRESSURE)      ? "MM-PRESS"   : "EXPAND";
+        const auto& working = limit_orders_[id].order();
+        const bool stale = working.status == LimitStatus::PENDING &&
+                           working.limit_price > 0.0 &&
+                           ((ask - working.limit_price) / working.limit_price * 10000.0) > working.stale_bp;
+        const bool timed_out = working.status == LimitStatus::PENDING &&
+                               (ts - working.posted_ts) > working.timeout_ms;
+        const char* cancel_reason = stale ? "stale" : (timed_out ? "timeout" : "cancelled");
 
-        LimitStatus status = limit_orders_[id].update(ask, bid, ts);
+        auto clear_expand_pending = [&]() {
+            if (s.pos.pending_layer == LAYER_EXPANSION) {
+                expand_state_[id] = 0;
+                expand_entry_price_[id] = 0.0;
+                expand_peak_price_[id] = 0.0;
+            }
+        };
 
-        if (status == LimitStatus::FILLED) {
-            // Limit filled  transition to open position
-            double fill_px = limit_orders_[id].fill_price();
-            s.pos.state      = POS_OPEN;
-            s.pos.entry_price = fill_px;
-            s.pos.entry_ts   = ts;
-            s.pos.layer      = s.pos.pending_layer;
-            s.pos.open_ticks = 0;
-            s.pos.peak_price = fill_px;
-            s.pos.mfe        = 0.0;
-            s.pos.mae        = 0.0;
+        auto clear_pending_metadata = [&]() {
+            limit_orders_[id].reset();
+            s.pos.pending_layer = LAYER_NONE;
+            s.pos.pending_qty = 0.0;
+            s.pos.pending_limit_price = 0.0;
+            s.pos.pending_client_id.clear();
+            s.pos.last_order_poll_ts = 0;
+        };
 
-            const char* sym  = sym_short(id);
-            const char* mode = (s.pos.layer == LAYER_MICRO)    ? "IMBAL"   :
-                               (s.pos.layer == LAYER_LEADLAG)  ? "LEADLAG" :
-                               (s.pos.layer == LAYER_VACUUM)        ? "VACUUM"    :
-                               (s.pos.layer == LAYER_VWAP)          ? "VWAP"      :
-                               (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                               (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"   :
-                               (s.pos.layer == LAYER_LIQUIDATION)  ? "LIQ"       :
-                               (s.pos.layer == LAYER_FUNDING)       ? "FUND"      :
-                               (s.pos.layer == LAYER_NGAS)          ? "NGAS"      :
-                               (s.pos.layer == LAYER_ETH_LEAD)      ? "ETH-LEAD"  :
-                               (s.pos.layer == LAYER_SOL_LEAD)      ? "SOL-LEAD"  :
-                               (s.pos.layer == LAYER_VOLSHOCK)      ? "VOLSHOCK"  :
-                               (s.pos.layer == LAYER_OFI)           ? "OFI"       :
-                               (s.pos.layer == LAYER_SWEEP)         ? "SWEEP"     :
-                               (s.pos.layer == LAYER_MM_PRESSURE)   ? "MM-PRESS"  : "EXPAND";
-
-            std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
-                sym, mode, fill_px);
-            std::fflush(stdout);
-
-            // Capture entry context for shadow log
+        auto capture_entry_context = [&]() {
             s.entry_imbalance  = s.last_tick.book_imbalance;
             s.entry_flow_ratio = compute_flow_ratio(id);
             s.entry_spread_bps = s.last_tick.spread_bps;
             s.entry_btc_move   = leadlag_.btc_move_bp();
             s.entry_latency_ms = market_env_.latency_ms;
+        };
 
-            limit_orders_[id].reset();
+        auto open_from_fill = [&](double fill_px, double fill_qty, const char* tag) {
+            s.pos.state = POS_OPEN;
+            s.pos.entry_price = fill_px;
+            s.pos.entry_ts = ts;
+            s.pos.layer = s.pos.pending_layer;
+            s.pos.open_ticks = 0;
+            s.pos.peak_price = fill_px;
+            s.pos.entered_qty = fill_qty > 0.0 ? fill_qty : s.pos.pending_qty;
+            s.pos.mfe = 0.0;
+            s.pos.mae = 0.0;
 
+            std::printf("[%s] %s | %s | fill=%.4f | qty=%.8f\n",
+                        tag, sym, mode, fill_px, s.pos.entered_qty);
+            std::fflush(stdout);
+
+            capture_entry_context();
+            clear_pending_metadata();
+        };
+
+        if (executor_ && !executor_->is_shadow()) {
+            if (s.pos.last_order_poll_ts == 0 || ts - s.pos.last_order_poll_ts >= 150) {
+                s.pos.last_order_poll_ts = ts;
+                OrderResult live = executor_->query_order(sym_lower(id), s.pos.pending_client_id);
+                if (live.ok) {
+                    if (live.status == "PARTIALLY_FILLED" && live.executed_qty > 0.0) {
+                        if (executor_->cancel_working_order(sym_lower(id),
+                                                            s.pos.pending_client_id,
+                                                            s.pos.pending_limit_price,
+                                                            "partial_fill_cancel_remainder")) {
+                            std::printf("[LIVE-MAKER-PARTIAL] %s | %s | qty=%.8f | awaiting final cancel\n",
+                                        sym, mode, live.executed_qty);
+                            std::fflush(stdout);
+                        }
+                        return;
+                    }
+                    if (live.status == "FILLED" && live.executed_qty > 0.0) {
+                        open_from_fill(live.avg_price > 0.0 ? live.avg_price : s.pos.pending_limit_price,
+                                       live.executed_qty,
+                                       "LIVE-MAKER-FILL");
+                        return;
+                    }
+                    if (live.status == "CANCELED" || live.status == "EXPIRED" || live.status == "REJECTED") {
+                        if (live.executed_qty > 0.0) {
+                            open_from_fill(live.avg_price > 0.0 ? live.avg_price : s.pos.pending_limit_price,
+                                           live.executed_qty,
+                                           "LIVE-MAKER-FINAL");
+                            return;
+                        }
+                        std::printf("[LIVE-MAKER-CANCEL] %s | %s | status=%s\n",
+                                    sym, mode, live.status.c_str());
+                        std::fflush(stdout);
+                        clear_expand_pending();
+                        s.pos.state = POS_FLAT;
+                        s.pos.reset();
+                        limit_orders_[id].reset();
+                        open_positions_--;
+                        return;
+                    }
+                }
+            }
+
+            if ((stale || timed_out) &&
+                executor_->cancel_working_order(sym_lower(id),
+                                                s.pos.pending_client_id,
+                                                s.pos.pending_limit_price,
+                                                cancel_reason)) {
+                std::printf("[LIVE-MAKER-CANCEL] %s | %s | limit=%.4f | reason=%s\n",
+                            sym, mode, s.pos.pending_limit_price, cancel_reason);
+                std::fflush(stdout);
+                clear_expand_pending();
+                s.pos.state = POS_FLAT;
+                s.pos.reset();
+                limit_orders_[id].reset();
+                open_positions_--;
+            }
+            return;
+        }
+
+        LimitStatus status = limit_orders_[id].update(ask, bid, ts);
+        if (status == LimitStatus::FILLED) {
+            const double fill_px = limit_orders_[id].fill_price();
+            if (executor_) {
+                executor_->record_shadow_fill(sym_lower(id),
+                                              s.pos.is_long,
+                                              s.pos.pending_qty,
+                                              fill_px,
+                                              s.pos.pending_client_id);
+            }
+            open_from_fill(fill_px, s.pos.pending_qty, "MAKER-FILL");
         } else if (status == LimitStatus::CANCELLED) {
-            // Limit timed out or price moved away  abandon
+            if (executor_) {
+                executor_->cancel_working_order(sym_lower(id),
+                                                s.pos.pending_client_id,
+                                                s.pos.pending_limit_price,
+                                                cancel_reason);
+            }
+            clear_expand_pending();
             s.pos.state = POS_FLAT;
             s.pos.reset();
             limit_orders_[id].reset();
-            open_positions_--;  // Undo the reserve from enter_pending
+            open_positions_--;
         }
-        // PENDING: nothing to do, wait for next tick
     }
 
     void manage_position(int id, double price, int64_t ts, SymbolState& s) {
@@ -2809,6 +2917,11 @@ private:
                            (layer == LAYER_OFI)             ? "OFI"        :
                            (layer == LAYER_SWEEP)           ? "SWEEP"      :
                            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
+        double qty = (final_size * legacy_size_mult) / std::max(price, 1.0);
+        if (qty <= 0.0) {
+            std::fprintf(stderr, "[ENTER-SKIP] %s | %s | computed qty=%.8f\n", sym, mode, qty);
+            return;
+        }
 
         const bool use_maker = layer_uses_maker_entry(layer);
         if (use_maker) {
@@ -2827,10 +2940,27 @@ private:
                             (layer == LAYER_LEADLAG_ETH_SOL)? 4 : 0;
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
+            const double limit_px = limit_orders_[id].order().limit_price;
+
+            OrderResult maker_order;
+            if (executor_) {
+                maker_order = executor_->submit_limit_maker(sym_lower(id), is_long, qty, limit_px);
+                if (!maker_order.ok) {
+                    limit_orders_[id].reset();
+                    std::fprintf(stderr, "[ENTER-PENDING] %s | %s | maker submit failed: %s\n",
+                                 sym, mode, maker_order.error.c_str());
+                    return;
+                }
+            }
 
             s.pos.state         = POS_PENDING;
             s.pos.pending_layer = layer;
             s.pos.is_long       = is_long;
+            s.pos.entered_qty   = 0.0;
+            s.pos.pending_qty   = qty;
+            s.pos.pending_limit_price = limit_px;
+            s.pos.pending_client_id = maker_order.client_id;
+            s.pos.last_order_poll_ts = 0;
             open_positions_++;  // Reserve  decremented if cancelled
 
             if (layer == LAYER_EXPANSION) {
@@ -2839,19 +2969,37 @@ private:
                 expand_peak_price_[id]  = price;
             }
 
-            std::printf("[ENTER-PENDING] %s | %s | regime=%s | signal_px=%.4f | bid=%.4f | weight=%.3f\n",
-                sym, mode, regime_name(s.regime), price, bid, final_weight);
+            std::printf("[ENTER-PENDING] %s | %s | regime=%s | signal_px=%.4f | limit=%.4f | qty=%.8f | client_id=%s | weight=%.3f\n",
+                sym, mode, regime_name(s.regime), price, limit_px, qty,
+                s.pos.pending_client_id.empty() ? "-" : s.pos.pending_client_id.c_str(),
+                final_weight);
             std::fflush(stdout);
 
         } else {
+            double fill_price = price;
+            double filled_qty = qty;
+            if (executor_) {
+                OrderResult entry = executor_->execute(sym_lower(id), is_long, qty, price);
+                if (!entry.ok) {
+                    return;
+                }
+                if (entry.avg_price > 0.0) {
+                    fill_price = entry.avg_price;
+                }
+                if (entry.executed_qty > 0.0) {
+                    filled_qty = entry.executed_qty;
+                }
+            }
+
             //  TAKER MODE: open position immediately 
             s.pos.state       = POS_OPEN;
-            s.pos.entry_price = price;
+            s.pos.entry_price = fill_price;
             s.pos.entry_ts    = ts;
             s.pos.layer       = layer;
             s.pos.is_long     = is_long;
             s.pos.open_ticks  = 0;
-            s.pos.peak_price  = price;
+            s.pos.peak_price  = fill_price;
+            s.pos.entered_qty = filled_qty;
             s.pos.mfe         = 0.0;
             s.pos.mae         = 0.0;
 
@@ -2870,19 +3018,14 @@ private:
 
             open_positions_++;
 
-            std::printf("[ENTER] %s | %s | %s | regime=%s | px=%.4f | weight=%.3f | mult=%.2f\n",
-                sym, mode, is_long ? "LONG" : "SHORT", regime_name(s.regime), price, final_weight, legacy_size_mult);
+            std::printf("[ENTER] %s | %s | %s | regime=%s | px=%.4f | qty=%.8f | weight=%.3f | mult=%.2f\n",
+                sym, mode, is_long ? "LONG" : "SHORT", regime_name(s.regime),
+                fill_price, filled_qty, final_weight, legacy_size_mult);
             std::fflush(stdout);
-
-            // Execute order (shadow or live  determined by executor config)
-            if (executor_) {
-                double qty = (final_size * legacy_size_mult) / std::max(price, 1.0);
-                executor_->execute(sym_lower(id), is_long, qty, price);
-            }
 
             std::string symbol_full = sym_full(id);
             broadcast_to_gui(GuiMessageBuilder::position_enter(
-                symbol_full, mode, price, (int)s.regime, final_weight
+                symbol_full, mode, fill_price, (int)s.regime, final_weight
             ));
         }
     }
@@ -2993,19 +3136,24 @@ private:
             se.flow_ratio    = s.entry_flow_ratio;
             se.spread_bps    = s.entry_spread_bps;
             se.btc_move_bp   = s.entry_btc_move;
-            se.win           = (pnl > 0) ? 1 : 0;
+            se.win           = (pnl_net > 0.0) ? 1 : 0;
             shadow_log_.record(se);
         }
 
         // Execute closing order (shadow or live)
         if (executor_) {
             double exit_px = s.pos.entry_price * (1.0 + pnl / 10000.0);
-            double qty = (s.pos.entry_price > 0.0)
-                ? (capital_control_.compute_final_size(0.5,
-                      CapitalControlLayer::MarketEnv{}, 0.0, 0.0, "UNKNOWN") / s.pos.entry_price)
-                : 0.0;
+            double qty = s.pos.entered_qty;
+            if (qty <= 0.0 && s.pos.entry_price > 0.0) {
+                qty = capital_control_.compute_final_size(
+                    0.5, CapitalControlLayer::MarketEnv{}, 0.0, 0.0, "UNKNOWN") / s.pos.entry_price;
+            }
             // Spot long-only: always SELL to close
-            executor_->execute(sym, false /*sell*/, qty, exit_px);
+            if (qty > 0.0) {
+                executor_->execute(sym_lower(id), false /*sell*/, qty, exit_px);
+            } else {
+                std::fprintf(stderr, "[EXIT] %s | no filled quantity recorded, close skipped\n", sym);
+            }
         }
         
         // Broadcast exit to GUI with complete trade details
@@ -3031,7 +3179,7 @@ private:
         trade_msg << "{\"type\":\"trade\","
                   << "\"last_order_symbol\":\"" << symbol_full << "\","
                   << "\"last_order_side\":\"" << (pnl > 0 ? "WIN" : "LOSS") << "\","
-                  << "\"last_order_size\":0,"
+                  << "\"last_order_size\":" << s.pos.entered_qty << ","
                   << "\"last_order_price\":" << s.pos.entry_price << ","
                   << "\"last_order_conviction\":" << (pnl + 2.0) << ","  // pnl + spread
                   << "\"last_order_cost_floor\":2.0,"

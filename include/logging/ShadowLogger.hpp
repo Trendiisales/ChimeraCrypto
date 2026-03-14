@@ -31,7 +31,7 @@ struct ShadowEntry {
     double  entry_px       = 0.0;
     double  exit_px        = 0.0;
     double  pnl_bp         = 0.0;  // net after round-trip cost
-        double gross_bp        = 0.0;  // raw price move before cost
+    double  gross_bp       = 0.0;  // raw price move before cost
     double  mfe_bp         = 0.0;
     double  mae_bp         = 0.0;
     int64_t hold_ms        = 0;
@@ -53,7 +53,7 @@ public:
             if (std::ftell(f_) == 0) {
                 std::fprintf(f_,
                     "ts_enter,ts_exit,symbol,layer,regime,"
-                    "entry_px,exit_px,pnl_bp,mfe_bp,mae_bp,"
+                    "entry_px,exit_px,pnl_bp,gross_bp,mfe_bp,mae_bp,"
                     "hold_ms,latency_ms,imbalance,flow_ratio,"
                     "spread_bps,btc_move_bp,win\n");
             }

@@ -320,15 +320,31 @@ struct TradingConfig {
     // Secondary continuation confirmations reused from the old book-only stack.
     // These are now context filters, not standalone entry engines.
     static constexpr int    CONTINUATION_CONFIRM_MIN_COUNT      = 1;
+    static constexpr int    FAST_CONTINUATION_CONFIRM_MIN_COUNT = 2;
+    static constexpr int    VOLSHOCK_CONFIRM_MIN_COUNT          = 1;
+    static constexpr int    OVERLAY_CONFIRM_MIN_COUNT           = 1;
+    static constexpr int    EXPERIMENTAL_CONFIRM_MIN_COUNT      = 2;
     static constexpr double CONTINUATION_OFI_RATIO_MIN          = 0.10;
     static constexpr double CONTINUATION_FLOW_MIN               = 0.53;
     static constexpr double CONTINUATION_BOOK_IMBAL_MIN         = 0.05;
     static constexpr double CONTINUATION_VWAP_MAX_UNDERWATER_BP = 12.0;
     static constexpr double CONTINUATION_VACUUM_DRAIN_RATIO     = 0.25;
+    static constexpr double CONTINUATION_DEPTH_RATIO_MIN        = 0.80;
+    static constexpr double CONTINUATION_DEPTH_IMBAL_MIN        = 0.08;
+    static constexpr double CONTINUATION_DEPTH_FLOW_MIN         = 0.53;
+
+    // Default engine mix for the live-data paper stack.
+    static constexpr bool ENABLE_PRIMARY_VOLSHOCK   = true;
+    static constexpr bool ENABLE_PRIMARY_IMPULSE    = true;
+    static constexpr bool ENABLE_PRIMARY_LEADLAG    = true;
+    static constexpr bool ENABLE_STANDALONE_EXPAND  = false;
+    static constexpr bool ENABLE_FUNDING_OVERLAY    = true;
+    static constexpr bool ENABLE_NGAS_OVERLAY       = false;
+    static constexpr bool ENABLE_LIQ_PAPER_ONLY     = true;
 
     // Paper-only research mode:
     // after a prolonged dry spell, relax the continuation stack modestly and
-    // allow the dormant VOLSHOCK engine to sample trades. This only applies
+    // allow the experimental fallback stack to sample trades. This only applies
     // in shadow mode and leaves live behavior unchanged.
     static constexpr int64_t PAPER_RESEARCH_IDLE_MS                = 2 * 60 * 1000LL;
     static constexpr double  PAPER_RESEARCH_FLOW_CONFIRM_THRESHOLD = 0.51;
@@ -336,6 +352,8 @@ struct TradingConfig {
     static constexpr double  PAPER_RESEARCH_EXPANSION_VOL_RATIO    = 1.45;
     static constexpr double  PAPER_RESEARCH_LEADLAG_OB_RATIO       = 1.04;
     static constexpr double  PAPER_RESEARCH_LEADLAG_FLOW_RATIO     = 1.01;
+    static constexpr double  PAPER_RESEARCH_DEPTH_RATIO_MIN        = 0.70;
+    static constexpr double  PAPER_RESEARCH_DEPTH_IMBAL_MIN        = 0.05;
 
     // -------------------------------------------------------------------------
     // MAKER ORDER MODE

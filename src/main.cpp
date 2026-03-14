@@ -335,11 +335,14 @@ int main() {
         controller.set_funding_fetcher(&g_funding);
     }).detach();
 
-    //  2c. NGAS fetcher  Natural Gas macro lead-lag signal 
-    g_ngas_engine.set_fetcher(&g_ngas_fetcher);
-    controller.set_ngas_engine(&g_ngas_engine);
-    g_ngas_fetcher.start();
-    std::printf("[STARTUP] NGAS macro fetcher started (5-min poll, NGO.F via stooq)\n");
+    if (chimera::TradingConfig::ENABLE_NGAS_OVERLAY) {
+        g_ngas_engine.set_fetcher(&g_ngas_fetcher);
+        controller.set_ngas_engine(&g_ngas_engine);
+        g_ngas_fetcher.start();
+        std::printf("[STARTUP] NGAS macro fetcher started (5-min poll, NGO.F via stooq)\n");
+    } else {
+        std::printf("[STARTUP] NGAS macro overlay disabled in TradingConfig\n");
+    }
     std::fflush(stdout);
 
     //  2b. Liquidation feed  Binance futures forceOrder stream 

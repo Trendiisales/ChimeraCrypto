@@ -39,6 +39,7 @@ public:
 
     struct SymState {
         double  vol_ema        = 0.0;
+        double  last_vol_ratio = 0.0;
         int     tick_count     = 0;
         double  last_price     = 0.0;
         int64_t last_signal_ts = 0;
@@ -83,6 +84,7 @@ public:
         // Volume spike check
         if (st.vol_ema <= 0.0) return false;
         double vol_ratio = volume / st.vol_ema;
+        st.last_vol_ratio = vol_ratio;
         if (vol_ratio < VOL_SPIKE_MULT) return false;
 
         // Price displacement check -- how much has price moved in last PRICE_LOOKBACK_MS?
@@ -107,7 +109,7 @@ public:
 
     double get_vol_ratio(int symbol_id) const {
         if (symbol_id < 0 || symbol_id >= MAX_SYMBOLS) return 0.0;
-        return states_[symbol_id].vol_ema;
+        return states_[symbol_id].last_vol_ratio;
     }
 
 private:

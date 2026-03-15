@@ -214,6 +214,7 @@ struct TradingConfig {
     static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
     static constexpr double VWAP_MIN_IMBALANCE         = 0.10;  // bid pressure must confirm
     static constexpr int    VWAP_MIN_TRADE_SAMPLES     = 8;     // require real trade prints before VWAP is tradable
+    static constexpr int    STARTUP_VWAP_MIN_TRADE_SAMPLES = 4; // during startup, allow VWAP once a small real-trade anchor exists
     static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
     static constexpr double VWAP_TP_BP                 = 12.0;
     static constexpr double VWAP_SL_BP                 = 4.5;
@@ -267,6 +268,8 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     static constexpr int    SHORT_VOL_WINDOW        = 20;
     static constexpr int    LONG_VOL_WINDOW         = 200;  // deprecated, using EMA
+    static constexpr int    STARTUP_REGIME_MIN_SHORT_TICKS = 8; // seed regime earlier after startup if real book/trade data is flowing
+    static constexpr int64_t STARTUP_WARMUP_MS      = 2 * 60 * 1000LL;
     static constexpr double LONG_VOL_EMA_ALPHA      = 0.06;
     static constexpr double VOL_RATIO_EMA_ALPHA     = 0.12;
     static constexpr double VOL_MIN_LONG            = 1e-8;
@@ -492,6 +495,7 @@ struct TradingConfig {
     // Only fires in GRIND regime — MM rebalancing is a ranging-market phenomenon.
     static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.14;  // slow imbal EMA > 0.14 (bid-heavy)
     static constexpr double MM_DRIFT_BPS_THRESHOLD  = 2.0;   // cumulative drift > 2bp over window
+    static constexpr int    STARTUP_MM_MIN_DRIFT_TICKS = 8;  // allow MM pressure once drift has some real history during startup
     static constexpr double MM_MAX_SPREAD_BPS       = 2.0;   // tight spread required
     static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
     static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise

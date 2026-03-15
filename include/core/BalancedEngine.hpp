@@ -664,7 +664,10 @@ public:
         
         // Update long_vol using EMA instead of rolling window
         // This makes long_vol adaptive instead of inert
-        if (s.short_returns.size() >= TradingConfig::SHORT_VOL_WINDOW) {
+        const int min_short_ticks = startup_warmup_mode(ts)
+            ? TradingConfig::STARTUP_REGIME_MIN_SHORT_TICKS
+            : TradingConfig::SHORT_VOL_WINDOW;
+        if (s.short_returns.size() >= static_cast<size_t>(min_short_ticks)) {
             double current_short_vol = compute_volatility(s.short_returns);
             
             if (!s.ema_initialized) {
@@ -1140,12 +1143,15 @@ private:
     
     Regime classify_regime(int id) {
         auto& s = symbols_[id];
+        const int min_short_ticks = startup_warmup_mode(last_tick_ts_ms_)
+            ? TradingConfig::STARTUP_REGIME_MIN_SHORT_TICKS
+            : TradingConfig::SHORT_VOL_WINDOW;
         
         // Increment regime stability counter
         s.regime_ticks++;
         
         // Need minimum data - wait for EMA to initialize
-        if (!s.ema_initialized || s.short_returns.size() < TradingConfig::SHORT_VOL_WINDOW) 
+        if (!s.ema_initialized || s.short_returns.size() < static_cast<size_t>(min_short_ticks))
             return REGIME_DEAD;
         
         // Compute short volatility (standard deviation of log returns from rolling window)
@@ -1280,9 +1286,13 @@ private:
         return t.bid > 0.0 && t.ask > 0.0 && t.ask > t.bid;
     }
 
-    bool vwap_ready(const SymbolState& s) const {
+    bool vwap_ready(const SymbolState& s, int64_t ts = 0) const {
+        const int64_t ref_ts = ts > 0 ? ts : last_tick_ts_ms_;
+        const int min_trade_samples = startup_warmup_mode(ref_ts)
+            ? TradingConfig::STARTUP_VWAP_MIN_TRADE_SAMPLES
+            : TradingConfig::VWAP_MIN_TRADE_SAMPLES;
         return s.session_vwap > 0.0 &&
-               s.vwap_trade_count >= TradingConfig::VWAP_MIN_TRADE_SAMPLES &&
+               s.vwap_trade_count >= min_trade_samples &&
                s.vwap_cum_vol > 0.0;
     }
 
@@ -1311,7 +1321,7 @@ private:
     }
 
     bool continuation_vwap_support(double price, const SymbolState& s) const {
-        if (!vwap_ready(s)) return false;
+        if (!vwap_ready(s, last_tick_ts_ms_)) return false;
         const double underwater_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
         return underwater_bp <= TradingConfig::CONTINUATION_VWAP_MAX_UNDERWATER_BP;
     }
@@ -1448,7 +1458,7 @@ private:
     }
 
     double positive_vwap_extension_bp(const SymbolState& s, double price) const {
-        if (!vwap_ready(s)) return 0.0;
+        if (!vwap_ready(s, last_tick_ts_ms_)) return 0.0;
         return std::max(0.0, (price - s.session_vwap) / s.session_vwap * 10000.0);
     }
 
@@ -1534,7 +1544,7 @@ private:
         const double flow = compute_flow_ratio(id);
 
         bool vwap_dip = false;
-        if (vwap_ready(s)) {
+        if (vwap_ready(s, last_tick_ts_ms_)) {
             const double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
             vwap_dip = deviation_bp >= TradingConfig::VWAP_ENTRY_DEVIATION_BP &&
                        deviation_bp <= TradingConfig::VWAP_MAX_DEVIATION_BP &&
@@ -1594,9 +1604,13 @@ private:
         return std::max(runtime_min_edge_bp_, layer_cost_floor_bp(layer) + 1.0);
     }
 
-    bool spot_native_regime_allows(int id, double price, const SymbolState& s, LayerMode layer) const {
+    bool spot_native_regime_allows(int id, double price, int64_t ts, const SymbolState& s, LayerMode layer) const {
         if (s.regime == REGIME_GRIND) return true;
-        if (s.regime == REGIME_DEAD) return false;
+        if (s.regime == REGIME_DEAD) {
+            return startup_warmup_mode(ts) &&
+                   s.short_returns.size() >= TradingConfig::STARTUP_REGIME_MIN_SHORT_TICKS &&
+                   projected_gross_edge_bp(id, price, s, layer) >= required_edge_bp(layer);
+        }
 
         if (projected_gross_edge_bp(id, price, s, layer) < required_edge_bp(layer)) {
             return false;
@@ -2013,6 +2027,12 @@ private:
         return paper_research_enabled_ &&
                shadow_mode && startup_ts_ms_ > 0 && total_trades_ == 0 &&
                (ts - startup_ts_ms_) >= 8 * 60 * 1000LL;
+    }
+
+    bool startup_warmup_mode(int64_t ts) const {
+        return startup_ts_ms_ > 0 &&
+               ts >= startup_ts_ms_ &&
+               (ts - startup_ts_ms_) <= TradingConfig::STARTUP_WARMUP_MS;
     }
 
     int64_t paper_research_idle_elapsed_ms(int64_t ts) const {
@@ -2578,7 +2598,7 @@ private:
             return false;
         }
         const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
-                               spot_native_regime_allows(id, price, s, LAYER_MICRO);
+                               spot_native_regime_allows(id, price, ts, s, LAYER_MICRO);
         if (!regime_ok) {
             rejection_throttle_.record(key, s.regime == REGIME_DEAD ? "not_grind"
                                                                     : "regime_edge_blocked");
@@ -3588,7 +3608,7 @@ private:
             return false;
         }
         // Only fires in GRIND or BUILDUP  BREAKOUT has own engines
-        const bool regime_ok = spot_native_regime_allows(id, price, s, LAYER_VACUUM);
+        const bool regime_ok = spot_native_regime_allows(id, price, ts, s, LAYER_VACUUM);
         if (!regime_ok) {
             rejection_throttle_.record(key, s.regime == REGIME_DEAD ? "wrong_regime"
                                                                     : "regime_edge_blocked");
@@ -3651,14 +3671,14 @@ private:
         }
         // Only fires in GRIND  VWAP reversion fails in trending regimes
         const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
-                               spot_native_regime_allows(id, price, s, LAYER_VWAP);
+                               spot_native_regime_allows(id, price, ts, s, LAYER_VWAP);
         if (!regime_ok) {
             rejection_throttle_.record(key, s.regime == REGIME_DEAD ? "not_grind"
                                                                     : "regime_edge_blocked");
             return false;
         }
         // Need established VWAP
-        if (!vwap_ready(s)) {
+        if (!vwap_ready(s, ts)) {
             rejection_throttle_.record(key, "vwap_not_ready");
             return false;
         }
@@ -3715,7 +3735,7 @@ private:
 
         // Regime: GRIND or BUILDUP only
         const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
-                               spot_native_regime_allows(id, price, s, LAYER_OFI);
+                               spot_native_regime_allows(id, price, ts, s, LAYER_OFI);
         if (!regime_ok) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI",
                                        s.regime == REGIME_DEAD ? "wrong_regime"
@@ -3873,14 +3893,20 @@ private:
 
         // Best in GRIND — MM rebalancing is a ranging-market phenomenon
         const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
-                               spot_native_regime_allows(id, price, s, LAYER_MM_PRESSURE);
+                               spot_native_regime_allows(id, price, ts, s, LAYER_MM_PRESSURE);
         if (!regime_ok) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM",
                                        s.regime == REGIME_DEAD ? "not_grind"
                                                                : "regime_edge_blocked");
             return false;
         }
-        if (!s.mm_imbal_init || s.mm_drift_ticks < 20) return false;
+        const int min_mm_drift_ticks = startup_warmup_mode(ts)
+            ? TradingConfig::STARTUP_MM_MIN_DRIFT_TICKS
+            : 20;
+        if (!s.mm_imbal_init || s.mm_drift_ticks < min_mm_drift_ticks) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "mm_warmup");
+            return false;
+        }
 
         const MarketTick& t = s.last_tick;
         if (t.bid <= 0.0 || t.ask <= 0.0) return false;

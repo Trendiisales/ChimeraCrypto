@@ -71,13 +71,29 @@ public:
     }
 
     OrderResult execute(const std::string& symbol, bool is_buy, double qty, double price) {
-        return execute_market(symbol, is_buy, qty, price);
+        return execute_market(symbol, is_buy, qty, price, std::string());
+    }
+
+    OrderResult execute(const std::string& symbol,
+                        bool is_buy,
+                        double qty,
+                        double price,
+                        const std::string& client_id) {
+        return execute_market(symbol, is_buy, qty, price, client_id);
     }
 
     OrderResult execute_market(const std::string& symbol,
                                bool is_buy,
                                double qty,
                                double price) {
+        return execute_market(symbol, is_buy, qty, price, std::string());
+    }
+
+    OrderResult execute_market(const std::string& symbol,
+                               bool is_buy,
+                               double qty,
+                               double price,
+                               const std::string& client_id) {
         OrderResult result;
         if (!rest_.is_ready()) {
             result.error = "not_ready";
@@ -87,7 +103,9 @@ public:
         }
 
         std::string sym_upper = to_upper(symbol);
-        std::string cid = make_client_id(sym_upper, is_buy ? "MKTB" : "MKTS");
+        std::string cid = client_id.empty()
+            ? make_client_id(sym_upper, is_buy ? "MKTB" : "MKTS")
+            : client_id;
 
         std::printf("[EXECUTOR] %s %s %.8f @ %.4f signal_px | type=MARKET\n",
                     is_buy ? "BUY" : "SELL", sym_upper.c_str(), qty, price);
@@ -108,6 +126,14 @@ public:
                                    bool is_buy,
                                    double qty,
                                    double limit_price) {
+        return submit_limit_maker(symbol, is_buy, qty, limit_price, std::string());
+    }
+
+    OrderResult submit_limit_maker(const std::string& symbol,
+                                   bool is_buy,
+                                   double qty,
+                                   double limit_price,
+                                   const std::string& client_id) {
         OrderResult result;
         if (!rest_.is_ready()) {
             result.error = "not_ready";
@@ -118,7 +144,9 @@ public:
         }
 
         std::string sym_upper = to_upper(symbol);
-        std::string cid = make_client_id(sym_upper, is_buy ? "MKRB" : "MKRS");
+        std::string cid = client_id.empty()
+            ? make_client_id(sym_upper, is_buy ? "MKRB" : "MKRS")
+            : client_id;
 
         std::printf("[EXECUTOR] %s %s %.8f @ %.8f | type=LIMIT_MAKER\n",
                     is_buy ? "BUY" : "SELL", sym_upper.c_str(), qty, limit_price);
@@ -142,11 +170,6 @@ public:
         OrderResult result;
         if (!rest_.is_ready()) {
             result.error = "not_ready";
-            return result;
-        }
-        if (rest_.is_shadow()) {
-            result.shadow = true;
-            result.error = "shadow_query_unsupported";
             return result;
         }
 
@@ -188,6 +211,7 @@ public:
     }
 
     bool is_shadow() const { return rest_.is_shadow(); }
+    bool is_shadow_mode() const { return rest_.is_shadow(); }
     bool is_ready() const { return rest_.is_ready(); }
     int fills() const { return fills_.load(); }
     int errors() const { return errors_.load(); }

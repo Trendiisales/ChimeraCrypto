@@ -12,8 +12,19 @@ struct RuntimeConfig {
     std::string credentials_file = "config/binance_credentials.json";
     bool shadow_mode = true;
     bool shadow_mode_set = false;
+    std::string paper_mode = "maker_transferable";
+    std::string paper_mode_description =
+        "Build and sign the exact LIMIT_MAKER payloads that live mode will send, but do not post them while shadow_mode=true";
+    bool allow_live_orders = false;
+    bool maker_only = true;
+    bool spot_only = true;
+    bool long_only = true;
+    bool allow_perps = false;
     bool paper_research_enabled = false;
     std::string audit_log_file = "data/execution_audit.jsonl";
+    double cost_bps = 8.0;
+    double min_edge_bps = 12.0;
+    double max_position_usd = 10000.0;
 
     static RuntimeConfig load(const std::string& path = "config/live_config.json") {
         RuntimeConfig cfg;
@@ -36,6 +47,22 @@ struct RuntimeConfig {
             cfg.shadow_mode_set = true;
         }
 
+        const std::string paper_mode = extract_json_string(content, "paper_mode");
+        if (!paper_mode.empty()) {
+            cfg.paper_mode = paper_mode;
+        }
+
+        const std::string paper_mode_description = extract_json_string(content, "paper_mode_description");
+        if (!paper_mode_description.empty()) {
+            cfg.paper_mode_description = paper_mode_description;
+        }
+
+        extract_json_bool(content, "allow_live_orders", cfg.allow_live_orders);
+        extract_json_bool(content, "maker_only", cfg.maker_only);
+        extract_json_bool(content, "spot_only", cfg.spot_only);
+        extract_json_bool(content, "long_only", cfg.long_only);
+        extract_json_bool(content, "allow_perps", cfg.allow_perps);
+
         bool paper_research = false;
         if (extract_json_bool(content, "paper_research_enabled", paper_research)) {
             cfg.paper_research_enabled = paper_research;
@@ -45,6 +72,10 @@ struct RuntimeConfig {
         if (!audit_log.empty()) {
             cfg.audit_log_file = audit_log;
         }
+
+        extract_json_double(content, "cost_bps", cfg.cost_bps);
+        extract_json_double(content, "min_edge_bps", cfg.min_edge_bps);
+        extract_json_double(content, "max_position_usd", cfg.max_position_usd);
 
         cfg.loaded = true;
         return cfg;
@@ -93,6 +124,29 @@ private:
             return true;
         }
         return false;
+    }
+
+    static bool extract_json_double(const std::string& content, const std::string& key, double& out) {
+        const std::string needle = "\"" + key + "\"";
+        auto pos = content.find(needle);
+        if (pos == std::string::npos) return false;
+
+        auto colon = content.find(':', pos + needle.size());
+        if (colon == std::string::npos) return false;
+
+        auto value_start = content.find_first_not_of(" \t\r\n", colon + 1);
+        if (value_start == std::string::npos) return false;
+
+        auto value_end = content.find_first_of(",}", value_start);
+        const std::string value = content.substr(
+            value_start,
+            value_end == std::string::npos ? std::string::npos : value_end - value_start);
+        try {
+            out = std::stod(value);
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 };
 

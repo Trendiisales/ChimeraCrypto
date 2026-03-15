@@ -11,6 +11,7 @@
 #include <functional>
 #include <cstdlib>
 #include <optional>
+#include <unordered_map>
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -91,6 +92,10 @@ public:
         std::fflush(stdout);
 
         curl_global_init(CURL_GLOBAL_DEFAULT);
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            shadow_orders_.clear();
+        }
         ready_ = true;
         return ping();
     }
@@ -182,8 +187,8 @@ public:
             result.status = (order_type == "LIMIT_MAKER") ? "NEW" : "FILLED";
             result.executed_qty = (order_type == "LIMIT_MAKER") ? 0.0 : qty;
             result.avg_price = (order_type == "LIMIT_MAKER") ? limit_price : 0.0;
-            result.order_id = static_cast<long>(
-                std::llabs(static_cast<long long>(std::hash<std::string>{}(client_id))) % 2000000000LL);
+            result.order_id = synth_shadow_order_id(client_id);
+            shadow_orders_[client_id] = result;
             orders_sent_.fetch_add(1, std::memory_order_relaxed);
             return result;
         }
@@ -247,7 +252,13 @@ public:
             return result;
         }
         if (shadow_mode_) {
-            result.error = "shadow_query_unsupported";
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto it = shadow_orders_.find(client_id);
+            if (it == shadow_orders_.end()) {
+                result.error = "shadow_order_not_found";
+                return result;
+            }
+            result = it->second;
             return result;
         }
 
@@ -294,6 +305,19 @@ public:
                             const std::string& client_id) {
         if (!shadow_mode_) return false;
         std::lock_guard<std::mutex> lk(mtx_);
+        OrderResult& result = shadow_orders_[client_id];
+        result.ok = true;
+        result.shadow = true;
+        result.order_id = result.order_id > 0 ? result.order_id : synth_shadow_order_id(client_id);
+        result.client_id = client_id;
+        result.order_type = result.order_type.empty() ? "LIMIT_MAKER" : result.order_type;
+        result.status = "FILLED";
+        result.executed_qty = qty;
+        result.avg_price = fill_price;
+        if (result.limit_price <= 0.0) {
+            result.limit_price = fill_price;
+        }
+        result.error.clear();
         std::printf("[SHADOW-FILL] %s %s %.8f | client_id=%s | fill_px=%.8f\n",
                     is_buy ? "BUY" : "SELL", symbol.c_str(), qty, client_id.c_str(), fill_price);
         std::fflush(stdout);
@@ -306,6 +330,17 @@ public:
                        const char* reason) {
         if (!shadow_mode_) return false;
         std::lock_guard<std::mutex> lk(mtx_);
+        OrderResult& result = shadow_orders_[client_id];
+        result.ok = true;
+        result.shadow = true;
+        result.order_id = result.order_id > 0 ? result.order_id : synth_shadow_order_id(client_id);
+        result.client_id = client_id;
+        result.order_type = result.order_type.empty() ? "LIMIT_MAKER" : result.order_type;
+        result.limit_price = limit_price;
+        result.status = "CANCELED";
+        result.executed_qty = 0.0;
+        result.avg_price = 0.0;
+        result.error.clear();
         std::printf("[SHADOW-CANCEL] %s | client_id=%s | limit_px=%.8f | reason=%s\n",
                     symbol.c_str(), client_id.c_str(), limit_price, reason ? reason : "cancelled");
         std::fflush(stdout);
@@ -336,7 +371,10 @@ public:
 
     bool cancel_order(const std::string& symbol,
                       const std::string& client_id) {
-        if (!ready_ || shadow_mode_) return true;
+        if (!ready_) return true;
+        if (shadow_mode_) {
+            return shadow_cancel(symbol, client_id, 0.0, "cancel_order");
+        }
 
         std::lock_guard<std::mutex> lk(mtx_);
         std::ostringstream qs;
@@ -367,6 +405,12 @@ private:
     bool ready_ = false;
     std::mutex mtx_;
     std::atomic<int> orders_sent_{0};
+    std::unordered_map<std::string, OrderResult> shadow_orders_;
+
+    static long synth_shadow_order_id(const std::string& client_id) {
+        return static_cast<long>(
+            std::llabs(static_cast<long long>(std::hash<std::string>{}(client_id))) % 2000000000LL);
+    }
 
     std::string sign(const std::string& data) const {
         unsigned char digest[EVP_MAX_MD_SIZE];

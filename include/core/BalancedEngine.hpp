@@ -123,6 +123,7 @@ struct Position {
     double pending_qty = 0.0;
     double pending_limit_price = 0.0;
     std::string pending_client_id;
+    long pending_order_id = 0;
     int64_t last_order_poll_ts = 0;
 
     void reset() {
@@ -141,6 +142,7 @@ struct Position {
         pending_qty = 0.0;
         pending_limit_price = 0.0;
         pending_client_id.clear();
+        pending_order_id = 0;
         last_order_poll_ts = 0;
     }
 };
@@ -544,9 +546,9 @@ public:
         // Position state diagnostic
         static int64_t last_pos_diag = 0;
         if (ts - last_pos_diag > 10000) {
-            std::printf("[POSITION-STATE] open=%d | sys_state=%d | loss_streak=%d | kill_until=%ld\n",
+            std::printf("[POSITION-STATE] open=%d | sys_state=%d | loss_streak=%d | kill_until=%lld\n",
                        open_positions_, system_state_, loss_streak_, 
-                       (kill_until_ > ts ? (kill_until_ - ts) : 0));
+                       static_cast<long long>(kill_until_ > ts ? (kill_until_ - ts) : 0));
             
             for (int i = 0; i < MAX_SYMBOLS; ++i) {
                 const char* sym = sym_short(i);
@@ -2520,6 +2522,7 @@ private:
             s.pos.pending_qty = 0.0;
             s.pos.pending_limit_price = 0.0;
             s.pos.pending_client_id.clear();
+            s.pos.pending_order_id = 0;
             s.pos.last_order_poll_ts = 0;
         };
 
@@ -2543,6 +2546,7 @@ private:
             const std::string entry_client_id = s.pos.pending_client_id.empty()
                 ? synth_client_id(sym, "paper-maker", ts)
                 : s.pos.pending_client_id;
+            const long entry_order_id = order_id > 0 ? order_id : s.pos.pending_order_id;
             s.pos.state = POS_OPEN;
             s.pos.entry_price = fill_px;
             s.pos.entry_ts = ts;
@@ -2551,7 +2555,7 @@ private:
             s.pos.peak_price = fill_px;
             s.pos.entered_qty = fill_qty > 0.0 ? fill_qty : s.pos.pending_qty;
             s.pos.entry_client_id = entry_client_id;
-            s.pos.entry_order_id = order_id;
+            s.pos.entry_order_id = entry_order_id;
             s.pos.mfe = 0.0;
             s.pos.mae = 0.0;
 
@@ -2561,7 +2565,7 @@ private:
 
             capture_entry_context();
             audit_order_event(ts, "order_filled", id, s.pos.pending_layer, s.regime,
-                              s.pos.is_long, "LIMIT_MAKER", entry_client_id, order_id,
+                              s.pos.is_long, "LIMIT_MAKER", entry_client_id, entry_order_id,
                               s.pos.entered_qty, s.pos.pending_limit_price,
                               s.pos.pending_limit_price, fill_px, "FILLED", tag);
             audit_position_event(ts, "position_open", id, s, fill_px, s.pos.entered_qty,
@@ -2621,7 +2625,8 @@ private:
                                     sym, mode, live.status.c_str());
                         std::fflush(stdout);
                         audit_order_event(ts, "order_canceled", id, s.pos.pending_layer, s.regime,
-                                          s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, live.order_id,
+                                          s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id,
+                                          live.order_id > 0 ? live.order_id : s.pos.pending_order_id,
                                           s.pos.pending_qty, s.pos.pending_limit_price,
                                           s.pos.pending_limit_price, 0.0, live.status, cancel_reason);
                         cancel_pending_state();
@@ -2639,7 +2644,7 @@ private:
                             sym, mode, s.pos.pending_limit_price, cancel_reason.c_str());
                 std::fflush(stdout);
                 audit_order_event(ts, "order_canceled", id, s.pos.pending_layer, s.regime,
-                                  s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, 0,
+                                  s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, s.pos.pending_order_id,
                                   s.pos.pending_qty, s.pos.pending_limit_price,
                                   s.pos.pending_limit_price, 0.0, "CANCELED", cancel_reason);
                 cancel_pending_state();
@@ -2670,7 +2675,7 @@ private:
                                                 cancel_reason.c_str());
             }
             audit_order_event(ts, "order_canceled", id, s.pos.pending_layer, s.regime,
-                              s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, 0,
+                              s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, s.pos.pending_order_id,
                               s.pos.pending_qty, s.pos.pending_limit_price,
                               s.pos.pending_limit_price, 0.0, "CANCELED", cancel_reason);
             cancel_pending_state();
@@ -3666,14 +3671,17 @@ private:
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
             const double limit_px = limit_orders_[id].order().limit_price;
+            const std::string pending_client_id = synth_client_id(sym, "maker", ts);
 
             OrderResult maker_order;
             if (executor_) {
-                maker_order = executor_->submit_limit_maker(sym_lower(id), is_long, qty, limit_px);
+                maker_order = executor_->submit_limit_maker(sym_lower(id), is_long, qty, limit_px, pending_client_id);
                 if (!maker_order.ok) {
                     limit_orders_[id].reset();
                     audit_order_event(ts, "order_rejected", id, layer, s.regime,
-                                      is_long, "LIMIT_MAKER", maker_order.client_id, maker_order.order_id,
+                                      is_long, "LIMIT_MAKER",
+                                      maker_order.client_id.empty() ? pending_client_id : maker_order.client_id,
+                                      maker_order.order_id,
                                       qty, price, limit_px, 0.0, "REJECTED", maker_order.error);
                     std::fprintf(stderr, "[ENTER-PENDING] %s | %s | maker submit failed: %s\n",
                                  sym, mode, maker_order.error.c_str());
@@ -3688,8 +3696,9 @@ private:
             s.pos.pending_qty   = qty;
             s.pos.pending_limit_price = limit_px;
             s.pos.pending_client_id = maker_order.client_id.empty()
-                ? synth_client_id(sym, "paper-maker", ts)
+                ? pending_client_id
                 : maker_order.client_id;
+            s.pos.pending_order_id = maker_order.order_id;
             s.pos.last_order_poll_ts = 0;
             open_positions_++;  // Reserve  decremented if cancelled
             last_trade_activity_ts_ms_ = ts;
@@ -3706,7 +3715,7 @@ private:
                 final_weight);
             std::fflush(stdout);
             audit_order_event(ts, "order_submitted", id, layer, s.regime,
-                              is_long, "LIMIT_MAKER", s.pos.pending_client_id, maker_order.order_id,
+                              is_long, "LIMIT_MAKER", s.pos.pending_client_id, s.pos.pending_order_id,
                               qty, price, limit_px, 0.0,
                               maker_order.status.empty() ? "NEW" : maker_order.status,
                               "maker_posted");
@@ -3714,12 +3723,18 @@ private:
         } else {
             double fill_price = price;
             double filled_qty = qty;
+            const std::string entry_client_id = synth_client_id(sym, "market", ts);
             OrderResult entry;
+            audit_order_event(ts, "order_submitted", id, layer, s.regime,
+                              is_long, "MARKET", entry_client_id, 0,
+                              qty, price, price, 0.0, "SUBMITTED", "market_entry");
             if (executor_) {
-                entry = executor_->execute(sym_lower(id), is_long, qty, price);
+                entry = executor_->execute(sym_lower(id), is_long, qty, price, entry_client_id);
                 if (!entry.ok) {
                     audit_order_event(ts, "order_rejected", id, layer, s.regime,
-                                      is_long, "MARKET", entry.client_id, entry.order_id,
+                                      is_long, "MARKET",
+                                      entry.client_id.empty() ? entry_client_id : entry.client_id,
+                                      entry.order_id,
                                       qty, price, 0.0, 0.0, "REJECTED", entry.error);
                     return;
                 }
@@ -3741,7 +3756,7 @@ private:
             s.pos.peak_price  = fill_price;
             s.pos.entered_qty = filled_qty;
             s.pos.entry_client_id = entry.client_id.empty()
-                ? synth_client_id(sym, "paper-market", ts)
+                ? entry_client_id
                 : entry.client_id;
             s.pos.entry_order_id = entry.order_id;
             s.pos.mfe         = 0.0;
@@ -3805,18 +3820,22 @@ private:
         const char* layer_label = layer_name(s.pos.layer);
         const char* win_str = pnl_net > 0 ? "WIN" : "LOSS";
 
-        std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
+        std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%lldms | total_pnl=%.2f\n",
             sym, layer_label, win_str,
             pending_exit_reason_.empty() ? "?" : pending_exit_reason_.c_str(),
-            pnl_net, s.pos.mfe, s.pos.mae, current_latency, hold_time_ms, total_pnl_);
+            pnl_net, s.pos.mfe, s.pos.mae, current_latency, static_cast<long long>(hold_time_ms), total_pnl_);
         std::fflush(stdout);
 
         // Compute exit reason before the callback block so it's in scope for
         // both stats_for() and the per-symbol circuit breaker below
         std::string exit_reason = pending_exit_reason_.empty() ? (pnl >= 0 ? "TP" : "SL") : pending_exit_reason_;
-        audit_position_event(ts, "position_exit", id, s,
-                             s.pos.entry_price * (1.0 + pnl / 10000.0),
-                             s.pos.entered_qty, pnl, pnl_net, exit_reason);
+        const double modeled_exit_px = s.pos.entry_price * (1.0 + pnl / 10000.0);
+        double exit_qty = s.pos.entered_qty;
+        if (exit_qty <= 0.0 && s.pos.entry_price > 0.0) {
+            exit_qty = capital_control_.compute_final_size(
+                0.5, CapitalControlLayer::MarketEnv{}, 0.0, 0.0, "UNKNOWN") / s.pos.entry_price;
+        }
+        const std::string exit_client_id = synth_client_id(sym, "exit", ts);
 
         // Fire trade exit callback so QuadEngine can log full trade data
         if (trade_exit_cb_) {
@@ -3825,7 +3844,7 @@ private:
             td.engine      = layer_label;
             td.pnl_bp      = pnl_net;
             td.entry_price = s.pos.entry_price;
-            td.exit_price  = s.pos.entry_price * (1.0 + pnl / 10000.0);
+            td.exit_price  = modeled_exit_px;
             td.mfe_bp      = s.pos.mfe;
             td.mae_bp      = s.pos.mae;
             td.hold_ms     = hold_time_ms;
@@ -3858,7 +3877,7 @@ private:
                 (s.regime == REGIME_BREAKOUT) ? "BREAKOUT" : "DEAD",
                 sizeof(se.regime)-1);
             se.entry_px      = s.pos.entry_price;
-            se.exit_px       = s.pos.entry_price * (1.0 + pnl / 10000.0);
+            se.exit_px       = modeled_exit_px;
             se.pnl_bp        = pnl_net;   // net after round-trip cost
             se.gross_bp      = pnl;        // raw price move before cost
             se.mfe_bp        = s.pos.mfe;
@@ -3873,22 +3892,49 @@ private:
             shadow_log_.record(se);
         }
 
-        // Execute closing order (shadow or live)
-        if (executor_) {
-            double exit_px = s.pos.entry_price * (1.0 + pnl / 10000.0);
-            double qty = s.pos.entered_qty;
-            if (qty <= 0.0 && s.pos.entry_price > 0.0) {
-                qty = capital_control_.compute_final_size(
-                    0.5, CapitalControlLayer::MarketEnv{}, 0.0, 0.0, "UNKNOWN") / s.pos.entry_price;
-            }
-            // Spot long-only: always SELL to close
-            if (qty > 0.0) {
-                executor_->execute(sym_lower(id), false /*sell*/, qty, exit_px);
+        if (exit_qty > 0.0) {
+            audit_order_event(ts, "order_submitted", id, s.pos.layer, s.regime,
+                              false, "MARKET", exit_client_id, 0,
+                              exit_qty, modeled_exit_px, modeled_exit_px, 0.0,
+                              "SUBMITTED", exit_reason);
+            if (executor_) {
+                OrderResult close = executor_->execute(sym_lower(id), false /*sell*/, exit_qty,
+                                                       modeled_exit_px, exit_client_id);
+                if (!close.ok) {
+                    audit_order_event(ts, "order_rejected", id, s.pos.layer, s.regime,
+                                      false, "MARKET",
+                                      close.client_id.empty() ? exit_client_id : close.client_id,
+                                      close.order_id, exit_qty, modeled_exit_px, modeled_exit_px,
+                                      0.0, "REJECTED", close.error);
+                    std::fprintf(stderr, "[EXIT] %s | close order failed: %s\n",
+                                 sym, close.error.c_str());
+                } else {
+                    const double close_fill_px = close.avg_price > 0.0 ? close.avg_price : modeled_exit_px;
+                    audit_order_event(ts, "order_filled", id, s.pos.layer, s.regime,
+                                      false, "MARKET",
+                                      close.client_id.empty() ? exit_client_id : close.client_id,
+                                      close.order_id, exit_qty, modeled_exit_px, close_fill_px,
+                                      close_fill_px,
+                                      close.status.empty() ? "FILLED" : close.status,
+                                      exit_reason);
+                }
             } else {
-                std::fprintf(stderr, "[EXIT] %s | no filled quantity recorded, close skipped\n", sym);
+                audit_order_event(ts, "order_rejected", id, s.pos.layer, s.regime,
+                                  false, "MARKET", exit_client_id, 0,
+                                  exit_qty, modeled_exit_px, modeled_exit_px, 0.0,
+                                  "REJECTED", "executor_unavailable");
             }
+        } else {
+            audit_order_event(ts, "order_rejected", id, s.pos.layer, s.regime,
+                              false, "MARKET", exit_client_id, 0,
+                              0.0, modeled_exit_px, modeled_exit_px, 0.0,
+                              "REJECTED", "missing_filled_qty");
+            std::fprintf(stderr, "[EXIT] %s | no filled quantity recorded, close skipped\n", sym);
         }
-        
+
+        audit_position_event(ts, "position_exit", id, s,
+                             modeled_exit_px, exit_qty, pnl, pnl_net, exit_reason);
+
         // Broadcast exit to GUI with complete trade details
         const char* layer_str = (s.pos.layer == LAYER_MICRO)   ? "MICRO"   :
                                (s.pos.layer == LAYER_IMPULSE)  ? "IMPULSE" :
@@ -3912,7 +3958,7 @@ private:
         trade_msg << "{\"type\":\"trade\","
                   << "\"last_order_symbol\":\"" << symbol_full << "\","
                   << "\"last_order_side\":\"" << (pnl > 0 ? "WIN" : "LOSS") << "\","
-                  << "\"last_order_size\":" << s.pos.entered_qty << ","
+                  << "\"last_order_size\":" << exit_qty << ","
                   << "\"last_order_price\":" << s.pos.entry_price << ","
                   << "\"last_order_conviction\":" << (pnl + 2.0) << ","  // pnl + spread
                   << "\"last_order_cost_floor\":2.0,"

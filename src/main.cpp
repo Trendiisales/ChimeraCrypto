@@ -317,10 +317,19 @@ int main() {
 
     //  1. Executor / API keys 
     chimera::SpotExecutor executor;
+    std::optional<bool> shadow_override = runtime_cfg.shadow_mode_set
+        ? std::optional<bool>(runtime_cfg.shadow_mode)
+        : std::nullopt;
+    if (!runtime_cfg.allow_live_orders) {
+        if (runtime_cfg.shadow_mode_set && !runtime_cfg.shadow_mode) {
+            std::fprintf(stderr,
+                "[STARTUP] allow_live_orders=false in %s  forcing shadow_mode=true.\n",
+                runtime_cfg.source_path.c_str());
+        }
+        shadow_override = true;
+    }
     bool executor_ok = executor.init(runtime_cfg.credentials_file,
-                                     runtime_cfg.shadow_mode_set
-                                         ? std::optional<bool>(runtime_cfg.shadow_mode)
-                                         : std::nullopt);
+                                     shadow_override);
     if (!executor_ok) {
         std::fprintf(stderr,
             "[STARTUP] WARNING: executor init failed  orders will be skipped.\n"
@@ -340,10 +349,18 @@ int main() {
     }
 
     {
+        const bool effective_shadow_mode = executor_ok
+            ? executor.is_shadow()
+            : shadow_override.value_or(runtime_cfg.shadow_mode);
         std::ostringstream audit_fields;
         audit_fields << "\"mode\":\"" << (executor_ok && !executor.is_shadow() ? "LIVE" : "PAPER") << "\","
                      << "\"executor_ready\":" << (executor_ok ? "true" : "false") << ","
-                     << "\"shadow_mode\":" << ((executor_ok ? executor.is_shadow() : runtime_cfg.shadow_mode) ? "true" : "false") << ","
+                     << "\"shadow_mode\":" << (effective_shadow_mode ? "true" : "false") << ","
+                     << "\"allow_live_orders\":" << (runtime_cfg.allow_live_orders ? "true" : "false") << ","
+                     << "\"paper_mode\":\""
+                     << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.paper_mode) << "\","
+                     << "\"paper_mode_description\":\""
+                     << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.paper_mode_description) << "\","
                      << "\"paper_research_enabled\":" << (runtime_cfg.paper_research_enabled ? "true" : "false") << ","
                      << "\"credentials_file\":\""
                      << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.credentials_file) << "\","
@@ -351,6 +368,13 @@ int main() {
                      << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.source_path) << "\","
                      << "\"audit_log_file\":\""
                      << chimera::ExecutionAuditLogger::escape_json(chimera::ExecutionAuditLogger::instance().path()) << "\","
+                     << "\"maker_only\":" << (runtime_cfg.maker_only ? "true" : "false") << ","
+                     << "\"spot_only\":" << (runtime_cfg.spot_only ? "true" : "false") << ","
+                     << "\"long_only\":" << (runtime_cfg.long_only ? "true" : "false") << ","
+                     << "\"allow_perps\":" << (runtime_cfg.allow_perps ? "true" : "false") << ","
+                     << "\"runtime_cost_bps\":" << runtime_cfg.cost_bps << ","
+                     << "\"runtime_min_edge_bps\":" << runtime_cfg.min_edge_bps << ","
+                     << "\"runtime_max_position_usd\":" << runtime_cfg.max_position_usd << ","
                      << "\"maker_mode\":" << (chimera::TradingConfig::MAKER_MODE ? "true" : "false") << ","
                      << "\"maker_entry_market_exit_bp\":" << chimera::TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP << ","
                      << "\"maker_entry_market_exit_cost_floor_bp\":" << chimera::TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP;

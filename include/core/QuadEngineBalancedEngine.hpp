@@ -201,6 +201,7 @@ public:
     void set_ngas_engine(chimera::NGASLeadLagEngine* n)      { balanced_.set_ngas_engine(n); }
     LiquidationEngine& liq_engine() { return balanced_.liq_engine(); }
     void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
+    void set_paper_research_enabled(bool enabled)            { balanced_.set_paper_research_enabled(enabled); }
     void set_latency(double ms) { last_latency_ms_ = ms; }
     void set_lat_p95(double ms)  { lat_p95_display_  = ms; }
     

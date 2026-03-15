@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <cstdlib>
+#include <optional>
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -39,7 +40,8 @@ struct AccountBalance {
 
 class BinanceREST {
 public:
-    bool load_credentials(const std::string& path) {
+    bool load_credentials(const std::string& path,
+                          std::optional<bool> shadow_override = std::nullopt) {
         std::ifstream f(path);
         if (!f.is_open()) {
             std::fprintf(stderr, "[REST] Cannot open credentials file: %s\n", path.c_str());
@@ -65,6 +67,9 @@ public:
                     shadow_mode_ = (content.substr(vstart, 5) != "false");
                 }
             }
+        }
+        if (shadow_override.has_value()) {
+            shadow_mode_ = *shadow_override;
         }
 
         if (api_key_.empty() || api_key_ == "YOUR_BINANCE_API_KEY_HERE") {

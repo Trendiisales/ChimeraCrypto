@@ -24,6 +24,8 @@
 #include "execution/NetworkLatencySystem.hpp"
 #include "core/SymbolIndex.hpp"
 #include "config/TradingConfig.hpp"
+#include "config/RuntimeConfig.hpp"
+#include "logging/ExecutionAuditLogger.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -310,23 +312,49 @@ int main() {
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
+    chimera::RuntimeConfig runtime_cfg = chimera::RuntimeConfig::load("config/live_config.json");
+    chimera::ExecutionAuditLogger::instance().configure(runtime_cfg.audit_log_file);
+
     //  1. Executor / API keys 
     chimera::SpotExecutor executor;
-    bool executor_ok = executor.init("config/binance_credentials.json");
+    bool executor_ok = executor.init(runtime_cfg.credentials_file,
+                                     runtime_cfg.shadow_mode_set
+                                         ? std::optional<bool>(runtime_cfg.shadow_mode)
+                                         : std::nullopt);
     if (!executor_ok) {
         std::fprintf(stderr,
             "[STARTUP] WARNING: executor init failed  orders will be skipped.\n"
-            "[STARTUP] Edit config/binance_credentials.json with real api_key/api_secret.\n");
+            "[STARTUP] Edit %s with real api_key/api_secret.\n",
+            runtime_cfg.credentials_file.c_str());
     }
 
     //  2. Engine (owns HTTP server on port 8080) 
     chimera::QuadEngineBalancedEngine controller;
+    controller.set_paper_research_enabled(runtime_cfg.paper_research_enabled);
 
     if (executor_ok) {
         controller.set_executor(&executor);
         std::printf("[STARTUP] Executor wired | shadow=%s\n",
                     executor.is_shadow() ? "YES (paper)" : "NO  LIVE");
         std::fflush(stdout);
+    }
+
+    {
+        std::ostringstream audit_fields;
+        audit_fields << "\"mode\":\"" << (executor_ok && !executor.is_shadow() ? "LIVE" : "PAPER") << "\","
+                     << "\"executor_ready\":" << (executor_ok ? "true" : "false") << ","
+                     << "\"shadow_mode\":" << ((executor_ok ? executor.is_shadow() : runtime_cfg.shadow_mode) ? "true" : "false") << ","
+                     << "\"paper_research_enabled\":" << (runtime_cfg.paper_research_enabled ? "true" : "false") << ","
+                     << "\"credentials_file\":\""
+                     << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.credentials_file) << "\","
+                     << "\"runtime_config\":\""
+                     << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.source_path) << "\","
+                     << "\"audit_log_file\":\""
+                     << chimera::ExecutionAuditLogger::escape_json(chimera::ExecutionAuditLogger::instance().path()) << "\","
+                     << "\"maker_mode\":" << (chimera::TradingConfig::MAKER_MODE ? "true" : "false") << ","
+                     << "\"maker_entry_market_exit_bp\":" << chimera::TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP << ","
+                     << "\"maker_entry_market_exit_cost_floor_bp\":" << chimera::TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP;
+        chimera::ExecutionAuditLogger::instance().record_now("session_start", audit_fields.str());
     }
 
     // Funding rate background fetch
@@ -456,6 +484,14 @@ int main() {
                 executor_ok ? executor.errors() : 0,
                 controller.get_total_trades(),
                 controller.get_total_pnl());
+    {
+        std::ostringstream audit_fields;
+        audit_fields << "\"fills\":" << (executor_ok ? executor.fills() : 0) << ","
+                     << "\"errors\":" << (executor_ok ? executor.errors() : 0) << ","
+                     << "\"total_trades\":" << controller.get_total_trades() << ","
+                     << "\"total_pnl_bp\":" << controller.get_total_pnl();
+        chimera::ExecutionAuditLogger::instance().record_now("session_end", audit_fields.str());
+    }
     std::printf("[SHUTDOWN] Clean exit.\n");
     std::fflush(stdout);
     release_instance_lock();

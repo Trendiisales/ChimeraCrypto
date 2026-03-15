@@ -41,6 +41,7 @@
 #include <iomanip>
 #include <array>
 #include "logging/ShadowLogger.hpp"
+#include "logging/ExecutionAuditLogger.hpp"
 #include "core/LimitOrderManager.hpp"
 #include "core/PnLGovernor.hpp"
 
@@ -110,6 +111,8 @@ struct Position {
     int open_ticks;      // Ticks since position opened (for minimum hold time)
     double peak_price;   // Highest favorable price since entry (for trailing)
     double entered_qty = 0.0;     // Actual filled quantity that must be closed on exit
+    std::string entry_client_id;
+    long entry_order_id = 0;
 
     // Phase 2: MFE/MAE tracking
     double mfe;
@@ -130,6 +133,8 @@ struct Position {
         open_ticks = 0;
         peak_price = 0.0;
         entered_qty = 0.0;
+        entry_client_id.clear();
+        entry_order_id = 0;
         mfe = 0.0;
         mae = 0.0;
         pending_layer = LAYER_NONE;
@@ -712,6 +717,13 @@ public:
                             paper_research_idle_elapsed_ms(ts) / 1000.0,
                             TradingConfig::PAPER_RESEARCH_IDLE_MS / 1000.0);
                 std::fflush(stdout);
+                {
+                    std::ostringstream fields;
+                    fields << "\"enabled\":" << (research_now ? "true" : "false") << ","
+                           << "\"idle_ms\":" << paper_research_idle_elapsed_ms(ts) << ","
+                           << "\"threshold_ms\":" << TradingConfig::PAPER_RESEARCH_IDLE_MS;
+                    ExecutionAuditLogger::instance().record_at(ts, "paper_research_state", fields.str());
+                }
                 paper_research_mode_logged_ = research_now;
             }
         }
@@ -789,6 +801,7 @@ public:
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
+    void set_paper_research_enabled(bool enabled)   { paper_research_enabled_ = enabled; }
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
@@ -1586,7 +1599,8 @@ private:
     // Used to relax selected thresholds slightly so the system can sample edge.
     bool startup_starved_mode(int64_t ts) const {
         const bool shadow_mode = is_shadow_mode();
-        return shadow_mode && startup_ts_ms_ > 0 && total_trades_ == 0 &&
+        return paper_research_enabled_ &&
+               shadow_mode && startup_ts_ms_ > 0 && total_trades_ == 0 &&
                (ts - startup_ts_ms_) >= 8 * 60 * 1000LL;
     }
 
@@ -1599,7 +1613,8 @@ private:
     }
 
     bool paper_research_mode(int64_t ts) const {
-        return is_shadow_mode() &&
+        return paper_research_enabled_ &&
+               is_shadow_mode() &&
                open_positions_ == 0 &&
                paper_research_idle_elapsed_ms(ts) >= TradingConfig::PAPER_RESEARCH_IDLE_MS;
     }
@@ -1669,6 +1684,103 @@ private:
     bool is_shadow_mode() const {
         // If executor is unavailable we are effectively in simulation mode.
         return (executor_ == nullptr) || executor_->is_shadow();
+    }
+
+    static std::string synth_client_id(const char* sym, const char* tag, int64_t ts) {
+        std::ostringstream cid;
+        cid << sym << "-" << tag << "-" << ts;
+        std::string out = cid.str();
+        if (out.size() > 36) {
+            out = out.substr(out.size() - 36);
+        }
+        return out;
+    }
+
+    const char* layer_name(LayerMode layer) const {
+        switch (layer) {
+            case LAYER_MICRO:           return "IMBAL";
+            case LAYER_IMPULSE:         return "IMPULSE";
+            case LAYER_EXPANSION:       return "EXPAND";
+            case LAYER_LEADLAG:         return "LEADLAG";
+            case LAYER_LEADLAG_ETH_SOL: return "LL-ETH-SOL";
+            case LAYER_VACUUM:          return "VACUUM";
+            case LAYER_VWAP:            return "VWAP";
+            case LAYER_LIQUIDATION:     return "LIQ";
+            case LAYER_FUNDING:         return "FUND";
+            case LAYER_NGAS:            return "NGAS";
+            case LAYER_ETH_LEAD:        return "ETH-LEAD";
+            case LAYER_SOL_LEAD:        return "SOL-LEAD";
+            case LAYER_VOLSHOCK:        return "VOLSHOCK";
+            case LAYER_OFI:             return "OFI";
+            case LAYER_SWEEP:           return "SWEEP";
+            case LAYER_MM_PRESSURE:     return "MM-PRESSURE";
+            default:                    return "UNKNOWN";
+        }
+    }
+
+    void audit_order_event(int64_t ts,
+                           const char* event,
+                           int id,
+                           LayerMode layer,
+                           Regime regime,
+                           bool is_long,
+                           const char* order_type,
+                           const std::string& client_id,
+                           long order_id,
+                           double qty,
+                           double signal_px,
+                           double order_px,
+                           double fill_px,
+                           const std::string& status,
+                           const std::string& reason) const {
+        std::ostringstream fields;
+        fields << "\"symbol\":\"" << ExecutionAuditLogger::escape_json(sym_full(id)) << "\","
+               << "\"side\":\"" << (is_long ? "BUY" : "SELL") << "\","
+               << "\"layer\":\"" << layer_name(layer) << "\","
+               << "\"regime\":\"" << regime_name(regime) << "\","
+               << "\"order_type\":\"" << ExecutionAuditLogger::escape_json(order_type ? order_type : "") << "\","
+               << "\"client_id\":\"" << ExecutionAuditLogger::escape_json(client_id) << "\","
+               << "\"order_id\":" << order_id << ","
+               << "\"qty\":" << qty << ","
+               << "\"signal_px\":" << signal_px << ","
+               << "\"order_px\":" << order_px << ","
+               << "\"fill_px\":" << fill_px << ","
+               << "\"shadow_mode\":" << (is_shadow_mode() ? "true" : "false") << ","
+               << "\"status\":\"" << ExecutionAuditLogger::escape_json(status) << "\"";
+        if (!reason.empty()) {
+            fields << ",\"reason\":\"" << ExecutionAuditLogger::escape_json(reason) << "\"";
+        }
+        ExecutionAuditLogger::instance().record_at(ts, event, fields.str());
+    }
+
+    void audit_position_event(int64_t ts,
+                              const char* event,
+                              int id,
+                              const SymbolState& s,
+                              double px,
+                              double qty,
+                              double gross_bp,
+                              double net_bp,
+                              const std::string& reason) const {
+        std::ostringstream fields;
+        fields << "\"symbol\":\"" << ExecutionAuditLogger::escape_json(sym_full(id)) << "\","
+               << "\"side\":\"" << (s.pos.is_long ? "BUY" : "SELL") << "\","
+               << "\"layer\":\"" << layer_name(s.pos.layer) << "\","
+               << "\"regime\":\"" << regime_name(s.regime) << "\","
+               << "\"client_id\":\"" << ExecutionAuditLogger::escape_json(s.pos.entry_client_id) << "\","
+               << "\"order_id\":" << s.pos.entry_order_id << ","
+               << "\"qty\":" << qty << ","
+               << "\"price\":" << px << ","
+               << "\"gross_bp\":" << gross_bp << ","
+               << "\"net_bp\":" << net_bp << ","
+               << "\"mfe_bp\":" << s.pos.mfe << ","
+               << "\"mae_bp\":" << s.pos.mae << ","
+               << "\"hold_ms\":" << (ts - s.pos.entry_ts) << ","
+               << "\"shadow_mode\":" << (is_shadow_mode() ? "true" : "false");
+        if (!reason.empty()) {
+            fields << ",\"reason\":\"" << ExecutionAuditLogger::escape_json(reason) << "\"";
+        }
+        ExecutionAuditLogger::instance().record_at(ts, event, fields.str());
     }
 
     const char* edge_name(EdgeEngineKey k) const {
@@ -2377,21 +2489,7 @@ private:
         const double ask = t.ask > 0.0 ? t.ask : price;
         const double bid = t.bid > 0.0 ? t.bid : price;
         const char* sym  = sym_short(id);
-        const char* mode = (s.pos.pending_layer == LAYER_MICRO)            ? "IMBAL"      :
-                           (s.pos.pending_layer == LAYER_LEADLAG)          ? "LEADLAG"    :
-                           (s.pos.pending_layer == LAYER_VACUUM)           ? "VACUUM"     :
-                           (s.pos.pending_layer == LAYER_VWAP)             ? "VWAP"       :
-                           (s.pos.pending_layer == LAYER_LEADLAG_ETH_SOL)  ? "LL-ETH-SOL" :
-                           (s.pos.pending_layer == LAYER_IMPULSE)          ? "IMPULSE"    :
-                           (s.pos.pending_layer == LAYER_LIQUIDATION)      ? "LIQ"        :
-                           (s.pos.pending_layer == LAYER_FUNDING)          ? "FUND"       :
-                           (s.pos.pending_layer == LAYER_NGAS)             ? "NGAS"       :
-                           (s.pos.pending_layer == LAYER_ETH_LEAD)         ? "ETH-LEAD"   :
-                           (s.pos.pending_layer == LAYER_SOL_LEAD)         ? "SOL-LEAD"   :
-                           (s.pos.pending_layer == LAYER_VOLSHOCK)         ? "VOLSHOCK"   :
-                           (s.pos.pending_layer == LAYER_OFI)              ? "OFI"        :
-                           (s.pos.pending_layer == LAYER_SWEEP)            ? "SWEEP"      :
-                           (s.pos.pending_layer == LAYER_MM_PRESSURE)      ? "MM-PRESS"   : "EXPAND";
+        const char* mode = layer_name(s.pos.pending_layer);
         const auto& working = limit_orders_[id].order();
         const bool stale = working.status == LimitStatus::PENDING &&
                            working.limit_price > 0.0 &&
@@ -2441,7 +2539,10 @@ private:
             s.entry_latency_ms = market_env_.latency_ms;
         };
 
-        auto open_from_fill = [&](double fill_px, double fill_qty, const char* tag) {
+        auto open_from_fill = [&](double fill_px, double fill_qty, const char* tag, long order_id = 0) {
+            const std::string entry_client_id = s.pos.pending_client_id.empty()
+                ? synth_client_id(sym, "paper-maker", ts)
+                : s.pos.pending_client_id;
             s.pos.state = POS_OPEN;
             s.pos.entry_price = fill_px;
             s.pos.entry_ts = ts;
@@ -2449,6 +2550,8 @@ private:
             s.pos.open_ticks = 0;
             s.pos.peak_price = fill_px;
             s.pos.entered_qty = fill_qty > 0.0 ? fill_qty : s.pos.pending_qty;
+            s.pos.entry_client_id = entry_client_id;
+            s.pos.entry_order_id = order_id;
             s.pos.mfe = 0.0;
             s.pos.mae = 0.0;
 
@@ -2457,6 +2560,12 @@ private:
             std::fflush(stdout);
 
             capture_entry_context();
+            audit_order_event(ts, "order_filled", id, s.pos.pending_layer, s.regime,
+                              s.pos.is_long, "LIMIT_MAKER", entry_client_id, order_id,
+                              s.pos.entered_qty, s.pos.pending_limit_price,
+                              s.pos.pending_limit_price, fill_px, "FILLED", tag);
+            audit_position_event(ts, "position_open", id, s, fill_px, s.pos.entered_qty,
+                                 0.0, 0.0, tag);
             clear_pending_metadata();
         };
 
@@ -2494,7 +2603,7 @@ private:
                         if (signal_invalid) {
                             flatten_stale_live_fill(fill_px, live.executed_qty, "LIVE-MAKER-STALE");
                         } else {
-                            open_from_fill(fill_px, live.executed_qty, "LIVE-MAKER-FILL");
+                            open_from_fill(fill_px, live.executed_qty, "LIVE-MAKER-FILL", live.order_id);
                         }
                         return;
                     }
@@ -2504,13 +2613,17 @@ private:
                             if (signal_invalid) {
                                 flatten_stale_live_fill(fill_px, live.executed_qty, "LIVE-MAKER-STALE");
                             } else {
-                                open_from_fill(fill_px, live.executed_qty, "LIVE-MAKER-FINAL");
+                                open_from_fill(fill_px, live.executed_qty, "LIVE-MAKER-FINAL", live.order_id);
                             }
                             return;
                         }
                         std::printf("[LIVE-MAKER-CANCEL] %s | %s | status=%s\n",
                                     sym, mode, live.status.c_str());
                         std::fflush(stdout);
+                        audit_order_event(ts, "order_canceled", id, s.pos.pending_layer, s.regime,
+                                          s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, live.order_id,
+                                          s.pos.pending_qty, s.pos.pending_limit_price,
+                                          s.pos.pending_limit_price, 0.0, live.status, cancel_reason);
                         cancel_pending_state();
                         return;
                     }
@@ -2525,6 +2638,10 @@ private:
                 std::printf("[LIVE-MAKER-CANCEL] %s | %s | limit=%.4f | reason=%s\n",
                             sym, mode, s.pos.pending_limit_price, cancel_reason.c_str());
                 std::fflush(stdout);
+                audit_order_event(ts, "order_canceled", id, s.pos.pending_layer, s.regime,
+                                  s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, 0,
+                                  s.pos.pending_qty, s.pos.pending_limit_price,
+                                  s.pos.pending_limit_price, 0.0, "CANCELED", cancel_reason);
                 cancel_pending_state();
             }
             return;
@@ -2552,6 +2669,10 @@ private:
                                                 s.pos.pending_limit_price,
                                                 cancel_reason.c_str());
             }
+            audit_order_event(ts, "order_canceled", id, s.pos.pending_layer, s.regime,
+                              s.pos.is_long, "LIMIT_MAKER", s.pos.pending_client_id, 0,
+                              s.pos.pending_qty, s.pos.pending_limit_price,
+                              s.pos.pending_limit_price, 0.0, "CANCELED", cancel_reason);
             cancel_pending_state();
         }
     }
@@ -3551,6 +3672,9 @@ private:
                 maker_order = executor_->submit_limit_maker(sym_lower(id), is_long, qty, limit_px);
                 if (!maker_order.ok) {
                     limit_orders_[id].reset();
+                    audit_order_event(ts, "order_rejected", id, layer, s.regime,
+                                      is_long, "LIMIT_MAKER", maker_order.client_id, maker_order.order_id,
+                                      qty, price, limit_px, 0.0, "REJECTED", maker_order.error);
                     std::fprintf(stderr, "[ENTER-PENDING] %s | %s | maker submit failed: %s\n",
                                  sym, mode, maker_order.error.c_str());
                     return;
@@ -3563,7 +3687,9 @@ private:
             s.pos.entered_qty   = 0.0;
             s.pos.pending_qty   = qty;
             s.pos.pending_limit_price = limit_px;
-            s.pos.pending_client_id = maker_order.client_id;
+            s.pos.pending_client_id = maker_order.client_id.empty()
+                ? synth_client_id(sym, "paper-maker", ts)
+                : maker_order.client_id;
             s.pos.last_order_poll_ts = 0;
             open_positions_++;  // Reserve  decremented if cancelled
             last_trade_activity_ts_ms_ = ts;
@@ -3579,13 +3705,22 @@ private:
                 s.pos.pending_client_id.empty() ? "-" : s.pos.pending_client_id.c_str(),
                 final_weight);
             std::fflush(stdout);
+            audit_order_event(ts, "order_submitted", id, layer, s.regime,
+                              is_long, "LIMIT_MAKER", s.pos.pending_client_id, maker_order.order_id,
+                              qty, price, limit_px, 0.0,
+                              maker_order.status.empty() ? "NEW" : maker_order.status,
+                              "maker_posted");
 
         } else {
             double fill_price = price;
             double filled_qty = qty;
+            OrderResult entry;
             if (executor_) {
-                OrderResult entry = executor_->execute(sym_lower(id), is_long, qty, price);
+                entry = executor_->execute(sym_lower(id), is_long, qty, price);
                 if (!entry.ok) {
+                    audit_order_event(ts, "order_rejected", id, layer, s.regime,
+                                      is_long, "MARKET", entry.client_id, entry.order_id,
+                                      qty, price, 0.0, 0.0, "REJECTED", entry.error);
                     return;
                 }
                 if (entry.avg_price > 0.0) {
@@ -3605,6 +3740,10 @@ private:
             s.pos.open_ticks  = 0;
             s.pos.peak_price  = fill_price;
             s.pos.entered_qty = filled_qty;
+            s.pos.entry_client_id = entry.client_id.empty()
+                ? synth_client_id(sym, "paper-market", ts)
+                : entry.client_id;
+            s.pos.entry_order_id = entry.order_id;
             s.pos.mfe         = 0.0;
             s.pos.mae         = 0.0;
 
@@ -3628,6 +3767,11 @@ private:
                 sym, mode, is_long ? "LONG" : "SHORT", regime_name(s.regime),
                 fill_price, filled_qty, final_weight, legacy_size_mult);
             std::fflush(stdout);
+            audit_order_event(ts, "order_filled", id, layer, s.regime,
+                              is_long, "MARKET", s.pos.entry_client_id, s.pos.entry_order_id,
+                              filled_qty, price, fill_price, fill_price, "FILLED", "market_entry");
+            audit_position_event(ts, "position_open", id, s, fill_price, filled_qty,
+                                 0.0, 0.0, "market_entry");
 
             std::string symbol_full = sym_full(id);
             broadcast_to_gui(GuiMessageBuilder::position_enter(
@@ -3658,23 +3802,7 @@ private:
         
         // From here on, use pnl_net for all recording/display
         // pnl (raw gross move) kept only for price reconstruction in shadow log
-        const char* layer_label =
-                            (s.pos.layer == LAYER_MICRO)          ? "IMBAL"      :
-                            (s.pos.layer == LAYER_IMPULSE)        ? "IMPULSE"    :
-                            (s.pos.layer == LAYER_EXPANSION)      ? "EXPAND"     :
-                            (s.pos.layer == LAYER_LEADLAG)        ? "LEADLAG"    :
-                            (s.pos.layer == LAYER_LEADLAG_ETH_SOL)? "LL-ETH-SOL" :
-                            (s.pos.layer == LAYER_VACUUM)         ? "VACUUM"     :
-                            (s.pos.layer == LAYER_VWAP)           ? "VWAP"       :
-                            (s.pos.layer == LAYER_LIQUIDATION)    ? "LIQ"        :
-                            (s.pos.layer == LAYER_FUNDING)        ? "FUND"       :
-                            (s.pos.layer == LAYER_NGAS)           ? "NGAS"       :
-                            (s.pos.layer == LAYER_ETH_LEAD)       ? "ETH-LEAD"   :
-                            (s.pos.layer == LAYER_SOL_LEAD)       ? "SOL-LEAD"   :
-                            (s.pos.layer == LAYER_VOLSHOCK)       ? "VOLSHOCK"   :
-                            (s.pos.layer == LAYER_OFI)             ? "OFI"        :
-                            (s.pos.layer == LAYER_SWEEP)           ? "SWEEP"      :
-                            (s.pos.layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "UNKNOWN";
+        const char* layer_label = layer_name(s.pos.layer);
         const char* win_str = pnl_net > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -3686,6 +3814,9 @@ private:
         // Compute exit reason before the callback block so it's in scope for
         // both stats_for() and the per-symbol circuit breaker below
         std::string exit_reason = pending_exit_reason_.empty() ? (pnl >= 0 ? "TP" : "SL") : pending_exit_reason_;
+        audit_position_event(ts, "position_exit", id, s,
+                             s.pos.entry_price * (1.0 + pnl / 10000.0),
+                             s.pos.entered_qty, pnl, pnl_net, exit_reason);
 
         // Fire trade exit callback so QuadEngine can log full trade data
         if (trade_exit_cb_) {
@@ -3916,6 +4047,7 @@ private:
     int64_t startup_ts_ms_ = 0;
     int64_t last_trade_activity_ts_ms_ = 0;
     int64_t last_tick_ts_ms_ = 0;
+    bool paper_research_enabled_ = false;
     bool paper_research_mode_logged_ = false;
     static constexpr int     SYM_SL_STREAK_LIMIT = 2;
     static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;

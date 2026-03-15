@@ -6,6 +6,7 @@
 #include <cctype>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <vector>
 #include <algorithm>
 
@@ -13,7 +14,8 @@ namespace chimera {
 
 class SpotExecutor {
 public:
-    bool init(const std::string& credentials_path = "config/binance_credentials.json") {
+    bool init(const std::string& credentials_path = "config/binance_credentials.json",
+              std::optional<bool> shadow_override = std::nullopt) {
         std::vector<std::string> candidates;
         candidates.push_back(credentials_path);
         if (credentials_path == "config/binance_credentials.json") {
@@ -28,7 +30,7 @@ public:
             std::error_code ec;
             if (!std::filesystem::exists(path, ec)) continue;
             attempted_existing = true;
-            if (rest_.load_credentials(path)) {
+            if (rest_.load_credentials(path, shadow_override)) {
                 loaded = true;
                 loaded_path = path;
                 break;

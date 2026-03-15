@@ -3,10 +3,12 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstring>
 #include <cstdio>
 #include <cstdint>
 #include <stdexcept>
+#include <curl/curl.h>
 
 extern chimera::ExchangeLatencyEngine g_exchange_latency;
 
@@ -27,6 +29,12 @@ void BinanceWSFeed::add_symbol(const std::string& symbol) {
 }
 
 void BinanceWSFeed::set_callback(TickCallback cb) { callback_ = cb; }
+
+size_t BinanceWSFeed::curl_write_cb(void* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* out = static_cast<std::string*>(userdata);
+    out->append(static_cast<char*>(ptr), size * nmemb);
+    return size * nmemb;
+}
 
 void BinanceWSFeed::start() {
     running_ = true;
@@ -102,6 +110,87 @@ int64_t BinanceWSFeed::extract_i64(const std::string& msg, const std::string& ke
     size_t end = msg.find_first_of(",}", pos);
     if (end == std::string::npos) return 0;
     try { return std::stoll(msg.substr(pos, end - pos)); } catch (...) { return 0; }
+}
+
+void BinanceWSFeed::seed_initial_books() {
+    int seeded = 0;
+    for (const auto& sym : symbols_) {
+        if (seed_symbol_book(sym)) {
+            seeded++;
+        }
+    }
+
+    std::printf("[WS-SEED] Seeded %d/%zu symbols with live REST book snapshots\n",
+                seeded, symbols_.size());
+    std::fflush(stdout);
+}
+
+bool BinanceWSFeed::seed_symbol_book(const std::string& symbol) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::printf("[WS-SEED] %s | curl_init_failed\n", symbol.c_str());
+        std::fflush(stdout);
+        return false;
+    }
+
+    std::string body;
+    long http_code = 0;
+    std::string sym_upper = symbol;
+    std::transform(sym_upper.begin(), sym_upper.end(), sym_upper.begin(), ::toupper);
+    const std::string url =
+        "https://api.binance.com/api/v3/ticker/bookTicker?symbol=" + sym_upper;
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &BinanceWSFeed::curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 3000L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    const CURLcode rc = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_cleanup(curl);
+
+    if (rc != CURLE_OK || http_code != 200) {
+        std::printf("[WS-SEED] %s | rest_seed_failed rc=%d http=%ld\n",
+                    symbol.c_str(), static_cast<int>(rc), http_code);
+        std::fflush(stdout);
+        return false;
+    }
+
+    const double bid = extract_dbl(body, "bidPrice");
+    const double ask = extract_dbl(body, "askPrice");
+    const double bid_sz = extract_dbl(body, "bidQty");
+    const double ask_sz = extract_dbl(body, "askQty");
+    if (bid <= 0.0 || ask <= 0.0 || ask <= bid) {
+        std::printf("[WS-SEED] %s | invalid_book bid=%.8f ask=%.8f\n",
+                    symbol.c_str(), bid, ask);
+        std::fflush(stdout);
+        return false;
+    }
+
+    const auto now = std::chrono::system_clock::now();
+    const int64_t recv_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                now.time_since_epoch()).count();
+
+    auto& st = get_or_create(symbol);
+    MarketTick& t = st.tick;
+    t.bid = bid;
+    t.ask = ask;
+    t.bid_size = bid_sz;
+    t.ask_size = ask_sz;
+    t.mid_price = (bid + ask) * 0.5;
+    t.spread_bps = ((ask - bid) / t.mid_price) * 10000.0;
+
+    const double total_sz = bid_sz + ask_sz;
+    t.book_imbalance = (total_sz > 1e-9) ? (bid_sz - ask_sz) / total_sz : 0.0;
+    t.timestamp = recv_ms;
+    t.rtt_ms = g_exchange_latency.p95();
+    st.book_ready = true;
+
+    std::printf("[WS-SEED] %s | bid=%.8f ask=%.8f spread=%.2fbp\n",
+                symbol.c_str(), bid, ask, t.spread_bps);
+    std::fflush(stdout);
+    return true;
 }
 
 // Extract a JSON bool value: "key":true / "key":false
@@ -312,6 +401,8 @@ void BinanceWSFeed::run() {
         auto& st = states_[sym];
         st.tick.symbol = sym;
     }
+
+    seed_initial_books();
 
     // Build combined stream path into member so c_str() pointer stays valid
     // for the entire lifetime of the lws connection

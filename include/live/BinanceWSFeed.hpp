@@ -5,6 +5,7 @@
 #include <atomic>
 #include <vector>
 #include <unordered_map>
+#include <cstdint>
 #include <libwebsockets.h>
 
 namespace chimera {
@@ -16,7 +17,8 @@ namespace chimera {
 //   @bookTicker  -> best bid/ask + sizes (real order book top)
 //   @aggTrade    -> trade price, qty, direction (buyer market maker flag)
 //
-// ZERO fake/hardcoded values. Fields are 0.0 until the stream delivers them.
+// ZERO fake/hardcoded values. Fields are 0.0 until a live REST seed or stream
+// event delivers them.
 // ============================================================================
 struct MarketTick {
     std::string symbol;
@@ -77,6 +79,8 @@ public:
 
 private:
     void run();
+    void seed_initial_books();
+    bool seed_symbol_book(const std::string& symbol);
 
     static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
                            void *user, void *in, size_t len);
@@ -95,6 +99,7 @@ private:
     static double      extract_dbl(const std::string& msg, const std::string& key);
     static int64_t     extract_i64(const std::string& msg, const std::string& key);
     static bool        extract_bool(const std::string& msg, const std::string& key);
+    static size_t      curl_write_cb(void* ptr, size_t size, size_t nmemb, void* userdata);
 
     void handle_book_ticker(const std::string& msg, int64_t recv_ms);
     void handle_agg_trade(const std::string& msg, int64_t recv_ms);

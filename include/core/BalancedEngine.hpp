@@ -412,7 +412,13 @@ public:
             gate.disabled_until = 0;
             gate.samples.clear();
         }
-        // Edge-first defaults: keep only candidate edges active by default.
+        // Boot with the spot-native maker edges enabled so they can actually
+        // produce samples and trade. Perp-informed candidates stay gated by
+        // local spot confirmation deeper in the entry path.
+        edge_gate_[EDGE_VWAP].enabled = true;
+        edge_gate_[EDGE_OFI].enabled = true;
+        edge_gate_[EDGE_VACUUM].enabled = true;
+        edge_gate_[EDGE_MM].enabled = true;
         edge_gate_[EDGE_LIQ].enabled = true;
         edge_gate_[EDGE_LEADLAG].enabled = true;
         
@@ -429,11 +435,10 @@ public:
         std::printf(" Capital Control Layer: ENABLED                                \n");
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
-        std::printf(" Active Engines: VOLSHOCK | IMPULSE | LEADLAG | FUNDING         \n");
-        std::printf(" Paper Experimental: LIQ-RECLAIM                                \n");
-        std::printf(" Research Fallback: EXPAND                                      \n");
-        std::printf(" Support Only: OFI | VWAP | VACUUM | DEPTH                      \n");
-        std::printf(" Parked Engines: IMBAL | SWEEP | MM | NGAS                      \n");
+        std::printf(" Active Spot Engines: IMBAL | VWAP | OFI | VACUUM | MM          \n");
+        std::printf(" Active Momentum Engines: VOLSHOCK | IMPULSE | EXPAND           \n");
+        std::printf(" Perp-Informed Candidates: LEADLAG | LIQ | FUNDING | NGAS       \n");
+        std::printf(" Parked Engines: SWEEP | ETH-LEAD | SOL-LEAD                    \n");
         std::printf(" Paper Research: idle dry-spell relaxes fallbacks only          \n");
         std::printf(" Multi-position: UP TO 3 (1 per symbol)                        \n");
         std::printf(" Dead zone (20-23 UTC): max 1 pos, raised thresholds           \n");

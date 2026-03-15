@@ -69,7 +69,7 @@ public:
         auto& ms = market_state_[id];
         
         // 3. Calculate available R (2.0R cap per symbol)
-        double micro_R = balanced_.get_open_positions() > 0 ? 1.0 : 0.0;
+        double micro_R = balanced_.get_active_slots() > 0 ? 1.0 : 0.0;
         double structural_R = structural_[id].pos.size_R;
         double convex_R = convex_[id].pos.size_R;
         double used_R = micro_R + structural_R + convex_R;
@@ -257,7 +257,7 @@ private:
         
         ms.last_price = price;
         
-        int micro_positions = balanced_.get_open_positions();
+        int micro_positions = balanced_.get_active_slots();
         ms.micro_active = (micro_positions > 0);
     }
     

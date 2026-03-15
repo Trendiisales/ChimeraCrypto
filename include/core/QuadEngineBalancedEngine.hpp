@@ -114,7 +114,7 @@ public:
         double dynamic_cap = allocator_[id].allowed_R(base_cap);
         
         // 5. Calculate current usage
-        double micro_R = balanced_.get_open_positions() > 0 ? 1.0 : 0.0;
+        double micro_R = balanced_.get_active_slots() > 0 ? 1.0 : 0.0;
         double structural_R = structural_[id].pos.size_R;
         double convex_R = convex_[id].pos.size_R;
         double compression_R = compression_[id].pos.size_R;
@@ -197,6 +197,8 @@ public:
     double get_realized_pnl() const { return balanced_.get_realized_pnl(); }
     int get_total_trades() const { return balanced_.get_total_trades(); }
     int get_open_positions() const { return balanced_.get_open_positions(); }
+    int get_pending_positions() const { return balanced_.get_pending_positions(); }
+    int get_active_slots() const { return balanced_.get_active_slots(); }
     void set_funding_fetcher(chimera::FundingRateFetcher* f) { balanced_.set_funding_fetcher(f); }
     void set_ngas_engine(chimera::NGASLeadLagEngine* n)      { balanced_.set_ngas_engine(n); }
     LiquidationEngine& liq_engine() { return balanced_.liq_engine(); }
@@ -218,6 +220,8 @@ public:
         json << "\"pnl\":" << balanced_.get_total_pnl() << ",";
         json << "\"realized_pnl\":" << balanced_.get_realized_pnl() << ",";
         json << "\"open_positions\":" << balanced_.get_open_positions() << ",";
+        json << "\"pending_positions\":" << balanced_.get_pending_positions() << ",";
+        json << "\"active_slots\":" << balanced_.get_active_slots() << ",";
         json << "\"total_trades\":" << balanced_.get_total_trades() << ",";
         json << "\"latency_p95\":" << lat_p95_display_ << ",";
         json << "\"paper_research_mode\":" << (balanced_.paper_research_mode_active() ? "true" : "false") << ",";
@@ -299,7 +303,7 @@ public:
             json << "\"compression_ticks\":" << compression_stats.compression_ticks << ",";
             
             // Portfolio
-            double micro_R = ms.micro_active ? 1.0 : 0.0;
+            double micro_R = balanced_.get_active_slots() > 0 ? 1.0 : 0.0;
             double portfolio_R = micro_R + structural_stats.size_R + convex_stats.size_R + compression_stats.size_R;
             json << "\"portfolio_R\":"  << portfolio_R << ",";
 
@@ -592,7 +596,7 @@ private:
         
         ms.last_price = price;
         ms.tick_counter++;
-        ms.micro_active = (balanced_.get_open_positions() > 0);
+        ms.micro_active = (balanced_.get_active_slots() > 0);
     }
     
     void enforce_directional_dominance(int id) {

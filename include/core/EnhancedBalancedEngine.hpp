@@ -171,7 +171,7 @@ private:
         }
         
         ms.last_price = price;
-        int micro_positions = balanced_.get_open_positions();
+        int micro_positions = balanced_.get_active_slots();
         ms.micro_active = (micro_positions > 0);
         double micro_R_used = micro_positions > 0 ? 1.0 : 0.0;
         ms.available_R = 2.0 - micro_R_used - structural_[id].pos.size_R;

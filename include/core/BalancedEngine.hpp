@@ -552,8 +552,8 @@ public:
         // Position state diagnostic
         static int64_t last_pos_diag = 0;
         if (ts - last_pos_diag > 10000) {
-            std::printf("[POSITION-STATE] open=%d | sys_state=%d | loss_streak=%d | kill_until=%lld\n",
-                       open_positions_, system_state_, loss_streak_, 
+            std::printf("[POSITION-STATE] open=%d | pending=%d | active_slots=%d | sys_state=%d | loss_streak=%d | kill_until=%lld\n",
+                       get_open_positions(), get_pending_positions(), open_positions_, system_state_, loss_streak_, 
                        static_cast<long long>(kill_until_ > ts ? (kill_until_ - ts) : 0));
             
             for (int i = 0; i < MAX_SYMBOLS; ++i) {
@@ -561,7 +561,8 @@ public:
                 const char* regime_name_str = regime_classifiers_[i].regime_name();
                 std::printf("[SYMBOL-STATE] %s | regime=%s (score=%.2f) | pos=%s | toxicity=%.2f | short_n=%zu | long_n=%zu\n",
                            sym, regime_name_str, regime_classifiers_[i].regime_score(),
-                           (symbols_[i].pos.state == POS_OPEN ? "OPEN" : "FLAT"),
+                           (symbols_[i].pos.state == POS_OPEN ? "OPEN" :
+                            (symbols_[i].pos.state == POS_PENDING ? "PENDING" : "FLAT")),
                            toxic_flow_[i].toxicity(),
                            symbols_[i].short_returns.size(), symbols_[i].long_returns.size());
                 
@@ -846,7 +847,9 @@ public:
         return capital_control_.win_boost_for(engine);
     }
     int    get_total_trades()   const { return total_trades_; }
-    int    get_open_positions() const { return open_positions_; }
+    int    get_open_positions() const { return count_positions(POS_OPEN); }
+    int    get_pending_positions() const { return count_positions(POS_PENDING); }
+    int    get_active_slots() const { return open_positions_; }
     bool   paper_research_mode_active() const { return paper_research_mode(last_tick_ts_ms_); }
     int64_t paper_research_idle_ms() const { return paper_research_idle_elapsed_ms(last_tick_ts_ms_); }
 
@@ -1284,6 +1287,16 @@ private:
 
     bool has_tradeable_book(const MarketTick& t) const {
         return t.bid > 0.0 && t.ask > 0.0 && t.ask > t.bid;
+    }
+
+    int count_positions(PosState state) const {
+        int count = 0;
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            if (symbols_[i].pos.state == state) {
+                count++;
+            }
+        }
+        return count;
     }
 
     bool vwap_ready(const SymbolState& s, int64_t ts = 0) const {
@@ -2951,7 +2964,6 @@ private:
     void manage_pending(int id, double price, int64_t ts, SymbolState& s) {
         const MarketTick& t = s.last_tick;
         const double ask = t.ask > 0.0 ? t.ask : price;
-        const double bid = t.bid > 0.0 ? t.bid : price;
         const char* sym  = sym_short(id);
         const char* mode = layer_name(s.pos.pending_layer);
         const auto& working = limit_orders_[id].order();
@@ -3115,12 +3127,15 @@ private:
         }
 
         LimitStatus status = signal_invalid ? LimitStatus::CANCELLED
-                                            : limit_orders_[id].update(ask, bid, ts);
+                                            : limit_orders_[id].update(t, ts);
         if (signal_invalid) {
             limit_orders_[id].cancel();
         }
         if (status == LimitStatus::FILLED) {
             const double fill_px = limit_orders_[id].fill_price();
+            const char* fill_reason = limit_orders_[id].fill_mode() == LimitFillMode::TRADE_AGGRESSION
+                ? "MAKER-FILL-TRADE"
+                : "MAKER-FILL";
             if (executor_) {
                 executor_->record_shadow_fill(sym_lower(id),
                                               s.pos.is_long,
@@ -3128,7 +3143,7 @@ private:
                                               fill_px,
                                               s.pos.pending_client_id);
             }
-            open_from_fill(fill_px, s.pos.pending_qty, "MAKER-FILL");
+            open_from_fill(fill_px, s.pos.pending_qty, fill_reason);
         } else if (status == LimitStatus::CANCELLED) {
             if (executor_) {
                 executor_->cancel_working_order(sym_lower(id),
@@ -4172,7 +4187,7 @@ private:
             // All entries are maker-only. Choose how aggressively to sit inside the spread.
             int layer_int = maker_profile_for_layer(layer);
 
-            limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
+            limit_orders_[id].enter_pending(layer_int, bid, ask, ts, is_long);
             const double limit_px = limit_orders_[id].order().limit_price;
             const std::string pending_client_id = synth_client_id(sym, "maker", ts);
 

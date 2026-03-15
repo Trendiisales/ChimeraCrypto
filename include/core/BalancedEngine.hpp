@@ -753,30 +753,38 @@ public:
         }
 
         // Try signals in priority order.
-        // The engine is intentionally continuation-first: the old book-only
-        // baselines now act as secondary confirmations instead of primary entries.
-        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+        // Spot-native setups go first. Perp-informed candidates only run after
+        // local spot conditions had the first opportunity to trade.
+        if (check_imbalance(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_VWAP, ts) &&
+            check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_OFI, ts) &&
+            check_ofi_pressure(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_MM, ts) &&
+            check_mm_pressure(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_VACUUM, ts) &&
+            check_vacuum(id, price, ts, s, latency_ms)) return;
         if (volshock_primary_enabled(ts) && check_vol_shock(id, price, ts, s, latency_ms)) return;
         if (impulse_primary_enabled() && check_impulse(id, price, ts, s, latency_ms)) return;
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
+        if (expansion_standalone_enabled(ts) && check_expansion(id, price, ts, s, latency_ms)) return;
         if (leadlag_primary_enabled() &&
             edge_gate_allows(id, EDGE_LEADLAG, ts) &&
             check_leadlag(id, price, ts, s, latency_ms)) return;
-        if (expansion_standalone_enabled(ts) && check_expansion(id, price, ts, s, latency_ms)) return;
         if (liquidation_engine_enabled() &&
             edge_gate_allows(id, EDGE_LIQ, ts) &&
             try_liquidation_entry(id, price, ts, s, latency_ms)) return;
+        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+        if (edge_gate_allows(id, EDGE_SWEEP, ts) &&
+            check_sweep(id, price, ts, s, latency_ms)) return;
         if (ngas_overlay_enabled() && try_ngas_entry(id, price, ts, s, latency_ms)) return;
         // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
         // No synthetic startup probes. Discovery must come from real edges only.
-
-        // Park old book-only primary entries. Their state is still maintained
-        // and reused inside the active continuation engines as context.
     }
     
     std::string get_rejection_stats() const { return rejection_telemetry_.build_json_snapshot(); }
@@ -1365,14 +1373,304 @@ private:
         return id == 4 || id == 5;
     }
 
+    bool perp_informed_layer(LayerMode layer) const {
+        switch (layer) {
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_LIQUIDATION:
+            case LAYER_FUNDING:
+            case LAYER_SWEEP:
+            case LAYER_ETH_LEAD:
+            case LAYER_SOL_LEAD:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    double configured_tp_bp(int id, LayerMode layer) const {
+        const bool alt_symbol = (id == 4 || id == 5 || id == 6);
+        switch (layer) {
+            case LAYER_LIQUIDATION:     return TradingConfig::LIQ_TP_BP;
+            case LAYER_FUNDING:         return TradingConfig::FUNDING_SIG_TP_BP;
+            case LAYER_NGAS:            return TradingConfig::NGAS_TP_BP;
+            case LAYER_LEADLAG:         return TradingConfig::LEADLAG_TP_BP;
+            case LAYER_MICRO:           return TradingConfig::IMBALANCE_TP_BP;
+            case LAYER_VACUUM:          return TradingConfig::VACUUM_TP_BP;
+            case LAYER_VWAP:            return TradingConfig::VWAP_TP_BP;
+            case LAYER_LEADLAG_ETH_SOL: return TradingConfig::LEADLAG_ETH_SOL_TP_BP;
+            case LAYER_EXPANSION:       return alt_symbol ? TradingConfig::EXPANSION_ALT_TP_BP
+                                                          : TradingConfig::EXPANSION_TP_BP;
+            case LAYER_IMPULSE:         return alt_symbol ? TradingConfig::IMPULSE_ALT_TP_BP
+                                                          : TradingConfig::IMPULSE_TP_BP;
+            case LAYER_ETH_LEAD:        return TradingConfig::ETH_LEAD_TP_BP;
+            case LAYER_SOL_LEAD:        return TradingConfig::SOL_LEAD_TP_BP;
+            case LAYER_VOLSHOCK:        return TradingConfig::VOLSHOCK_TP_BP;
+            case LAYER_OFI:             return TradingConfig::OFI_TP_BP;
+            case LAYER_SWEEP:           return TradingConfig::SWEEP_TP_BP;
+            case LAYER_MM_PRESSURE:     return TradingConfig::MM_TP_BP;
+            default:                    return TradingConfig::IMPULSE_TP_BP;
+        }
+    }
+
+    double positive_vwap_extension_bp(const SymbolState& s, double price) const {
+        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) return 0.0;
+        return std::max(0.0, (price - s.session_vwap) / s.session_vwap * 10000.0);
+    }
+
+    double spot_confirmation_spread_limit_bp(LayerMode layer) const {
+        switch (layer) {
+            case LAYER_LIQUIDATION:
+                return TradingConfig::LIQ_MAX_SPREAD_BPS;
+            case LAYER_FUNDING:
+                return TradingConfig::VWAP_MAX_SPREAD_BPS;
+            case LAYER_SWEEP:
+                return std::min(TradingConfig::SWEEP_MAX_SPREAD_BPS, TradingConfig::OFI_MAX_SPREAD_BPS);
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_ETH_LEAD:
+            case LAYER_SOL_LEAD:
+            default:
+                return TradingConfig::OFI_MAX_SPREAD_BPS;
+        }
+    }
+
+    double spot_confirmation_book_floor(LayerMode layer, int id) const {
+        switch (layer) {
+            case LAYER_LIQUIDATION:
+                return TradingConfig::LIQ_MIN_BOOK_IMBALANCE;
+            case LAYER_FUNDING:
+                return TradingConfig::VWAP_MIN_IMBALANCE;
+            case LAYER_SWEEP:
+                return std::max(TradingConfig::CONTINUATION_BOOK_IMBAL_MIN,
+                                TradingConfig::OFI_BOOK_CONFIRM_IMBAL);
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_ETH_LEAD:
+            case LAYER_SOL_LEAD:
+            default:
+                return (id == 0 || id == 1)
+                    ? TradingConfig::OFI_MAJOR_BOOK_CONFIRM_IMBAL
+                    : TradingConfig::CONTINUATION_BOOK_IMBAL_MIN;
+        }
+    }
+
+    double spot_confirmation_flow_floor(LayerMode layer, int id, int64_t ts) const {
+        switch (layer) {
+            case LAYER_LIQUIDATION:
+                return TradingConfig::LIQ_MIN_FLOW_RATIO;
+            case LAYER_FUNDING:
+                return TradingConfig::FLOW_CONFIRM_THRESHOLD;
+            case LAYER_SWEEP:
+                return std::max(TradingConfig::CONTINUATION_FLOW_MIN,
+                                TradingConfig::FLOW_CONFIRM_THRESHOLD);
+            case LAYER_LEADLAG:
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_ETH_LEAD:
+            case LAYER_SOL_LEAD:
+            default:
+                return (id == 0 || id == 1)
+                    ? std::max(TradingConfig::CONTINUATION_FLOW_MIN, TradingConfig::OFI_MAJOR_FLOW_MIN)
+                    : std::max(TradingConfig::CONTINUATION_FLOW_MIN, active_flow_confirm_threshold(ts));
+        }
+    }
+
+    double spot_confirmation_max_extension_bp(LayerMode layer) const {
+        switch (layer) {
+            case LAYER_LEADLAG:
+                return TradingConfig::LEADLAG_TARGET_MAX_BP;
+            case LAYER_LEADLAG_ETH_SOL:
+            case LAYER_ETH_LEAD:
+                return LeadLagEngine::ETH_TARGET_MOVED_MAX_BP;
+            case LAYER_SOL_LEAD:
+                return LeadLagEngine::SOL_TARGET_MOVED_MAX_BP;
+            case LAYER_LIQUIDATION:
+                return TradingConfig::LIQ_SPOT_MOVED_MAX_BP;
+            case LAYER_FUNDING:
+                return 0.0;
+            case LAYER_SWEEP:
+                return TradingConfig::LEADLAG_TARGET_MAX_BP;
+            default:
+                return TradingConfig::VWAP_MAX_DEVIATION_BP;
+        }
+    }
+
+    bool funding_spot_context_support(int id, double price, const SymbolState& s) const {
+        const MarketTick& t = s.last_tick;
+        const double flow = compute_flow_ratio(id);
+
+        bool vwap_dip = false;
+        if (s.session_vwap > 0.0 && s.vwap_cum_vol >= 10.0) {
+            const double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
+            vwap_dip = deviation_bp >= TradingConfig::VWAP_ENTRY_DEVIATION_BP &&
+                       deviation_bp <= TradingConfig::VWAP_MAX_DEVIATION_BP &&
+                       t.book_imbalance >= TradingConfig::VWAP_MIN_IMBALANCE;
+        }
+
+        bool ofi_pressure = false;
+        if (s.ofi_ema_init) {
+            ofi_pressure = current_ofi_ratio(s) >= TradingConfig::OFI_MAJOR_RATIO_THRESHOLD &&
+                           t.book_imbalance >= TradingConfig::OFI_MAJOR_BOOK_CONFIRM_IMBAL &&
+                           flow >= TradingConfig::OFI_MAJOR_FLOW_MIN;
+        }
+
+        const bool imbalance_support =
+            t.spread_bps <= TradingConfig::IMBALANCE_MAX_SPREAD_BPS &&
+            t.book_imbalance >= TradingConfig::IMBALANCE_THRESHOLD &&
+            flow >= TradingConfig::FLOW_CONFIRM_THRESHOLD;
+
+        return vwap_dip || ofi_pressure || imbalance_support;
+    }
+
+    bool sweep_refill_support(int id, double price, int64_t ts, const SymbolState& s) const {
+        const MarketTick& t = s.last_tick;
+        if (t.spread_bps > std::min(TradingConfig::SWEEP_MAX_SPREAD_BPS,
+                                    TradingConfig::OFI_MAX_SPREAD_BPS)) {
+            return false;
+        }
+        if (t.book_imbalance < std::max(TradingConfig::CONTINUATION_BOOK_IMBAL_MIN,
+                                        TradingConfig::OFI_BOOK_CONFIRM_IMBAL)) {
+            return false;
+        }
+        if (compute_flow_ratio(id) < std::max(TradingConfig::CONTINUATION_FLOW_MIN,
+                                              TradingConfig::FLOW_CONFIRM_THRESHOLD)) {
+            return false;
+        }
+        if (!continuation_depth_support(id, ts, s)) return false;
+        return positive_vwap_extension_bp(s, price) <= TradingConfig::LEADLAG_TARGET_MAX_BP;
+    }
+
+    double projected_gross_edge_bp(int id, double price, const SymbolState& s, LayerMode layer) const {
+        const double base_edge_bp = configured_tp_bp(id, layer);
+        const double vwap_extension_bp = positive_vwap_extension_bp(s, price);
+        double penalty_bp = vwap_extension_bp;
+
+        if (layer == LAYER_LIQUIDATION) {
+            penalty_bp = std::max(penalty_bp, std::max(0.0, liq_engine_.spot_move_bp(id, price)));
+        } else if (layer == LAYER_FUNDING) {
+            penalty_bp = vwap_extension_bp * 1.5;
+        } else if (layer == LAYER_SWEEP) {
+            penalty_bp = vwap_extension_bp * 1.25;
+        }
+
+        return std::max(0.0, base_edge_bp - penalty_bp);
+    }
+
+    double preview_maker_limit_price(LayerMode layer, double bid, double ask) const {
+        const double spread = std::max(ask - bid, 0.0);
+        const double mid = (bid + ask) * 0.5;
+        const double price_tick = std::max(mid * 0.000001, 0.00000001);
+
+        double join_ratio = 0.0;
+        switch (maker_profile_for_layer(layer)) {
+            case 0: join_ratio = 0.00; break;
+            case 1: join_ratio = 0.15; break;
+            case 2: join_ratio = 0.25; break;
+            case 3: join_ratio = 0.35; break;
+            case 4: join_ratio = 0.45; break;
+            default: join_ratio = 0.20; break;
+        }
+
+        double limit_px = bid;
+        if (spread > price_tick) {
+            limit_px = bid + spread * join_ratio;
+            limit_px = std::min(limit_px, ask - price_tick);
+            limit_px = std::max(limit_px, bid);
+        }
+        return limit_px;
+    }
+
+    bool spot_confirmation_gate(
+        int id,
+        double price,
+        int64_t ts,
+        const SymbolState& s,
+        LayerMode layer,
+        std::string& reason) const {
+        if (!perp_informed_layer(layer)) return true;
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0 || t.ask <= t.bid) {
+            reason = "spot_book_invalid";
+            return false;
+        }
+        if (t.spread_bps > spot_confirmation_spread_limit_bp(layer)) {
+            reason = "spot_spread_wide";
+            return false;
+        }
+        if (t.book_imbalance < spot_confirmation_book_floor(layer, id)) {
+            reason = "spot_book_weak";
+            return false;
+        }
+        if (compute_flow_ratio(id) < spot_confirmation_flow_floor(layer, id, ts)) {
+            reason = "spot_flow_weak";
+            return false;
+        }
+
+        const double max_extension_bp = spot_confirmation_max_extension_bp(layer);
+        if (positive_vwap_extension_bp(s, price) > max_extension_bp) {
+            reason = "spot_overextended";
+            return false;
+        }
+
+        if (layer == LAYER_FUNDING && !funding_spot_context_support(id, price, s)) {
+            reason = "spot_context_missing";
+            return false;
+        }
+        if (layer == LAYER_SWEEP && !sweep_refill_support(id, price, ts, s)) {
+            reason = "spot_refill_missing";
+            return false;
+        }
+        return true;
+    }
+
+    bool maker_entry_feasible_gate(
+        int id,
+        double price,
+        const SymbolState& s,
+        LayerMode layer,
+        std::string& reason) const {
+        if (!perp_informed_layer(layer)) return true;
+        if (!layer_uses_maker_entry(layer)) {
+            reason = "maker_disabled";
+            return false;
+        }
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0 || t.ask <= t.bid) {
+            reason = "maker_no_book";
+            return false;
+        }
+        if (toxic_flow_[id].toxic_regime()) {
+            reason = "toxic_spot";
+            return false;
+        }
+
+        const double limit_px = preview_maker_limit_price(layer, t.bid, t.ask);
+        if (limit_px <= 0.0 || limit_px >= t.ask) {
+            reason = "maker_not_postable";
+            return false;
+        }
+
+        const double required_edge_bp = layer_cost_floor_bp(layer) + 1.0;
+        if (projected_gross_edge_bp(id, price, s, layer) <= required_edge_bp) {
+            reason = "edge_below_floor";
+            return false;
+        }
+
+        return true;
+    }
+
     bool pending_fill_requires_revalidation(LayerMode layer) const {
         switch (layer) {
             case LAYER_LEADLAG:
             case LAYER_LEADLAG_ETH_SOL:
             case LAYER_LIQUIDATION:
+            case LAYER_FUNDING:
             case LAYER_IMPULSE:
             case LAYER_EXPANSION:
             case LAYER_VOLSHOCK:
+            case LAYER_SWEEP:
                 return true;
             default:
                 return false;
@@ -1508,6 +1806,12 @@ private:
                     reason = "fill_flow_weak";
                     return false;
                 }
+                if (!spot_confirmation_gate(id, price, ts, s, layer, reason)) {
+                    return false;
+                }
+                if (!maker_entry_feasible_gate(id, price, s, layer, reason)) {
+                    return false;
+                }
                 return require_secondary_support("fill_secondary_lost");
             }
 
@@ -1523,6 +1827,12 @@ private:
                 }
                 if (compute_flow_ratio(id) < active_flow_confirm_threshold(ts)) {
                     reason = "fill_flow_weak";
+                    return false;
+                }
+                if (!spot_confirmation_gate(id, price, ts, s, layer, reason)) {
+                    return false;
+                }
+                if (!maker_entry_feasible_gate(id, price, s, layer, reason)) {
                     return false;
                 }
                 return require_secondary_support("fill_secondary_lost");
@@ -1564,7 +1874,49 @@ private:
                     reason = "fill_book_weak";
                     return false;
                 }
+                if (!spot_confirmation_gate(id, price, ts, s, layer, reason)) {
+                    return false;
+                }
+                if (!maker_entry_feasible_gate(id, price, s, layer, reason)) {
+                    return false;
+                }
                 return require_secondary_support("fill_secondary_lost");
+            }
+
+            case LAYER_FUNDING: {
+                if (!funding_ || !funding_->ready()) {
+                    reason = "fill_funding_unavailable";
+                    return false;
+                }
+                if (funding_->rate() >= TradingConfig::FUNDING_SIG_THRESHOLD) {
+                    reason = "fill_funding_not_negative";
+                    return false;
+                }
+                if (latency_ms > TradingConfig::FUNDING_SIG_LATENCY_MAX) {
+                    reason = "fill_latency_high";
+                    return false;
+                }
+                if (!spot_confirmation_gate(id, price, ts, s, layer, reason)) {
+                    return false;
+                }
+                if (!maker_entry_feasible_gate(id, price, s, layer, reason)) {
+                    return false;
+                }
+                return require_secondary_support("fill_secondary_lost");
+            }
+
+            case LAYER_SWEEP: {
+                if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) {
+                    reason = "fill_latency_high";
+                    return false;
+                }
+                if (!spot_confirmation_gate(id, price, ts, s, layer, reason)) {
+                    return false;
+                }
+                if (!maker_entry_feasible_gate(id, price, s, layer, reason)) {
+                    return false;
+                }
+                return true;
             }
 
             case LAYER_VOLSHOCK: {
@@ -1860,8 +2212,9 @@ private:
             case LAYER_ETH_LEAD:
             case LAYER_SOL_LEAD:
             case LAYER_VOLSHOCK:
-            case LAYER_SWEEP:
                 return 4;  // aggressive maker, still rests inside the spread
+            case LAYER_SWEEP:
+                return 1;  // refill entry: join inside the spread, do not chase the sweep
             case LAYER_EXPANSION:
             case LAYER_VWAP:
                 return 2;  // moderate inside-spread posting
@@ -2301,6 +2654,16 @@ private:
             return false;
         }
 
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_LEADLAG, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_LEADLAG, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+
         const auto confirms = collect_secondary_long_confirmations(id, price, ts, s, latency_ms);
         if (confirms.count < required_secondary_confirmation_count(LAYER_LEADLAG, ts)) {
             rejection_throttle_.record(key, "secondary_support_missing");
@@ -2376,6 +2739,16 @@ private:
             return false;
         }
 
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_LIQUIDATION, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_LIQUIDATION, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+
         const auto confirms = collect_secondary_long_confirmations(id, price, ts, s, latency_ms);
         if (confirms.count < required_secondary_confirmation_count(LAYER_LIQUIDATION, ts)) {
             rejection_throttle_.record(key, "secondary_support_missing");
@@ -2421,6 +2794,16 @@ private:
 
         // Latency not critical for this engine  it's a slow signal
         if (latency_ms > TradingConfig::FUNDING_SIG_LATENCY_MAX) return false;
+
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_FUNDING, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_FUNDING, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
 
         const auto confirms = collect_secondary_long_confirmations(id, price, ts, s, latency_ms);
         if (confirms.count < required_secondary_confirmation_count(LAYER_FUNDING, ts)) {
@@ -2980,6 +3363,16 @@ private:
             return false;
         }
 
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_LEADLAG_ETH_SOL, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_LEADLAG_ETH_SOL, gate_reason)) {
+            rejection_throttle_.record(key, gate_reason);
+            return false;
+        }
+
         std::printf("[LL-ETH-SOL] SOL | eth_move=%.2fbp | flow=%.2f | latency=%.1fms | ENTERING LONG\n",
                     leadlag_.eth_move_bp(), flow, latency_ms);
         std::fflush(stdout);
@@ -3009,6 +3402,14 @@ private:
         double sustain = TradingConfig::LEADLAG_ETH_SOL_THRESHOLD_BP * 0.6;
         if (std::fabs(eth_now_bp) < sustain) return false;
 
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_ETH_LEAD, gate_reason)) {
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_ETH_LEAD, gate_reason)) {
+            return false;
+        }
+
         std::printf("[ETH-LEAD] %s | eth_move=%.2fbp | sustain=%.2fbp | latency=%.1fms | ENTERING LONG\n",
                     sym_short(id), eth_now_bp, sustain, latency_ms);
         std::fflush(stdout);
@@ -3037,6 +3438,14 @@ private:
         double sol_now_bp = leadlag_.sol_move_bp();
         double sustain = 7.0; // 12bp threshold * 0.6
         if (std::fabs(sol_now_bp) < sustain) return false;
+
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_SOL_LEAD, gate_reason)) {
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_SOL_LEAD, gate_reason)) {
+            return false;
+        }
 
         std::printf("[SOL-LEAD] %s | sol_move=%.2fbp | latency=%.1fms | ENTERING LONG\n",
                     sym_short(id), sol_now_bp, latency_ms);
@@ -3315,10 +3724,9 @@ private:
     // LAYER_SWEEP  Liquidity Sweep / Stop Run
     // =========================================================================
     // Edge: a spike in aggressive trade size (>5x EMA) combined with a depth
-    // collapse on the same side signals a stop run.  We trade momentum continuation
-    // (the most reliable outcome — 60-70% of sweeps continue 20-80 bps).
-    // Taker entry only — sweep edges decay in <200ms, maker fill is uncertain.
-    // EV at 55% WR: 0.55*22 - 0.45*8 = 12.1 - 3.6 = +8.5bp net (after ~8bp taker)
+    // collapse on the same side signals a stop run. We do not chase the first
+    // continuation print. The sweep only becomes tradable if spot refills,
+    // spread normalises, and a passive bid still has edge left.
     // =========================================================================
     bool check_sweep(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
@@ -3363,10 +3771,20 @@ private:
             return false;
         }
 
-        std::printf("[SWEEP] %s | size_spike=%.1fx | ask_collapse=%.1f%% | lat=%.1fms | LONG\n",
-                    sym_short(id), size_spike, ask_collapse * 100.0, latency_ms);
+        std::string gate_reason;
+        if (!spot_confirmation_gate(id, price, ts, s, LAYER_SWEEP, gate_reason)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", gate_reason);
+            return false;
+        }
+        if (!maker_entry_feasible_gate(id, price, s, LAYER_SWEEP, gate_reason)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SWEEP", gate_reason);
+            return false;
+        }
+
+        std::printf("[SWEEP-REFILL] %s | size_spike=%.1fx | ask_collapse=%.1f%% | flow=%.2f | book=%.2f | lat=%.1fms | LONG\n",
+                    sym_short(id), size_spike, ask_collapse * 100.0, compute_flow_ratio(id),
+                    t.book_imbalance, latency_ms);
         std::fflush(stdout);
-        // Sweeps use taker entry — edge window is <200ms
         enter(id, price, ts, s, LAYER_SWEEP, true);
         return true;
     }
@@ -3447,27 +3865,9 @@ private:
                     (layer == LAYER_SWEEP)      ? LayerType::EXPAND :
                     (layer == LAYER_MM_PRESSURE)? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
-        // Expected gross edge per layer (gross TP targets from TradingConfig)
-        const bool alt_symbol = (id == 4 || id == 5 || id == 6);
-        sig.expected_bps = (layer == LAYER_LIQUIDATION)      ? TradingConfig::LIQ_TP_BP :
-                           (layer == LAYER_FUNDING)          ? TradingConfig::FUNDING_SIG_TP_BP :
-                           (layer == LAYER_NGAS)             ? TradingConfig::NGAS_TP_BP :
-                           (layer == LAYER_LEADLAG)          ? TradingConfig::LEADLAG_TP_BP :
-                           (layer == LAYER_MICRO)            ? TradingConfig::IMBALANCE_TP_BP :
-                           (layer == LAYER_VACUUM)           ? TradingConfig::VACUUM_TP_BP :
-                           (layer == LAYER_VWAP)             ? TradingConfig::VWAP_TP_BP :
-                           (layer == LAYER_LEADLAG_ETH_SOL)  ? TradingConfig::LEADLAG_ETH_SOL_TP_BP :
-                           (layer == LAYER_EXPANSION)        ? (alt_symbol ? TradingConfig::EXPANSION_ALT_TP_BP
-                                                                              : TradingConfig::EXPANSION_TP_BP) :
-                           (layer == LAYER_IMPULSE)          ? (alt_symbol ? TradingConfig::IMPULSE_ALT_TP_BP
-                                                                              : TradingConfig::IMPULSE_TP_BP) :
-                           (layer == LAYER_ETH_LEAD)         ? TradingConfig::ETH_LEAD_TP_BP :
-                           (layer == LAYER_SOL_LEAD)         ? TradingConfig::SOL_LEAD_TP_BP :
-                           (layer == LAYER_VOLSHOCK)         ? TradingConfig::VOLSHOCK_TP_BP :
-                           (layer == LAYER_OFI)              ? TradingConfig::OFI_TP_BP :
-                           (layer == LAYER_SWEEP)            ? TradingConfig::SWEEP_TP_BP :
-                           (layer == LAYER_MM_PRESSURE)      ? TradingConfig::MM_TP_BP :
-                                                                TradingConfig::IMPULSE_TP_BP;
+        sig.expected_bps = perp_informed_layer(layer)
+            ? projected_gross_edge_bp(id, price, s, layer)
+            : configured_tp_bp(id, layer);
         sig.confidence = 1.0;
 
         // HARD LATENCY BACKSTOP  never enter on stale data regardless of engine
@@ -3481,15 +3881,21 @@ private:
         // Net logs assume maker entry plus market-style exit until maker exits exist.
         double cost_floor = layer_cost_floor_bp(layer);
         if (sig.expected_bps < cost_floor) {
-            std::string key = std::string(sym_short(id)) +
-                             " " + ((layer == LAYER_LEADLAG)  ? "LEADLAG" :
-                                    (layer == LAYER_IMPULSE)   ? "IMPULSE" :
-                                    (layer == LAYER_EXPANSION) ? "EXPAND"  :
-                                    (layer == LAYER_VACUUM)          ? "VACUUM"    :
-                                    (layer == LAYER_VWAP)              ? "VWAP"      :
-                                    (layer == LAYER_LEADLAG_ETH_SOL)   ? "LL-ETH-SOL" : "IMBAL");
+            std::string key = std::string(sym_short(id)) + " " + layer_name(layer);
             rejection_throttle_.record(key, "cost_floor");
             return;
+        }
+
+        if (perp_informed_layer(layer)) {
+            std::string gate_reason;
+            if (!spot_confirmation_gate(id, price, ts, s, layer, gate_reason)) {
+                rejection_throttle_.record(std::string(sym_short(id)) + " " + layer_name(layer), gate_reason);
+                return;
+            }
+            if (!maker_entry_feasible_gate(id, price, s, layer, gate_reason)) {
+                rejection_throttle_.record(std::string(sym_short(id)) + " " + layer_name(layer), gate_reason);
+                return;
+            }
         }
 
         if (!governor_.approve(sig)) {

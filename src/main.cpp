@@ -57,18 +57,29 @@ public:
 
     // Call once at startup to redirect stdout+stderr
     void install() {
-        // Redirect stdout
-        orig_stdout_ = stdout;
-        pipe(stdout_pipe_);
-        orig_stdout_fd_ = dup(STDOUT_FILENO);
-        dup2(stdout_pipe_[1], STDOUT_FILENO);
-        close(stdout_pipe_[1]);
+        if (installed_) return;
 
-        // Redirect stderr
+        // Redirect stdout
+        if (pipe(stdout_pipe_) != 0) {
+            write_direct("[LOGGER] Failed to create stdout pipe\n");
+            return;
+        }
+        orig_stdout_fd_ = dup(STDOUT_FILENO);
         orig_stderr_fd_ = dup(STDERR_FILENO);
+        if (orig_stdout_fd_ < 0 || orig_stderr_fd_ < 0) {
+            write_direct("[LOGGER] Failed to duplicate stdio file descriptors\n");
+            return;
+        }
+        dup2(stdout_pipe_[1], STDOUT_FILENO);
         dup2(stdout_pipe_[1], STDERR_FILENO);  // merge stderr into same pipe
+        close(stdout_pipe_[1]);
+        stdout_pipe_[1] = -1;
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        setvbuf(stderr, nullptr, _IONBF, 0);
 
         // Start drain thread
+        installed_ = true;
+        running_ = true;
         drain_thread_ = std::thread([this]{ drain_loop(); });
     }
 
@@ -80,28 +91,54 @@ public:
             file_ << msg;
             file_.flush();
         }
+        append_csv_text_locked(msg, std::strlen(msg));
     }
 
     std::string current_path() const { return current_path_; }
+    std::string current_csv_path() const { return current_csv_path_; }
 
     void flush_and_close() {
-        running_ = false;
-        if (drain_thread_.joinable()) drain_thread_.join();
+        if (installed_) {
+            std::fflush(stdout);
+            std::fflush(stderr);
+            if (orig_stdout_fd_ >= 0) dup2(orig_stdout_fd_, STDOUT_FILENO);
+            if (orig_stderr_fd_ >= 0) dup2(orig_stderr_fd_, STDERR_FILENO);
+            running_ = false;
+            if (drain_thread_.joinable()) drain_thread_.join();
+            if (stdout_pipe_[0] >= 0) {
+                close(stdout_pipe_[0]);
+                stdout_pipe_[0] = -1;
+            }
+            if (orig_stdout_fd_ >= 0) {
+                close(orig_stdout_fd_);
+                orig_stdout_fd_ = -1;
+            }
+            if (orig_stderr_fd_ >= 0) {
+                close(orig_stderr_fd_);
+                orig_stderr_fd_ = -1;
+            }
+            installed_ = false;
+        }
         std::lock_guard<std::mutex> lk(mtx_);
+        flush_csv_fragment_locked();
         if (file_.is_open()) { file_.flush(); file_.close(); }
+        if (csv_file_.is_open()) { csv_file_.flush(); csv_file_.close(); }
     }
 
 private:
     std::ofstream            file_;
+    std::ofstream            csv_file_;
     std::string              current_path_;
+    std::string              current_csv_path_;
     int                      current_day_ = -1;
     std::mutex               mtx_;
     std::atomic<bool>        running_{true};
     std::thread              drain_thread_;
-    FILE*                    orig_stdout_ = nullptr;
     int                      orig_stdout_fd_ = -1;
     int                      orig_stderr_fd_ = -1;
     int                      stdout_pipe_[2] = {-1, -1};
+    bool                     installed_ = false;
+    std::string              csv_partial_line_;
 
     static std::string utc_date_str() {
         time_t t = time(nullptr);
@@ -122,31 +159,40 @@ private:
 
     void open_today() {
         std::lock_guard<std::mutex> lk(mtx_);
-        if (file_.is_open()) { file_.flush(); file_.close(); }
-        mkdir(LOG_DIR, 0755);
-        current_path_ = std::string(LOG_DIR) + "/chimera_" + utc_date_str() + ".log";
-        file_.open(current_path_, std::ios::app);
-        current_day_ = utc_day();
-        if (file_.is_open()) {
-            file_ << "\n=== LOG OPENED " << utc_date_str() << " ===\n";
-            file_.flush();
-        }
+        open_day_files_unlocked("LOG OPENED");
         purge_old_logs();
     }
 
     void check_rotate() {
         // called under mtx_
         if (utc_day() != current_day_) {
-            if (file_.is_open()) { file_.flush(); file_.close(); }
-            mkdir(LOG_DIR, 0755);
-            current_path_ = std::string(LOG_DIR) + "/chimera_" + utc_date_str() + ".log";
-            file_.open(current_path_, std::ios::app);
-            current_day_ = utc_day();
-            if (file_.is_open()) {
-                file_ << "\n=== LOG ROTATED " << utc_date_str() << " ===\n";
-                file_.flush();
-            }
+            open_day_files_unlocked("LOG ROTATED");
             purge_old_logs();
+        }
+    }
+
+    void open_day_files_unlocked(const char* marker) {
+        flush_csv_fragment_locked();
+        if (file_.is_open()) { file_.flush(); file_.close(); }
+        if (csv_file_.is_open()) { csv_file_.flush(); csv_file_.close(); }
+
+        mkdir(LOG_DIR, 0755);
+        const std::string date = utc_date_str();
+        current_path_ = std::string(LOG_DIR) + "/chimera_" + date + ".log";
+        current_csv_path_ = std::string(LOG_DIR) + "/chimera_" + date + ".csv";
+        file_.open(current_path_, std::ios::app);
+        current_day_ = utc_day();
+        if (file_.is_open()) {
+            file_ << "\n=== " << marker << " " << date << " ===\n";
+            file_.flush();
+        }
+
+        struct stat st{};
+        const bool csv_has_data = (::stat(current_csv_path_.c_str(), &st) == 0) && st.st_size > 0;
+        csv_file_.open(current_csv_path_, std::ios::app);
+        if (csv_file_.is_open() && !csv_has_data) {
+            csv_file_ << "ts_utc,stream,message\n";
+            csv_file_.flush();
         }
     }
 
@@ -154,20 +200,91 @@ private:
         // called under mtx_
         DIR* dir = opendir(LOG_DIR);
         if (!dir) return;
-        std::vector<std::string> files;
+        std::vector<std::string> log_files;
+        std::vector<std::string> csv_files;
         struct dirent* ent;
         while ((ent = readdir(dir)) != nullptr) {
             std::string name(ent->d_name);
-            if (name.rfind("chimera_", 0) == 0 && name.size() > 4 &&
-                name.substr(name.size()-4) == ".log") {
-                files.push_back(std::string(LOG_DIR) + "/" + name);
+            if (name.rfind("chimera_", 0) != 0 || name.size() <= 4) continue;
+            const std::string path = std::string(LOG_DIR) + "/" + name;
+            if (name.substr(name.size()-4) == ".log") {
+                log_files.push_back(path);
+            } else if (name.substr(name.size()-4) == ".csv") {
+                csv_files.push_back(path);
             }
         }
         closedir(dir);
-        std::sort(files.begin(), files.end());
-        while (static_cast<int>(files.size()) > LOG_KEEP_DAYS) {
-            std::remove(files.front().c_str());
-            files.erase(files.begin());
+
+        std::sort(log_files.begin(), log_files.end());
+        while (static_cast<int>(log_files.size()) > LOG_KEEP_DAYS) {
+            std::remove(log_files.front().c_str());
+            log_files.erase(log_files.begin());
+        }
+
+        std::sort(csv_files.begin(), csv_files.end());
+        while (static_cast<int>(csv_files.size()) > LOG_KEEP_DAYS) {
+            std::remove(csv_files.front().c_str());
+            csv_files.erase(csv_files.begin());
+        }
+    }
+
+    static std::string iso_utc_now() {
+        using clock = std::chrono::system_clock;
+        const auto now = clock::now();
+        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count();
+        const std::time_t secs = static_cast<std::time_t>(now_ms / 1000);
+        std::tm tm_buf{};
+        gmtime_r(&secs, &tm_buf);
+
+        char buf[40];
+        std::snprintf(buf, sizeof(buf),
+                      "%04d-%02d-%02dT%02d:%02d:%02d.%03lldZ",
+                      tm_buf.tm_year + 1900,
+                      tm_buf.tm_mon + 1,
+                      tm_buf.tm_mday,
+                      tm_buf.tm_hour,
+                      tm_buf.tm_min,
+                      tm_buf.tm_sec,
+                      (long long)(now_ms % 1000));
+        return std::string(buf);
+    }
+
+    static std::string csv_escape(const std::string& text) {
+        std::string escaped;
+        escaped.reserve(text.size() + 8);
+        for (char c : text) {
+            if (c == '"') escaped += "\"\"";
+            else escaped += c;
+        }
+        return escaped;
+    }
+
+    void write_csv_row_locked(const std::string& line) {
+        if (!csv_file_.is_open()) return;
+        std::string trimmed = line;
+        while (!trimmed.empty() && (trimmed.back() == '\r' || trimmed.back() == '\n')) {
+            trimmed.pop_back();
+        }
+        csv_file_ << iso_utc_now() << ",console,\"" << csv_escape(trimmed) << "\"\n";
+        csv_file_.flush();
+    }
+
+    void append_csv_text_locked(const char* text, size_t len) {
+        if (!csv_file_.is_open() || text == nullptr || len == 0) return;
+        csv_partial_line_.append(text, len);
+        size_t newline_pos = std::string::npos;
+        while ((newline_pos = csv_partial_line_.find('\n')) != std::string::npos) {
+            const std::string line = csv_partial_line_.substr(0, newline_pos);
+            write_csv_row_locked(line);
+            csv_partial_line_.erase(0, newline_pos + 1);
+        }
+    }
+
+    void flush_csv_fragment_locked() {
+        if (!csv_partial_line_.empty()) {
+            write_csv_row_locked(csv_partial_line_);
+            csv_partial_line_.clear();
         }
     }
 
@@ -193,6 +310,7 @@ private:
                 file_.write(buf, bytes);
                 file_.flush();
             }
+            append_csv_text_locked(buf, static_cast<size_t>(bytes));
         }
         // Drain remainder
         while (true) {
@@ -204,7 +322,12 @@ private:
             buf[bytes] = '\0';
             write(orig_stdout_fd_, buf, bytes);
             std::lock_guard<std::mutex> lk(mtx_);
-            if (file_.is_open()) file_.write(buf, bytes);
+            check_rotate();
+            if (file_.is_open()) {
+                file_.write(buf, bytes);
+                file_.flush();
+            }
+            append_csv_text_locked(buf, static_cast<size_t>(bytes));
         }
     }
 };
@@ -303,7 +426,9 @@ void signal_handler(int sig) {
 int main() {
     //  0. Rolling log — install first so all output is captured
     g_logger = new RollingLogger();
+    g_logger->install();
     printf("[STARTUP] Rolling log: %s (7-day retention)\n", g_logger->current_path().c_str());
+    printf("[STARTUP] Rolling CSV: %s (daily console mirror)\n", g_logger->current_csv_path().c_str());
     fflush(stdout);
 
     //  1. Single-instance lock  must be first 
@@ -340,6 +465,7 @@ int main() {
     //  2. Engine (owns HTTP server on port 8080) 
     chimera::QuadEngineBalancedEngine controller;
     controller.set_paper_research_enabled(runtime_cfg.paper_research_enabled);
+    controller.set_runtime_edge_requirements(runtime_cfg.cost_bps, runtime_cfg.min_edge_bps);
 
     if (executor_ok) {
         controller.set_executor(&executor);

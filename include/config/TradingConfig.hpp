@@ -152,7 +152,7 @@ struct TradingConfig {
     // Minimum |book_imbalance| to fire: (bid_size - ask_size)/(bid_size + ask_size)
     // 0.42 = bids must be 2.45x asks. Restored toward original 0.45  at 0.30 the
     // signal fired on noise and WR dropped to ~50%. Need 79%+ WR at this TP/SL.
-    static constexpr double IMBALANCE_THRESHOLD        = 0.42;
+    static constexpr double IMBALANCE_THRESHOLD        = 0.34;
 
     // Reject if spread too wide  wide spread means fills are poor
     // BTC normal spread: 0.1-0.5bp. Above 1.5bp = unusually wide, skip.
@@ -197,8 +197,8 @@ struct TradingConfig {
     // Edge: ask-side depth drains >40% in 2 ticks  price gaps up through vacuum
     // Spot-only long: buy when ask wall disappears before price moves
     // -------------------------------------------------------------------------
-    static constexpr double VACUUM_ASK_DRAIN_RATIO     = 0.40;  // ask depth drops 40%+
-    static constexpr double VACUUM_MIN_IMBALANCE       = 0.20;  // bid must be present
+    static constexpr double VACUUM_ASK_DRAIN_RATIO     = 0.30;  // ask depth drops 30%+
+    static constexpr double VACUUM_MIN_IMBALANCE       = 0.12;  // bid must be present
     static constexpr double VACUUM_MAX_SPREAD_BPS      = 2.0;   // don't enter wide spreads
     static constexpr double VACUUM_TP_BP               = 16.0;
     static constexpr double VACUUM_SL_BP               = 6.0;
@@ -210,9 +210,10 @@ struct TradingConfig {
     // Edge: in GRIND regime, price >20bp below session VWAP + bid imbalance = buy
     // Mean reversion back toward VWAP. High win rate in ranging markets.
     // -------------------------------------------------------------------------
-    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 20.0;  // min distance below VWAP
+    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 16.0;  // min distance below VWAP
     static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
-    static constexpr double VWAP_MIN_IMBALANCE         = 0.15;  // bid pressure must confirm
+    static constexpr double VWAP_MIN_IMBALANCE         = 0.10;  // bid pressure must confirm
+    static constexpr int    VWAP_MIN_TRADE_SAMPLES     = 8;     // require real trade prints before VWAP is tradable
     static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
     static constexpr double VWAP_TP_BP                 = 12.0;
     static constexpr double VWAP_SL_BP                 = 4.5;
@@ -250,7 +251,7 @@ struct TradingConfig {
     static constexpr double REGIME_BUILDUP_TO_BREAKOUT      = 1.65;
     static constexpr double REGIME_BREAKOUT_ENTER           = 1.65;
     static constexpr double REGIME_BREAKOUT_EXIT            = 1.35;
-    static constexpr int    MIN_REGIME_TICKS                = 30;
+    static constexpr int    MIN_REGIME_TICKS                = 12;
     static constexpr int    EXPAND_POST_COMPRESS_LOCKOUT  = 3;   // block EXPAND for N ticks after COMPRESSIONBREAKOUT transition (regime lag filter)
     static constexpr double REGIME_MIN_LONG_AVG             = 0.004;
 
@@ -457,14 +458,14 @@ struct TradingConfig {
     // Edge: 33-tick OFI ratio > 0.25 + volume spike + book confirmation
     // Maker entry. TP=18bp, SL=6bp → EV +4.8bp at 45% WR after ~4bp cost.
     // Only fires in GRIND/BUILDUP to avoid chasing breakout momentum.
-    static constexpr double OFI_RATIO_THRESHOLD    = 0.25;  // (buy_ema - sell_ema) / total > 0.25
-    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.5;   // current volume > 1.5x EMA baseline
-    static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.10;  // book_imbalance > 0.10 (bid-heavy)
+    static constexpr double OFI_RATIO_THRESHOLD    = 0.18;  // (buy_ema - sell_ema) / total > 0.18
+    static constexpr double OFI_VOLUME_SPIKE_MULT  = 1.25;  // current volume > 1.25x EMA baseline
+    static constexpr double OFI_BOOK_CONFIRM_IMBAL = 0.06;  // book_imbalance > 0.06 (bid-heavy)
     // BTC/ETH are deeper books; require stronger confirmation to avoid chop entries.
-    static constexpr double OFI_MAJOR_RATIO_THRESHOLD    = 0.32;
-    static constexpr double OFI_MAJOR_VOLUME_SPIKE_MULT  = 2.0;
-    static constexpr double OFI_MAJOR_BOOK_CONFIRM_IMBAL = 0.18;
-    static constexpr double OFI_MAJOR_FLOW_MIN           = 0.58;
+    static constexpr double OFI_MAJOR_RATIO_THRESHOLD    = 0.24;
+    static constexpr double OFI_MAJOR_VOLUME_SPIKE_MULT  = 1.6;
+    static constexpr double OFI_MAJOR_BOOK_CONFIRM_IMBAL = 0.12;
+    static constexpr double OFI_MAJOR_FLOW_MIN           = 0.55;
     static constexpr double OFI_MAX_SPREAD_BPS     = 2.0;   // skip if spread too wide
     static constexpr double OFI_TP_BP              = 18.0;  // conservative: new engine, calibrate later
     static constexpr double OFI_SL_BP              = 6.0;   // 3:1 gross R:R
@@ -489,8 +490,8 @@ struct TradingConfig {
     // Edge: persistent slow book imbalance + upward price drift + OFI confirmation
     // Maker entry. TP=20bp, SL=7bp → EV +6.5bp at 50% WR after ~4bp maker cost.
     // Only fires in GRIND regime — MM rebalancing is a ranging-market phenomenon.
-    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.20;  // slow imbal EMA > 0.20 (bid-heavy)
-    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 3.0;   // cumulative drift > 3bp over window
+    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.14;  // slow imbal EMA > 0.14 (bid-heavy)
+    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 2.0;   // cumulative drift > 2bp over window
     static constexpr double MM_MAX_SPREAD_BPS       = 2.0;   // tight spread required
     static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
     static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise

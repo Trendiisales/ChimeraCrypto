@@ -180,6 +180,7 @@ struct SymbolState {
     double vwap_cum_vol  = 0.0;   // cumulative volume
     double session_vwap  = 0.0;   // current VWAP value
     int64_t vwap_session_start = 0; // timestamp of session start
+    int vwap_trade_count = 0;     // real trade updates contributing to session VWAP
 
     // Liquidity Vacuum: rolling ask depth baseline
     double ask_depth_ema = 0.0;   // EMA of ask_size (baseline)
@@ -232,6 +233,7 @@ struct SymbolState {
         vwap_cum_vol = 0.0;
         session_vwap = 0.0;
         vwap_session_start = 0;
+        vwap_trade_count = 0;
         ask_depth_ema = 0.0;
         ask_depth_init = false;
         buy_vol_ema   = 0.0;
@@ -495,7 +497,6 @@ public:
                 ));
             }
             
-            std::printf("[REJECTION-SUMMARY] Last 60s:\n");
             rejection_throttle_.print_summary(ts);
             
             std::string pnl_json = pnl_by_band_.build_json();
@@ -632,13 +633,19 @@ public:
         if (s.vwap_session_start == 0 || day_ms < 1000) {
             s.vwap_cum_pv  = 0.0;
             s.vwap_cum_vol = 0.0;
+            s.vwap_trade_count = 0;
+            s.session_vwap = 0.0;
             s.vwap_session_start = ts;
         }
-        double vol_tick = (tick.trade_qty > 0.0) ? tick.trade_qty : 1.0;
-        s.vwap_cum_pv  += price * vol_tick;
-        s.vwap_cum_vol += vol_tick;
-        if (s.vwap_cum_vol > 0.0)
-            s.session_vwap = s.vwap_cum_pv / s.vwap_cum_vol;
+        if (tick.trade_qty > 0.0) {
+            const double trade_px = tick.last_price > 0.0 ? tick.last_price : price;
+            s.vwap_cum_pv  += trade_px * tick.trade_qty;
+            s.vwap_cum_vol += tick.trade_qty;
+            s.vwap_trade_count++;
+            if (s.vwap_cum_vol > 0.0) {
+                s.session_vwap = s.vwap_cum_pv / s.vwap_cum_vol;
+            }
+        }
 
         // ---- ASK DEPTH EMA (for Liquidity Vacuum baseline) ----
         if (tick.ask_size > 0.0) {
@@ -757,6 +764,14 @@ public:
             return;
         }
 
+        // All entries are spot-maker orders. If we do not currently have a
+        // valid local book, skip evaluation instead of spamming regime-based
+        // rejects on trade-only ticks.
+        if (!has_tradeable_book(s.last_tick)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " BOOK", "book_not_ready");
+            return;
+        }
+
         // Try signals in priority order.
         // Spot-native setups go first. Perp-informed candidates only run after
         // local spot conditions had the first opportunity to trade.
@@ -817,6 +832,10 @@ public:
     void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
     void set_paper_research_enabled(bool enabled)   { paper_research_enabled_ = enabled; }
+    void set_runtime_edge_requirements(double cost_bps, double min_edge_bps) {
+        runtime_cost_floor_bp_ = std::max(cost_bps, TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP);
+        runtime_min_edge_bp_ = std::max(min_edge_bps, runtime_cost_floor_bp_ + 1.0);
+    }
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
@@ -1257,6 +1276,16 @@ private:
         return buy / total;
     }
 
+    bool has_tradeable_book(const MarketTick& t) const {
+        return t.bid > 0.0 && t.ask > 0.0 && t.ask > t.bid;
+    }
+
+    bool vwap_ready(const SymbolState& s) const {
+        return s.session_vwap > 0.0 &&
+               s.vwap_trade_count >= TradingConfig::VWAP_MIN_TRADE_SAMPLES &&
+               s.vwap_cum_vol > 0.0;
+    }
+
     struct SecondaryLongConfirmations {
         int  count  = 0;
         bool ofi    = false;
@@ -1282,7 +1311,7 @@ private:
     }
 
     bool continuation_vwap_support(double price, const SymbolState& s) const {
-        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) return false;
+        if (!vwap_ready(s)) return false;
         const double underwater_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
         return underwater_bp <= TradingConfig::CONTINUATION_VWAP_MAX_UNDERWATER_BP;
     }
@@ -1419,7 +1448,7 @@ private:
     }
 
     double positive_vwap_extension_bp(const SymbolState& s, double price) const {
-        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) return 0.0;
+        if (!vwap_ready(s)) return 0.0;
         return std::max(0.0, (price - s.session_vwap) / s.session_vwap * 10000.0);
     }
 
@@ -1505,7 +1534,7 @@ private:
         const double flow = compute_flow_ratio(id);
 
         bool vwap_dip = false;
-        if (s.session_vwap > 0.0 && s.vwap_cum_vol >= 10.0) {
+        if (vwap_ready(s)) {
             const double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
             vwap_dip = deviation_bp >= TradingConfig::VWAP_ENTRY_DEVIATION_BP &&
                        deviation_bp <= TradingConfig::VWAP_MAX_DEVIATION_BP &&
@@ -1559,6 +1588,31 @@ private:
         }
 
         return std::max(0.0, base_edge_bp - penalty_bp);
+    }
+
+    double required_edge_bp(LayerMode layer) const {
+        return std::max(runtime_min_edge_bp_, layer_cost_floor_bp(layer) + 1.0);
+    }
+
+    bool spot_native_regime_allows(int id, double price, const SymbolState& s, LayerMode layer) const {
+        if (s.regime == REGIME_GRIND) return true;
+        if (s.regime == REGIME_DEAD) return false;
+
+        if (projected_gross_edge_bp(id, price, s, layer) < required_edge_bp(layer)) {
+            return false;
+        }
+
+        switch (layer) {
+            case LAYER_MICRO:
+            case LAYER_VWAP:
+            case LAYER_MM_PRESSURE:
+                return s.regime == REGIME_BUILDUP;
+            case LAYER_OFI:
+            case LAYER_VACUUM:
+                return s.regime == REGIME_BUILDUP || s.regime == REGIME_BREAKOUT;
+            default:
+                return false;
+        }
     }
 
     double preview_maker_limit_price(LayerMode layer, double bid, double ask) const {
@@ -1635,7 +1689,6 @@ private:
         const SymbolState& s,
         LayerMode layer,
         std::string& reason) const {
-        if (!perp_informed_layer(layer)) return true;
         if (!layer_uses_maker_entry(layer)) {
             reason = "maker_disabled";
             return false;
@@ -1657,8 +1710,7 @@ private:
             return false;
         }
 
-        const double required_edge_bp = layer_cost_floor_bp(layer) + 1.0;
-        if (projected_gross_edge_bp(id, price, s, layer) <= required_edge_bp) {
+        if (projected_gross_edge_bp(id, price, s, layer) < required_edge_bp(layer)) {
             reason = "edge_below_floor";
             return false;
         }
@@ -2171,7 +2223,7 @@ private:
 
     double edge_round_trip_cost_bp(EdgeEngineKey k) const {
         (void)k;
-        return TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP;
+        return std::max(runtime_cost_floor_bp_, TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP);
     }
 
     bool layer_uses_taker_entry(LayerMode layer) const {
@@ -2197,12 +2249,12 @@ private:
 
     double layer_round_trip_cost_bp(LayerMode layer) const {
         (void)layer;
-        return TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP;
+        return std::max(runtime_cost_floor_bp_, TradingConfig::MAKER_ENTRY_MARKET_EXIT_BP);
     }
 
     double layer_cost_floor_bp(LayerMode layer) const {
         (void)layer;
-        return TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP;
+        return std::max(runtime_cost_floor_bp_, TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP);
     }
 
     int maker_profile_for_layer(LayerMode layer) const {
@@ -2525,9 +2577,11 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
+                               spot_native_regime_allows(id, price, s, LAYER_MICRO);
         if (!regime_ok) {
-            rejection_throttle_.record(key, "not_grind");
+            rejection_throttle_.record(key, s.regime == REGIME_DEAD ? "not_grind"
+                                                                    : "regime_edge_blocked");
             return false;
         }
 
@@ -3534,8 +3588,10 @@ private:
             return false;
         }
         // Only fires in GRIND or BUILDUP  BREAKOUT has own engines
-        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
-            rejection_throttle_.record(key, "wrong_regime");
+        const bool regime_ok = spot_native_regime_allows(id, price, s, LAYER_VACUUM);
+        if (!regime_ok) {
+            rejection_throttle_.record(key, s.regime == REGIME_DEAD ? "wrong_regime"
+                                                                    : "regime_edge_blocked");
             return false;
         }
         const MarketTick& t = s.last_tick;
@@ -3594,13 +3650,15 @@ private:
             return false;
         }
         // Only fires in GRIND  VWAP reversion fails in trending regimes
-        const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
+                               spot_native_regime_allows(id, price, s, LAYER_VWAP);
         if (!regime_ok) {
-            rejection_throttle_.record(key, "not_grind");
+            rejection_throttle_.record(key, s.regime == REGIME_DEAD ? "not_grind"
+                                                                    : "regime_edge_blocked");
             return false;
         }
         // Need established VWAP
-        if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) {
+        if (!vwap_ready(s)) {
             rejection_throttle_.record(key, "vwap_not_ready");
             return false;
         }
@@ -3656,9 +3714,12 @@ private:
         const bool major_symbol = (id == 0 || id == 1);
 
         // Regime: GRIND or BUILDUP only
-        const bool regime_block = (s.regime == REGIME_DEAD) || (!starved && s.regime == REGIME_BREAKOUT);
-        if (regime_block) {
-            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "wrong_regime");
+        const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
+                               spot_native_regime_allows(id, price, s, LAYER_OFI);
+        if (!regime_ok) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI",
+                                       s.regime == REGIME_DEAD ? "wrong_regime"
+                                                               : "regime_edge_blocked");
             return false;
         }
         if (!s.ofi_ema_init) return false;
@@ -3811,9 +3872,12 @@ private:
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
 
         // Best in GRIND — MM rebalancing is a ranging-market phenomenon
-        const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
+                               spot_native_regime_allows(id, price, s, LAYER_MM_PRESSURE);
         if (!regime_ok) {
-            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM",
+                                       s.regime == REGIME_DEAD ? "not_grind"
+                                                               : "regime_edge_blocked");
             return false;
         }
         if (!s.mm_imbal_init || s.mm_drift_ticks < 20) return false;
@@ -3870,7 +3934,7 @@ private:
                     (layer == LAYER_SWEEP)      ? LayerType::EXPAND :
                     (layer == LAYER_MM_PRESSURE)? LayerType::EXPAND :
                     (layer == LAYER_MICRO) ? LayerType::MICRO : LayerType::LEADLAG;
-        sig.expected_bps = perp_informed_layer(layer)
+        sig.expected_bps = layer_uses_maker_entry(layer)
             ? projected_gross_edge_bp(id, price, s, layer)
             : configured_tp_bp(id, layer);
         sig.confidence = 1.0;
@@ -3884,8 +3948,7 @@ private:
 
         // COST FLOOR GATE — this research build is maker-entry only.
         // Net logs assume maker entry plus market-style exit until maker exits exist.
-        double cost_floor = layer_cost_floor_bp(layer);
-        if (sig.expected_bps < cost_floor) {
+        if (sig.expected_bps < required_edge_bp(layer)) {
             std::string key = std::string(sym_short(id)) + " " + layer_name(layer);
             rejection_throttle_.record(key, "cost_floor");
             return;
@@ -3897,6 +3960,9 @@ private:
                 rejection_throttle_.record(std::string(sym_short(id)) + " " + layer_name(layer), gate_reason);
                 return;
             }
+        }
+        if (layer_uses_maker_entry(layer)) {
+            std::string gate_reason;
             if (!maker_entry_feasible_gate(id, price, s, layer, gate_reason)) {
                 rejection_throttle_.record(std::string(sym_short(id)) + " " + layer_name(layer), gate_reason);
                 return;
@@ -4577,6 +4643,8 @@ private:
 
     // Spot executor  wired at startup via set_executor()
     SpotExecutor* executor_ = nullptr;
+    double runtime_cost_floor_bp_ = TradingConfig::MAKER_ENTRY_MARKET_EXIT_COST_FLOOR_BP;
+    double runtime_min_edge_bp_ = 12.0;
 
     static const char* sym_lower(int id) { return sym_full(id); }
 };

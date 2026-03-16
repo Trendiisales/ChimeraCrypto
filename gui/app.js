@@ -512,6 +512,64 @@ function updateHistoryPanel() {
   }).join('');
 }
 
+function updateQualityPanel() {
+  const trades = persistentTrades();
+  const box = $('history-quality-list');
+  const insightEl = $('history-quality-insight');
+  if (!box || !insightEl) return;
+
+  if (!trades.length) {
+    insightEl.textContent = 'Layer quality stats appear once completed trades are persisted.';
+    box.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No persistent layer stats yet</div>';
+    return;
+  }
+
+  const byLayer = new Map();
+  trades.forEach(tr => {
+    const layer = (tr.e || '?').toUpperCase();
+    if (!byLayer.has(layer)) {
+      byLayer.set(layer, { layer, trades: 0, pnl: 0, mfe: 0, timeout: 0, noFollow: 0 });
+    }
+    const row = byLayer.get(layer);
+    row.trades += 1;
+    row.pnl += (+tr.p || 0);
+    row.mfe += (+tr.mfe || 0);
+    const why = (tr.why || tr.reason || '').toUpperCase();
+    if (why === 'TIMEOUT') row.timeout += 1;
+    if (why === 'NO_FOLLOW') row.noFollow += 1;
+  });
+
+  const rows = [...byLayer.values()]
+    .map(r => ({
+      ...r,
+      avgPnl: r.pnl / Math.max(1, r.trades),
+      avgMfe: r.mfe / Math.max(1, r.trades),
+      timeoutRate: (r.timeout / Math.max(1, r.trades)) * 100,
+      noFollowRate: (r.noFollow / Math.max(1, r.trades)) * 100,
+    }))
+    .sort((a, b) => b.trades - a.trades || b.avgMfe - a.avgMfe);
+
+  const worst = rows[0];
+  if (worst && worst.avgMfe < 2.0 && worst.timeoutRate >= 60) {
+    insightEl.textContent = `${worst.layer} is the main quality drag right now: avg MFE ${worst.avgMfe.toFixed(2)}bp, avg PnL ${worst.avgPnl.toFixed(2)}bp, timeout rate ${worst.timeoutRate.toFixed(0)}%.`;
+  } else {
+    insightEl.textContent = 'Use avg MFE and timeout rate to decide which layers should stay active. A layer that cannot produce >8bp gross often enough should be gated harder.';
+  }
+
+  box.innerHTML = rows.slice(0, 6).map(r => {
+    const pnlClsName = r.avgPnl > 0 ? 'pos' : r.avgPnl < 0 ? 'neg' : '';
+    const mfeClsName = r.avgMfe >= 8 ? 'pos' : r.avgMfe >= 4 ? 'warn' : 'neg';
+    return `<div class="rt-row ${r.avgPnl >= 0 ? 'rt-win' : 'rt-loss'}">
+      <span class="rt-time">${r.layer}</span>
+      <span class="rt-sym">${r.trades}T</span>
+      <span class="rt-eng ${pnlClsName}">${r.avgPnl >= 0 ? '+' : ''}${r.avgPnl.toFixed(2)}bp</span>
+      <span class="rt-why ${mfeClsName}">${r.avgMfe.toFixed(2)}bp MFE</span>
+      <span class="rt-pnl">${r.timeoutRate.toFixed(0)}% TO</span>
+      <span class="rt-hold">${r.noFollowRate.toFixed(0)}% NF</span>
+    </div>`;
+  }).join('');
+}
+
 //  TRADE CARDS 
 function reasonClass(r) {
   if (!r) return 'timeout';
@@ -719,6 +777,7 @@ function updateBoostPanel(data) {
   updateBoostPanel(data);
   updateOrderDiagnostics(data);
   updateHistoryPanel();
+  updateQualityPanel();
 
   // Exit breakdown
   if (data.session) {

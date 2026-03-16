@@ -1699,9 +1699,104 @@ private:
         return positive_vwap_extension_bp(s, price) <= TradingConfig::LEADLAG_TARGET_MAX_BP;
     }
 
+    double confirmation_bonus_bp(
+        int id,
+        double price,
+        int64_t ts,
+        const SymbolState& s) const {
+        const auto confirms = collect_secondary_long_confirmations(
+            id,
+            price,
+            ts,
+            s,
+            market_env_.latency_ms);
+        return confirms.count * 2.0;
+    }
+
     double projected_gross_edge_bp(int id, double price, const SymbolState& s, LayerMode layer) const {
+        const MarketTick& t = s.last_tick;
         const double base_edge_bp = configured_tp_bp(id, layer);
         const double vwap_extension_bp = positive_vwap_extension_bp(s, price);
+        const double flow = compute_flow_ratio(id);
+        const double confirm_bonus = confirmation_bonus_bp(id, price, last_tick_ts_ms_, s);
+        const double spread_penalty = std::max(0.0, t.spread_bps);
+        auto clamp_edge = [&](double edge) {
+            return std::max(0.0, std::min(edge, base_edge_bp));
+        };
+
+        switch (layer) {
+            case LAYER_MICRO: {
+                if (t.bid <= 0.0 || t.ask <= 0.0) return 0.0;
+                const double imbalance_excess =
+                    std::max(0.0, t.book_imbalance - TradingConfig::IMBALANCE_THRESHOLD);
+                const double flow_excess =
+                    std::max(0.0, flow - TradingConfig::FLOW_CONFIRM_THRESHOLD);
+                const double vwap_bonus = std::min(4.0, std::max(0.0, (s.session_vwap - price) /
+                    std::max(s.session_vwap, 1e-9) * 10000.0) * 0.25);
+                return clamp_edge(imbalance_excess * 26.0 +
+                                  flow_excess * 18.0 +
+                                  confirm_bonus +
+                                  vwap_bonus -
+                                  spread_penalty);
+            }
+            case LAYER_VWAP: {
+                if (!vwap_ready(s, last_tick_ts_ms_) || t.bid <= 0.0 || t.ask <= 0.0) return 0.0;
+                const double deviation_bp = std::max(0.0, (s.session_vwap - price) /
+                    std::max(s.session_vwap, 1e-9) * 10000.0);
+                const double book_bonus =
+                    std::max(0.0, t.book_imbalance - TradingConfig::VWAP_MIN_IMBALANCE) * 12.0;
+                const double flow_bonus =
+                    std::max(0.0, flow - TradingConfig::FLOW_CONFIRM_THRESHOLD) * 16.0;
+                return clamp_edge(deviation_bp + book_bonus + flow_bonus + confirm_bonus -
+                                  spread_penalty);
+            }
+            case LAYER_OFI: {
+                if (!s.ofi_ema_init || !s.trade_size_init || t.bid <= 0.0 || t.ask <= 0.0) return 0.0;
+                const double ofi_ratio = current_ofi_ratio(s);
+                const double vol_ratio = s.trade_size_ema > 1e-9
+                    ? (t.agg_buy_volume + t.agg_sell_volume) / s.trade_size_ema
+                    : 0.0;
+                const double ofi_excess =
+                    std::max(0.0, ofi_ratio - TradingConfig::OFI_RATIO_THRESHOLD);
+                const double vol_excess =
+                    std::max(0.0, vol_ratio - TradingConfig::OFI_VOLUME_SPIKE_MULT);
+                const double book_excess =
+                    std::max(0.0, t.book_imbalance - TradingConfig::OFI_BOOK_CONFIRM_IMBAL);
+                const double flow_excess =
+                    std::max(0.0, flow - TradingConfig::FLOW_CONFIRM_THRESHOLD);
+                return clamp_edge(ofi_excess * 34.0 +
+                                  vol_excess * 4.0 +
+                                  book_excess * 18.0 +
+                                  flow_excess * 18.0 +
+                                  confirm_bonus -
+                                  spread_penalty);
+            }
+            case LAYER_VACUUM: {
+                if (!s.ask_depth_init || s.ask_depth_ema <= 0.0 || t.ask_size <= 0.0) return 0.0;
+                const double drain_ratio = 1.0 - (t.ask_size / s.ask_depth_ema);
+                const double drain_excess =
+                    std::max(0.0, drain_ratio - TradingConfig::VACUUM_ASK_DRAIN_RATIO);
+                const double book_excess =
+                    std::max(0.0, t.book_imbalance - TradingConfig::VACUUM_MIN_IMBALANCE);
+                return clamp_edge(drain_excess * 26.0 +
+                                  book_excess * 12.0 +
+                                  confirm_bonus -
+                                  spread_penalty);
+            }
+            case LAYER_MM_PRESSURE: {
+                if (!s.mm_imbal_init || price <= 0.0) return 0.0;
+                const double drift_bps = (s.mm_drift_sum / price) * 10000.0;
+                const double imbal_excess =
+                    std::max(0.0, s.mm_imbal_ema - TradingConfig::MM_IMBAL_EMA_THRESHOLD);
+                return clamp_edge(std::max(0.0, drift_bps) +
+                                  imbal_excess * 14.0 +
+                                  confirm_bonus -
+                                  spread_penalty);
+            }
+            default:
+                break;
+        }
+
         double penalty_bp = vwap_extension_bp;
 
         if (layer == LAYER_LIQUIDATION) {
@@ -1724,8 +1819,14 @@ private:
         if (s.regime == REGIME_DEAD) {
             const bool warmed = s.short_returns.size() >= TradingConfig::STARTUP_REGIME_MIN_SHORT_TICKS;
             const double projected_edge = projected_gross_edge_bp(id, price, s, layer);
+            const auto confirms = collect_secondary_long_confirmations(
+                id,
+                price,
+                ts,
+                s,
+                market_env_.latency_ms);
             const double dead_regime_buffer =
-                (layer == LAYER_MICRO || layer == LAYER_VWAP) ? 0.0 : 1.0;
+                (layer == LAYER_VWAP) ? 1.0 : 2.0;
             const double required_edge = required_edge_bp(layer) + dead_regime_buffer;
             if (!warmed || projected_edge < required_edge) {
                 return false;
@@ -1733,16 +1834,17 @@ private:
 
             switch (layer) {
                 case LAYER_MICRO:
-                    return true;
+                    return confirms.count >= 2;
                 case LAYER_VWAP:
-                    return vwap_ready(s, ts);
+                    return vwap_ready(s, ts) && confirms.count >= 1;
                 case LAYER_OFI:
-                    return s.ofi_ema_init;
+                    return s.ofi_ema_init && confirms.count >= 2;
                 case LAYER_VACUUM:
-                    return s.ask_depth_init;
+                    return s.ask_depth_init && confirms.count >= 1;
                 case LAYER_MM_PRESSURE:
                     return s.mm_imbal_init &&
-                           s.mm_drift_ticks >= TradingConfig::STARTUP_MM_MIN_DRIFT_TICKS;
+                           s.mm_drift_ticks >= TradingConfig::STARTUP_MM_MIN_DRIFT_TICKS &&
+                           confirms.count >= 1;
                 default:
                     return startup_warmup_mode(ts);
             }
@@ -2831,6 +2933,18 @@ private:
             return false;
         }
 
+        const auto confirms = collect_secondary_long_confirmations(id, price, ts, s, latency_ms);
+        const int min_confirms = (s.regime == REGIME_GRIND) ? 1 : 2;
+        if (confirms.count < min_confirms) {
+            rejection_throttle_.record(key, "secondary_support_missing");
+            return false;
+        }
+
+        if (projected_gross_edge_bp(id, price, s, LAYER_MICRO) < required_edge_bp(LAYER_MICRO)) {
+            rejection_throttle_.record(key, "edge_below_floor");
+            return false;
+        }
+
         enter(id, price, ts, s, LAYER_MICRO, true);
         return true;
     }
@@ -3535,6 +3649,16 @@ private:
             exit(id, move_bp, ts, s);
             return;
         }
+        if (s.pos.layer == LAYER_MICRO && age_ms >= 1500 && s.pos.mfe < 0.5) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
+        if (s.pos.layer == LAYER_MICRO && age_ms >= 3500 && s.pos.mfe < 1.0) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
         if (s.pos.layer == LAYER_OFI && age_ms >= 2500 && s.pos.mfe < 0.6) {
             pending_exit_reason_ = "NO_FOLLOW";
             exit(id, move_bp, ts, s);
@@ -4004,6 +4128,17 @@ private:
                                        : TradingConfig::FLOW_CONFIRM_THRESHOLD;
         if (flow < min_flow) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "flow_weak");
+            return false;
+        }
+
+        const auto confirms = collect_secondary_long_confirmations(id, price, ts, s, latency_ms);
+        const int min_confirms = (s.regime == REGIME_BUILDUP || s.regime == REGIME_BREAKOUT) ? 1 : 2;
+        if (confirms.count < min_confirms) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "secondary_support_missing");
+            return false;
+        }
+        if (projected_gross_edge_bp(id, price, s, LAYER_OFI) < required_edge_bp(LAYER_OFI)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "edge_below_floor");
             return false;
         }
 
@@ -4742,6 +4877,11 @@ private:
         if (consecutive_losses_ >= 3) cooldown_ms = 5000;
         else if (consecutive_losses_ >= 2) cooldown_ms = 2000;
         else if (consecutive_losses_ >= 1) cooldown_ms = 1000;
+        if ((s.pos.layer == LAYER_MICRO || s.pos.layer == LAYER_OFI) &&
+            (exit_reason == "NO_FOLLOW" || exit_reason == "TIMEOUT") &&
+            s.pos.mfe < 1.0) {
+            cooldown_ms = std::max<int64_t>(cooldown_ms, 4000);
+        }
         s.cooldown_until = ts + cooldown_ms;
         
         if (s.pos.layer == LAYER_EXPANSION) {

@@ -40,6 +40,7 @@
 #include <sstream>
 #include <iomanip>
 #include <array>
+#include <mutex>
 #include "logging/ShadowLogger.hpp"
 #include "logging/ExecutionAuditLogger.hpp"
 #include "core/LimitOrderManager.hpp"
@@ -373,6 +374,32 @@ public:
         std::string reason;   // "TP" / "SL" / "TRAIL" / "TIMEOUT"
     };
     using TradeExitCallback = std::function<void(const TradeExitData&)>;
+
+    struct OrderDiagCounters {
+        int submitted = 0;
+        int filled = 0;
+        int canceled = 0;
+        int rejected = 0;
+        int entry_submitted = 0;
+        int exit_submitted = 0;
+        int timeout_cancels = 0;
+        int stale_cancels = 0;
+        int invalidated_cancels = 0;
+    };
+
+    struct RecentOrderDiag {
+        int64_t ts_ms = 0;
+        std::string event;
+        std::string symbol;
+        std::string layer;
+        std::string side;
+        std::string order_type;
+        std::string status;
+        std::string reason;
+        double qty = 0.0;
+        double order_px = 0.0;
+        double fill_px = 0.0;
+    };
 
     void set_trade_exit_callback(TradeExitCallback cb) { trade_exit_cb_ = std::move(cb); }
     
@@ -934,7 +961,82 @@ public:
         j << "]}";
         return j.str();
     }
-    
+
+    std::string get_order_diagnostics_json() const {
+        static const char* LAYER_NAMES[] = {
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK","OFI","SWEEP","MM-PRESSURE"
+        };
+
+        std::lock_guard<std::mutex> lk(order_diag_mutex_);
+        const double fill_rate = order_diag_.submitted > 0
+            ? 100.0 * static_cast<double>(order_diag_.filled) / static_cast<double>(order_diag_.submitted)
+            : 0.0;
+        const double cancel_rate = order_diag_.submitted > 0
+            ? 100.0 * static_cast<double>(order_diag_.canceled) / static_cast<double>(order_diag_.submitted)
+            : 0.0;
+        const double timeout_rate = order_diag_.entry_submitted > 0
+            ? 100.0 * static_cast<double>(order_diag_.timeout_cancels) / static_cast<double>(order_diag_.entry_submitted)
+            : 0.0;
+
+        std::ostringstream j;
+        j << std::fixed << std::setprecision(2);
+        j << "\"order_diag\":{"
+          << "\"submitted\":" << order_diag_.submitted << ","
+          << "\"filled\":" << order_diag_.filled << ","
+          << "\"canceled\":" << order_diag_.canceled << ","
+          << "\"rejected\":" << order_diag_.rejected << ","
+          << "\"entry_submitted\":" << order_diag_.entry_submitted << ","
+          << "\"exit_submitted\":" << order_diag_.exit_submitted << ","
+          << "\"timeout_cancels\":" << order_diag_.timeout_cancels << ","
+          << "\"stale_cancels\":" << order_diag_.stale_cancels << ","
+          << "\"invalidated_cancels\":" << order_diag_.invalidated_cancels << ","
+          << "\"fill_rate\":" << fill_rate << ","
+          << "\"cancel_rate\":" << cancel_rate << ","
+          << "\"timeout_rate\":" << timeout_rate << ","
+          << "\"by_layer\":[";
+
+        bool first = true;
+        for (int i = 1; i < 17; ++i) {
+            const auto& c = order_diag_by_layer_[i];
+            if (c.submitted == 0 && c.filled == 0 && c.canceled == 0 && c.rejected == 0) continue;
+            if (!first) j << ",";
+            first = false;
+            const double layer_fill_rate = c.submitted > 0
+                ? 100.0 * static_cast<double>(c.filled) / static_cast<double>(c.submitted)
+                : 0.0;
+            j << "{\"name\":\"" << LAYER_NAMES[i] << "\","
+              << "\"submitted\":" << c.submitted << ","
+              << "\"filled\":" << c.filled << ","
+              << "\"canceled\":" << c.canceled << ","
+              << "\"rejected\":" << c.rejected << ","
+              << "\"timeouts\":" << c.timeout_cancels << ","
+              << "\"fill_rate\":" << layer_fill_rate
+              << "}";
+        }
+
+        j << "],\"recent\":[";
+        bool first_recent = true;
+        for (const auto& ev : recent_order_diag_) {
+            if (!first_recent) j << ",";
+            first_recent = false;
+            j << "{"
+              << "\"ts_ms\":" << ev.ts_ms << ","
+              << "\"event\":\"" << ExecutionAuditLogger::escape_json(ev.event) << "\","
+              << "\"symbol\":\"" << ExecutionAuditLogger::escape_json(ev.symbol) << "\","
+              << "\"layer\":\"" << ExecutionAuditLogger::escape_json(ev.layer) << "\","
+              << "\"side\":\"" << ExecutionAuditLogger::escape_json(ev.side) << "\","
+              << "\"order_type\":\"" << ExecutionAuditLogger::escape_json(ev.order_type) << "\","
+              << "\"status\":\"" << ExecutionAuditLogger::escape_json(ev.status) << "\","
+              << "\"reason\":\"" << ExecutionAuditLogger::escape_json(ev.reason) << "\","
+              << "\"qty\":" << ev.qty << ","
+              << "\"order_px\":" << ev.order_px << ","
+              << "\"fill_px\":" << ev.fill_px
+              << "}";
+        }
+        j << "]}";
+        return j.str();
+    }
+
     void set_gui_broadcast(GuiBroadcastCallback callback) {
         // DISABLED - GUI decoupled, logs only
         // gui_broadcast_ = callback;
@@ -1620,9 +1722,30 @@ private:
     bool spot_native_regime_allows(int id, double price, int64_t ts, const SymbolState& s, LayerMode layer) const {
         if (s.regime == REGIME_GRIND) return true;
         if (s.regime == REGIME_DEAD) {
-            return startup_warmup_mode(ts) &&
-                   s.short_returns.size() >= TradingConfig::STARTUP_REGIME_MIN_SHORT_TICKS &&
-                   projected_gross_edge_bp(id, price, s, layer) >= required_edge_bp(layer);
+            const bool warmed = s.short_returns.size() >= TradingConfig::STARTUP_REGIME_MIN_SHORT_TICKS;
+            const double projected_edge = projected_gross_edge_bp(id, price, s, layer);
+            const double dead_regime_buffer =
+                (layer == LAYER_MICRO || layer == LAYER_VWAP) ? 0.0 : 1.0;
+            const double required_edge = required_edge_bp(layer) + dead_regime_buffer;
+            if (!warmed || projected_edge < required_edge) {
+                return false;
+            }
+
+            switch (layer) {
+                case LAYER_MICRO:
+                    return true;
+                case LAYER_VWAP:
+                    return vwap_ready(s, ts);
+                case LAYER_OFI:
+                    return s.ofi_ema_init;
+                case LAYER_VACUUM:
+                    return s.ask_depth_init;
+                case LAYER_MM_PRESSURE:
+                    return s.mm_imbal_init &&
+                           s.mm_drift_ticks >= TradingConfig::STARTUP_MM_MIN_DRIFT_TICKS;
+                default:
+                    return startup_warmup_mode(ts);
+            }
         }
 
         if (projected_gross_edge_bp(id, price, s, layer) < required_edge_bp(layer)) {
@@ -2177,6 +2300,7 @@ private:
                            double fill_px,
                            const std::string& status,
                            const std::string& reason) const {
+        record_order_diag(ts, event, id, layer, is_long, order_type, status, reason, qty, order_px, fill_px);
         std::ostringstream fields;
         fields << "\"symbol\":\"" << ExecutionAuditLogger::escape_json(sym_full(id)) << "\","
                << "\"side\":\"" << (is_long ? "BUY" : "SELL") << "\","
@@ -2195,6 +2319,62 @@ private:
             fields << ",\"reason\":\"" << ExecutionAuditLogger::escape_json(reason) << "\"";
         }
         ExecutionAuditLogger::instance().record_at(ts, event, fields.str());
+    }
+
+    void record_order_diag(int64_t ts,
+                           const char* event,
+                           int id,
+                           LayerMode layer,
+                           bool is_long,
+                           const char* order_type,
+                           const std::string& status,
+                           const std::string& reason,
+                           double qty,
+                           double order_px,
+                           double fill_px) const {
+        std::lock_guard<std::mutex> lk(order_diag_mutex_);
+        OrderDiagCounters& total = order_diag_;
+        OrderDiagCounters* by_layer = nullptr;
+        const int layer_idx = static_cast<int>(layer);
+        if (layer_idx >= 0 && layer_idx < static_cast<int>(order_diag_by_layer_.size())) {
+            by_layer = &order_diag_by_layer_[layer_idx];
+        }
+
+        auto apply = [&](OrderDiagCounters& c) {
+            const std::string ev = event ? event : "";
+            if (ev == "order_submitted") {
+                c.submitted++;
+                if (is_long) c.entry_submitted++;
+                else c.exit_submitted++;
+            } else if (ev == "order_filled") {
+                c.filled++;
+            } else if (ev == "order_canceled") {
+                c.canceled++;
+                if (reason == "timeout") c.timeout_cancels++;
+                else if (reason == "stale") c.stale_cancels++;
+                else c.invalidated_cancels++;
+            } else if (ev == "order_rejected") {
+                c.rejected++;
+            }
+        };
+
+        apply(total);
+        if (by_layer) apply(*by_layer);
+
+        RecentOrderDiag diag;
+        diag.ts_ms = ts;
+        diag.event = event ? event : "";
+        diag.symbol = sym_full(id);
+        diag.layer = layer_name(layer);
+        diag.side = is_long ? "BUY" : "SELL";
+        diag.order_type = order_type ? order_type : "";
+        diag.status = status;
+        diag.reason = reason;
+        diag.qty = qty;
+        diag.order_px = order_px;
+        diag.fill_px = fill_px;
+        recent_order_diag_.push_front(diag);
+        while (recent_order_diag_.size() > 20) recent_order_diag_.pop_back();
     }
 
     void audit_position_event(int64_t ts,
@@ -2310,11 +2490,14 @@ private:
                 return 2;  // moderate inside-spread posting
             case LAYER_FUNDING:
             case LAYER_NGAS:
-            case LAYER_OFI:
             case LAYER_MM_PRESSURE:
-            case LAYER_MICRO:
-            default:
                 return 0;  // patient bid-side maker
+            case LAYER_MICRO:
+                return 5;  // slight inside-spread join so spot imbalance can actually rest at the front
+            default:
+                return 0;
+            case LAYER_OFI:
+                return 5;  // light inside-spread join with patience: increases transferable fill rate
         }
     }
 
@@ -3352,6 +3535,16 @@ private:
             exit(id, move_bp, ts, s);
             return;
         }
+        if (s.pos.layer == LAYER_OFI && age_ms >= 2500 && s.pos.mfe < 0.6) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
+        if (s.pos.layer == LAYER_OFI && age_ms >= 5000 && s.pos.mfe < 1.2) {
+            pending_exit_reason_ = "NO_FOLLOW";
+            exit(id, move_bp, ts, s);
+            return;
+        }
 
         // Breakeven protection for EXPANSION  if trade peaked at 2bp profit, floor at entry
         // For LONG: move_bp positive = profit. For SHORT: move_bp negative = profit.
@@ -3746,7 +3939,7 @@ private:
         const bool starved = startup_starved_mode(ts);
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
-        const bool major_symbol = (id == 0 || id == 1);
+        const bool deep_book_symbol = (id == 0);
 
         // Regime: GRIND or BUILDUP only
         const bool regime_ok = (starved && s.regime == REGIME_BUILDUP) ||
@@ -3773,7 +3966,7 @@ private:
 
         // Must exceed threshold in the long direction only (spot = long bias)
         double min_ofi_ratio = starved ? 0.18 : TradingConfig::OFI_RATIO_THRESHOLD;
-        if (major_symbol) {
+        if (deep_book_symbol) {
             min_ofi_ratio = std::max(min_ofi_ratio, TradingConfig::OFI_MAJOR_RATIO_THRESHOLD);
         }
         if (ofi_ratio < min_ofi_ratio) {
@@ -3788,7 +3981,7 @@ private:
         }
         double vol_ratio = (t.agg_buy_volume + t.agg_sell_volume) / s.trade_size_ema;
         double min_vol_spike = starved ? 1.2 : TradingConfig::OFI_VOLUME_SPIKE_MULT;
-        if (major_symbol) {
+        if (deep_book_symbol) {
             min_vol_spike = std::max(min_vol_spike, TradingConfig::OFI_MAJOR_VOLUME_SPIKE_MULT);
         }
         if (vol_ratio < min_vol_spike) {
@@ -3798,7 +3991,7 @@ private:
 
         // Book must also lean long (bid depth >= ask depth)
         double min_book_imbal = starved ? 0.05 : TradingConfig::OFI_BOOK_CONFIRM_IMBAL;
-        if (major_symbol) {
+        if (deep_book_symbol) {
             min_book_imbal = std::max(min_book_imbal, TradingConfig::OFI_MAJOR_BOOK_CONFIRM_IMBAL);
         }
         if (t.book_imbalance < min_book_imbal) {
@@ -3807,7 +4000,7 @@ private:
         }
 
         double flow = compute_flow_ratio(id);
-        double min_flow = major_symbol ? TradingConfig::OFI_MAJOR_FLOW_MIN
+        double min_flow = deep_book_symbol ? TradingConfig::OFI_MAJOR_FLOW_MIN
                                        : TradingConfig::FLOW_CONFIRM_THRESHOLD;
         if (flow < min_flow) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "flow_weak");
@@ -4656,6 +4849,10 @@ private:
     };
     LayerStats layer_stats_[17]; // indexed by LayerMode enum value (0..16)
                                   // 14=LAYER_OFI  15=LAYER_SWEEP  16=LAYER_MM_PRESSURE
+    mutable OrderDiagCounters order_diag_;
+    mutable std::array<OrderDiagCounters, 17> order_diag_by_layer_{};
+    mutable std::deque<RecentOrderDiag> recent_order_diag_;
+    mutable std::mutex order_diag_mutex_;
 
     LayerStats& stats_for(LayerMode m) {
         int idx = (int)m;

@@ -228,6 +228,7 @@ public:
         json << "\"paper_research_idle_ms\":" << balanced_.paper_research_idle_ms() << ",";
         json << balanced_.get_boost_json() << ",";
         json << balanced_.get_layer_adapt_json() << ",";
+        json << balanced_.get_order_diagnostics_json() << ",";
         json << "\"rejections\":" << balanced_.get_rejection_stats() << ",";
         json << "\"signal_rejections\":" << balanced_.get_signal_rejection_stats() << ",";
 
@@ -398,7 +399,7 @@ private:
             r.pnl_bp = exd("p"); r.entry_price = exd("en"); r.exit_price = exd("ex");
             r.mfe_bp = exd("mfe"); r.mae_bp = exd("mae"); r.hold_ms = (int64_t)exd("hold");
             if (!r.time.empty() && !r.symbol.empty())
-                trade_log_.push_back(r);
+                trade_log_.push_front(r);
         }
         if (trade_log_.size() > 200) trade_log_.resize(200);
         std::printf("[TRADE_LOG] Loaded %zu trades from disk\n", trade_log_.size());
@@ -454,10 +455,24 @@ private:
 
     void write_session_marker() {
         { int _r = ::system("mkdir -p data"); (void)_r; }
+        TradeRecord marker;
+        marker.time = now_hms();
+        marker.symbol = "SESSION";
+        marker.engine = "START";
+        marker.reason = "START";
+        marker.pnl_bp = 0.0;
+        marker.entry_price = 0.0;
+        marker.exit_price = 0.0;
+        marker.mfe_bp = 0.0;
+        marker.mae_bp = 0.0;
+        marker.hold_ms = 0;
         std::ofstream f(TRADE_LOG_FILE, std::ios::app);
         if (!f.is_open()) return;
-        f << "{\"t\":\"" << now_hms() << "\",\"s\":\"SESSION\",\"e\":\"START\","
+        f << "{\"t\":\"" << marker.time << "\",\"s\":\"SESSION\",\"e\":\"START\","
           << "\"p\":0,\"en\":0,\"ex\":0,\"mfe\":0,\"mae\":0,\"hold\":0,\"why\":\"START\"}\n";
+        std::lock_guard<std::mutex> lk(trade_log_mutex_);
+        trade_log_.push_front(marker);
+        if (trade_log_.size() > 200) trade_log_.pop_back();
     }
 
     void push_trade(const std::string& sym, const std::string& eng,

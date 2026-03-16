@@ -16,6 +16,7 @@ const SYMBOLS = [
 ];
 
 let localTrades = [];
+let latestServerTrades = [];
 let audioCtx = null;
 let audioUnlocked = false;
 let lastPrices = {};
@@ -87,16 +88,24 @@ function saveTrades() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localTrades.slice(0, 200))); } catch(e) {}
 }
 window.clearTrades = function() {
-  localTrades = []; wins = 0; losses = 0;
+  localTrades = []; latestServerTrades = []; wins = 0; losses = 0;
   localStorage.removeItem(STORAGE_KEY);
   renderTradeLog(); updateWinRate();
 };
 
+function tradeSource() {
+  return latestServerTrades && latestServerTrades.length ? latestServerTrades : localTrades;
+}
+
+function persistentTrades() {
+  return tradeSource().filter(t => t.s !== 'SESSION' && t.e !== 'START');
+}
+
 // Returns only trades from the most recent engine session (after last SESSION START marker)
 function currentSessionTrades() {
-  // localTrades is newest-first. Find the first SESSION entry (most recent session boundary).
+  const source = tradeSource();
   const allNonSession = [];
-  for (const t of localTrades) {
+  for (const t of source) {
     if (t.s === 'SESSION' || t.e === 'START') break; // stop at session boundary
     allNonSession.push(t);
   }
@@ -105,6 +114,7 @@ function currentSessionTrades() {
 
 //  TRADE MERGE 
 function mergeTrades(serverLog, isBootLoad) {
+  latestServerTrades = serverLog ? serverLog.slice(0, 200) : [];
   if (!serverLog || !serverLog.length) return;
   const before = localTrades.length;
   const existing = new Set(localTrades.map(t => `${t.t}|${t.s}|${t.e}|${t.p}`));
@@ -146,6 +156,7 @@ const $ = id => document.getElementById(id);
 const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
 const fmtPnl = v => (v >= 0 ? '+' : '') + (+v).toFixed(2) + 'bp';
 const pnlCls = (base, v) => base + ' ' + (+v > 0 ? 'pos' : +v < 0 ? 'neg' : '');
+const fmtClockFromMs = ts => ts ? new Date(ts).toISOString().substring(11, 16) : '--';
 
 const ACCOUNT_SIZE = 10000;
 const bpToUsd = bp => (bp / 10000) * ACCOUNT_SIZE;
@@ -312,7 +323,7 @@ function renderTradeLog() {
 function renderRpTrades() {
   var list = document.getElementById('rp-trade-list');
   if (!list) return;
-  var trades = localTrades.filter(function(t){ return t.s !== 'SESSION'; });
+  var trades = tradeSource().filter(function(t){ return t.s !== 'SESSION'; });
   if (!trades.length) {
     list.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No trades yet</div>';
     return;
@@ -368,6 +379,136 @@ function renderRpTrades() {
     html += '</div>';
     html += '</div>';
     return html;
+  }).join('');
+}
+
+function updateOrderDiagnostics(data) {
+  const d = data && data.order_diag ? data.order_diag : null;
+  if (!d) return;
+
+  set('od-submitted', d.submitted || 0);
+  set('od-filled', d.filled || 0);
+  set('od-canceled', d.canceled || 0);
+  set('od-rejected', d.rejected || 0);
+  set('od-timeouts', d.timeout_cancels || 0);
+  set('od-fill-rate', d.fill_rate != null ? d.fill_rate.toFixed(0) + '%' : '--');
+  set('od-cancel-rate', d.cancel_rate != null ? d.cancel_rate.toFixed(0) + '%' : '--');
+
+  const hint = $('od-hint');
+  if (hint) {
+    let msg = 'Waiting for order flow.';
+    if ((d.submitted || 0) === 0) {
+      msg = 'No orders submitted. Trade frequency is limited by signal gating, not execution.';
+    } else if ((d.filled || 0) === 0) {
+      msg = 'Signals are posting orders, but none are filling. Increase frequency via fill quality, not looser alpha.';
+    } else if ((data.total_trades || 0) === 0) {
+      msg = 'Orders are filling, but no positions have exited yet.';
+    } else if ((d.timeout_cancels || 0) > (d.filled || 0)) {
+      msg = 'Most entry attempts are timing out. Safer frequency gains come from better maker joins or longer holdable edges.';
+    } else {
+      msg = 'Order flow is live. Focus on profitable follow-through, not raw trade count.';
+    }
+    hint.textContent = msg;
+  }
+
+  const byLayer = $('od-by-layer');
+  if (byLayer) {
+    const rows = (d.by_layer || []).slice(0, 8);
+    if (!rows.length) {
+      byLayer.innerHTML = '<div style="color:var(--muted);font-size:11px;font-style:italic">No order activity yet</div>';
+    } else {
+      byLayer.innerHTML = rows.map(row => `
+        <div class="stat-row">
+          <span class="sr-label">${row.name}</span>
+          <span style="display:flex;gap:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums">
+            <span>S ${row.submitted}</span>
+            <span style="color:var(--green)">F ${row.filled}</span>
+            <span style="color:var(--yellow)">C ${row.canceled}</span>
+            <span>${(row.fill_rate || 0).toFixed(0)}%</span>
+          </span>
+        </div>
+      `).join('');
+    }
+  }
+
+  const recent = $('od-recent');
+  if (recent) {
+    const rows = (d.recent || []).slice(0, 10);
+    if (!rows.length) {
+      recent.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No recent order events</div>';
+    } else {
+      recent.innerHTML = rows.map(ev => {
+        const cls = ev.event === 'order_filled' ? 'rt-win' :
+                    ev.event === 'order_rejected' ? 'rt-loss' : '';
+        const reason = ev.reason || ev.status || '--';
+        return `<div class="rt-row ${cls}">
+          <span class="rt-time">${fmtClockFromMs(ev.ts_ms)}</span>
+          <span class="rt-sym">${(ev.symbol || '').replace('usdt','').toUpperCase()}</span>
+          <span class="rt-eng">${ev.layer || '--'}</span>
+          <span class="rt-why">${(ev.event || '').replace('order_','').toUpperCase()}</span>
+          <span class="rt-pnl ${ev.event === 'order_filled' ? 'pos' : ev.event === 'order_rejected' ? 'neg' : ''}">${reason}</span>
+          <span class="rt-hold">${ev.order_type || '--'}</span>
+        </div>`;
+      }).join('');
+    }
+  }
+}
+
+function updateHistoryPanel() {
+  const trades = persistentTrades();
+  const total = trades.length;
+  const winsN = trades.filter(t => (+t.p || 0) >= 0).length;
+  const lossesN = total - winsN;
+  const totalPnl = trades.reduce((acc, t) => acc + (+t.p || 0), 0);
+  const wr = total > 0 ? (winsN / total * 100) : 0;
+
+  set('hist-count', total);
+  set('hist-wins', winsN);
+  set('hist-losses', lossesN);
+  set('hist-wr', total > 0 ? wr.toFixed(0) + '%' : '--%');
+  set('hist-pnl', total > 0 ? fmtPnl(totalPnl) : '+0.00bp');
+
+  const hp = $('hist-pnl');
+  if (hp) hp.className = 'tp-val ' + (totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : '');
+  const hw = $('hist-wr');
+  if (hw) hw.className = 'tp-val ' + (total > 0 ? (wr >= 50 ? 'pos' : 'neg') : '');
+
+  const insightEl = $('hist-insight');
+  if (insightEl) {
+    let msg = 'Persistent history is loaded from disk and survives restarts.';
+    const recent = trades.slice(0, 2);
+    if (recent.length === 2 &&
+        recent.every(t => t.s === 'BTC' && t.e === 'OFI' && (t.why || t.reason) === 'TIMEOUT') &&
+        recent.every(t => (+t.mfe || 0) <= 0.10)) {
+      msg = 'The last 2 completed trades were BTC OFI timeouts with no follow-through. Frequency should come from faster OFI recycling and more ETH/BNB/SOL participation, not repeated dead BTC entries.';
+    } else if (recent.length > 0) {
+      msg = 'History shows which layers are completing trades across resets. Use the order funnel to separate submitted orders from completed exits.';
+    }
+    insightEl.textContent = msg;
+  }
+
+  const list = $('history-trades-list');
+  if (!list) return;
+  if (!trades.length) {
+    list.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No persistent completed trades yet</div>';
+    return;
+  }
+
+  list.innerHTML = trades.slice(0, 12).map(tr => {
+    const p = +tr.p || 0;
+    const isWin = p >= 0;
+    const sym = (tr.s || '').replace('USDT','').replace('/','');
+    const eng = (tr.e || '?').toUpperCase();
+    const why = normalizeReason(tr.why || tr.reason || '?');
+    const time = tr.t ? (tr.t.length > 10 ? tr.t.substring(5,16).replace('T',' ') : tr.t) : '--';
+    return `<div class="rt-row ${isWin ? 'rt-win' : 'rt-loss'}">
+      <span class="rt-time">${time}</span>
+      <span class="rt-sym">${sym}</span>
+      <span class="rt-eng">${eng}</span>
+      <span class="rt-why">${why}</span>
+      <span class="rt-pnl ${isWin ? 'pos' : 'neg'}">${isWin ? '+' : ''}${p.toFixed(2)}bp</span>
+      <span class="rt-hold">${fmtHold(tr.hold)}</span>
+    </div>`;
   }).join('');
 }
 
@@ -576,6 +717,8 @@ function updateBoostPanel(data) {
 
   // Boost multiplier panel
   updateBoostPanel(data);
+  updateOrderDiagnostics(data);
+  updateHistoryPanel();
 
   // Exit breakdown
   if (data.session) {

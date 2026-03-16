@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <functional>
+#include <filesystem>
 
 namespace chimera {
 
@@ -144,8 +145,7 @@ private:
     }
 
     void serve_file(int client_fd, const std::string& filename, const std::string& content_type) {
-        std::string filepath = "/home/jo/ChimeraCrypto/gui/" + filename;
-        std::ifstream file(filepath);
+        std::ifstream file(resolve_gui_file(filename));
         
         if (!file) {
             send_404(client_fd);
@@ -167,6 +167,22 @@ private:
         response << body;
         
         send_all(client_fd, response.str());
+    }
+
+    static std::string resolve_gui_file(const std::string& filename) {
+        const std::filesystem::path cwd = std::filesystem::current_path();
+        const std::filesystem::path candidates[] = {
+            cwd / "gui" / filename,
+            cwd / ".." / "gui" / filename,
+            std::filesystem::path("/Users/jo/Documents/ChimeraCrypto/gui") / filename,
+        };
+        std::error_code ec;
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::exists(candidate, ec)) {
+                return candidate.string();
+            }
+        }
+        return (cwd / "gui" / filename).string();
     }
     
     void serve_state(int client_fd) {

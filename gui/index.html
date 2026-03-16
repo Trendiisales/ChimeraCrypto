@@ -621,7 +621,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   <!-- TRADES PANEL -->
   <div class="trades-panel">
     <div class="trades-panel-hd">
-      <span class="tp-label">TRADE LOG</span>
+      <span class="tp-label">COMPLETED TRADES</span>
       <div class="tp-stats">
         <span>W:<span id="tp-wins" class="tp-val pos">0</span></span>
         <span>L:<span id="tp-losses" class="tp-val neg">0</span></span>
@@ -640,6 +640,42 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
     <div class="trades-panel-body">
       <div id="recent-trades-list" style="padding:4px 0">
         <div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">Waiting for first trade...</div>
+      </div>
+    </div>
+
+    <div style="padding:8px 12px;border-top:1px solid var(--border)">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px">ORDER FUNNEL</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;font-variant-numeric:tabular-nums;margin-bottom:6px">
+        <span>S:<span id="od-submitted" class="tp-val">0</span></span>
+        <span style="color:var(--green)">F:<span id="od-filled" class="tp-val pos">0</span></span>
+        <span style="color:var(--yellow)">C:<span id="od-canceled" class="tp-val">0</span></span>
+        <span style="color:var(--red)">R:<span id="od-rejected" class="tp-val neg">0</span></span>
+        <span>TO:<span id="od-timeouts" class="tp-val">0</span></span>
+        <span>Fill%:<span id="od-fill-rate" class="tp-val">--</span></span>
+        <span>Cancel%:<span id="od-cancel-rate" class="tp-val">--</span></span>
+      </div>
+      <div id="od-hint" style="font-size:11px;color:var(--muted);margin-bottom:8px">Waiting for order flow.</div>
+      <div id="od-by-layer" style="margin-bottom:8px">
+        <div style="color:var(--muted);font-size:11px;font-style:italic">No order activity yet</div>
+      </div>
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin:8px 0 6px">RECENT ORDER EVENTS</div>
+      <div id="od-recent" style="padding:0 0 4px">
+        <div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No recent order events</div>
+      </div>
+    </div>
+
+    <div style="padding:8px 12px;border-top:1px solid var(--border)">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px">PERSISTENT HISTORY</div>
+      <div class="tp-stats" style="margin-bottom:6px">
+        <span>T:<span id="hist-count" class="tp-val">0</span></span>
+        <span>W:<span id="hist-wins" class="tp-val pos">0</span></span>
+        <span>L:<span id="hist-losses" class="tp-val neg">0</span></span>
+        <span>WR:<span id="hist-wr" class="tp-val">--%</span></span>
+        <span>PnL:<span id="hist-pnl" class="tp-val">+0.00bp</span></span>
+      </div>
+      <div id="hist-insight" style="font-size:11px;color:var(--muted);margin-bottom:8px">Persistent history is loaded from disk and survives restarts.</div>
+      <div id="history-trades-list" style="padding:0 0 4px">
+        <div style="padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic">No persistent completed trades yet</div>
       </div>
     </div>
 

@@ -70,6 +70,11 @@ public:
                 timeout = 300;
                 stale_bp = 2.0;
                 break;
+            case 5:
+                join_ratio = 0.10;
+                timeout = TradingConfig::MAKER_IMBALANCE_TIMEOUT_MS;
+                stale_bp = TradingConfig::MAKER_STALE_BP;
+                break;
             default:
                 join_ratio = 0.20;
                 timeout = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;
@@ -192,6 +197,20 @@ public:
     }
 
 private:
+    bool rests_inside_spread(double bid, double ask) const {
+        if (order_.limit_price <= 0.0 || bid <= 0.0 || ask <= 0.0 || ask <= bid) {
+            return false;
+        }
+
+        const double tolerance = std::max(1e-8, order_.limit_price * 1e-9);
+        if (order_.is_buy) {
+            return order_.limit_price > bid + tolerance &&
+                   order_.limit_price < ask - tolerance;
+        }
+        return order_.limit_price < ask - tolerance &&
+               order_.limit_price > bid + tolerance;
+    }
+
     bool crosses_book(double ask, double bid) const {
         if (order_.is_buy) {
             return ask > 0.0 && ask <= order_.limit_price;
@@ -208,13 +227,17 @@ private:
 
         const double tolerance = std::max(1e-8, order_.limit_price * 1e-9);
         if (order_.is_buy) {
-            const bool at_or_better_bid = bid > 0.0 && bid + tolerance >= order_.limit_price;
+            const bool at_or_better_bid =
+                (bid > 0.0 && bid + tolerance >= order_.limit_price) ||
+                rests_inside_spread(bid, ask);
             const bool seller_aggressed = agg_sell_volume > 0.0;
             const bool trade_hit_level = trade_price <= order_.limit_price + tolerance;
             return at_or_better_bid && seller_aggressed && trade_hit_level;
         }
 
-        const bool at_or_better_ask = ask > 0.0 && ask - tolerance <= order_.limit_price;
+        const bool at_or_better_ask =
+            (ask > 0.0 && ask - tolerance <= order_.limit_price) ||
+            rests_inside_spread(bid, ask);
         const bool buyer_aggressed = agg_buy_volume > 0.0;
         const bool trade_hit_level = trade_price + tolerance >= order_.limit_price;
         return at_or_better_ask && buyer_aggressed && trade_hit_level;

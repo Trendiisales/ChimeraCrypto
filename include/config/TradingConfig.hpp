@@ -133,9 +133,9 @@ struct TradingConfig {
     static constexpr double  LIQ_MIN_BOOK_IMBALANCE = 0.08;     // require at least mild bid pressure
     static constexpr double  LIQ_MIN_VOL_RATIO      = 0.90;     // avoid dead tape
     static constexpr double  LIQ_MAX_VOL_RATIO      = 2.40;     // avoid panic blow-off fills
-    static constexpr double  LIQ_TP_BP              = 6.0;      // tighter TP: avg MFE was 3.72bp, 10bp was never reached
-    static constexpr double  LIQ_SL_BP              = 2.0;      // tighter SL: liq cascade either works fast or fails
-    static constexpr int64_t LIQ_MAX_HOLD_MS        = 2000;     // 2s: liquidation cascade resolves in <2s or not at all
+    static constexpr double  LIQ_TP_BP              = 10.0;     // raised from 6bp: now maker entry (~4bp cost), 10bp TP = +3bp net at 55% WR
+    static constexpr double  LIQ_SL_BP              = 3.0;      // raised from 2bp: tighter SL was too tight for maker fill noise
+    static constexpr int64_t LIQ_MAX_HOLD_MS        = 3000;     // 3s: cascade resolves fast; maker fill adds ~400ms, 3s total is safe
 
 
     // -------------------------------------------------------------------------
@@ -386,8 +386,8 @@ struct TradingConfig {
     static constexpr double  SOL_LEAD_SUSTAIN_MULT  =  0.58; // sustain: 7/12bp threshold
 
     // VOLUME SHOCK CONTINUATION ENGINE
-    static constexpr double  VOLSHOCK_TP_BP         = 14.0;  // conservative: new engine, no data yet
-    static constexpr double  VOLSHOCK_SL_BP         =  4.0;  // 2.5:1 gross R:R
+    static constexpr double  VOLSHOCK_TP_BP         = 18.0;  // raised from 14bp: maker entry (~4bp cost) makes 18bp TP give +5bp EV at 55% WR
+    static constexpr double  VOLSHOCK_SL_BP         =  4.0;  // 3.5:1 gross R:R
     static constexpr int64_t VOLSHOCK_MAX_HOLD_MS   = 6000;  // 6s -- let continuation develop
 
     // NGAS LEAD-LAG ENGINE  Natural Gas macro signal leads crypto risk rotation

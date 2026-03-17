@@ -765,8 +765,10 @@ public:
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
         // SOL-LEAD: 0% WR, net -17bp -- HARD DISABLED
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
-        // VOLSHOCK: no edge demonstrated -- PARKED
-        // if (check_vol_shock(id, price, ts, s, latency_ms)) return;
+        // VOLSHOCK: maker entry now wired (layer_id=7, ask-0.1*spread, 500ms)
+        // At maker cost 4bp: EV = 0.55*14 - 0.45*4 = 7.7-1.8 = +5.9bp at 55% WR
+        // Requires vol spike 3x baseline + displacement 8bp — higher conviction than EXPAND
+        if (check_vol_shock(id, price, ts, s, latency_ms)) return;
 
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
@@ -781,8 +783,9 @@ public:
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
-            // MM-PRESSURE: 1 trade 0% WR -6.9bp -- PARKED (too few samples, no edge shown)
-            // if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            // MM-PRESSURE: maker entry, GRIND-only, 3 confirmation gates — re-enabled
+            // 1 trade sample was insufficient to park; structural edge is sound
+            if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
             // NEW: BTC/ETH cointegration stat arb (BTC and ETH only)
             if (check_statarb(id, price, ts, s, latency_ms)) return;
             // NEW: Session open momentum (London/NY/Asia opens)
@@ -1296,25 +1299,25 @@ private:
     }
 
     double edge_round_trip_cost_bp(EdgeEngineKey k) const {
-        if (k == EDGE_LIQ || k == EDGE_SWEEP) return TradingConfig::TAKER_ROUND_TRIP_BP;
+        // MAKER-ONLY POLICY: only SWEEP is still classified as taker (parked, no samples)
+        if (k == EDGE_SWEEP) return TradingConfig::TAKER_ROUND_TRIP_BP;
         return TradingConfig::MAKER_ROUND_TRIP_BP;
     }
 
     bool layer_uses_taker_entry(LayerMode layer) const {
+        // MAKER-ONLY POLICY (2026-03-17):
+        // Taker round-trip cost (~10bp) makes all fast scalp strategies structurally
+        // unprofitable given observed avg MFE of 1-4bp. All entries now use maker limits.
+        // Disabled layers are commented out in dispatch and never reach enter(), but
+        // keeping this function accurate prevents accidental re-enablement.
         switch (layer) {
-            case LAYER_LEADLAG:
-            case LAYER_LEADLAG_ETH_SOL:
-            case LAYER_LIQUIDATION:
-            case LAYER_IMPULSE:
-            case LAYER_EXPANSION:
-            case LAYER_ETH_LEAD:
-            case LAYER_SOL_LEAD:
-            case LAYER_VOLSHOCK:
-            case LAYER_SWEEP:
-            case LAYER_SESSION_MOM:  // session open = taker (time-sensitive)
-                return true;
+            case LAYER_IMPULSE:         // DISABLED — was taker, 0% WR
+            case LAYER_ETH_LEAD:        // DISABLED — was taker, 17% WR
+            case LAYER_SOL_LEAD:        // DISABLED — was taker, 0% WR
+            case LAYER_SWEEP:           // PARKED — was taker, no samples
+                return true;            // keep as taker so cost floor rejects if re-enabled
             default:
-                return false;
+                return false;           // all active layers: maker
         }
     }
 
@@ -2290,10 +2293,9 @@ private:
         // so we don't give back most of the move to timeout.
         if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION
             || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM) {
-            const double round_trip_cost =
-                (s.pos.layer == LAYER_LIQUIDATION || s.pos.layer == LAYER_SESSION_MOM)
-                    ? TradingConfig::TAKER_ROUND_TRIP_BP
-                    : TradingConfig::MAKER_ROUND_TRIP_BP;
+            // MAKER-ONLY POLICY: all active layers now use maker entry (~4bp cost)
+            // Previously LIQ and SESSION_MOM used TAKER_ROUND_TRIP_BP — corrected.
+            const double round_trip_cost = TradingConfig::MAKER_ROUND_TRIP_BP;
             // For VWAP: arm at cost+0.5 when partial triggered, otherwise cost+1.5
             const double arm_bp = (s.pos.layer == LAYER_VWAP && s.pos.partial_exit_done)
                 ? round_trip_cost + 0.5
@@ -3080,19 +3082,20 @@ private:
         // eng_mult: position size multiplier per layer
         // All aggressive multipliers removed until net-positive edge confirmed
         // over 50+ trades. LEADLAG was 4x on gross-positive/net-negative edge.
-        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 0.6 :  // event-driven but noisy in shadow: downsize until proven net-positive
+        double eng_mult = (layer == LAYER_LIQUIDATION)      ? 1.0 :  // maker entry now — size normally; was 0.6 due to taker-era noise
                           (layer == LAYER_FUNDING)          ? 1.5 :  // slow-burn
                           (layer == LAYER_NGAS)             ? 1.0 :  // macro, unproven net
                           (layer == LAYER_LEADLAG)          ? 1.0 :  // BUG5 FIX: was 4x, net-negative at 47% WR
                           (layer == LAYER_LEADLAG_ETH_SOL)  ? 0.5 :  // net-negative until proven (see audit)
-                          (layer == LAYER_IMPULSE)          ? 1.0 :  // neutral until net confirmed
-                          (layer == LAYER_EXPANSION)        ? 0.8 :  // BUG10: net-negative, reduce exposure
-                          (layer == LAYER_ETH_LEAD)         ? 1.0 :  // unproven, neutral
-                          (layer == LAYER_SOL_LEAD)         ? 1.0 :  // unproven, neutral
-                          (layer == LAYER_VOLSHOCK)         ? 0.5 :  // new engine, conservative
-                          (layer == LAYER_OFI)              ? 0.5 :  // new engine, conservative
-                          (layer == LAYER_SWEEP)            ? 0.5 :  // new engine, taker — conservative
-                          (layer == LAYER_MM_PRESSURE)      ? 0.5 :  // new engine, conservative
+                          (layer == LAYER_IMPULSE)          ? 1.0 :  // DISABLED — kept for completeness
+                          (layer == LAYER_EXPANSION)        ? 0.8 :  // DISABLED — kept for completeness
+                          (layer == LAYER_ETH_LEAD)         ? 1.0 :  // DISABLED
+                          (layer == LAYER_SOL_LEAD)         ? 1.0 :  // DISABLED
+                          (layer == LAYER_VOLSHOCK)         ? 0.7 :  // new with maker entry: conservative until 20+ samples
+                          (layer == LAYER_OFI)              ? 0.5 :  // DISABLED — kept for completeness
+                          (layer == LAYER_SWEEP)            ? 0.5 :  // PARKED
+                          (layer == LAYER_MM_PRESSURE)      ? 0.8 :  // re-enabled: conservative first run
+                          (layer == LAYER_SESSION_MOM)      ? 0.8 :  // new with maker entry: conservative until session samples arrive
                           (layer == LAYER_VWAP)             ? 1.0 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
@@ -3172,12 +3175,18 @@ private:
             double ask = s.last_tick.ask > 0.0 ? s.last_tick.ask : price * 1.0001;
 
             // Map LayerMode to int id expected by LimitOrderManager
-            // 0=IMBALANCE(maker/bid), 1=IMPULSE(taker/ask), 2=EXPANSION(maker/mid), 3=LEADLAG(taker/ask)
-            // 4=LEADLAG-MAKER: post at ask-0.1*spread (aggressive maker, ~4bp saving vs taker)
-            int layer_int = (layer == LAYER_MICRO)          ? 0 :
-                            (layer == LAYER_EXPANSION)      ? 2 :
-                            (layer == LAYER_LEADLAG)        ? 4 :
-                            (layer == LAYER_LEADLAG_ETH_SOL)? 4 : 0;
+            // 0=IMBALANCE(maker/bid), 1=IMPULSE(taker/ask — disabled), 2=EXPANSION(maker/mid — disabled)
+            // 3=LEADLAG(taker/ask — disabled), 4=LEADLAG-aggressive-maker (ask-0.1*spread, 300ms)
+            // 5=LIQUIDATION-maker (bid+0.1*spread, 400ms — fast event, needs quick fill near bid)
+            // 6=SESSION_MOM-maker (ask-0.15*spread, 800ms — session open, price displacing upward)
+            // 7=VOLSHOCK-maker (ask-0.1*spread, 500ms — volume spike, fast but not as urgent as leadlag)
+            int layer_int = (layer == LAYER_MICRO)           ? 0 :
+                            (layer == LAYER_EXPANSION)       ? 2 :
+                            (layer == LAYER_LEADLAG)         ? 4 :
+                            (layer == LAYER_LEADLAG_ETH_SOL) ? 4 :
+                            (layer == LAYER_LIQUIDATION)     ? 5 :
+                            (layer == LAYER_SESSION_MOM)     ? 6 :
+                            (layer == LAYER_VOLSHOCK)        ? 7 : 0;
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
             const double limit_px = limit_orders_[id].order().limit_price;

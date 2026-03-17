@@ -108,7 +108,33 @@ public:
             timeout   = 300;   // 300ms: LEADLAG edge window ~80ms, 3x buffer
             stale_bp  = 2.0;   // cancel if ask rises 2bp — move has started without us
         }
-        // LAYER_EXPANSION: post at mid - 0.3 * spread (kept for reference, currently disabled)
+        // LAYER_LIQUIDATION maker (layer_id=5): post at bid + 0.1*spread
+        // LIQ cascade pushes price up fast — we post just above bid to catch the lift.
+        // 400ms timeout: cascade either resolves in <2s or doesn't at all.
+        // Stale at 3bp: if ask blows past us by 3bp the cascade already ran without us.
+        else if (layer_id == 5) {
+            limit_px  = bid + 0.1 * spread;
+            timeout   = 400;   // 400ms: cascade front-runs fast, must fill early
+            stale_bp  = 3.0;   // if ask runs 3bp above limit, cascade is already in price
+        }
+        // LAYER_SESSION_MOM maker (layer_id=6): post at ask - 0.15*spread
+        // Session open momentum — price is displacing upward but not spiking yet.
+        // Patient maker fill: 800ms is fine, session momentum lasts 10-20 minutes.
+        // Stale at 4bp: if we're 4bp away the displacement already ran.
+        else if (layer_id == 6) {
+            limit_px  = ask - 0.15 * spread;
+            timeout   = 800;   // 800ms: session momentum is slower than scalp signals
+            stale_bp  = 4.0;   // wider stale — session opens have more noise
+        }
+        // LAYER_VOLSHOCK maker (layer_id=7): post at ask - 0.1*spread
+        // Volume shock + displacement — similar urgency to LEADLAG but slightly slower.
+        // 500ms timeout: if volume spike hasn't attracted a fill in 500ms, edge is gone.
+        else if (layer_id == 7) {
+            limit_px  = ask - 0.1 * spread;
+            timeout   = 500;   // 500ms: vol shock continuation is slightly slower than leadlag
+            stale_bp  = 2.5;   // cancel if ask rises 2.5bp — move ran without us
+        }
+        // LAYER_EXPANSION and fallback: post at mid - 0.3 * spread (kept for reference, disabled)
         else {
             limit_px  = mid - 0.3 * spread;
             timeout   = TradingConfig::MAKER_IMPULSE_TIMEOUT_MS;

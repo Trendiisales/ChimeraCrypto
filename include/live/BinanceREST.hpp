@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <optional>
 #include <unordered_map>
+#include <cmath>
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -41,6 +42,17 @@ struct AccountBalance {
 
 class BinanceREST {
 public:
+    struct SymbolFilters {
+        bool loaded = false;
+        double tick_size = 0.0;
+        double min_price = 0.0;
+        double max_price = 0.0;
+        double step_size = 0.0;
+        double min_qty = 0.0;
+        double max_qty = 0.0;
+        double min_notional = 0.0;
+    };
+
     bool load_credentials(const std::string& path,
                           std::optional<bool> shadow_override = std::nullopt,
                           bool shadow_validate_on_exchange = false) {
@@ -163,16 +175,39 @@ public:
 
         const std::string side = is_buy ? "BUY" : "SELL";
         const std::string ts = timestamp_ms();
+        const SymbolFilters filters = get_symbol_filters(symbol);
+
+        const double normalized_qty = normalize_qty(qty, filters);
+        if (normalized_qty <= 0.0) {
+            result.error = "qty_below_exchange_min";
+            return result;
+        }
+
+        double normalized_limit_price = limit_price;
+        if (order_type == "LIMIT_MAKER") {
+            normalized_limit_price = normalize_price(limit_price, filters, is_buy);
+            if (normalized_limit_price <= 0.0) {
+                result.error = "price_below_exchange_min";
+                return result;
+            }
+        }
+
+        if (filters.min_notional > 0.0 && normalized_limit_price > 0.0) {
+            if (normalized_qty * normalized_limit_price + 1e-12 < filters.min_notional) {
+                result.error = "notional_below_exchange_min";
+                return result;
+            }
+        }
 
         std::ostringstream qs;
         qs << "symbol=" << symbol
            << "&side=" << side
            << "&type=" << order_type
-           << "&quantity=" << format_qty(qty)
+           << "&quantity=" << format_qty(normalized_qty)
            << "&newClientOrderId=" << client_id;
 
         if (order_type == "LIMIT_MAKER") {
-            qs << "&price=" << format_price(limit_price);
+            qs << "&price=" << format_price(normalized_limit_price);
         }
 
         qs << "&recvWindow=5000"
@@ -211,8 +246,9 @@ public:
 
             result.ok = true;
             result.status = (order_type == "LIMIT_MAKER") ? "NEW" : "FILLED";
-            result.executed_qty = (order_type == "LIMIT_MAKER") ? 0.0 : qty;
-            result.avg_price = (order_type == "LIMIT_MAKER") ? limit_price : 0.0;
+            result.executed_qty = (order_type == "LIMIT_MAKER") ? 0.0 : normalized_qty;
+            result.avg_price = (order_type == "LIMIT_MAKER") ? normalized_limit_price : 0.0;
+            result.limit_price = normalized_limit_price;
             result.order_id = synth_shadow_order_id(client_id);
             shadow_orders_[client_id] = result;
             orders_sent_.fetch_add(1, std::memory_order_relaxed);
@@ -251,8 +287,8 @@ public:
         }
 
         std::printf("[LIVE-ORDER] %s %s %.8f | type=%s | id=%ld status=%s avg_px=%.8f limit_px=%.8f\n",
-                    side.c_str(), symbol.c_str(), qty, order_type.c_str(),
-                    result.order_id, result.status.c_str(), result.avg_price, limit_price);
+                    side.c_str(), symbol.c_str(), normalized_qty, order_type.c_str(),
+                    result.order_id, result.status.c_str(), result.avg_price, normalized_limit_price);
         std::fflush(stdout);
 
         orders_sent_.fetch_add(1, std::memory_order_relaxed);
@@ -434,6 +470,7 @@ private:
     std::mutex mtx_;
     std::atomic<int> orders_sent_{0};
     std::unordered_map<std::string, OrderResult> shadow_orders_;
+    std::unordered_map<std::string, SymbolFilters> symbol_filters_;
 
     static long synth_shadow_order_id(const std::string& client_id) {
         return static_cast<long>(
@@ -460,6 +497,94 @@ private:
         auto now = std::chrono::system_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         return std::to_string(ms);
+    }
+
+    SymbolFilters get_symbol_filters(const std::string& symbol) {
+        auto it = symbol_filters_.find(symbol);
+        if (it != symbol_filters_.end()) {
+            return it->second;
+        }
+
+        SymbolFilters filters;
+        std::string body;
+        long http_code = 0;
+        if (get("/api/v3/exchangeInfo", "symbol=" + symbol, body, http_code) && http_code == 200) {
+            filters.tick_size = extract_filter_double(body, "PRICE_FILTER", "tickSize");
+            filters.min_price = extract_filter_double(body, "PRICE_FILTER", "minPrice");
+            filters.max_price = extract_filter_double(body, "PRICE_FILTER", "maxPrice");
+            filters.step_size = extract_filter_double(body, "LOT_SIZE", "stepSize");
+            filters.min_qty = extract_filter_double(body, "LOT_SIZE", "minQty");
+            filters.max_qty = extract_filter_double(body, "LOT_SIZE", "maxQty");
+            filters.min_notional = extract_filter_double(body, "MIN_NOTIONAL", "minNotional");
+            filters.loaded = true;
+        }
+
+        symbol_filters_[symbol] = filters;
+        return filters;
+    }
+
+    static double extract_filter_double(const std::string& body,
+                                        const std::string& filter_type,
+                                        const std::string& field) {
+        const std::string filter_needle = "\"filterType\":\"" + filter_type + "\"";
+        auto pos = body.find(filter_needle);
+        if (pos == std::string::npos) return 0.0;
+
+        const std::string field_needle = "\"" + field + "\":\"";
+        pos = body.find(field_needle, pos);
+        if (pos == std::string::npos) return 0.0;
+        pos += field_needle.size();
+        auto end = body.find('"', pos);
+        if (end == std::string::npos) return 0.0;
+        try {
+            return std::stod(body.substr(pos, end - pos));
+        } catch (...) {
+            return 0.0;
+        }
+    }
+
+    static double floor_to_step(double value, double step) {
+        if (step <= 0.0) return value;
+        const double scaled = std::floor((value / step) + 1e-12);
+        return scaled * step;
+    }
+
+    static double ceil_to_step(double value, double step) {
+        if (step <= 0.0) return value;
+        const double scaled = std::ceil((value / step) - 1e-12);
+        return scaled * step;
+    }
+
+    static double normalize_qty(double qty, const SymbolFilters& filters) {
+        double out = qty;
+        if (filters.step_size > 0.0) {
+            out = floor_to_step(out, filters.step_size);
+        }
+        if (filters.min_qty > 0.0 && out + 1e-12 < filters.min_qty) {
+            return 0.0;
+        }
+        if (filters.max_qty > 0.0 && out > filters.max_qty) {
+            out = filters.max_qty;
+            if (filters.step_size > 0.0) {
+                out = floor_to_step(out, filters.step_size);
+            }
+        }
+        return out;
+    }
+
+    static double normalize_price(double px, const SymbolFilters& filters, bool is_buy) {
+        double out = px;
+        if (filters.tick_size > 0.0) {
+            out = is_buy ? floor_to_step(out, filters.tick_size)
+                         : ceil_to_step(out, filters.tick_size);
+        }
+        if (filters.min_price > 0.0 && out + 1e-12 < filters.min_price) {
+            return 0.0;
+        }
+        if (filters.max_price > 0.0 && out > filters.max_price) {
+            return filters.max_price;
+        }
+        return out;
     }
 
     static std::string trim_number(const char* fmt, double value) {

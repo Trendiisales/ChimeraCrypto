@@ -203,30 +203,32 @@ private:
         // called under mtx_
         DIR* dir = opendir(LOG_DIR);
         if (!dir) return;
-        std::vector<std::string> log_files;
-        std::vector<std::string> csv_files;
+        std::vector<std::pair<time_t, std::string>> log_files;
+        std::vector<std::pair<time_t, std::string>> csv_files;
         struct dirent* ent;
         while ((ent = readdir(dir)) != nullptr) {
             std::string name(ent->d_name);
             if (name.rfind("chimera_", 0) != 0 || name.size() <= 4) continue;
             const std::string path = std::string(LOG_DIR) + "/" + name;
+            struct stat st{};
+            const time_t mtime = (::stat(path.c_str(), &st) == 0) ? st.st_mtime : 0;
             if (name.substr(name.size()-4) == ".log") {
-                log_files.push_back(path);
+                log_files.emplace_back(mtime, path);
             } else if (name.substr(name.size()-4) == ".csv") {
-                csv_files.push_back(path);
+                csv_files.emplace_back(mtime, path);
             }
         }
         closedir(dir);
 
         std::sort(log_files.begin(), log_files.end());
         while (static_cast<int>(log_files.size()) > LOG_KEEP_DAYS) {
-            std::remove(log_files.front().c_str());
+            std::remove(log_files.front().second.c_str());
             log_files.erase(log_files.begin());
         }
 
         std::sort(csv_files.begin(), csv_files.end());
         while (static_cast<int>(csv_files.size()) > LOG_KEEP_DAYS) {
-            std::remove(csv_files.front().c_str());
+            std::remove(csv_files.front().second.c_str());
             csv_files.erase(csv_files.begin());
         }
     }

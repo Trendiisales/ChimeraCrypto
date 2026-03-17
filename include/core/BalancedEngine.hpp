@@ -1680,13 +1680,10 @@ private:
         const char* sym = sym_short(id);  // was hardcoded ETH/SOL  now works for all 7 symbols
         std::string key = std::string(sym) + " LEADLAG";
 
-        // Spot HFT does not have enough post-cost edge on BTC/ETH/SOL follow trades.
-        // Restrict to higher-beta followers where a BTC burst can still produce a
-        // double-digit move after we pay entry/exit friction.
-        if (id < 3) {
-            rejection_throttle_.record(key, "symbol_filtered");
-            return false;
-        }
+        // BTC (id==0) is already blocked above — it cannot follow itself.
+        // ETH (id=1) and SOL (id=2) are valid BTC followers; prior filtering
+        // was based on a miscalibrated 6.5bp cost floor (now corrected to 10bp).
+        // All 7 symbols (ids 1-6) are eligible BTC lead-lag followers.
 
         if (ts < layer_lock_until_) {
             rejection_throttle_.record(key, "layer_locked");

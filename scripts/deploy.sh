@@ -71,12 +71,12 @@ if systemctl list-unit-files chimera.service > /dev/null 2>&1; then
         exit 1
     fi
 else
-    echo "[DEPLOY] ERROR: chimera.service not installed. Install it first:"
+    echo "[DEPLOY] ERROR: chimera.service not installed. Cannot start Chimera."
+    echo "[DEPLOY] Install the service first:"
     echo "  sudo cp $CHIMERA_DIR/scripts/chimera.service /etc/systemd/system/"
     echo "  sudo systemctl daemon-reload"
+    echo "  sudo systemctl enable chimera"
     echo "  sudo systemctl start chimera"
-    echo ""
-    echo "  Do NOT use 'systemctl enable chimera' — that causes auto-start on boot."
     exit 1
 fi
 

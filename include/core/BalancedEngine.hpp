@@ -745,17 +745,34 @@ public:
         // Try signals in priority order
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
 
-        // MACRO TREND FILTER: suppress all LONG-only signals when price is in downtrend
-        // trend_allows_long() = fast EMA >= slow EMA (500-tick baseline)
-        // All current signals are long-only on spot. No longs in a downtrend.
+        // MACRO TREND FILTER: suppress momentum signals when price is in meaningful downtrend
+        // IMPORTANT: mean-reversion signals (VWAP, DIVERGE, SPREAD-COMPRESS) are EXEMPT —
+        // they fire precisely BECAUSE price dropped vs trend. Blocking them defeats their purpose.
+        // Only block if gap is >= 5bp (genuine downtrend, not tick noise).
         const bool trend_ok = trend_allows_long(id);
         if (!trend_ok) {
             static int64_t last_trend_log_[MAX_SYMBOLS] = {};
             if (ts - last_trend_log_[id] > 30000) {
-                std::printf("[TREND-FILTER] %s | downtrend detected (fast_ema=%.4f < slow_ema=%.4f) | all longs suppressed\n",
-                    sym_short(id), trend_ema_fast_[id], trend_ema_slow_[id]);
+                double gap_bp = (trend_ema_slow_[id] - trend_ema_fast_[id]) / trend_ema_fast_[id] * 10000.0;
+                std::printf("[TREND-FILTER] %s | downtrend gap=%.2fbp (fast=%.2f slow=%.2f) | blocking momentum signals\n",
+                    sym_short(id), gap_bp, trend_ema_fast_[id], trend_ema_slow_[id]);
                 std::fflush(stdout);
                 last_trend_log_[id] = ts;
+            }
+            // Mean-reversion signals are exempt — they want price below trend
+            // Only block the momentum/event engines
+            if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
+            if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+            if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+            // Block remaining momentum signals during downtrend
+            // (LEADLAG, VOLSHOCK, SESSION_MOM, MM-PRESSURE all chase moves — not suitable in downtrend)
+            // Fall through to mean-reversion block below
+            const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
+            if (has_book) {
+                if (edge_gate_allows(id, EDGE_VWAP, ts)           && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+                if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
+                if (edge_gate_allows(id, EDGE_DIVERGE, ts)         && check_divergence(id, price, ts, s, latency_ms)) return;
+                if (check_statarb(id, price, ts, s, latency_ms)) return;
             }
             return;
         }
@@ -3692,13 +3709,16 @@ private:
     int    trend_tick_count_[MAX_SYMBOLS] = {};   // ticks since init
 
     // Returns true if macro trend permits a LONG entry on this symbol
-    // Suppresses longs when fast EMA is below slow EMA (downtrend confirmed)
+    // Suppresses longs when fast EMA is below slow EMA by >= 5bp (genuine downtrend)
+    // Gaps < 5bp are tick noise and do not block entries.
     bool trend_allows_long(int id) const {
         if (!trend_ema_init_[id]) return true;  // not enough data yet, allow
         if (trend_tick_count_[id] < 100) return true;  // need 100 ticks minimum
-        // fast < slow = bearish  block longs
-        const bool bullish = trend_ema_fast_[id] >= trend_ema_slow_[id];
-        return bullish;
+        if (trend_ema_fast_[id] <= 0.0) return true;
+        double gap_bp = (trend_ema_slow_[id] - trend_ema_fast_[id]) / trend_ema_fast_[id] * 10000.0;
+        // Only block on genuine downtrend — 5bp gap minimum
+        // Below 5bp is noise from normal tick-to-tick variance
+        return gap_bp < 5.0;
     }
 
     void update_trend_ema(int id, double price) {

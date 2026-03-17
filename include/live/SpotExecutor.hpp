@@ -15,7 +15,8 @@ namespace chimera {
 class SpotExecutor {
 public:
     bool init(const std::string& credentials_path = "config/binance_credentials.json",
-              std::optional<bool> shadow_override = std::nullopt) {
+              std::optional<bool> shadow_override = std::nullopt,
+              bool shadow_validate_on_exchange = false) {
         std::vector<std::string> candidates;
         candidates.push_back(credentials_path);
         if (credentials_path == "config/binance_credentials.json") {
@@ -30,7 +31,7 @@ public:
             std::error_code ec;
             if (!std::filesystem::exists(path, ec)) continue;
             attempted_existing = true;
-            if (rest_.load_credentials(path, shadow_override)) {
+            if (rest_.load_credentials(path, shadow_override, shadow_validate_on_exchange)) {
                 loaded = true;
                 loaded_path = path;
                 break;
@@ -66,6 +67,12 @@ public:
 
         std::printf("[EXECUTOR] Ready. shadow=%s\n",
                     rest_.is_shadow() ? "YES (paper trading)" : "NO (LIVE)");
+        if (rest_.is_shadow()) {
+            std::printf("[EXECUTOR] Shadow order validation: %s\n",
+                        rest_.validates_shadow_orders_on_exchange()
+                            ? "BINANCE_ORDER_TEST"
+                            : "LOCAL_SIM");
+        }
         std::fflush(stdout);
         return true;
     }
@@ -213,6 +220,9 @@ public:
     bool is_shadow() const { return rest_.is_shadow(); }
     bool is_shadow_mode() const { return rest_.is_shadow(); }
     bool is_ready() const { return rest_.is_ready(); }
+    bool validates_shadow_orders_on_exchange() const {
+        return rest_.validates_shadow_orders_on_exchange();
+    }
     int fills() const { return fills_.load(); }
     int errors() const { return errors_.load(); }
 

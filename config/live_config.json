@@ -3,7 +3,7 @@
     "shadow_mode": true,
     "shadow_mode_description": "Orders are logged and validated but NOT executed on exchange",
     "paper_mode": "maker_transferable",
-    "paper_mode_description": "Build and sign the exact LIMIT_MAKER payloads that live mode will send, but do not post them while shadow_mode=true",
+    "paper_mode_description": "Build and sign the exact live payloads, validate them via Binance order/test, and keep execution local while shadow_mode=true",
     "allow_live_orders": false,
     "maker_only": true,
     "spot_only": true,

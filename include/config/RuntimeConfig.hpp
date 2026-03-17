@@ -14,7 +14,7 @@ struct RuntimeConfig {
     bool shadow_mode_set = false;
     std::string paper_mode = "maker_transferable";
     std::string paper_mode_description =
-        "Build and sign the exact LIMIT_MAKER payloads that live mode will send, but do not post them while shadow_mode=true";
+        "Build and sign the exact live payloads, validate them via Binance order/test, and keep execution local while shadow_mode=true";
     bool allow_live_orders = false;
     bool maker_only = true;
     bool spot_only = true;

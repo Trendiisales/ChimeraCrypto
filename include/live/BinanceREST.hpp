@@ -42,7 +42,8 @@ struct AccountBalance {
 class BinanceREST {
 public:
     bool load_credentials(const std::string& path,
-                          std::optional<bool> shadow_override = std::nullopt) {
+                          std::optional<bool> shadow_override = std::nullopt,
+                          bool shadow_validate_on_exchange = false) {
         std::ifstream f(path);
         if (!f.is_open()) {
             std::fprintf(stderr, "[REST] Cannot open credentials file: %s\n", path.c_str());
@@ -72,6 +73,7 @@ public:
         if (shadow_override.has_value()) {
             shadow_mode_ = *shadow_override;
         }
+        shadow_validate_on_exchange_ = shadow_mode_ && shadow_validate_on_exchange;
 
         if (api_key_.empty() || api_key_ == "YOUR_BINANCE_API_KEY_HERE") {
             std::fprintf(stderr, "[REST] No API key set in %s\n", path.c_str());
@@ -87,8 +89,9 @@ public:
         std::printf("[REST] Key loaded: ...%s | Secret loaded: %s\n",
                     api_key_.size() > 8 ? api_key_.substr(api_key_.size() - 8).c_str() : "??",
                     api_secret_.empty() ? "NO" : "YES");
-        std::printf("[REST] Credentials loaded. shadow_mode=%s\n",
-                    shadow_mode_ ? "TRUE (no real orders)" : "FALSE (LIVE TRADING)");
+        std::printf("[REST] Credentials loaded. shadow_mode=%s | shadow_transport=%s\n",
+                    shadow_mode_ ? "TRUE (no real orders)" : "FALSE (LIVE TRADING)",
+                    shadow_validate_on_exchange_ ? "BINANCE_ORDER_TEST" : "LOCAL_SIM");
         std::fflush(stdout);
 
         curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -179,8 +182,31 @@ public:
         const std::string full_qs = payload + "&signature=" + sign(payload);
 
         if (shadow_mode_) {
-            std::printf("[SHADOW-ORDER] POST /api/v3/order | %s | type=%s | %s\n",
-                        symbol.c_str(), order_type.c_str(), full_qs.c_str());
+            if (shadow_validate_on_exchange_) {
+                std::string body;
+                long http_code = 0;
+                if (!post("/api/v3/order/test", full_qs, body, http_code)) {
+                    result.error = "shadow_order_test_curl_failed";
+                    std::fprintf(stderr,
+                                 "[SHADOW-ORDER-TEST] request failed | %s | type=%s\n",
+                                 symbol.c_str(), order_type.c_str());
+                    return result;
+                }
+                if (http_code != 200) {
+                    result.error = body.empty()
+                        ? ("shadow_order_test_http_" + std::to_string(http_code))
+                        : body;
+                    std::fprintf(stderr,
+                                 "[SHADOW-ORDER-TEST] rejected | %s | type=%s | http=%ld body=%s\n",
+                                 symbol.c_str(), order_type.c_str(), http_code, body.c_str());
+                    return result;
+                }
+                std::printf("[SHADOW-ORDER-TEST] POST /api/v3/order/test | %s | type=%s | %s\n",
+                            symbol.c_str(), order_type.c_str(), full_qs.c_str());
+            } else {
+                std::printf("[SHADOW-ORDER] POST /api/v3/order | %s | type=%s | %s\n",
+                            symbol.c_str(), order_type.c_str(), full_qs.c_str());
+            }
             std::fflush(stdout);
 
             result.ok = true;
@@ -396,12 +422,14 @@ public:
 
     bool is_shadow() const { return shadow_mode_; }
     bool is_ready() const { return ready_; }
+    bool validates_shadow_orders_on_exchange() const { return shadow_validate_on_exchange_; }
     int orders_sent() const { return orders_sent_.load(); }
 
 private:
     std::string api_key_;
     std::string api_secret_;
     bool shadow_mode_ = true;
+    bool shadow_validate_on_exchange_ = false;
     bool ready_ = false;
     std::mutex mtx_;
     std::atomic<int> orders_sent_{0};

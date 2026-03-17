@@ -165,8 +165,11 @@ private:
 
     void check_rotate() {
         // called under mtx_
-        if (utc_day() != current_day_) {
-            open_day_files_unlocked("LOG ROTATED");
+        const bool day_changed = utc_day() != current_day_;
+        const bool log_missing = !current_path_.empty() && ::access(current_path_.c_str(), F_OK) != 0;
+        const bool csv_missing = !current_csv_path_.empty() && ::access(current_csv_path_.c_str(), F_OK) != 0;
+        if (day_changed || log_missing || csv_missing) {
+            open_day_files_unlocked(day_changed ? "LOG ROTATED" : "LOG REOPENED");
             purge_old_logs();
         }
     }
@@ -445,6 +448,7 @@ int main() {
     std::optional<bool> shadow_override = runtime_cfg.shadow_mode_set
         ? std::optional<bool>(runtime_cfg.shadow_mode)
         : std::nullopt;
+    const bool shadow_validate_on_exchange = runtime_cfg.paper_mode == "maker_transferable";
     if (!runtime_cfg.allow_live_orders) {
         if (runtime_cfg.shadow_mode_set && !runtime_cfg.shadow_mode) {
             std::fprintf(stderr,
@@ -454,7 +458,8 @@ int main() {
         shadow_override = true;
     }
     bool executor_ok = executor.init(runtime_cfg.credentials_file,
-                                     shadow_override);
+                                     shadow_override,
+                                     shadow_validate_on_exchange);
     if (!executor_ok) {
         std::fprintf(stderr,
             "[STARTUP] WARNING: executor init failed  orders will be skipped.\n"
@@ -478,10 +483,17 @@ int main() {
         const bool effective_shadow_mode = executor_ok
             ? executor.is_shadow()
             : shadow_override.value_or(runtime_cfg.shadow_mode);
+        const char* shadow_transport = !effective_shadow_mode
+            ? "LIVE_ORDERS"
+            : (executor_ok && executor.validates_shadow_orders_on_exchange()
+                ? "BINANCE_ORDER_TEST"
+                : "LOCAL_SIM");
         std::ostringstream audit_fields;
         audit_fields << "\"mode\":\"" << (executor_ok && !executor.is_shadow() ? "LIVE" : "PAPER") << "\","
                      << "\"executor_ready\":" << (executor_ok ? "true" : "false") << ","
                      << "\"shadow_mode\":" << (effective_shadow_mode ? "true" : "false") << ","
+                     << "\"shadow_transport\":\""
+                     << chimera::ExecutionAuditLogger::escape_json(shadow_transport) << "\","
                      << "\"allow_live_orders\":" << (runtime_cfg.allow_live_orders ? "true" : "false") << ","
                      << "\"paper_mode\":\""
                      << chimera::ExecutionAuditLogger::escape_json(runtime_cfg.paper_mode) << "\","

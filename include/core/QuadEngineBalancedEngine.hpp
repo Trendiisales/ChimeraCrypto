@@ -14,6 +14,7 @@
 #include <chrono>
 #include <fstream>
 #include <ctime>
+#include <cstdio>
 
 namespace chimera {
 
@@ -371,9 +372,82 @@ private:
     double prev_compression_pnl_[MAX_SYMBOLS]    = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
+    static constexpr int TRADE_LOG_KEEP_DAYS = 7;
     std::string last_written_trade_key_;  // dedup guard  prevents double-writes
+    int trade_log_last_prune_day_ = -1;
+
+    static std::string extract_trade_json_string(const std::string& line, const std::string& key) {
+        auto pos = line.find("\"" + key + "\":\"");
+        if (pos == std::string::npos) return "";
+        pos += key.size() + 4;
+        auto end = line.find('"', pos);
+        return end != std::string::npos ? line.substr(pos, end-pos) : "";
+    }
+
+    static std::string trade_log_cutoff_utc() {
+        const auto cutoff = std::chrono::system_clock::now() -
+            std::chrono::hours(24 * TRADE_LOG_KEEP_DAYS);
+        const std::time_t t = std::chrono::system_clock::to_time_t(cutoff);
+        std::tm tm_buf{};
+        gmtime_r(&t, &tm_buf);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+        return std::string(buf);
+    }
+
+    static int current_utc_day_key() {
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_buf{};
+        gmtime_r(&t, &tm_buf);
+        return (tm_buf.tm_year + 1900) * 1000 + tm_buf.tm_yday;
+    }
+
+    void maybe_prune_trade_log_file(bool force = false) {
+        const int day_key = current_utc_day_key();
+        if (!force && day_key == trade_log_last_prune_day_) {
+            return;
+        }
+        trade_log_last_prune_day_ = day_key;
+        prune_trade_log_file();
+    }
+
+    void prune_trade_log_file() {
+        std::ifstream in(TRADE_LOG_FILE);
+        if (!in.is_open()) return;
+
+        const std::string cutoff = trade_log_cutoff_utc();
+        std::vector<std::string> kept_lines;
+        std::string line;
+        bool trimmed = false;
+        while (std::getline(in, line)) {
+            if (line.empty()) continue;
+            const std::string ts = extract_trade_json_string(line, "t");
+            if (ts.empty() || ts >= cutoff) {
+                kept_lines.push_back(line);
+            } else {
+                trimmed = true;
+            }
+        }
+        in.close();
+
+        if (!trimmed) return;
+
+        const std::string tmp_path = std::string(TRADE_LOG_FILE) + ".tmp";
+        {
+            std::ofstream out(tmp_path, std::ios::trunc);
+            for (const auto& kept : kept_lines) {
+                out << kept << '\n';
+            }
+        }
+        std::remove(TRADE_LOG_FILE);
+        std::rename(tmp_path.c_str(), TRADE_LOG_FILE);
+        std::printf("[TRADE_LOG] Pruned entries older than %d days\n", TRADE_LOG_KEEP_DAYS);
+        std::fflush(stdout);
+    }
 
     void load_trades_from_disk() {
+        maybe_prune_trade_log_file(true);
         std::ifstream f(TRADE_LOG_FILE);
         if (!f.is_open()) return;
         std::string line;
@@ -382,11 +456,7 @@ private:
             if (line.size() < 10) continue;
             TradeRecord r;
             auto ex = [&](const std::string& key) -> std::string {
-                auto pos = line.find("\"" + key + "\":\"");
-                if (pos == std::string::npos) return "";
-                pos += key.size() + 4;
-                auto end = line.find('"', pos);
-                return end != std::string::npos ? line.substr(pos, end-pos) : "";
+                return extract_trade_json_string(line, key);
             };
             auto exd = [&](const std::string& key) -> double {
                 auto pos = line.find("\"" + key + "\":");
@@ -408,6 +478,7 @@ private:
     void save_trade_to_disk(const TradeRecord& r) {
         // Ensure data dir exists
         { int _r = ::system("mkdir -p data"); (void)_r; }
+        maybe_prune_trade_log_file();
 
         // DEDUP GUARD  prevent double-writes when two processes run simultaneously
         // or when the callback fires twice for the same trade (e.g. after a restart)
@@ -455,6 +526,7 @@ private:
 
     void write_session_marker() {
         { int _r = ::system("mkdir -p data"); (void)_r; }
+        maybe_prune_trade_log_file();
         TradeRecord marker;
         marker.time = now_hms();
         marker.symbol = "SESSION";

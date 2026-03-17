@@ -21,7 +21,11 @@ public:
     using StateCallback = std::function<std::string()>;
     
     SimpleHttpServer(int port = 8080) 
-        : port_(port), running_(false), state_callback_(nullptr) {}
+        : port_(port), running_(false), state_callback_(nullptr) {
+        // Resolve GUI directory at runtime using HOME env, fallback to /home/jo
+        const char* home = std::getenv("HOME");
+        gui_dir_ = std::string(home ? home : "/home/jo") + "/ChimeraCrypto/gui/";
+    }
     
     ~SimpleHttpServer() {
         stop();
@@ -144,7 +148,7 @@ private:
     }
 
     void serve_file(int client_fd, const std::string& filename, const std::string& content_type) {
-        std::string filepath = "/home/jo/ChimeraCrypto/gui/" + filename;
+        std::string filepath = gui_dir_ + filename;
         std::ifstream file(filepath);
         
         if (!file) {
@@ -201,6 +205,7 @@ private:
     std::atomic<bool> running_;
     std::thread server_thread_;
     StateCallback state_callback_;
+    std::string gui_dir_;  // resolved at construction: $HOME/ChimeraCrypto/gui/
 };
 
 } // namespace chimera

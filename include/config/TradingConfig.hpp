@@ -61,8 +61,10 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Taker fees (8bp) + spread (1bp) + slippage (1bp) = ~10bp per round trip.
     // Any signal with expected edge below this is a guaranteed loser.
+    // AUDIT FIX (2026-03-17): cost_bps in live_config.json was 6.5 — misaligned
+    // with measured 10-12bp true cost. Raised all floors to match reality.
     static constexpr double COST_FLOOR_BP = 12.0;        // taker round trip floor (LEADLAG/IMPULSE etc)
-    static constexpr double EXPANSION_COST_FLOOR_BP = 8.0; // BUG10: EXPANSION net-negative at 4bp floor, raise to 8bp
+    static constexpr double EXPANSION_COST_FLOOR_BP = 10.0; // raised from 8bp: EXPANSION net-negative below 10bp
 
 
     // -------------------------------------------------------------------------
@@ -121,8 +123,8 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Short liquidation on perp = forced buy on perp = spot follows up 50-200ms later
     // Min notional filters noise  only meaningful liquidations move spot
-    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 350000.0; // stricter: ignore small liquidation noise
-    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD = 500000.0; // alts are noisier than BTC/ETH/SOL; require larger cascade
+    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 500000.0; // raised: larger cascades produce more reliable follow-through
+    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD = 750000.0; // alts: require larger cascade for sufficient edge
     static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 2.5;      // tighter anti-chase window
     static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 250;      // edge decays fast; stale liq signals are net-negative
     static constexpr int64_t LIQ_COOLDOWN_MS        = 10000;    // avoid repeated liq stabs in chop
@@ -211,11 +213,12 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     static constexpr double VWAP_ENTRY_DEVIATION_BP    = 20.0;  // min distance below VWAP
     static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
+    static constexpr double VWAP_PARTIAL_EXIT_BP       = 8.0;   // NEW: exit 50% of position at 8bp to lock gains seen in MFE data
     static constexpr double VWAP_MIN_IMBALANCE         = 0.15;  // bid pressure must confirm
     static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
-    static constexpr double VWAP_TP_BP                 = 12.0;
+    static constexpr double VWAP_TP_BP                 = 14.0;  // raised from 12bp: best trades reached 10bp MFE and timed out
     static constexpr double VWAP_SL_BP                 = 4.5;
-    static constexpr int64_t VWAP_MAX_HOLD_MS          = 12000; // avoid long timeout bleed
+    static constexpr int64_t VWAP_MAX_HOLD_MS          = 45000; // raised from 12s: mean reversion needs 30-60s to develop (observed max 45.4s)
     static constexpr double LATENCY_VWAP_MAX_MS        = 50.0;  // not latency sensitive
 
     // -------------------------------------------------------------------------

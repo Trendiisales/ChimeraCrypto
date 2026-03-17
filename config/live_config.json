@@ -2,8 +2,9 @@
     "credentials_file": "./config/binance_credentials.json",
     "shadow_mode": true,
     "shadow_mode_description": "Orders are logged and validated but NOT executed on exchange",
-    "cost_bps": 6.5,
-    "min_edge_bps": 8.0,
+    "cost_bps": 10.0,
+    "cost_bps_note": "FIXED 2026-03-17: was 6.5 (wrong). Actual taker cost = 8bp fees + 1bp spread + 1bp slip = ~10bp round trip. See TradingConfig.hpp header.",
+    "min_edge_bps": 10.0,
     "max_position_usd": 10000,
     "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 }

@@ -119,6 +119,10 @@ struct Position {
     double mfe;
     double mae;
 
+    // Partial exit flag: set when VWAP trade crosses VWAP_PARTIAL_EXIT_BP
+    // Tightens trail floor so we lock in gains rather than giving back to timeout
+    bool partial_exit_done = false;
+
     // Maker limit order fields
     LayerMode pending_layer = LAYER_NONE;  // layer that triggered the limit
     double pending_qty = 0.0;
@@ -136,6 +140,7 @@ struct Position {
         entered_qty = 0.0;
         mfe = 0.0;
         mae = 0.0;
+        partial_exit_done = false;
         pending_layer = LAYER_NONE;
         pending_qty = 0.0;
         pending_limit_price = 0.0;
@@ -752,15 +757,16 @@ public:
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
         if (edge_gate_allows(id, EDGE_LEADLAG, ts) && check_leadlag(id, price, ts, s, latency_ms)) return;
-        if (check_impulse(id, price, ts, s, latency_ms)) return;
-        if (check_expansion(id, price, ts, s, latency_ms)) return;
-        // DISABLED: ETH-LEAD 17% WR, net -121bp across 6 trades
+        // IMPULSE: 3 trades 0% WR -44.65bp avg -14.9bp  HARD DISABLED (entries always mistimed, MFE=0)
+        // if (check_impulse(id, price, ts, s, latency_ms)) return;
+        // EXPANSION: 2 trades 0% WR -16bp avg -8bp  HARD DISABLED (no direction after entry)
+        // if (check_expansion(id, price, ts, s, latency_ms)) return;
+        // ETH-LEAD: 17% WR, net -121bp -- HARD DISABLED
         // if (check_eth_lead(id, price, ts, s, latency_ms)) return;
-        // DISABLED: SOL-LEAD 0% WR, insufficient data, net -17bp
+        // SOL-LEAD: 0% WR, net -17bp -- HARD DISABLED
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
-        // Park VOLSHOCK until a positive rolling edge is demonstrated.
+        // VOLSHOCK: no edge demonstrated -- PARKED
         // if (check_vol_shock(id, price, ts, s, latency_ms)) return;
-        // No synthetic startup probes. Discovery must come from real edges only.
 
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
@@ -770,11 +776,13 @@ public:
             // VACUUM: 17 trades 0% WR -53.67bp -- HARD DISABLED (threshold too loose)
             // if (edge_gate_allows(id, EDGE_VACUUM, ts) && check_vacuum(id, price, ts, s, latency_ms)) return;
             // if (edge_gate_allows(id, EDGE_OFI, ts) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-            // Park IMBAL until it proves positive edge in this venue.
+            // IMBAL: unproven -- PARKED
             // if (check_imbalance(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
+            // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
+            // MM-PRESSURE: 1 trade 0% WR -6.9bp -- PARKED (too few samples, no edge shown)
+            // if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
             // NEW: BTC/ETH cointegration stat arb (BTC and ETH only)
             if (check_statarb(id, price, ts, s, latency_ms)) return;
             // NEW: Session open momentum (London/NY/Asia opens)
@@ -2103,10 +2111,21 @@ private:
             sl_bp     = TradingConfig::VACUUM_SL_BP;
             max_hold  = TradingConfig::VACUUM_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_VWAP) {
-            // TP=18bp gross  +8bp net. SL=7bp. Hold 45s max (slower reversion).
+            // TP=14bp gross  +10bp net. SL=4.5bp. Hold 45s max (mean reversion needs time).
+            // PARTIAL EXIT: if move_bp >= VWAP_PARTIAL_EXIT_BP, set pos as half-exited and
+            // tighten trail floor to lock gains. Prevents 10bp MFE -> timeout at zero.
             tp_bp     = TradingConfig::VWAP_TP_BP;
             sl_bp     = TradingConfig::VWAP_SL_BP;
             max_hold  = TradingConfig::VWAP_MAX_HOLD_MS;
+            // Partial exit trigger: once price reaches VWAP_PARTIAL_EXIT_BP, tighten trail
+            // to 50% of peak so we lock in at least half the move. This fires BEFORE the
+            // standard 50% trail below (arm_bp check) because we want to arm sooner for VWAP.
+            if (!s.pos.partial_exit_done && move_bp >= TradingConfig::VWAP_PARTIAL_EXIT_BP) {
+                s.pos.partial_exit_done = true;
+                std::printf("[VWAP-PARTIAL] %s | move=%.2fbp >= partial_exit=%.2fbp | tightening trail floor\n",
+                    sym_short(id), move_bp, TradingConfig::VWAP_PARTIAL_EXIT_BP);
+                std::fflush(stdout);
+            }
         } else if (s.pos.layer == LAYER_EXPANSION) {
             // EXPANSION: own tighter params. Cut losers fast at 12s/5bp SL.
             // LINK(5)/AVAX(4)/POL(6): thin books, moves run 11-22bp -- 6bp TP cuts winners short
@@ -2157,16 +2176,15 @@ private:
 
         if (is_shadow_mode()) {
             const bool shadow_scalper_layer =
-                (s.pos.layer == LAYER_LIQUIDATION) ||
                 (s.pos.layer == LAYER_LEADLAG) ||
                 (s.pos.layer == LAYER_LEADLAG_ETH_SOL) ||
                 (s.pos.layer == LAYER_MICRO) ||
-                (s.pos.layer == LAYER_IMPULSE) ||
-                (s.pos.layer == LAYER_EXPANSION) ||
                 (s.pos.layer == LAYER_ETH_LEAD) ||
                 (s.pos.layer == LAYER_SOL_LEAD) ||
-                (s.pos.layer == LAYER_VOLSHOCK) ||
-                (s.pos.layer == LAYER_SWEEP);
+                (s.pos.layer == LAYER_VOLSHOCK);
+            // NOTE: LAYER_LIQUIDATION, LAYER_VWAP, LAYER_IMPULSE, LAYER_EXPANSION,
+            // LAYER_SWEEP, LAYER_MM_PRESSURE intentionally excluded from shadow scalper
+            // profile so they run at their real configured params for valid edge measurement.
             if (shadow_scalper_layer) {
             // SHADOW scalper profile: faster close cycle and smaller targets for
             // high sample throughput during tuning.
@@ -2268,25 +2286,31 @@ private:
         // VWAP fix: trades reaching 10bp MFE were timing out at 5.68bp because
         // floor = peak - 1.25bp = 8.75bp, but price hovered above that until timeout.
         // New formula: lock in 50% of peak profit once armed. Much tighter protection.
+        // VWAP partial exit: once partial_exit_done is set (crossed 8bp), use 65% floor
+        // so we don't give back most of the move to timeout.
         if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION
             || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM) {
             const double round_trip_cost =
                 (s.pos.layer == LAYER_LIQUIDATION || s.pos.layer == LAYER_SESSION_MOM)
                     ? TradingConfig::TAKER_ROUND_TRIP_BP
                     : TradingConfig::MAKER_ROUND_TRIP_BP;
-            const double arm_bp = round_trip_cost + 1.5;  // arm once clearly past costs
+            // For VWAP: arm at cost+0.5 when partial triggered, otherwise cost+1.5
+            const double arm_bp = (s.pos.layer == LAYER_VWAP && s.pos.partial_exit_done)
+                ? round_trip_cost + 0.5
+                : round_trip_cost + 1.5;
             if (peak_profit_bp >= arm_bp) {
-                // Lock in 50% of peak profit (e.g. peak=10bp -> floor=5bp)
-                // Always at least break-even on costs
+                // VWAP after partial trigger: lock in 65% (tighter — we already know it moved)
+                // All others: lock in 50% of peak profit
+                const double lock_pct = (s.pos.layer == LAYER_VWAP && s.pos.partial_exit_done) ? 0.65 : 0.50;
                 const double floor_bp = std::max(round_trip_cost + 0.5,
-                                                  peak_profit_bp * 0.50);
+                                                  peak_profit_bp * lock_pct);
                 if (move_bp <= floor_bp) {
-                    std::printf("[TRAIL-50PCT] %s | %s | peak=%.2fbp floor=%.2fbp now=%.2fbp\n",
+                    std::printf("[TRAIL-50PCT] %s | %s | peak=%.2fbp floor=%.2fbp now=%.2fbp lock=%.0f%%\n",
                         sym_short(id),
                         (s.pos.layer == LAYER_VWAP) ? "VWAP" :
                         (s.pos.layer == LAYER_STATARB) ? "STATARB" :
                         (s.pos.layer == LAYER_SESSION_MOM) ? "SESS" : "LEADLAG",
-                        peak_profit_bp, floor_bp, move_bp);
+                        peak_profit_bp, floor_bp, move_bp, lock_pct * 100.0);
                     std::fflush(stdout);
                     pending_exit_reason_ = "TRAIL";
                     exit(id, move_bp, ts, s);

@@ -93,6 +93,11 @@ void StatefulGovernor::log_reject(const Signal& signal,
 
 bool StatefulGovernor::approve(Signal& signal)
 {
+    const char* layer_name =
+        (signal.layer == LayerType::IMPULSE) ? "IMPULSE" :
+        (signal.layer == LayerType::EXPAND)  ? "EXPAND"  :
+        (signal.layer == LayerType::MICRO)   ? "MICRO"   : "LEADLAG";
+
     // MICRO is allowed again, but only when volatility is not dead.
     // This prevents imbalance-style entries in flat/noise tape.
     if (signal.layer == LayerType::MICRO && current_vol_score_ < 0.85) {
@@ -114,9 +119,25 @@ bool StatefulGovernor::approve(Signal& signal)
     double min_bps = dynamic_min_bps();
 
     if (adjusted_bps < min_bps) {
-        log_reject(signal, "LOW_EXPECTED_BPS");
+        std::cout << "[GOV-REJECT] "
+                  << signal.symbol
+                  << " layer=" << layer_name
+                  << " reason=LOW_EXPECTED_BPS"
+                  << " adjusted=" << adjusted_bps
+                  << " min=" << min_bps
+                  << " vol_score=" << current_vol_score_
+                  << std::endl;
         return false;
     }
+
+    std::cout << "[GOV-APPROVE] "
+              << signal.symbol
+              << " layer=" << layer_name
+              << " expected=" << signal.expected_bps
+              << " adjusted=" << adjusted_bps
+              << " min=" << min_bps
+              << " vol_score=" << current_vol_score_
+              << std::endl;
 
     return true;
 }

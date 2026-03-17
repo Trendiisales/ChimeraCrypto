@@ -131,9 +131,9 @@ struct TradingConfig {
     static constexpr double  LIQ_MIN_BOOK_IMBALANCE = 0.08;     // require at least mild bid pressure
     static constexpr double  LIQ_MIN_VOL_RATIO      = 0.90;     // avoid dead tape
     static constexpr double  LIQ_MAX_VOL_RATIO      = 2.40;     // avoid panic blow-off fills
-    static constexpr double  LIQ_TP_BP              = 10.0;     // smaller target to reduce timeout drift
-    static constexpr double  LIQ_SL_BP              = 3.0;      // tighter loss cap: reduce -12bp style hits
-    static constexpr int64_t LIQ_MAX_HOLD_MS        = 3000;     // faster invalidation if continuation doesn't appear
+    static constexpr double  LIQ_TP_BP              = 6.0;      // tighter TP: avg MFE was 3.72bp, 10bp was never reached
+    static constexpr double  LIQ_SL_BP              = 2.0;      // tighter SL: liq cascade either works fast or fails
+    static constexpr int64_t LIQ_MAX_HOLD_MS        = 2000;     // 2s: liquidation cascade resolves in <2s or not at all
 
 
     // -------------------------------------------------------------------------
@@ -452,6 +452,23 @@ struct TradingConfig {
     static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
     static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise
     static constexpr int64_t MM_MAX_HOLD_MS         = 20000; // 20s: inventory pressure resolves slowly
+
+    // -------------------------------------------------------------------------
+    // STAT ARB  BTC/ETH cointegration spread mean reversion
+    // -------------------------------------------------------------------------
+    static constexpr double  STATARB_TP_BP           = 20.0;
+    static constexpr double  STATARB_SL_BP           = 6.0;
+    static constexpr int64_t STATARB_MAX_HOLD_MS     = 4 * 3600000LL;
+    static constexpr int64_t STATARB_COOLDOWN_MS     = 1800000LL;
+    static constexpr double  STATARB_ENTRY_ZSCORE    = 2.0;
+    static constexpr double  STATARB_EXIT_ZSCORE     = 0.4;
+
+    // -------------------------------------------------------------------------
+    // SESSION OPEN MOMENTUM  London/NY/Asia open directional plays
+    // -------------------------------------------------------------------------
+    static constexpr double  SESSION_MOM_TP_BP       = 22.0;
+    static constexpr double  SESSION_MOM_SL_BP       = 6.0;
+    static constexpr int64_t SESSION_MOM_MAX_HOLD_MS = 900000LL; // 15 min
 
     // -------------------------------------------------------------------------
     // DIAGNOSTIC OUTPUT

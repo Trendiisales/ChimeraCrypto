@@ -27,6 +27,8 @@
 #include "reinforcement/AdaptiveReinforcementLayer.hpp"
 #include "market_data/FundingRateFetcher.hpp"
 #include "core/NGASLeadLagEngine.hpp"
+#include "core/StatArbEngine.hpp"
+#include "core/SessionMomentumEngine.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -63,7 +65,9 @@ enum LayerMode {
     LAYER_VOLSHOCK,         // Volume Shock Continuation -- spike + displacement
     LAYER_OFI,              // Order Flow Imbalance -- persistent buy aggression
     LAYER_SWEEP,            // Liquidity Sweep -- aggressive spike + depth collapse
-    LAYER_MM_PRESSURE       // Market Maker Inventory Pressure -- slow drift + absorption
+    LAYER_MM_PRESSURE,      // Market Maker Inventory Pressure -- slow drift + absorption
+    LAYER_STATARB,          // BTC/ETH cointegration spread mean reversion
+    LAYER_SESSION_MOM       // London/NY/Asia session open momentum
 };
 
 enum PosState {
@@ -575,6 +579,10 @@ public:
         latency_gov_.update(latency_ms, ts);
         leadlag_.update_price(id, price, ts);
         vol_scoring_[id].update(price, ts);
+        // StatArb needs BTC and ETH prices every tick
+        statarb_.update_price(id, price);
+        // Session momentum tracks session start price per symbol
+        session_mom_.update(id, price, ts);
         
         tick_count_[id]++;
         if (ts - last_tick_count_reset_[id] >= 1000) {
@@ -757,6 +765,10 @@ public:
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            // NEW: BTC/ETH cointegration stat arb (BTC and ETH only)
+            if (check_statarb(id, price, ts, s, latency_ms)) return;
+            // NEW: Session open momentum (London/NY/Asia opens)
+            if (check_session_momentum(id, price, ts, s, latency_ms)) return;
         }
     }
     
@@ -821,13 +833,13 @@ public:
     // Full session breakdown  auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK","OFI","SWEEP","MM-PRESSURE"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK","OFI","SWEEP","MM-PRESSURE","STATARB","SESS-MOM"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
         int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
         double total_pnl=0.0;
-        for (int i=1;i<17;i++){  // 1=MICRO .. 16=MM_PRESSURE — covers all active layers
+        for (int i=1;i<19;i++){  // 1=MICRO .. 18=SESS-MOM
             total_wins    += layer_stats_[i].wins;
             total_losses  += layer_stats_[i].losses;
             total_tp      += layer_stats_[i].tp_exits;
@@ -847,9 +859,13 @@ public:
           << "\"sl_exits\":"      << total_sl << ","
           << "\"trail_exits\":"   << total_trail << ","
           << "\"timeout_exits\":" << total_timeout << ","
+          // StatArb spread stats
+          << "\"statarb_z\":"     << statarb_.spread_zscore() << ","
+          << "\"statarb_trades\":" << statarb_.stats().total_trades << ","
+          << "\"statarb_pnl\":"   << statarb_.stats().total_pnl_bp << ","
           << "\"by_layer\":[";
         bool first=true;
-        for (int i=1;i<17;i++){  // 1=MICRO .. 16=MM_PRESSURE -- covers all active layers
+        for (int i=1;i<19;i++){  // 1=MICRO .. 18=SESS-MOM
             const auto& ls=layer_stats_[i];
             if (ls.total()==0) continue;
             if (!first) j << ",";
@@ -1277,6 +1293,7 @@ private:
             case LAYER_SOL_LEAD:
             case LAYER_VOLSHOCK:
             case LAYER_SWEEP:
+            case LAYER_SESSION_MOM:  // session open = taker (time-sensitive)
                 return true;
             default:
                 return false;
@@ -1855,7 +1872,9 @@ private:
                                (s.pos.layer == LAYER_VOLSHOCK)      ? "VOLSHOCK"  :
                                (s.pos.layer == LAYER_OFI)           ? "OFI"       :
                                (s.pos.layer == LAYER_SWEEP)         ? "SWEEP"     :
-                               (s.pos.layer == LAYER_MM_PRESSURE)   ? "MM-PRESS"  : "EXPAND";
+                               (s.pos.layer == LAYER_MM_PRESSURE)   ? "MM-PRESS"  :
+                               (s.pos.layer == LAYER_STATARB)       ? "STATARB"   :
+                               (s.pos.layer == LAYER_SESSION_MOM)   ? "SESS-MOM"  : "EXPAND";
 
             std::printf("[MAKER-FILL] %s | %s | fill=%.4f | maker_cost=~4bp vs taker=~10bp\n",
                 sym, mode, fill_px);
@@ -2010,6 +2029,14 @@ private:
             tp_bp    = TradingConfig::MM_TP_BP;
             sl_bp    = TradingConfig::MM_SL_BP;
             max_hold = TradingConfig::MM_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_STATARB) {
+            tp_bp    = TradingConfig::STATARB_TP_BP;
+            sl_bp    = TradingConfig::STATARB_SL_BP;
+            max_hold = TradingConfig::STATARB_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_SESSION_MOM) {
+            tp_bp    = TradingConfig::SESSION_MOM_TP_BP;
+            sl_bp    = TradingConfig::SESSION_MOM_SL_BP;
+            max_hold = TradingConfig::SESSION_MOM_MAX_HOLD_MS;
         } else {
             // IMPULSE: alt coins (AVAX/LINK/POL) get wider TP -- thin books, moves run to 20bp+
             // SOL: standard TP (moves are shallower than micro-caps)
@@ -2052,6 +2079,8 @@ private:
                 move_bp, tp_bp);
             std::fflush(stdout);
             pending_exit_reason_ = "TP";
+            if (s.pos.layer == LAYER_STATARB && statarb_.has_position())
+                statarb_.close(price, "TP", ts);
             exit(id, move_bp, ts, s);
             return;
         }
@@ -2062,6 +2091,8 @@ private:
                 sym_short(id), move_bp, sl_bp);
             std::fflush(stdout);
             pending_exit_reason_ = "SL";
+            if (s.pos.layer == LAYER_STATARB && statarb_.has_position())
+                statarb_.close(price, "SL", ts);
             exit(id, move_bp, ts, s);
             return;
         }
@@ -2125,19 +2156,48 @@ private:
         }
 
         // Cost-aware fast trail for active quality layers.
-        if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION) {
+        // VWAP fix: trades reaching 10bp MFE were timing out at 5.68bp because
+        // floor = peak - 1.25bp = 8.75bp, but price hovered above that until timeout.
+        // New formula: lock in 50% of peak profit once armed. Much tighter protection.
+        if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION
+            || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM) {
             const double round_trip_cost =
-                (s.pos.layer == LAYER_LIQUIDATION)
+                (s.pos.layer == LAYER_LIQUIDATION || s.pos.layer == LAYER_SESSION_MOM)
                     ? TradingConfig::TAKER_ROUND_TRIP_BP
                     : TradingConfig::MAKER_ROUND_TRIP_BP;
-            const double arm_bp = round_trip_cost + 1.0;
+            const double arm_bp = round_trip_cost + 1.5;  // arm once clearly past costs
             if (peak_profit_bp >= arm_bp) {
-                const double floor_bp = std::max(round_trip_cost + 0.25, peak_profit_bp - 1.25);
+                // Lock in 50% of peak profit (e.g. peak=10bp -> floor=5bp)
+                // Always at least break-even on costs
+                const double floor_bp = std::max(round_trip_cost + 0.5,
+                                                  peak_profit_bp * 0.50);
                 if (move_bp <= floor_bp) {
+                    std::printf("[TRAIL-50PCT] %s | %s | peak=%.2fbp floor=%.2fbp now=%.2fbp\n",
+                        sym_short(id),
+                        (s.pos.layer == LAYER_VWAP) ? "VWAP" :
+                        (s.pos.layer == LAYER_STATARB) ? "STATARB" :
+                        (s.pos.layer == LAYER_SESSION_MOM) ? "SESS" : "LEADLAG",
+                        peak_profit_bp, floor_bp, move_bp);
+                    std::fflush(stdout);
                     pending_exit_reason_ = "TRAIL";
                     exit(id, move_bp, ts, s);
                     return;
                 }
+            }
+        }
+
+        // STAT ARB: check spread-based exit independent of TP/SL
+        // If the spread has mean-reverted, close the position even before TP
+        if (s.pos.layer == LAYER_STATARB && statarb_.has_position()) {
+            std::string exit_reason;
+            if (statarb_.check_exit(price, s.pos.entry_price, ts, exit_reason)) {
+                std::printf("[STATARB-EXIT-SPREAD] %s | why=%s | pnl=%.2fbp\n",
+                    sym_short(id), exit_reason.c_str(), move_bp);
+                std::fflush(stdout);
+                statarb_.close(price, exit_reason, ts);
+                pending_exit_reason_ = exit_reason;
+                exit(id, move_bp, ts, s);
+                return;
             }
         }
 
@@ -2148,6 +2208,8 @@ private:
                 (long)(ts - s.pos.entry_ts), (long)max_hold);
             std::fflush(stdout);
             pending_exit_reason_ = "TIMEOUT";
+            if (s.pos.layer == LAYER_STATARB && statarb_.has_position())
+                statarb_.close(price, "TIMEOUT", ts);
             exit(id, move_bp, ts, s);
             return;
         }
@@ -2624,6 +2686,117 @@ private:
         return true;
     }
 
+    // =========================================================================
+    // STAT ARB  BTC/ETH cointegration spread mean reversion
+    // Only fires on BTC (id=0) or ETH (id=1) — the two legs of the spread.
+    // When the log-price ratio deviates > 2 stddevs from 4h rolling mean,
+    // buy the cheap leg (spot-only = always a long on whichever is underpriced).
+    // =========================================================================
+    bool check_statarb(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Only trade BTC and ETH legs
+        if (id != 0 && id != 1) return false;
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+        if (statarb_.has_position()) return false;  // one position at a time
+        if (statarb_.in_cooldown(ts)) return false;
+
+        // Don't trade in DEAD regime
+        if (s.regime == REGIME_DEAD) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " STATARB", "regime_dead");
+            return false;
+        }
+
+        double z = 0.0;
+        StatArbEngine::StatArbSignal sig = statarb_.check_signal(z);
+        if (sig == StatArbEngine::StatArbSignal::NONE) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " STATARB", "spread_not_extreme");
+            return false;
+        }
+
+        // Map signal to which leg to buy
+        int target_id = (sig == StatArbEngine::StatArbSignal::LONG_BTC) ? 0 : 1;
+        if (id != target_id) {
+            // This tick is for the wrong leg — signal will fire on next target tick
+            return false;
+        }
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " STATARB", "no_book");
+            return false;
+        }
+        if (t.spread_bps > 2.0) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " STATARB", "spread_wide");
+            return false;
+        }
+
+        std::printf("[STATARB] %s | z=%.2f | spread=%.4f | signal=%s | ENTERING LONG\n",
+            sym_short(id), z, statarb_.current_spread(),
+            (sig == StatArbEngine::StatArbSignal::LONG_BTC) ? "LONG_BTC(cheap)" : "LONG_ETH(cheap)");
+        std::fflush(stdout);
+
+        statarb_.open(sig, id, price, ts);
+        enter(id, price, ts, s, LAYER_STATARB, true);
+        return true;
+    }
+
+    // =========================================================================
+    // SESSION MOMENTUM  London/NY/Asia open directional play
+    // Fires in first 20 minutes of major session opens when price has displaced
+    // significantly from session start with elevated vol and BTC agreement.
+    // =========================================================================
+    bool check_session_momentum(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
+        if (latency_ms > TradingConfig::LATENCY_HARD_LIMIT_MS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SESS", "latency");
+            return false;
+        }
+
+        // Need a real vol ratio from the market state
+        double short_vol = compute_volatility(s.short_returns);
+        double long_vol  = s.long_vol_ema;
+        if (long_vol < TradingConfig::MIN_LONG_VOL_FOR_TRADING) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SESS", "low_vol");
+            return false;
+        }
+        double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
+
+        // Get BTC displacement from session start (use BTC's own session data)
+        double btc_disp_bp = 0.0;
+        if (id != 0) {
+            // Proxy BTC displacement via leadlag BTC move buffer
+            btc_disp_bp = leadlag_.btc_move_bp();
+        }
+
+        int direction = 0;
+        if (!session_mom_.check_signal(id, price, vol_ratio, btc_disp_bp, ts, direction)) {
+            return false;
+        }
+
+        // Spot only — long side only
+        if (direction < 0) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SESS", "short_not_supported");
+            return false;
+        }
+
+        // Confirm with order flow
+        double flow = compute_flow_ratio(id);
+        if (flow < 0.52) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SESS", "flow_weak");
+            return false;
+        }
+
+        const MarketTick& t = s.last_tick;
+        if (t.spread_bps > 3.0) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SESS", "spread_wide");
+            return false;
+        }
+
+        session_mom_.mark_traded(id, ts);
+        enter(id, price, ts, s, LAYER_SESSION_MOM, true);
+        return true;
+    }
+
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
         Signal sig;
         sig.symbol = sym_full(id);
@@ -2751,7 +2924,9 @@ private:
             (layer == LAYER_VOLSHOCK)        ? "VOLSHOCK"   :
             (layer == LAYER_OFI)             ? "OFI"        :
             (layer == LAYER_SWEEP)           ? "SWEEP"      :
-            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "UNKNOWN";
+            (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE":
+            (layer == LAYER_STATARB)         ? "STATARB"    :
+            (layer == LAYER_SESSION_MOM)     ? "SESS-MOM"   : "UNKNOWN";
         double final_size = capital_control_.compute_final_size(
             final_weight, cap_env, unrealized_bp, drawdown_bp, ccl_engine
         );
@@ -2965,9 +3140,11 @@ private:
                             (s.pos.layer == LAYER_ETH_LEAD)       ? "ETH-LEAD"   :
                             (s.pos.layer == LAYER_SOL_LEAD)       ? "SOL-LEAD"   :
                             (s.pos.layer == LAYER_VOLSHOCK)       ? "VOLSHOCK"   :
-                            (s.pos.layer == LAYER_OFI)             ? "OFI"        :
-                            (s.pos.layer == LAYER_SWEEP)           ? "SWEEP"      :
-                            (s.pos.layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "UNKNOWN";
+                            (s.pos.layer == LAYER_OFI)            ? "OFI"        :
+                            (s.pos.layer == LAYER_SWEEP)          ? "SWEEP"      :
+                            (s.pos.layer == LAYER_MM_PRESSURE)    ? "MM-PRESSURE":
+                            (s.pos.layer == LAYER_STATARB)        ? "STATARB"    :
+                            (s.pos.layer == LAYER_SESSION_MOM)    ? "SESS-MOM"   : "UNKNOWN";
         const char* win_str = pnl_net > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -3169,6 +3346,8 @@ private:
     ShadowLogger shadow_log_;
     FundingRateFetcher*  funding_ = nullptr;  // optional  set from main()
     NGASLeadLagEngine*   ngas_    = nullptr;  // optional  set from main()
+    StatArbEngine        statarb_;
+    SessionMomentumEngine session_mom_;
     VolatilityScoring vol_scoring_[MAX_SYMBOLS];
     StatefulGovernor governor_;
     PnLGovernor      pnl_governor_;   // BUG2 FIX: daily loss limit with UTC midnight reset
@@ -3278,12 +3457,12 @@ private:
         double avg_mfe()  const { return total() > 0 ? sum_mfe / total() : 0.0; }
         double avg_mae()  const { return total() > 0 ? sum_mae / total() : 0.0; }
     };
-    LayerStats layer_stats_[17]; // indexed by LayerMode enum value (0..16)
+    LayerStats layer_stats_[19]; // indexed by LayerMode enum value (0..18: includes STATARB=17, SESS-MOM=18)
                                   // 14=LAYER_OFI  15=LAYER_SWEEP  16=LAYER_MM_PRESSURE
 
     LayerStats& stats_for(LayerMode m) {
         int idx = (int)m;
-        return layer_stats_[(idx >= 0 && idx < 17) ? idx : 0];
+        return layer_stats_[(idx >= 0 && idx < 19) ? idx : 0];
     }
     
     GuiBroadcastCallback gui_broadcast_;

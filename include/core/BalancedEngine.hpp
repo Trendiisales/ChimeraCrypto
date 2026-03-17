@@ -29,6 +29,8 @@
 #include "core/NGASLeadLagEngine.hpp"
 #include "core/StatArbEngine.hpp"
 #include "core/SessionMomentumEngine.hpp"
+#include "core/SpreadCompressionEngine.hpp"
+#include "core/DivergenceEngine.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -67,7 +69,9 @@ enum LayerMode {
     LAYER_SWEEP,            // Liquidity Sweep -- aggressive spike + depth collapse
     LAYER_MM_PRESSURE,      // Market Maker Inventory Pressure -- slow drift + absorption
     LAYER_STATARB,          // BTC/ETH cointegration spread mean reversion
-    LAYER_SESSION_MOM       // London/NY/Asia session open momentum
+    LAYER_SESSION_MOM,      // London/NY/Asia session open momentum
+    LAYER_SPREAD_COMPRESS,  // Spread compression: wide->tight = MM directional commitment
+    LAYER_DIVERGENCE        // Cross-symbol divergence: BTC/ETH/SOL short-timeframe reversion
 };
 
 enum PosState {
@@ -90,7 +94,9 @@ enum EdgeEngineKey {
     EDGE_VACUUM  = 4,
     EDGE_SWEEP   = 5,
     EDGE_MM      = 6,
-    EDGE_ENGINE_COUNT = 7
+    EDGE_SPREAD_COMPRESS = 7,
+    EDGE_DIVERGE = 8,
+    EDGE_ENGINE_COUNT = 9
 };
 
 struct EdgeSample {
@@ -406,6 +412,8 @@ public:
         edge_gate_[EDGE_LEADLAG].enabled = true;
         edge_gate_[EDGE_VWAP].enabled    = true;   // 33% WR, only winning engine
         edge_gate_[EDGE_LIQ].enabled     = true;   // event-driven, sound logic
+        edge_gate_[EDGE_SPREAD_COMPRESS].enabled = true;  // new: spread compression signal
+        edge_gate_[EDGE_DIVERGE].enabled         = true;  // new: cross-symbol divergence
         // Hard-disable the provably broken engines: set disabled_until to far future
         // They cannot be auto-promoted until this date passes.
         static constexpr int64_t DISABLED_FOREVER = 9999999999999LL; // ~year 2286
@@ -598,6 +606,8 @@ public:
         statarb_.update_price(id, price);
         // Session momentum tracks session start price per symbol
         session_mom_.update(id, price, ts);
+        // Divergence engine tracks 30s rolling price per symbol (BTC/ETH/SOL)
+        divergence_.update(id, price, ts);
         
         tick_count_[id]++;
         if (ts - last_tick_count_reset_[id] >= 1000) {
@@ -786,6 +796,10 @@ public:
             // MM-PRESSURE: maker entry, GRIND-only, 3 confirmation gates — re-enabled
             // 1 trade sample was insufficient to park; structural edge is sound
             if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            // SPREAD-COMPRESS: spread wide->tight = MM directional commitment, maker bid
+            if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
+            // DIVERGE: BTC/ETH/SOL laggard snaps back to correlated peers, maker bid
+            if (edge_gate_allows(id, EDGE_DIVERGE, ts) && check_divergence(id, price, ts, s, latency_ms)) return;
             // NEW: BTC/ETH cointegration stat arb (BTC and ETH only)
             if (check_statarb(id, price, ts, s, latency_ms)) return;
             // NEW: Session open momentum (London/NY/Asia opens)
@@ -854,13 +868,13 @@ public:
     // Full session breakdown  auto-maintained on every exit, no grep needed
     std::string get_session_stats_json() const {
         static const char* LAYER_NAMES[] = {
-            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK","OFI","SWEEP","MM-PRESSURE","STATARB","SESS-MOM"
+            "NONE","MICRO","IMPULSE","EXPAND","LEADLAG","LL-ETH-SOL","VACUUM","VWAP","LIQ","FUND","NGAS","ETH-LEAD","SOL-LEAD","VOLSHOCK","OFI","SWEEP","MM-PRESSURE","STATARB","SESS-MOM","SPREAD-COMPRESS","DIVERGE"
         };
         std::ostringstream j;
         j << std::fixed << std::setprecision(2);
         int total_wins=0,total_losses=0,total_tp=0,total_sl=0,total_trail=0,total_timeout=0;
         double total_pnl=0.0;
-        for (int i=1;i<19;i++){  // 1=MICRO .. 18=SESS-MOM
+        for (int i=1;i<21;i++){  // 1=MICRO .. 20=DIVERGE
             total_wins    += layer_stats_[i].wins;
             total_losses  += layer_stats_[i].losses;
             total_tp      += layer_stats_[i].tp_exits;
@@ -1294,6 +1308,8 @@ private:
             case LAYER_VACUUM:          out = EDGE_VACUUM;  return true;
             case LAYER_SWEEP:           out = EDGE_SWEEP;   return true;
             case LAYER_MM_PRESSURE:     out = EDGE_MM;      return true;
+            case LAYER_SPREAD_COMPRESS: out = EDGE_SPREAD_COMPRESS; return true;
+            case LAYER_DIVERGENCE:      out = EDGE_DIVERGE; return true;
             default: return false;
         }
     }
@@ -1880,7 +1896,9 @@ private:
                            (s.pos.pending_layer == LAYER_SWEEP)           ? "SWEEP"      :
                            (s.pos.pending_layer == LAYER_MM_PRESSURE)     ? "MM-PRESS"   :
                            (s.pos.pending_layer == LAYER_STATARB)         ? "STATARB"    :
-                           (s.pos.pending_layer == LAYER_SESSION_MOM)     ? "SESS-MOM"   : "EXPAND";
+                           (s.pos.pending_layer == LAYER_SESSION_MOM)     ? "SESS-MOM"   :
+                           (s.pos.pending_layer == LAYER_SPREAD_COMPRESS) ? "SPREAD-COMPRESS" :
+                           (s.pos.pending_layer == LAYER_DIVERGENCE)      ? "DIVERGE"    : "EXPAND";
 
         const auto& working = limit_orders_[id].order();
         const bool stale = working.status == LimitStatus::PENDING &&
@@ -2168,6 +2186,16 @@ private:
             tp_bp    = TradingConfig::SESSION_MOM_TP_BP;
             sl_bp    = TradingConfig::SESSION_MOM_SL_BP;
             max_hold = TradingConfig::SESSION_MOM_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_SPREAD_COMPRESS) {
+            // Spread compression: fast microstructure move, 12s max hold
+            tp_bp    = TradingConfig::SPREAD_COMPRESS_TP_BP;
+            sl_bp    = TradingConfig::SPREAD_COMPRESS_SL_BP;
+            max_hold = TradingConfig::SPREAD_COMPRESS_MAX_HOLD_MS;
+        } else if (s.pos.layer == LAYER_DIVERGENCE) {
+            // Cross-symbol divergence: 30s snap-back window, 20s max hold
+            tp_bp    = TradingConfig::DIVERGE_TP_BP;
+            sl_bp    = TradingConfig::DIVERGE_SL_BP;
+            max_hold = TradingConfig::DIVERGE_MAX_HOLD_MS;
         } else {
             // IMPULSE: alt coins (AVAX/LINK/POL) get wider TP -- thin books, moves run to 20bp+
             // SOL: standard TP (moves are shallower than micro-caps)
@@ -2292,7 +2320,8 @@ private:
         // VWAP partial exit: once partial_exit_done is set (crossed 8bp), use 65% floor
         // so we don't give back most of the move to timeout.
         if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION
-            || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM) {
+            || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM
+            || s.pos.layer == LAYER_SPREAD_COMPRESS || s.pos.layer == LAYER_DIVERGENCE) {
             // MAKER-ONLY POLICY: all active layers now use maker entry (~4bp cost)
             // Previously LIQ and SESSION_MOM used TAKER_ROUND_TRIP_BP — corrected.
             const double round_trip_cost = TradingConfig::MAKER_ROUND_TRIP_BP;
@@ -2932,6 +2961,76 @@ private:
         return true;
     }
 
+    // =========================================================================
+    // SPREAD COMPRESSION  spread wide->tight = MM directional commitment
+    // =========================================================================
+    bool check_spread_compression(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
+        // Only GRIND and BUILDUP — compression in BREAKOUT is too noisy
+        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SPREAD-COMPRESS", "regime_wrong");
+            return false;
+        }
+
+        if (latency_ms > TradingConfig::LATENCY_NET_CLEAN_MS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SPREAD-COMPRESS", "latency_high");
+            return false;
+        }
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+
+        int direction = 0;
+        if (!spread_compress_.check_signal(id, t.spread_bps, t.book_imbalance, ts, direction)) {
+            return false;
+        }
+
+        // Spot-long only
+        if (direction < 0) return false;
+
+        std::printf("[SPREAD-COMPRESS-ENTRY] %s | spread=%.2fbp | imbal=%.3f | regime=%s | ENTERING LONG\n",
+            sym_short(id), t.spread_bps, t.book_imbalance, regime_name(s.regime));
+        std::fflush(stdout);
+        enter(id, price, ts, s, LAYER_SPREAD_COMPRESS, true);
+        return true;
+    }
+
+    // =========================================================================
+    // DIVERGENCE  BTC/ETH/SOL laggard snaps back to correlated peers
+    // =========================================================================
+    bool check_divergence(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        // Only BTC(0), ETH(1), SOL(2) — the correlated trio
+        if (id > 2) return false;
+        if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
+
+        // Only GRIND and BUILDUP — divergences in BREAKOUT are trend-driven
+        if (s.regime == REGIME_DEAD || s.regime == REGIME_BREAKOUT) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " DIVERGE", "regime_wrong");
+            return false;
+        }
+
+        if (latency_ms > TradingConfig::LATENCY_NET_CLEAN_MS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " DIVERGE", "latency_high");
+            return false;
+        }
+
+        const MarketTick& t = s.last_tick;
+        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+
+        double diverge_bp = 0.0;
+        if (!divergence_.check_signal(id, t.book_imbalance, t.spread_bps, ts, diverge_bp)) {
+            return false;
+        }
+
+        std::printf("[DIVERGE-ENTRY] %s | diverge=%.2fbp | imbal=%.3f | spread=%.2fbp | regime=%s | ENTERING LONG\n",
+            sym_short(id), diverge_bp, t.book_imbalance, t.spread_bps, regime_name(s.regime));
+        std::fflush(stdout);
+        enter(id, price, ts, s, LAYER_DIVERGENCE, true);
+        return true;
+    }
+
+
     void enter(int id, double price, int64_t ts, SymbolState& s, LayerMode layer, bool is_long = true) {
         Signal sig;
         sig.symbol = sym_full(id);
@@ -2964,6 +3063,8 @@ private:
                            (layer == LAYER_OFI)              ? TradingConfig::OFI_TP_BP :
                            (layer == LAYER_SWEEP)            ? TradingConfig::SWEEP_TP_BP :
                            (layer == LAYER_MM_PRESSURE)      ? TradingConfig::MM_TP_BP :
+                           (layer == LAYER_SPREAD_COMPRESS)  ? TradingConfig::SPREAD_COMPRESS_TP_BP :
+                           (layer == LAYER_DIVERGENCE)       ? TradingConfig::DIVERGE_TP_BP :
                                                                 TradingConfig::IMPULSE_TP_BP;
         sig.confidence = 1.0;
 
@@ -3061,7 +3162,9 @@ private:
             (layer == LAYER_SWEEP)           ? "SWEEP"      :
             (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE":
             (layer == LAYER_STATARB)         ? "STATARB"    :
-            (layer == LAYER_SESSION_MOM)     ? "SESS-MOM"   : "UNKNOWN";
+            (layer == LAYER_SESSION_MOM)     ? "SESS-MOM"   :
+            (layer == LAYER_SPREAD_COMPRESS) ? "SPREAD-COMPRESS" :
+            (layer == LAYER_DIVERGENCE)      ? "DIVERGE"    : "UNKNOWN";
         double final_size = capital_control_.compute_final_size(
             final_weight, cap_env, unrealized_bp, drawdown_bp, ccl_engine
         );
@@ -3096,6 +3199,8 @@ private:
                           (layer == LAYER_SWEEP)            ? 0.5 :  // PARKED
                           (layer == LAYER_MM_PRESSURE)      ? 0.8 :  // re-enabled: conservative first run
                           (layer == LAYER_SESSION_MOM)      ? 0.8 :  // new with maker entry: conservative until session samples arrive
+                          (layer == LAYER_SPREAD_COMPRESS)  ? 0.7 :  // new engine: conservative until 20+ samples
+                          (layer == LAYER_DIVERGENCE)       ? 0.7 :  // new engine: conservative until 20+ samples
                           (layer == LAYER_VWAP)             ? 1.0 :
                                                               1.0;
         legacy_size_mult *= eng_mult;
@@ -3157,7 +3262,9 @@ private:
                            (layer == LAYER_VOLSHOCK)         ? "VOLSHOCK"   :
                            (layer == LAYER_OFI)             ? "OFI"        :
                            (layer == LAYER_SWEEP)           ? "SWEEP"      :
-                           (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE": "EXPAND";
+                           (layer == LAYER_MM_PRESSURE)     ? "MM-PRESSURE":
+                           (layer == LAYER_SPREAD_COMPRESS) ? "SPREAD-COMPRESS" :
+                           (layer == LAYER_DIVERGENCE)      ? "DIVERGE"    : "EXPAND";
 
         // Compute qty once here — used by both maker and taker paths
         double qty = (final_size * legacy_size_mult) / std::max(price, 1.0);
@@ -3186,7 +3293,10 @@ private:
                             (layer == LAYER_LEADLAG_ETH_SOL) ? 4 :
                             (layer == LAYER_LIQUIDATION)     ? 5 :
                             (layer == LAYER_SESSION_MOM)     ? 6 :
-                            (layer == LAYER_VOLSHOCK)        ? 7 : 0;
+                            (layer == LAYER_VOLSHOCK)        ? 7 :
+                            (layer == LAYER_SPREAD_COMPRESS) ? 0 :  // bid placement, same as MICRO
+                            (layer == LAYER_DIVERGENCE)      ? 0 : 0;  // bid placement — buying the laggard
+
 
             limit_orders_[id].enter_pending(layer_int, bid, ask, ts);
             const double limit_px = limit_orders_[id].order().limit_price;
@@ -3319,7 +3429,9 @@ private:
                             (s.pos.layer == LAYER_SWEEP)          ? "SWEEP"      :
                             (s.pos.layer == LAYER_MM_PRESSURE)    ? "MM-PRESSURE":
                             (s.pos.layer == LAYER_STATARB)        ? "STATARB"    :
-                            (s.pos.layer == LAYER_SESSION_MOM)    ? "SESS-MOM"   : "UNKNOWN";
+                            (s.pos.layer == LAYER_SESSION_MOM)    ? "SESS-MOM"   :
+                            (s.pos.layer == LAYER_SPREAD_COMPRESS) ? "SPREAD-COMPRESS" :
+                            (s.pos.layer == LAYER_DIVERGENCE)      ? "DIVERGE"    : "UNKNOWN";
         const char* win_str = pnl_net > 0 ? "WIN" : "LOSS";
 
         std::printf("[EXIT] %s | %s | %s | reason=%s | pnl=%.2fbp | mfe=%.2f | mae=%.2f | lat=%.1fms | hold=%ldms | total_pnl=%.2f\n",
@@ -3528,6 +3640,8 @@ private:
     NGASLeadLagEngine*   ngas_    = nullptr;  // optional  set from main()
     StatArbEngine        statarb_;
     SessionMomentumEngine session_mom_;
+    SpreadCompressionEngine spread_compress_;
+    DivergenceEngine     divergence_;
     VolatilityScoring vol_scoring_[MAX_SYMBOLS];
     StatefulGovernor governor_;
     PnLGovernor      pnl_governor_;   // BUG2 FIX: daily loss limit with UTC midnight reset
@@ -3637,12 +3751,12 @@ private:
         double avg_mfe()  const { return total() > 0 ? sum_mfe / total() : 0.0; }
         double avg_mae()  const { return total() > 0 ? sum_mae / total() : 0.0; }
     };
-    LayerStats layer_stats_[19]; // indexed by LayerMode enum value (0..18: includes STATARB=17, SESS-MOM=18)
+    LayerStats layer_stats_[21]; // indexed by LayerMode enum value (0..20: includes SPREAD_COMPRESS=19, DIVERGE=20)
                                   // 14=LAYER_OFI  15=LAYER_SWEEP  16=LAYER_MM_PRESSURE
 
     LayerStats& stats_for(LayerMode m) {
         int idx = (int)m;
-        return layer_stats_[(idx >= 0 && idx < 19) ? idx : 0];
+        return layer_stats_[(idx >= 0 && idx < 21) ? idx : 0];
     }
     
     GuiBroadcastCallback gui_broadcast_;

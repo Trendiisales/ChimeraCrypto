@@ -23,6 +23,7 @@
 #include <atomic>
 #include <mutex>
 #include <sstream>
+#include <iomanip>
 #include <fstream>
 #include <functional>
 #include <curl/curl.h>
@@ -252,7 +253,7 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // cancel_order — DELETE /api/v3/order
+    // cancel_order — DELETE /api/v3/order by order_id
     // -----------------------------------------------------------------------
     bool cancel_order(const std::string& symbol, long order_id) {
         if (!ready_ || shadow_mode_) return true;
@@ -271,6 +272,135 @@ public:
         long http_code = 0;
         del("/api/v3/order", payload, body, http_code);
         return http_code == 200;
+    }
+
+    // cancel_order by client order id (origClientOrderId)
+    bool cancel_order(const std::string& symbol, const std::string& client_id) {
+        if (!ready_ || shadow_mode_) return true;
+        if (client_id.empty()) return false;
+
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::string ts = timestamp_ms();
+        std::ostringstream qs;
+        qs << "symbol=" << symbol
+           << "&origClientOrderId=" << client_id
+           << "&recvWindow=5000"
+           << "&timestamp=" << ts;
+        std::string payload = qs.str();
+        payload += "&signature=" + sign(payload);
+
+        std::string body;
+        long http_code = 0;
+        del("/api/v3/order", payload, body, http_code);
+        return http_code == 200;
+    }
+
+    // -----------------------------------------------------------------------
+    // place_limit_maker — POST a POST_ONLY limit order
+    // -----------------------------------------------------------------------
+    OrderResult place_limit_maker(const std::string& symbol,
+                                  bool is_buy,
+                                  double qty,
+                                  double limit_price,
+                                  const std::string& client_id) {
+        OrderResult r;
+        if (shadow_mode_) {
+            r.ok        = true;
+            r.shadow    = true;
+            r.client_id = client_id;
+            r.status    = "NEW";
+            return r;
+        }
+        if (!ready_) return r;
+
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::string ts = timestamp_ms();
+
+        // Format price/qty with enough precision
+        std::ostringstream price_ss, qty_ss;
+        price_ss << std::fixed << std::setprecision(8) << limit_price;
+        qty_ss   << std::fixed << std::setprecision(8) << qty;
+
+        std::ostringstream qs;
+        qs << "symbol="          << symbol
+           << "&side="           << (is_buy ? "BUY" : "SELL")
+           << "&type=LIMIT_MAKER"
+           << "&quantity="       << qty_ss.str()
+           << "&price="          << price_ss.str()
+           << "&newClientOrderId=" << client_id
+           << "&recvWindow=5000"
+           << "&timestamp="      << ts;
+        std::string payload = qs.str();
+        payload += "&signature=" + sign(payload);
+
+        std::string body;
+        long http_code = 0;
+        post("/api/v3/order", payload, body, http_code);
+
+        if (http_code != 200) {
+            r.error = "HTTP " + std::to_string(http_code) + ": " + body;
+            return r;
+        }
+
+        r.ok        = true;
+        r.client_id = client_id;
+        r.status    = "NEW";
+        orders_sent_.fetch_add(1, std::memory_order_relaxed);
+        return r;
+    }
+
+    // -----------------------------------------------------------------------
+    // query_order — GET order status by client order id
+    // -----------------------------------------------------------------------
+    OrderResult query_order(const std::string& symbol,
+                            const std::string& client_id) {
+        OrderResult r;
+        if (!ready_ || shadow_mode_ || client_id.empty()) return r;
+
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::string ts = timestamp_ms();
+        std::ostringstream qs;
+        qs << "symbol=" << symbol
+           << "&origClientOrderId=" << client_id
+           << "&recvWindow=5000"
+           << "&timestamp=" << ts;
+        std::string payload = qs.str();
+        payload += "&signature=" + sign(payload);
+
+        std::string body;
+        long http_code = 0;
+        get("/api/v3/order", payload, body, http_code);
+
+        if (http_code != 200) {
+            r.error = "HTTP " + std::to_string(http_code);
+            return r;
+        }
+
+        // Parse minimal JSON fields
+        auto extract_str = [&](const std::string& key) -> std::string {
+            auto pos = body.find("\"" + key + "\":");
+            if (pos == std::string::npos) return "";
+            pos += key.size() + 3;
+            if (body[pos] == '"') {
+                pos++;
+                auto end = body.find('"', pos);
+                return end != std::string::npos ? body.substr(pos, end - pos) : "";
+            }
+            auto end = body.find_first_of(",}", pos);
+            return end != std::string::npos ? body.substr(pos, end - pos) : "";
+        };
+        auto extract_dbl = [&](const std::string& key) -> double {
+            auto s = extract_str(key);
+            try { return s.empty() ? 0.0 : std::stod(s); } catch (...) { return 0.0; }
+        };
+
+        r.ok           = true;
+        r.status       = extract_str("status");
+        r.executed_qty = extract_dbl("executedQty");
+        r.avg_price    = extract_dbl("cummulativeQuoteQty");
+        if (r.executed_qty > 0.0 && r.avg_price > 0.0)
+            r.avg_price /= r.executed_qty;  // cummulativeQuoteQty / executedQty = avg price
+        return r;
     }
 
     bool   is_shadow()     const { return shadow_mode_; }

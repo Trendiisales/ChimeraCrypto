@@ -90,21 +90,23 @@ public:
     // qty:      base asset quantity
     // price:    signal price (for logging only — market orders use exchange price)
     // -----------------------------------------------------------------------
-    void execute(const std::string& symbol,
-                 bool is_buy,
-                 double qty,
-                 double price) {
+    // -----------------------------------------------------------------------
+    // execute — market order entry/exit, returns OrderResult with fill details
+    // -----------------------------------------------------------------------
+    OrderResult execute(const std::string& symbol,
+                        bool is_buy,
+                        double qty,
+                        double price) {
+        OrderResult r;
         if (!rest_.is_ready()) {
             std::fprintf(stderr, "[EXECUTOR] Not ready — order dropped: %s %s %.8f\n",
                          symbol.c_str(), is_buy ? "BUY" : "SELL", qty);
-            return;
+            return r;
         }
 
-        // Binance requires uppercase symbol
         std::string sym_upper = symbol;
         for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
 
-        // Unique client order id: symbol prefix + side + microseconds
         auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         std::string cid = sym_upper.substr(0, 3)
@@ -116,22 +118,115 @@ public:
                     is_buy ? "BUY" : "SELL", sym_upper.c_str(), qty, price);
         std::fflush(stdout);
 
-        OrderResult r = rest_.place_order(sym_upper, is_buy, qty, cid);
+        r = rest_.place_order(sym_upper, is_buy, qty, cid);
+        r.ok = r.ok || r.shadow;  // shadow orders are always "ok"
 
         if (!r.ok) {
             std::fprintf(stderr, "[EXECUTOR] Order failed: %s\n", r.error.c_str());
             errors_.fetch_add(1, std::memory_order_relaxed);
-            return;
+            return r;
         }
 
         if (r.shadow) {
+            r.executed_qty = qty;
+            r.avg_price    = price;
+            r.status       = "FILLED";
             fills_.fetch_add(1, std::memory_order_relaxed);
-            return;
+            return r;
         }
 
         std::printf("[EXECUTOR] FILLED %s %s | id=%ld status=%s qty=%.8f avg_px=%.4f\n",
                     sym_upper.c_str(), is_buy ? "BUY" : "SELL",
                     r.order_id, r.status.c_str(), r.executed_qty, r.avg_price);
+        std::fflush(stdout);
+        fills_.fetch_add(1, std::memory_order_relaxed);
+        return r;
+    }
+
+    // -----------------------------------------------------------------------
+    // submit_limit_maker — post a maker limit order, returns client_id
+    // -----------------------------------------------------------------------
+    OrderResult submit_limit_maker(const std::string& symbol,
+                                   bool is_buy,
+                                   double qty,
+                                   double limit_price) {
+        OrderResult r;
+        if (!rest_.is_ready()) return r;
+
+        std::string sym_upper = symbol;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+
+        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string cid = sym_upper.substr(0, 3) + "M"
+                        + std::to_string(now_us);
+        if (cid.size() > 36) cid = cid.substr(cid.size() - 36);
+
+        if (rest_.is_shadow()) {
+            // Shadow: pretend order posted successfully
+            r.ok        = true;
+            r.shadow    = true;
+            r.client_id = cid;
+            r.status    = "NEW";
+            return r;
+        }
+
+        r = rest_.place_limit_maker(sym_upper, is_buy, qty, limit_price, cid);
+        if (!r.ok) {
+            std::fprintf(stderr, "[EXECUTOR] Limit maker failed: %s\n", r.error.c_str());
+            errors_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return r;
+    }
+
+    // -----------------------------------------------------------------------
+    // query_order — poll exchange for fill status of a working order
+    // -----------------------------------------------------------------------
+    OrderResult query_order(const std::string& symbol,
+                            const std::string& client_id) {
+        OrderResult r;
+        if (!rest_.is_ready() || client_id.empty()) return r;
+        if (rest_.is_shadow()) {
+            // Shadow: not needed, manage_pending uses simulated price crossing
+            return r;
+        }
+        std::string sym_upper = symbol;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+        return rest_.query_order(sym_upper, client_id);
+    }
+
+    // -----------------------------------------------------------------------
+    // cancel_working_order — cancel a live limit order
+    // -----------------------------------------------------------------------
+    bool cancel_working_order(const std::string& symbol,
+                              const std::string& client_id,
+                              double /*limit_price*/,
+                              const char* reason) {
+        if (!rest_.is_ready() || client_id.empty()) return false;
+        if (rest_.is_shadow()) return true;  // shadow: always succeeds
+        std::string sym_upper = symbol;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+        bool ok = rest_.cancel_order(sym_upper, client_id);
+        if (ok) {
+            std::printf("[EXECUTOR] Cancelled %s client_id=%s reason=%s\n",
+                        sym_upper.c_str(), client_id.c_str(), reason);
+            std::fflush(stdout);
+        }
+        return ok;
+    }
+
+    // -----------------------------------------------------------------------
+    // record_shadow_fill — log a simulated fill in shadow mode
+    // -----------------------------------------------------------------------
+    void record_shadow_fill(const std::string& symbol,
+                            bool is_buy,
+                            double qty,
+                            double fill_price,
+                            const std::string& client_id) {
+        std::printf("[SHADOW-FILL] %s %s %.8f @ %.4f cid=%s\n",
+                    symbol.c_str(), is_buy ? "BUY" : "SELL",
+                    qty, fill_price,
+                    client_id.empty() ? "-" : client_id.c_str());
         std::fflush(stdout);
         fills_.fetch_add(1, std::memory_order_relaxed);
     }

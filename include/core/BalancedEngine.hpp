@@ -688,6 +688,16 @@ public:
         (void)(s.regime);  // suppress unused-variable for old_regime
         s.regime = classify_regime(id);
         // Note: classify_regime() already logs the change with full detail
+
+        // BUG FIX (2026-03-17): governor_.update_volatility() and
+        // update_latency() were never called, so current_vol_score_ was
+        // permanently 1.0 and current_latency_ was permanently 0.0.
+        // Wire vol_ratio_ema (already computed in classify_regime) so the
+        // governor's dynamic_min_bps() uses real market volatility.
+        // Wire latency_ms (per-tick data age) so LATENCY_HARD guard fires
+        // when the feed is genuinely lagging.
+        governor_.update_volatility(s.vol_ratio_ema);
+        governor_.update_latency(latency_ms);
         
         // Position management
         // PENDING: limit order posted, check for fill or cancellation

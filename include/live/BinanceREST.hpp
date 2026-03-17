@@ -13,6 +13,7 @@
 #include <optional>
 #include <unordered_map>
 #include <cmath>
+#include <iomanip>
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -51,6 +52,8 @@ public:
         double min_qty = 0.0;
         double max_qty = 0.0;
         double min_notional = 0.0;
+        int tick_decimals = 8;
+        int qty_decimals = 8;
     };
 
     bool load_credentials(const std::string& path,
@@ -176,6 +179,15 @@ public:
         const std::string side = is_buy ? "BUY" : "SELL";
         const std::string ts = timestamp_ms();
         const SymbolFilters filters = get_symbol_filters(symbol);
+        const bool requires_exchange_filters = !shadow_mode_ || shadow_validate_on_exchange_;
+
+        if (requires_exchange_filters && !filters.loaded) {
+            result.error = "exchange_filters_unavailable";
+            std::fprintf(stderr,
+                         "[REST] exchangeInfo unavailable | %s | refusing %s %s until filters load\n",
+                         symbol.c_str(), side.c_str(), order_type.c_str());
+            return result;
+        }
 
         const double normalized_qty = normalize_qty(qty, filters);
         if (normalized_qty <= 0.0) {
@@ -199,15 +211,20 @@ public:
             }
         }
 
+        const std::string formatted_qty = format_qty(normalized_qty, filters);
+        const std::string formatted_price = (order_type == "LIMIT_MAKER")
+            ? format_price(normalized_limit_price, filters)
+            : std::string();
+
         std::ostringstream qs;
         qs << "symbol=" << symbol
            << "&side=" << side
            << "&type=" << order_type
-           << "&quantity=" << format_qty(normalized_qty)
+           << "&quantity=" << formatted_qty
            << "&newClientOrderId=" << client_id;
 
         if (order_type == "LIMIT_MAKER") {
-            qs << "&price=" << format_price(normalized_limit_price);
+            qs << "&price=" << formatted_price;
         }
 
         qs << "&recvWindow=5000"
@@ -232,8 +249,13 @@ public:
                         ? ("shadow_order_test_http_" + std::to_string(http_code))
                         : body;
                     std::fprintf(stderr,
-                                 "[SHADOW-ORDER-TEST] rejected | %s | type=%s | http=%ld body=%s\n",
-                                 symbol.c_str(), order_type.c_str(), http_code, body.c_str());
+                                 "[SHADOW-ORDER-TEST] rejected | %s | type=%s | qty=%s | price=%s | tick=%.*f | step=%.*f | http=%ld body=%s\n",
+                                 symbol.c_str(), order_type.c_str(),
+                                 formatted_qty.c_str(),
+                                 order_type == "LIMIT_MAKER" ? formatted_price.c_str() : "-",
+                                 filters.tick_decimals, filters.tick_size,
+                                 filters.qty_decimals, filters.step_size,
+                                 http_code, body.c_str());
                     return result;
                 }
                 std::printf("[SHADOW-ORDER-TEST] POST /api/v3/order/test | %s | type=%s | %s\n",
@@ -279,7 +301,7 @@ public:
         }
         if (result.avg_price <= 0.0) {
             result.avg_price = (order_type == "LIMIT_MAKER")
-                ? limit_price
+                ? normalized_limit_price
                 : extract_json_double(body, "price");
         }
         if (result.order_type.empty()) {
@@ -501,46 +523,120 @@ private:
 
     SymbolFilters get_symbol_filters(const std::string& symbol) {
         auto it = symbol_filters_.find(symbol);
-        if (it != symbol_filters_.end()) {
+        if (it != symbol_filters_.end() && it->second.loaded) {
             return it->second;
         }
 
+        SymbolFilters filters = fetch_symbol_filters(symbol);
+        if (filters.loaded) {
+            symbol_filters_[symbol] = filters;
+        } else {
+            symbol_filters_.erase(symbol);
+        }
+        return filters;
+    }
+
+    SymbolFilters fetch_symbol_filters(const std::string& symbol) {
         SymbolFilters filters;
         std::string body;
         long http_code = 0;
-        if (get("/api/v3/exchangeInfo", "symbol=" + symbol, body, http_code) && http_code == 200) {
-            filters.tick_size = extract_filter_double(body, "PRICE_FILTER", "tickSize");
-            filters.min_price = extract_filter_double(body, "PRICE_FILTER", "minPrice");
-            filters.max_price = extract_filter_double(body, "PRICE_FILTER", "maxPrice");
-            filters.step_size = extract_filter_double(body, "LOT_SIZE", "stepSize");
-            filters.min_qty = extract_filter_double(body, "LOT_SIZE", "minQty");
-            filters.max_qty = extract_filter_double(body, "LOT_SIZE", "maxQty");
-            filters.min_notional = extract_filter_double(body, "MIN_NOTIONAL", "minNotional");
-            filters.loaded = true;
+        if (!get("/api/v3/exchangeInfo", "symbol=" + symbol, body, http_code)) {
+            std::fprintf(stderr, "[REST] exchangeInfo request failed | %s\n", symbol.c_str());
+            return filters;
+        }
+        if (http_code != 200) {
+            std::fprintf(stderr, "[REST] exchangeInfo rejected | %s | http=%ld body=%s\n",
+                         symbol.c_str(), http_code, body.c_str());
+            return filters;
         }
 
-        symbol_filters_[symbol] = filters;
+        const std::string tick_size_str = extract_filter_string(body, "PRICE_FILTER", "tickSize");
+        const std::string min_price_str = extract_filter_string(body, "PRICE_FILTER", "minPrice");
+        const std::string max_price_str = extract_filter_string(body, "PRICE_FILTER", "maxPrice");
+        const std::string step_size_str = extract_filter_string(body, "LOT_SIZE", "stepSize");
+        const std::string min_qty_str = extract_filter_string(body, "LOT_SIZE", "minQty");
+        const std::string max_qty_str = extract_filter_string(body, "LOT_SIZE", "maxQty");
+        std::string min_notional_str = extract_filter_string(body, "MIN_NOTIONAL", "minNotional");
+        if (min_notional_str.empty()) {
+            min_notional_str = extract_filter_string(body, "NOTIONAL", "minNotional");
+        }
+
+        filters.tick_size = parse_double(tick_size_str);
+        filters.min_price = parse_double(min_price_str);
+        filters.max_price = parse_double(max_price_str);
+        filters.step_size = parse_double(step_size_str);
+        filters.min_qty = parse_double(min_qty_str);
+        filters.max_qty = parse_double(max_qty_str);
+        filters.min_notional = parse_double(min_notional_str);
+        filters.tick_decimals = decimals_from_filter_string(tick_size_str);
+        filters.qty_decimals = decimals_from_filter_string(step_size_str);
+        filters.loaded = filters.tick_size > 0.0 && filters.step_size > 0.0;
+
+        if (!filters.loaded) {
+            std::fprintf(stderr,
+                         "[REST] exchangeInfo incomplete | %s | tick=%s step=%s\n",
+                         symbol.c_str(), tick_size_str.c_str(), step_size_str.c_str());
+            return filters;
+        }
+
+        std::printf("[REST] Filters loaded | %s | tick=%s | step=%s | min_qty=%s | min_notional=%s\n",
+                    symbol.c_str(),
+                    tick_size_str.c_str(),
+                    step_size_str.c_str(),
+                    min_qty_str.c_str(),
+                    min_notional_str.empty() ? "0" : min_notional_str.c_str());
+        std::fflush(stdout);
         return filters;
+    }
+
+    static std::string extract_filter_string(const std::string& body,
+                                             const std::string& filter_type,
+                                             const std::string& field) {
+        const std::string filter_needle = "\"filterType\":\"" + filter_type + "\"";
+        auto pos = body.find(filter_needle);
+        if (pos == std::string::npos) return {};
+
+        const std::string field_needle = "\"" + field + "\":\"";
+        pos = body.find(field_needle, pos);
+        if (pos == std::string::npos) return {};
+        pos += field_needle.size();
+        auto end = body.find('"', pos);
+        if (end == std::string::npos) return {};
+        return body.substr(pos, end - pos);
     }
 
     static double extract_filter_double(const std::string& body,
                                         const std::string& filter_type,
                                         const std::string& field) {
-        const std::string filter_needle = "\"filterType\":\"" + filter_type + "\"";
-        auto pos = body.find(filter_needle);
-        if (pos == std::string::npos) return 0.0;
+        return parse_double(extract_filter_string(body, filter_type, field));
+    }
 
-        const std::string field_needle = "\"" + field + "\":\"";
-        pos = body.find(field_needle, pos);
-        if (pos == std::string::npos) return 0.0;
-        pos += field_needle.size();
-        auto end = body.find('"', pos);
-        if (end == std::string::npos) return 0.0;
+    static double parse_double(const std::string& value) {
+        if (value.empty()) return 0.0;
         try {
-            return std::stod(body.substr(pos, end - pos));
+            return std::stod(value);
         } catch (...) {
             return 0.0;
         }
+    }
+
+    static int decimals_from_filter_string(const std::string& value) {
+        auto dot = value.find('.');
+        if (dot == std::string::npos) return 0;
+
+        size_t last = value.find_last_not_of('0');
+        if (last == std::string::npos || last <= dot) {
+            return 0;
+        }
+        return static_cast<int>(last - dot);
+    }
+
+    static double round_to_precision(double value, int decimals) {
+        if (decimals <= 0) {
+            return std::round(value);
+        }
+        const double scale = std::pow(10.0, decimals);
+        return std::round(value * scale) / scale;
     }
 
     static double floor_to_step(double value, double step) {
@@ -559,6 +655,7 @@ private:
         double out = qty;
         if (filters.step_size > 0.0) {
             out = floor_to_step(out, filters.step_size);
+            out = round_to_precision(out, filters.qty_decimals);
         }
         if (filters.min_qty > 0.0 && out + 1e-12 < filters.min_qty) {
             return 0.0;
@@ -567,6 +664,7 @@ private:
             out = filters.max_qty;
             if (filters.step_size > 0.0) {
                 out = floor_to_step(out, filters.step_size);
+                out = round_to_precision(out, filters.qty_decimals);
             }
         }
         return out;
@@ -577,6 +675,7 @@ private:
         if (filters.tick_size > 0.0) {
             out = is_buy ? floor_to_step(out, filters.tick_size)
                          : ceil_to_step(out, filters.tick_size);
+            out = round_to_precision(out, filters.tick_decimals);
         }
         if (filters.min_price > 0.0 && out + 1e-12 < filters.min_price) {
             return 0.0;
@@ -587,28 +686,18 @@ private:
         return out;
     }
 
-    static std::string trim_number(const char* fmt, double value) {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), fmt, value);
-        std::string s(buf);
-        auto dot = s.find('.');
-        if (dot != std::string::npos) {
-            size_t last = s.find_last_not_of('0');
-            if (last != std::string::npos && last > dot) {
-                s = s.substr(0, last + 1);
-            } else if (last == dot) {
-                s = s.substr(0, dot);
-            }
-        }
-        return s;
+    static std::string format_decimal(double value, int decimals) {
+        std::ostringstream out;
+        out << std::fixed << std::setprecision(std::max(0, decimals)) << value;
+        return out.str();
     }
 
-    static std::string format_qty(double qty) {
-        return trim_number("%.8f", qty);
+    static std::string format_qty(double qty, const SymbolFilters& filters) {
+        return format_decimal(qty, filters.qty_decimals);
     }
 
-    static std::string format_price(double px) {
-        return trim_number("%.8f", px);
+    static std::string format_price(double px, const SymbolFilters& filters) {
+        return format_decimal(px, filters.tick_decimals);
     }
 
     static size_t write_cb(void* ptr, size_t size, size_t nmemb, void* userdata) {

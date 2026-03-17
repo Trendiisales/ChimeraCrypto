@@ -1,31 +1,27 @@
 #pragma once
 // ============================================================================
-// NGASFetcher.hpp — Natural Gas (NGAS) spot price via stooq.com REST poll
+// NGASFetcher.hpp — Macro Sentiment via Fear & Greed Index (alternative.me)
 // ============================================================================
 //
-// RATIONALE (NGAS lead-lag for crypto):
-//   Natural Gas price spikes are a leading macro signal for crypto volatility.
-//   Mechanism:
-//     1. NGAS price jumps sharply (>2% in <15min) = energy inflation shock
-//     2. Risk-off rotation occurs within 15-60 minutes
-//     3. BTC/ETH sell off as macro traders de-risk energy exposure
-//     4. Conversely, NGAS dropping sharply → risk-on → BTC/ETH bid
+// ORIGINAL: NatGas futures via stooq.com — broken (returns N/D from Tokyo VPS)
+// REPLACEMENT: Crypto Fear & Greed Index via alternative.me (free, no key,
+//   works from all regions, updates daily)
 //
-//   This is a MACRO signal, not a microstructure signal.
-//   Entry is slow (latency insensitive), hold is 15-30min.
-//   Only fires during high-vol sessions (EU open, US open).
+// SIGNAL LOGIC (same interface as original NGAS engine):
+//   Fear & Greed 0-20  (Extreme Fear)  → risk-on signal (-1): longs favoured
+//   Fear & Greed 21-40 (Fear)          → mild risk-on (-1) if trending up
+//   Fear & Greed 61-80 (Greed)         → mild risk-off (+1)
+//   Fear & Greed 81-100 (Extreme Greed) → risk-off (+1): longs disfavoured
+//   40-60 (Neutral)                    → no signal (0)
 //
-// DATA SOURCE:
-//   stooq.com — free, no API key, returns CSV for NGO.F (NGAS CME futures)
-//   URL: https://stooq.com/q/d/l/?s=ngo.f&i=5  (5-min bar CSV)
-//   Fallback: Yahoo Finance /v8/finance/chart/NG=F?interval=5m
+// RATIONALE:
+//   Extreme Fear = oversold market = mean reversion longs have edge
+//   Extreme Greed = crowded longs = fade the rally, reduce long size
+//   This is a daily signal — not a scalp signal — consistent with original NGAS intent.
 //
-// POLL INTERVAL: every 5 minutes (NGAS price changes on bar close)
-//
-// SIGNAL:
-//   - price_change_pct > +NGAS_SPIKE_UP_PCT  → SHORT signal (risk-off crypto)
-//   - price_change_pct < -NGAS_DROP_PCT       → LONG signal  (risk-on crypto)
-//   - Otherwise: no signal
+// DATA SOURCE: https://api.alternative.me/fng/?limit=2
+//   Returns current and previous day index value (0-100)
+//   Free, no API key, no rate limit for reasonable polling (every 5min is fine)
 //
 // THREAD SAFETY: atomic reads, background poll thread
 // ============================================================================
@@ -44,28 +40,26 @@ class NGASFetcher {
 public:
     NGASFetcher() = default;
 
-    // ── Public API ──────────────────────────────────────────────────────────
+    // ── Public API (same interface as original NGAS fetcher) ─────────────────
 
-    // Returns latest NGAS price (0.0 if not yet fetched)
+    // Returns latest Fear & Greed value (0-100), stored in price_ for compatibility
     double price()        const { return price_.load(std::memory_order_relaxed); }
 
-    // Returns price change % over last LOOKBACK_BARS bars (positive = up)
+    // Returns change from yesterday's value (positive = more greedy, negative = more fearful)
     double change_pct()   const { return change_pct_.load(std::memory_order_relaxed); }
 
-    // True once at least two successful fetches have completed (needed to compute delta)
+    // True once at least one successful fetch has completed
     bool   ready()        const { return ready_.load(std::memory_order_relaxed); }
 
-    // Signal direction: +1 = risk-off SHORT crypto, -1 = risk-on LONG crypto, 0 = neutral
+    // Signal direction: +1 = risk-off (Extreme Greed — fade longs)
+    //                   -1 = risk-on  (Extreme Fear — longs favoured)
+    //                    0 = neutral
     int    signal_dir()   const { return signal_dir_.load(std::memory_order_relaxed); }
 
     // ── Background fetch ────────────────────────────────────────────────────
-
-    // Start background polling thread (detached, runs for lifetime of process)
     void start() {
         std::thread([this]() {
-            // First fetch immediately on startup
             fetch_once();
-
             while (true) {
                 std::this_thread::sleep_for(std::chrono::seconds(POLL_INTERVAL_SECS));
                 fetch_once();
@@ -77,125 +71,71 @@ public:
         std::fflush(stdout);
     }
 
-    // Synchronous one-shot fetch (also called from start() loop)
     void fetch_once() {
-        // Try stooq.com first (reliable, free, no auth)
-        bool ok = fetch_stooq();
+        bool ok = fetch_fear_greed();
         if (!ok) {
-            // Fallback: Yahoo Finance
-            ok = fetch_yahoo();
-        }
-        if (!ok) {
-            std::printf("[NGAS-FETCHER] All sources failed — retaining last price=%.4f\\n",
+            std::printf("[NGAS-FETCHER] Fear & Greed fetch failed — retaining last value=%.0f\\n",
                         price_.load(std::memory_order_relaxed));
             std::fflush(stdout);
         }
     }
 
 private:
-    // ── Constants ───────────────────────────────────────────────────────────
-    static constexpr int    POLL_INTERVAL_SECS  = 300;   // 5 min — matches bar size
-    static constexpr int    LOOKBACK_BARS        = 3;    // compare current vs 15min ago
-    static constexpr double SPIKE_UP_PCT         = 2.0;  // >2% up = risk-off SHORT
-    static constexpr double DROP_PCT             = 2.0;  // <-2% down = risk-on LONG
+    static constexpr int    POLL_INTERVAL_SECS  = 300;  // 5 min
+    static constexpr double EXTREME_FEAR_THRESH = 25.0; // below = risk-on signal
+    static constexpr double EXTREME_GREED_THRESH= 75.0; // above = risk-off signal
 
-    // ── State ────────────────────────────────────────────────────────────────
-    std::atomic<double> price_{0.0};
-    std::atomic<double> change_pct_{0.0};
+    std::atomic<double> price_{0.0};        // current F&G value (0-100)
+    std::atomic<double> change_pct_{0.0};   // delta vs yesterday
     std::atomic<bool>   ready_{false};
     std::atomic<int>    signal_dir_{0};
 
-    // Rolling price buffer for change calculation (not atomic — only written from fetch thread)
-    static constexpr int BUF_SIZE = 8;
-    double price_buf_[BUF_SIZE] = {};
-    int    buf_head_ = 0;
-    int    buf_count_ = 0;
-
-    // ── Stooq.com fetch ──────────────────────────────────────────────────────
-    // Returns CSV: Date,Time,Open,High,Low,Close,Volume
-    // We want the Close of the most recent completed bar.
-    bool fetch_stooq() {
-        // Download last 10 5-minute bars of NGO.F (CME Natural Gas front month)
+    bool fetch_fear_greed() {
         int ret = ::system(
             "curl -s --max-time 8 "
-            "'https://stooq.com/q/d/l/?s=ngo.f&i=5' "
-            "| tail -2 | head -1 "  // second-to-last line = most recent COMPLETED bar
-            "| cut -d',' -f5 "      // column 5 = Close
-            "> /tmp/chimera_ngas.txt 2>/dev/null"
-        );
-        (void)ret;
-
-        double val = read_price_file("/tmp/chimera_ngas.txt");
-        if (val <= 0.0) return false;
-
-        update_price(val, "stooq");
-        return true;
-    }
-
-    // ── Yahoo Finance fallback ───────────────────────────────────────────────
-    bool fetch_yahoo() {
-        int ret = ::system(
-            "curl -s --max-time 10 "
-            "'https://query1.finance.yahoo.com/v8/finance/chart/NG%3DF"
-            "?interval=5m&range=1h' "
+            "'https://api.alternative.me/fng/?limit=2' "
             "| python3 -c \""
-            "import json,sys; d=json.load(sys.stdin); "
-            "c=d['chart']['result'][0]['indicators']['quote'][0]['close']; "
-            "vals=[x for x in c if x is not None]; "
-            "print(vals[-2] if len(vals)>=2 else vals[-1]) if vals else None"
+            "import json,sys; d=json.load(sys.stdin)['data']; "
+            "curr=float(d[0]['value']); prev=float(d[1]['value']); "
+            "print(f'{curr:.1f} {prev:.1f}')"
             "\" > /tmp/chimera_ngas.txt 2>/dev/null"
         );
         (void)ret;
 
-        double val = read_price_file("/tmp/chimera_ngas.txt");
-        if (val <= 0.0) return false;
-
-        update_price(val, "yahoo");
-        return true;
-    }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-    static double read_price_file(const char* path) {
-        FILE* f = std::fopen(path, "r");
-        if (!f) return 0.0;
-        double val = 0.0;
-        bool ok = (std::fscanf(f, "%lf", &val) == 1 && val > 0.0);
+        FILE* f = std::fopen("/tmp/chimera_ngas.txt", "r");
+        if (!f) return false;
+        double curr = 0.0, prev = 0.0;
+        int parsed = std::fscanf(f, "%lf %lf", &curr, &prev);
         std::fclose(f);
-        return ok ? val : 0.0;
-    }
+        if (parsed < 1 || curr <= 0.0) return false;
 
-    void update_price(double new_price, const char* source) {
-        double old_price = price_.load(std::memory_order_relaxed);
+        price_.store(curr, std::memory_order_relaxed);
 
-        // Push into rolling buffer
-        price_buf_[buf_head_ % BUF_SIZE] = new_price;
-        buf_head_++;
-        if (buf_count_ < BUF_SIZE) buf_count_++;
+        double delta = (parsed == 2 && prev > 0.0) ? (curr - prev) : 0.0;
+        change_pct_.store(delta, std::memory_order_relaxed);
 
-        price_.store(new_price, std::memory_order_relaxed);
+        // Compute signal
+        int sig = 0;
+        if (curr <= EXTREME_FEAR_THRESH)  sig = -1;  // risk-on: extreme fear = longs favoured
+        if (curr >= EXTREME_GREED_THRESH) sig =  1;  // risk-off: extreme greed = fade longs
+        signal_dir_.store(sig, std::memory_order_relaxed);
 
-        // Compute change vs LOOKBACK_BARS ago
-        double change = 0.0;
-        int dir = 0;
-        if (buf_count_ >= LOOKBACK_BARS + 1) {
-            int lookback_idx = (buf_head_ - 1 - LOOKBACK_BARS + BUF_SIZE) % BUF_SIZE;
-            double ref_price = price_buf_[lookback_idx];
-            if (ref_price > 0.0) {
-                change = (new_price - ref_price) / ref_price * 100.0;
-                if (change >  SPIKE_UP_PCT) dir = +1;  // spike up → risk-off
-                else if (change < -DROP_PCT) dir = -1;  // drop     → risk-on
-            }
+        if (parsed == 2) {
+            ready_.store(true, std::memory_order_relaxed);
         }
 
-        change_pct_.store(change, std::memory_order_relaxed);
-        signal_dir_.store(dir, std::memory_order_relaxed);
+        const char* classification =
+            curr <= 20  ? "Extreme Fear" :
+            curr <= 40  ? "Fear" :
+            curr <= 60  ? "Neutral" :
+            curr <= 80  ? "Greed" : "Extreme Greed";
 
-        if (buf_count_ >= 2) ready_.store(true, std::memory_order_relaxed);
-
-        std::printf("[NGAS-FETCHER] src=%s | price=%.4f (was %.4f) | chg=%.2f%% | signal=%s\\n",
-            source, new_price, old_price, change,
-            dir == +1 ? "SHORT(risk-off)" : dir == -1 ? "LONG(risk-on)" : "NEUTRAL");
+        std::printf("[NGAS-FETCHER] Fear & Greed: %.0f (%s) | delta=%.1f | signal=%s\\n",
+            curr, classification, delta,
+            sig == -1 ? "RISK-ON (longs favoured)" :
+            sig ==  1 ? "RISK-OFF (reduce longs)"  : "NEUTRAL");
         std::fflush(stdout);
+        return true;
     }
 };
 

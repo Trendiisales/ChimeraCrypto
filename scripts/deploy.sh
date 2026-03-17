@@ -71,17 +71,13 @@ if systemctl list-unit-files chimera.service > /dev/null 2>&1; then
         exit 1
     fi
 else
-    echo "[DEPLOY] No systemd service found. Starting manually in background..."
-    cd "$CHIMERA_DIR"
-    nohup ./build/chimera > logs/chimera_startup.log 2>&1 &
-    CHIMERA_PID=$!
-    sleep 2
-    if kill -0 $CHIMERA_PID 2>/dev/null; then
-        echo "[DEPLOY] Started with PID $CHIMERA_PID"
-    else
-        echo "[DEPLOY] ERROR: Process exited immediately. Check logs/chimera_startup.log"
-        exit 1
-    fi
+    echo "[DEPLOY] ERROR: chimera.service not installed. Install it first:"
+    echo "  sudo cp $CHIMERA_DIR/scripts/chimera.service /etc/systemd/system/"
+    echo "  sudo systemctl daemon-reload"
+    echo "  sudo systemctl start chimera"
+    echo ""
+    echo "  Do NOT use 'systemctl enable chimera' — that causes auto-start on boot."
+    exit 1
 fi
 
 # ── 6. Verify ────────────────────────────────────────────────────────────────

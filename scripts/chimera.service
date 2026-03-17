@@ -9,10 +9,10 @@ User=jo
 WorkingDirectory=/home/jo/ChimeraCrypto
 ExecStart=/home/jo/ChimeraCrypto/build/chimera
 ExecStop=/bin/kill -SIGINT $MAINPID
-Restart=on-failure
-RestartSec=10
+Restart=no
 StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+# WantedBy intentionally omitted — must be started manually with: systemctl start chimera
+# Do NOT run: systemctl enable chimera

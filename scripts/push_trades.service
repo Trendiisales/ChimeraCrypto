@@ -7,8 +7,8 @@ Type=simple
 User=jo
 WorkingDirectory=/home/jo/ChimeraCrypto
 ExecStart=/home/jo/ChimeraCrypto/scripts/push_trades.sh
-Restart=on-failure
-RestartSec=30
+Restart=no
 
 [Install]
-WantedBy=multi-user.target
+# WantedBy intentionally omitted — must be started manually with: systemctl start push_trades
+# Do NOT run: systemctl enable push_trades

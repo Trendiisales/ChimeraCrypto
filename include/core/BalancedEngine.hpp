@@ -378,8 +378,22 @@ public:
             gate.disabled_until = 0;
             gate.samples.clear();
         }
-        // Edge-first defaults: keep only candidate edges active by default.
+        // Edge defaults based on live trade audit (Mar 2026):
+        //   LEADLAG: only enabled engine with confirmed signal (gated by trend filter now)
+        //   VWAP:    33% WR - only engine with ANY wins, enable by default
+        //   LIQ:     needs more data but signal logic is sound
+        //   OFI:     24 trades 0% WR -95bp - PERMANENTLY DISABLED
+        //   VACUUM:  17 trades 0% WR -53bp - PERMANENTLY DISABLED
         edge_gate_[EDGE_LEADLAG].enabled = true;
+        edge_gate_[EDGE_VWAP].enabled    = true;   // 33% WR, only winning engine
+        edge_gate_[EDGE_LIQ].enabled     = true;   // event-driven, sound logic
+        // Hard-disable the provably broken engines: set disabled_until to far future
+        // They cannot be auto-promoted until this date passes.
+        static constexpr int64_t DISABLED_FOREVER = 9999999999999LL; // ~year 2286
+        edge_gate_[EDGE_OFI].enabled        = false;
+        edge_gate_[EDGE_OFI].disabled_until = DISABLED_FOREVER;
+        edge_gate_[EDGE_VACUUM].enabled        = false;
+        edge_gate_[EDGE_VACUUM].disabled_until = DISABLED_FOREVER;
         
         // Phase 2: Initialize capital control
         capital_control_.set_base_capital(10000.0);
@@ -394,8 +408,11 @@ public:
         std::printf(" Capital Control Layer: ENABLED                                \n");
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
-        std::printf(" Active Engines: LEADLAG | LIQ | VWAP-REV (long-only)          \n");
-        std::printf(" Parked Engines: OFI | VACUUM | IMBAL | SWEEP | MM | VOLSHOCK  \n");
+        std::printf(" Active Engines: LEADLAG (trend-gated) | LIQ | VWAP-REV      \n");
+        std::printf(" Parked Engines: SWEEP | MM (unproven)                        \n");
+        std::printf(" HARD DISABLED:  OFI (0%% WR -95bp) | VACUUM (0%% WR -53bp)   \n");
+        std::printf(" Trend Filter:   ENABLED (500-tick EMA vs 100-tick EMA)       \n");
+        std::printf(" Circuit Breaker: 2 SLs = 15min pause (was 5min)              \n");
         std::printf(" Multi-position: UP TO 3 (1 per symbol)                        \n");
         std::printf(" Dead zone (20-23 UTC): max 1 pos, raised thresholds           \n");
         std::printf("\n");
@@ -581,6 +598,9 @@ public:
         }
         s.last_price = price;
 
+        // ---- MACRO TREND EMA  used to gate long entries against downtrend ----
+        update_trend_ema(id, price);
+
         // ---- SESSION VWAP UPDATE ----
         // Reset VWAP at UTC midnight (session boundary)
         int64_t day_ms = ts % 86400000LL;
@@ -691,6 +711,22 @@ public:
 
         // Try signals in priority order
         // Priority: liquidation first (strongest signal), then lead-lag, then breakout, then microstructure
+
+        // MACRO TREND FILTER: suppress all LONG-only signals when price is in downtrend
+        // trend_allows_long() = fast EMA >= slow EMA (500-tick baseline)
+        // All current signals are long-only on spot. No longs in a downtrend.
+        const bool trend_ok = trend_allows_long(id);
+        if (!trend_ok) {
+            static int64_t last_trend_log_[MAX_SYMBOLS] = {};
+            if (ts - last_trend_log_[id] > 30000) {
+                std::printf("[TREND-FILTER] %s | downtrend detected (fast_ema=%.4f < slow_ema=%.4f) | all longs suppressed\n",
+                    sym_short(id), trend_ema_fast_[id], trend_ema_slow_[id]);
+                std::fflush(stdout);
+                last_trend_log_[id] = ts;
+            }
+            return;
+        }
+
         if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         if (try_funding_entry(id, price, ts, s, latency_ms)) return;
         if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
@@ -712,11 +748,13 @@ public:
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
         const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
         if (has_book) {
-            if (edge_gate_allows(id, EDGE_VACUUM, ts) && check_vacuum(id, price, ts, s, latency_ms)) return;
+            // OFI: 24 trades 0% WR -95.66bp -- HARD DISABLED (all timeouts, no edge)
+            // VACUUM: 17 trades 0% WR -53.67bp -- HARD DISABLED (threshold too loose)
+            // if (edge_gate_allows(id, EDGE_VACUUM, ts) && check_vacuum(id, price, ts, s, latency_ms)) return;
+            // if (edge_gate_allows(id, EDGE_OFI, ts) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
             // Park IMBAL until it proves positive edge in this venue.
             // if (check_imbalance(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_OFI, ts) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
         }
@@ -3075,8 +3113,10 @@ private:
             if (exit_reason == "SL") {
                 sym_consecutive_sl_[id]++;
                 if (sym_consecutive_sl_[id] >= SYM_SL_STREAK_LIMIT) {
-                    const bool shadow_mode = is_shadow_mode();
-                    const int64_t pause_ms = shadow_mode ? 45000LL : SYM_SL_PAUSE_MS;
+                    // Shadow mode uses same pause time as live - 45s was causing
+                    // AVAX triple-SL (3 x -18bp) because shadow reset too fast.
+                    // We want shadow mode to behave like live to surface real strategy flaws.
+                    const int64_t pause_ms = SYM_SL_PAUSE_MS;
                     sym_sl_cooldown_[id] = ts + pause_ms;
                     const char* sym = sym_short(id);
                     std::printf("[CIRCUIT-BREAK-TRIGGER] %s | %d consecutive SLs  pausing %.0fs\n",
@@ -3159,13 +3199,46 @@ private:
     int64_t last_loss_ts_;
 
     // PER-SYMBOL CIRCUIT BREAKER  prevents entering a trending-against-us move
-    // After 2 consecutive SL exits on the same symbol, pause that symbol 5 minutes
+    // After 2 consecutive SL exits on the same symbol, pause that symbol 15 minutes
     // Prevents 02:46-02:51 style ETH crash cluster (8 x -8bp = -64bp in 5 min)
     int     sym_consecutive_sl_[MAX_SYMBOLS];
     int64_t sym_sl_cooldown_[MAX_SYMBOLS];
     int64_t startup_ts_ms_ = 0;
-    static constexpr int     SYM_SL_STREAK_LIMIT = 2;
-    static constexpr int64_t SYM_SL_PAUSE_MS     = 5 * 60000LL;
+    static constexpr int     SYM_SL_STREAK_LIMIT = 2;       // 2 SLs = pause
+    static constexpr int64_t SYM_SL_PAUSE_MS     = 15 * 60000LL; // 15 min (was 5min - not enough)
+
+    // MACRO TREND FILTER  slow EMA of price per symbol
+    // Alpha = 0.002  ~500-tick window (~5 minutes of data at 100 ticks/sec)
+    // If price < trend_ema: downtrend  suppress all LONG entries
+    // If price > trend_ema: uptrend   allow LONG entries
+    static constexpr double TREND_EMA_ALPHA      = 0.002;
+    static constexpr double TREND_EMA_FAST_ALPHA = 0.01;    // 100-tick fast EMA
+    double trend_ema_slow_[MAX_SYMBOLS]   = {};   // 500-tick slow EMA
+    double trend_ema_fast_[MAX_SYMBOLS]   = {};   // 100-tick fast EMA
+    bool   trend_ema_init_[MAX_SYMBOLS]   = {};   // seeded flag
+    int    trend_tick_count_[MAX_SYMBOLS] = {};   // ticks since init
+
+    // Returns true if macro trend permits a LONG entry on this symbol
+    // Suppresses longs when fast EMA is below slow EMA (downtrend confirmed)
+    bool trend_allows_long(int id) const {
+        if (!trend_ema_init_[id]) return true;  // not enough data yet, allow
+        if (trend_tick_count_[id] < 100) return true;  // need 100 ticks minimum
+        // fast < slow = bearish  block longs
+        const bool bullish = trend_ema_fast_[id] >= trend_ema_slow_[id];
+        return bullish;
+    }
+
+    void update_trend_ema(int id, double price) {
+        if (!trend_ema_init_[id]) {
+            trend_ema_slow_[id] = price;
+            trend_ema_fast_[id] = price;
+            trend_ema_init_[id] = true;
+        } else {
+            trend_ema_slow_[id] = (1.0 - TREND_EMA_ALPHA)      * trend_ema_slow_[id] + TREND_EMA_ALPHA      * price;
+            trend_ema_fast_[id] = (1.0 - TREND_EMA_FAST_ALPHA) * trend_ema_fast_[id] + TREND_EMA_FAST_ALPHA * price;
+        }
+        trend_tick_count_[id]++;
+    }
 
     double total_pnl_;
     double realized_pnl_;

@@ -82,7 +82,7 @@ struct TradingConfig {
     // BTC must move at least this many bp in the lookback window to signal
     // Raised 810bp: at 8bp too many weak moves were triggering. 10bp filters
     // for genuine momentum that ETH/SOL reliably follows.
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 5.0;   // crypto spot needs more signals; still gated by flow/book confirmation
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 7.0;   // raised 5->7bp: 5bp fired too many weak moves that reversed (17 x -7.58bp cluster)
     // LEADLAG confirmation gates (added Mar 2026)
     // OB ratio: bid_size/ask_size must exceed this — filters neutral/bearish book
     static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.08; // bid 8% > ask

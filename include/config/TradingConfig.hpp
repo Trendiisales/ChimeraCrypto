@@ -123,8 +123,8 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // Short liquidation on perp = forced buy on perp = spot follows up 50-200ms later
     // Min notional filters noise  only meaningful liquidations move spot
-    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 500000.0; // raised: larger cascades produce more reliable follow-through
-    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD = 750000.0; // alts: require larger cascade for sufficient edge
+    static constexpr double  LIQ_MIN_NOTIONAL_USD   = 1000000.0; // AUDIT 2026-03-21: raised 500k->1M. All 3 LIQ trades at 500k threshold lost. Only cascades >$1M reliably move spot.
+    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD = 1500000.0; // AUDIT 2026-03-21: raised 750k->1.5M for alts (thinner books, more noise)
     static constexpr double  LIQ_SPOT_MOVED_MAX_BP  = 2.5;      // tighter anti-chase window
     static constexpr int64_t LIQ_SIGNAL_WINDOW_MS   = 250;      // edge decays fast; stale liq signals are net-negative
     static constexpr int64_t LIQ_COOLDOWN_MS        = 10000;    // avoid repeated liq stabs in chop
@@ -208,17 +208,25 @@ struct TradingConfig {
 
     // -------------------------------------------------------------------------
     // VWAP REVERSION ENGINE
-    // Edge: in GRIND regime, price >20bp below session VWAP + bid imbalance = buy
+    // Edge: in GRIND regime, price >12bp below session VWAP + bid imbalance = buy
     // Mean reversion back toward VWAP. High win rate in ranging markets.
+    // AUDIT 2026-03-21: lowered entry from 20bp -> 12bp to 3-4x trade frequency.
+    // Compensated with tighter OFI+flow confirmation gates in check_vwap_reversion.
+    // Partial exit lowered 8->4bp: avg MFE was only 1.4bp, 8bp trigger never fired.
+    // Trail arm tightened: 7 trades peaked >2bp then gave back all gains to timeout.
     // -------------------------------------------------------------------------
-    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 20.0;  // min distance below VWAP
-    static constexpr double VWAP_MAX_DEVIATION_BP      = 80.0;  // too far = trending, skip
-    static constexpr double VWAP_PARTIAL_EXIT_BP       = 8.0;   // NEW: exit 50% of position at 8bp to lock gains seen in MFE data
-    static constexpr double VWAP_MIN_IMBALANCE         = 0.15;  // bid pressure must confirm
-    static constexpr double VWAP_MAX_SPREAD_BPS        = 2.0;
-    static constexpr double VWAP_TP_BP                 = 14.0;  // raised from 12bp: best trades reached 10bp MFE and timed out
-    static constexpr double VWAP_SL_BP                 = 4.5;
-    static constexpr int64_t VWAP_MAX_HOLD_MS          = 45000; // raised from 12s: mean reversion needs 30-60s to develop (observed max 45.4s)
+    static constexpr double VWAP_ENTRY_DEVIATION_BP    = 12.0;  // lowered 20->12bp: was too restrictive, fired rarely
+    static constexpr double VWAP_MAX_DEVIATION_BP      = 60.0;  // tightened 80->60bp: beyond 60bp is a breakdown not a dip
+    static constexpr double VWAP_PARTIAL_EXIT_BP       = 4.0;   // lowered 8->4bp: avg MFE=1.4bp, 8bp trigger never fired
+    static constexpr double VWAP_PARTIAL_EXIT_SIZE     = 0.60;  // exit 60% at partial trigger (was implicit 50%)
+    static constexpr double VWAP_MIN_IMBALANCE         = 0.18;  // raised 0.15->0.18: tighter confirmation to compensate lower entry threshold
+    static constexpr double VWAP_MIN_OFI_RATIO         = 0.12;  // NEW: OFI must be buy-sided to confirm VWAP dip is real
+    static constexpr double VWAP_MAX_SPREAD_BPS        = 1.8;   // tightened 2.0->1.8bp: wider spread = worse fill quality
+    static constexpr double VWAP_TP_BP                 = 12.0;  // lowered 14->12bp: realistic for 12bp entry threshold
+    static constexpr double VWAP_SL_BP                 = 3.5;   // tightened 4.5->3.5bp: with lower entry threshold, less noise tolerance needed
+    static constexpr int64_t VWAP_MAX_HOLD_MS          = 35000; // tightened 45->35s: reduces dead-time on failed reversions
+    static constexpr double VWAP_TRAIL_ARM_BP          = 1.5;   // NEW: arm trail at 1.5bp profit (was only at partial exit)
+    static constexpr double VWAP_TRAIL_LOCK_PCT        = 0.60;  // NEW: lock 60% of peak once trail armed (was 50%)
     static constexpr double LATENCY_VWAP_MAX_MS        = 50.0;  // not latency sensitive
 
     // -------------------------------------------------------------------------
@@ -252,7 +260,7 @@ struct TradingConfig {
     static constexpr double REGIME_BUILDUP_TO_BREAKOUT      = 1.65;
     static constexpr double REGIME_BREAKOUT_ENTER           = 1.65;
     static constexpr double REGIME_BREAKOUT_EXIT            = 1.35;
-    static constexpr int    MIN_REGIME_TICKS                = 30;
+    static constexpr int    MIN_REGIME_TICKS                = 50;  // AUDIT 2026-03-21: raised 30->50. Logs show regime changing every 3-7s (every 30 ticks at ETH speed). 50 ticks ~6s minimum stability before regime locks in.
     static constexpr int    EXPAND_POST_COMPRESS_LOCKOUT  = 3;   // block EXPAND for N ticks after COMPRESSIONBREAKOUT transition (regime lag filter)
     static constexpr double REGIME_MIN_LONG_AVG             = 0.004;
 
@@ -298,10 +306,9 @@ struct TradingConfig {
     static constexpr double TRAIL_LONG_VOL_MULT        = 3.0;  // loosened  was cutting 12bp winner at 4bp
 
     // Minimum profit before trailing stop activates
-    // IMPULSE TP=20bp  trail must not arm until trade has real room.
-    // Previous 1.5bp was cutting winners at 1-3bp; 0 TP hits in 24 trades.
-    // Raise to 10bp: let IMPULSE run, hard SL=4bp protects the downside.
-    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 4.0;  // arm at 4bp  IMPULSE TP=10bp, SL=7bp: protect gains once we clear 40% of TP
+    // VWAP has its own tighter arm at VWAP_TRAIL_ARM_BP = 1.5bp (see above).
+    // For IMPULSE/EXPANSION: arm at 4bp — let them run to their wider TPs.
+    static constexpr double MIN_PROFIT_TO_TRAIL_BP     = 4.0;  // IMPULSE/EXPANSION only — VWAP uses VWAP_TRAIL_ARM_BP
 
     // Minimum ticks to hold before any exit allowed (prevent instant exits)
     static constexpr int    MIN_HOLD_TICKS             = 3;

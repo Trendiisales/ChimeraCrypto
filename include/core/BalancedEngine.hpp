@@ -769,6 +769,9 @@ public:
                 std::fflush(stdout);
                 last_trend_log_[id] = ts;
             }
+            // Record in rejection throttle so REJECTION-SUMMARY shows trend blocks
+            rejection_throttle_.record(std::string(sym_short(id)) + " LEADLAG", "trend_filter_down");
+            rejection_throttle_.record(std::string(sym_short(id)) + " VOLSHOCK", "trend_filter_down");
             // Mean-reversion signals are exempt — they want price below trend
             // Only block the momentum/event engines
             if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
@@ -805,7 +808,12 @@ public:
         // VOLSHOCK: maker entry now wired (layer_id=7, ask-0.1*spread, 500ms)
         // At maker cost 4bp: EV = 0.55*14 - 0.45*4 = 7.7-1.8 = +5.9bp at 55% WR
         // Requires vol spike 3x baseline + displacement 8bp — higher conviction than EXPAND
-        if (check_vol_shock(id, price, ts, s, latency_ms)) return;
+        // AUDIT 2026-03-21: added has_book guard — VOLSHOCK was logging "no_book_data"
+        // for SOL/LINK/AVAX/POL because bookTicker arrives later than aggTrade at startup.
+        {
+            const bool vs_has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
+            if (vs_has_book && check_vol_shock(id, price, ts, s, latency_ms)) return;
+        }
 
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
@@ -2338,25 +2346,25 @@ private:
         }
 
         // Cost-aware fast trail for active quality layers.
-        // VWAP fix: trades reaching 10bp MFE were timing out at 5.68bp because
-        // floor = peak - 1.25bp = 8.75bp, but price hovered above that until timeout.
-        // New formula: lock in 50% of peak profit once armed. Much tighter protection.
-        // VWAP partial exit: once partial_exit_done is set (crossed 8bp), use 65% floor
-        // so we don't give back most of the move to timeout.
+        // AUDIT 2026-03-21: VWAP now uses its own tighter arm threshold (1.5bp) and
+        // lock percentage (60%) to prevent the 7 observed cases of MFE>2bp→timeout loss.
+        // Other layers retain original 50% lock at cost+1.5bp arm.
         if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION
             || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM
             || s.pos.layer == LAYER_SPREAD_COMPRESS || s.pos.layer == LAYER_DIVERGENCE) {
-            // MAKER-ONLY POLICY: all active layers now use maker entry (~4bp cost)
-            // Previously LIQ and SESSION_MOM used TAKER_ROUND_TRIP_BP — corrected.
             const double round_trip_cost = TradingConfig::MAKER_ROUND_TRIP_BP;
-            // For VWAP: arm at cost+0.5 when partial triggered, otherwise cost+1.5
-            const double arm_bp = (s.pos.layer == LAYER_VWAP && s.pos.partial_exit_done)
-                ? round_trip_cost + 0.5
-                : round_trip_cost + 1.5;
+            // VWAP: arm at 1.5bp (tighter — 7 trades showed MFE>2bp then reversed to loss)
+            // All others: arm at cost+1.5bp
+            const double arm_bp = (s.pos.layer == LAYER_VWAP)
+                ? TradingConfig::VWAP_TRAIL_ARM_BP
+                : (s.pos.partial_exit_done ? round_trip_cost + 0.5 : round_trip_cost + 1.5);
             if (peak_profit_bp >= arm_bp) {
-                // VWAP after partial trigger: lock in 65% (tighter — we already know it moved)
-                // All others: lock in 50% of peak profit
-                const double lock_pct = (s.pos.layer == LAYER_VWAP && s.pos.partial_exit_done) ? 0.65 : 0.50;
+                // VWAP: lock 60% of peak (tighter — convert reversal losses to small wins)
+                // VWAP after partial trigger: lock 70%
+                // All others: lock 50% of peak profit
+                const double lock_pct = (s.pos.layer == LAYER_VWAP)
+                    ? (s.pos.partial_exit_done ? 0.70 : TradingConfig::VWAP_TRAIL_LOCK_PCT)
+                    : (s.pos.partial_exit_done ? 0.65 : 0.50);
                 const double floor_bp = std::max(round_trip_cost + 0.5,
                                                   peak_profit_bp * lock_pct);
                 if (move_bp <= floor_bp) {
@@ -2640,26 +2648,41 @@ private:
             return false;
         }
         // Core signal: price is below VWAP by entry deviation threshold
+        // AUDIT 2026-03-21: threshold lowered 20->12bp. Compensated by tighter OFI + imbalance gates.
         double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
-        const double min_dev_bp = starved ? 14.0 : TradingConfig::VWAP_ENTRY_DEVIATION_BP;
+        const double min_dev_bp = starved ? 9.0 : TradingConfig::VWAP_ENTRY_DEVIATION_BP;
         if (deviation_bp < min_dev_bp) {
             rejection_throttle_.record(key, "not_far_enough_below_vwap");
             return false;
         }
         // Don't enter if too far below VWAP  that's a breakdown, not a dip
-        const double max_dev_bp = starved ? 60.0 : TradingConfig::VWAP_MAX_DEVIATION_BP;
+        const double max_dev_bp = starved ? 45.0 : TradingConfig::VWAP_MAX_DEVIATION_BP;
         if (deviation_bp > max_dev_bp) {
             rejection_throttle_.record(key, "too_far_below_vwap");
             return false;
         }
         // Book must show bid pressure  buyers are stepping in
-        const double min_imbal = starved ? 0.08 : TradingConfig::VWAP_MIN_IMBALANCE;
+        const double min_imbal = starved ? 0.10 : TradingConfig::VWAP_MIN_IMBALANCE;
         if (t.book_imbalance < min_imbal) {
             rejection_throttle_.record(key, "no_bid_confirmation");
             return false;
         }
-        std::printf("[VWAP-REV] %s | price=%.4f | vwap=%.4f | dev=%.1fbp | imbal=%.2f | ENTERING LONG\n",
-                    sym, price, s.session_vwap, deviation_bp, t.book_imbalance);
+        // OFI confirmation: buy flow must exceed sell flow
+        // AUDIT 2026-03-21: added to compensate for lower entry threshold (was 20bp, now 12bp).
+        // Prevents entries where price dipped but selling is still dominant.
+        if (s.ofi_ema_init) {
+            double total_ofi = s.ofi_buy_ema + s.ofi_sell_ema;
+            if (total_ofi > 1e-9) {
+                double ofi_ratio = (s.ofi_buy_ema - s.ofi_sell_ema) / total_ofi;
+                const double min_ofi = starved ? 0.06 : TradingConfig::VWAP_MIN_OFI_RATIO;
+                if (ofi_ratio < min_ofi) {
+                    rejection_throttle_.record(key, "ofi_sell_dominant");
+                    return false;
+                }
+            }
+        }
+        std::printf("[VWAP-REV] %s | price=%.4f | vwap=%.4f | dev=%.1fbp | imbal=%.2f | ofi_init=%d | ENTERING LONG\n",
+                    sym, price, s.session_vwap, deviation_bp, t.book_imbalance, (int)s.ofi_ema_init);
         std::fflush(stdout);
         enter(id, price, ts, s, LAYER_VWAP, true);
         return true;
@@ -3723,9 +3746,10 @@ private:
         if (trend_tick_count_[id] < 100) return true;  // need 100 ticks minimum
         if (trend_ema_fast_[id] <= 0.0) return true;
         double gap_bp = (trend_ema_slow_[id] - trend_ema_fast_[id]) / trend_ema_fast_[id] * 10000.0;
-        // Only block on genuine downtrend — 5bp gap minimum
-        // Below 5bp is noise from normal tick-to-tick variance
-        return gap_bp < 5.0;
+        // AUDIT 2026-03-21: raised 5->8bp. At 5bp the filter was permanently blocking
+        // BTC/ETH/SOL during normal choppy sessions (slow EMA lags fast in any ranging market).
+        // 8bp = genuine downtrend, not tick noise or lag artifact.
+        return gap_bp < 8.0;
     }
 
     void update_trend_ema(int id, double price) {

@@ -96,7 +96,8 @@ enum EdgeEngineKey {
     EDGE_MM      = 6,
     EDGE_SPREAD_COMPRESS = 7,
     EDGE_DIVERGE = 8,
-    EDGE_ENGINE_COUNT = 9
+    EDGE_IMBAL   = 9,  // AUDIT 2026-03-21: added for IMBALANCE shadow tracking
+    EDGE_ENGINE_COUNT = 10
 };
 
 struct EdgeSample {
@@ -414,6 +415,10 @@ public:
         edge_gate_[EDGE_LIQ].enabled     = true;   // event-driven, sound logic
         edge_gate_[EDGE_SPREAD_COMPRESS].enabled = true;  // new: spread compression signal
         edge_gate_[EDGE_DIVERGE].enabled         = true;  // new: cross-symbol divergence
+        // IMBAL: re-enabled as live shadow — starts parked (enabled=false), auto-promotes
+        // after 30 trades with avg_pnl >= 0.8bp. Strict threshold (0.42) + spread < 1.5bp
+        // compensates for maker cost floor.
+        edge_gate_[EDGE_IMBAL].enabled = false;  // parked — must earn promotion
         // Hard-disable the provably broken engines: set disabled_until to far future
         // They cannot be auto-promoted until this date passes.
         static constexpr int64_t DISABLED_FOREVER = 9999999999999LL; // ~year 2286
@@ -436,9 +441,13 @@ public:
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
         std::printf(" Active Engines: LEADLAG (trend-gated) | LIQ | VWAP-REV      \n");
-        std::printf(" Parked Engines: SWEEP | MM (unproven)                        \n");
+        std::printf(" Shadow Engines: IMBAL (parked, auto-promotes after 30 trades) \n");
+        std::printf(" Parked Engines: SWEEP (no samples yet)                       \n");
         std::printf(" HARD DISABLED:  OFI (0%% WR -95bp) | VACUUM (0%% WR -53bp)   \n");
-        std::printf(" Trend Filter:   ENABLED (500-tick EMA vs 100-tick EMA)       \n");
+        std::printf(" AUDIT 2026-03-21 FIXES:                                       \n");
+        std::printf("   VWAP entry: 20->12bp | Trend filter: 5->8bp gap            \n");
+        std::printf("   Regime min ticks: 30->50 | LIQ notional: 500k->1M          \n");
+        std::printf("   VWAP trail: arm@1.5bp lock=60%% | Partial exit: 8->4bp     \n");
         std::printf(" Circuit Breaker: 2 SLs = 15min pause (was 5min)              \n");
         std::printf(" Multi-position: UP TO 3 (1 per symbol)                        \n");
         std::printf(" Dead zone (20-23 UTC): max 1 pos, raised thresholds           \n");
@@ -823,8 +832,9 @@ public:
             // VACUUM: 17 trades 0% WR -53.67bp -- HARD DISABLED (threshold too loose)
             // if (edge_gate_allows(id, EDGE_VACUUM, ts) && check_vacuum(id, price, ts, s, latency_ms)) return;
             // if (edge_gate_allows(id, EDGE_OFI, ts) && check_ofi_pressure(id, price, ts, s, latency_ms)) return;
-            // IMBAL: unproven -- PARKED
-            // if (check_imbalance(id, price, ts, s, latency_ms)) return;
+            // IMBAL: re-enabled as shadow layer (AUDIT 2026-03-21). Starts parked (enabled=false),
+            // auto-promotes after 30 trades proving edge. Gate: imbal>0.42, spread<1.5bp, GRIND only.
+            if (edge_gate_allows(id, EDGE_IMBAL, ts) && check_imbalance(id, price, ts, s, latency_ms)) return;
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
@@ -1329,6 +1339,9 @@ private:
             case EDGE_VACUUM:  return "VACUUM";
             case EDGE_SWEEP:   return "SWEEP";
             case EDGE_MM:      return "MM-PRESSURE";
+            case EDGE_SPREAD_COMPRESS: return "SPREAD-COMPRESS";
+            case EDGE_DIVERGE: return "DIVERGE";
+            case EDGE_IMBAL:   return "IMBAL";
             default:           return "UNKNOWN";
         }
     }
@@ -1345,6 +1358,7 @@ private:
             case LAYER_MM_PRESSURE:     out = EDGE_MM;      return true;
             case LAYER_SPREAD_COMPRESS: out = EDGE_SPREAD_COMPRESS; return true;
             case LAYER_DIVERGENCE:      out = EDGE_DIVERGE; return true;
+            case LAYER_MICRO:           out = EDGE_IMBAL;   return true;
             default: return false;
         }
     }

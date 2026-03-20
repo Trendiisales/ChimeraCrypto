@@ -1319,10 +1319,13 @@ private:
 
     // Shadow starvation detector: no trades for an extended period after startup.
     // Used to relax selected thresholds slightly so the system can sample edge.
+    // AUDIT 2026-03-21: lowered 8min -> 3min. With fixed regime thrashing and
+    // trend filter (8bp), first VWAP trade can occur within 3-5min. 8min was too
+    // conservative and kept thresholds tight when the market was genuinely ranging.
     bool startup_starved_mode(int64_t ts) const {
         const bool shadow_mode = is_shadow_mode();
         return shadow_mode && startup_ts_ms_ > 0 && total_trades_ == 0 &&
-               (ts - startup_ts_ms_) >= 8 * 60 * 1000LL;
+               (ts - startup_ts_ms_) >= 3 * 60 * 1000LL;
     }
 
     bool is_shadow_mode() const {
@@ -3044,6 +3047,7 @@ private:
 
         int direction = 0;
         if (!spread_compress_.check_signal(id, t.spread_bps, t.book_imbalance, ts, direction)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SPREAD-COMPRESS", "signal_not_ready");
             return false;
         }
 
@@ -3081,6 +3085,7 @@ private:
 
         double diverge_bp = 0.0;
         if (!divergence_.check_signal(id, t.book_imbalance, t.spread_bps, ts, diverge_bp)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " DIVERGE", "signal_not_ready");
             return false;
         }
 

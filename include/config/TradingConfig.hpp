@@ -277,7 +277,7 @@ struct TradingConfig {
     static constexpr int    SHORT_VOL_WINDOW        = 20;
     static constexpr int    LONG_VOL_WINDOW         = 200;  // deprecated, using EMA
     static constexpr double LONG_VOL_EMA_ALPHA      = 0.06;
-    static constexpr double VOL_RATIO_EMA_ALPHA     = 0.12;
+    static constexpr double VOL_RATIO_EMA_ALPHA     = 0.06;  // AUDIT 2026-03-21: tightened 0.12->0.06. At 0.12 (~8-tick EMA) a single spike tick moved vol_ratio from 0.58->2.34 in the logs, causing GRIND->BUILDUP->BREAKOUT->BUILDUP->GRIND in 1 second. 0.06 (~17-tick EMA) smooths over individual spike ticks without losing regime responsiveness.
     static constexpr double VOL_MIN_LONG            = 1e-8;
 
     // Absolute volatility floor: below this, no trade is profitable

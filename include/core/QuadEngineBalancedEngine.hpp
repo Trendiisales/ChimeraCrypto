@@ -208,7 +208,14 @@ public:
         std::ostringstream json;
         json << std::fixed << std::setprecision(2);
         json << "{";
-        
+
+        // Build version — git commit hash injected at compile time via -DBUILD_VERSION
+        // Falls back to "dev" if not set (local builds without CI)
+#ifndef BUILD_VERSION
+#define BUILD_VERSION "dev"
+#endif
+        json << "\"build_ver\":\"" << BUILD_VERSION << "\",";
+
         for (int _pi = 0; _pi < MAX_SYMBOLS; ++_pi)
             json << "\"" << sym_full(_pi) << "_price\":" << market_state_[_pi].last_price << ",";
         json << "\"pnl\":" << balanced_.get_total_pnl() << ",";

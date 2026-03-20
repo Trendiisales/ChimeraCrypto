@@ -617,6 +617,11 @@ public:
         session_mom_.update(id, price, ts);
         // Divergence engine tracks 30s rolling price per symbol (BTC/ETH/SOL)
         divergence_.update(id, price, ts);
+        // SpreadCompression needs spread history every tick — even when regime blocks entry
+        // Without this, the wide→tight detection only ran in GRIND which missed compressions
+        // that started in BREAKOUT and resolved as regime dropped back to GRIND/BUILDUP.
+        if (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0)
+            spread_compress_.update_state(id, s.last_tick.spread_bps);
         
         tick_count_[id]++;
         if (ts - last_tick_count_reset_[id] >= 1000) {

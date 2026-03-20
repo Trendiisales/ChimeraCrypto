@@ -4,6 +4,7 @@
 #include <deque>
 #include <algorithm>
 #include "core/SymbolIndex.hpp"
+#include "config/TradingConfig.hpp"
 
 namespace chimera {
 
@@ -24,6 +25,7 @@ namespace chimera {
 //
 // SIGNAL: leader moves >= threshold_bp in LOOKBACK_MS
 //         AND follower has NOT yet moved TARGET_MOVED_MAX_BP
+// NOTE: thresholds read from TradingConfig to stay in sync with tuning.
 // ============================================================================
 
 struct PricePoint {
@@ -41,25 +43,25 @@ static constexpr int SOL_FOLLOWERS_N    = 2;
 
 class LeadLagEngine {
 public:
-    static constexpr double  MAX_LATENCY_MS        = 80.0;  // data age calibrated: old 35ms < p95 36ms = all signals blocked
+    static constexpr double  MAX_LATENCY_MS        = 80.0;
 
-    // Tier 1: BTC -> alts
-    static constexpr double  BTC_MOVE_THRESHOLD_BP = 5.0;
-    static constexpr double  TARGET_MOVED_MAX_BP   = 3.0;
+    // Tier 1: BTC -> alts — read thresholds from TradingConfig (single source of truth)
+    static constexpr double  BTC_MOVE_THRESHOLD_BP = TradingConfig::LEADLAG_BTC_THRESHOLD_BP; // 7.0bp
+    static constexpr double  TARGET_MOVED_MAX_BP   = TradingConfig::LEADLAG_TARGET_MAX_BP;    // 3.0bp
     static constexpr int64_t LOOKBACK_MS           = 180;
     static constexpr int     MIN_BTC_SAMPLES       = 3;
 
-    // Tier 2: ETH -> alts (slightly wider window, ETH is slower leader)
-    static constexpr double  ETH_MOVE_THRESHOLD_BP = 8.0;
+    // Tier 2: ETH -> alts
+    static constexpr double  ETH_MOVE_THRESHOLD_BP   = TradingConfig::LEADLAG_ETH_SOL_THRESHOLD_BP; // 9.0bp
     static constexpr double  ETH_TARGET_MOVED_MAX_BP = 2.5;
-    static constexpr int64_t ETH_LOOKBACK_MS       = 160;
-    static constexpr int     MIN_ETH_SAMPLES       = 3;
+    static constexpr int64_t ETH_LOOKBACK_MS         = 160;
+    static constexpr int     MIN_ETH_SAMPLES         = 3;
 
-    // Tier 3: SOL -> alts (tightest window, SOL is fast L1)
-    static constexpr double  SOL_MOVE_THRESHOLD_BP = 9.0;
+    // Tier 3: SOL -> alts
+    static constexpr double  SOL_MOVE_THRESHOLD_BP   = 9.0;
     static constexpr double  SOL_TARGET_MOVED_MAX_BP = 2.5;
-    static constexpr int64_t SOL_LOOKBACK_MS       = 120;
-    static constexpr int     MIN_SOL_SAMPLES       = 3;
+    static constexpr int64_t SOL_LOOKBACK_MS         = 120;
+    static constexpr int     MIN_SOL_SAMPLES         = 3;
 
     LeadLagEngine() {}
 

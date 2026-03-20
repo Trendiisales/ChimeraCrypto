@@ -74,9 +74,34 @@ public:
 
     SpreadCompressionEngine() {}
 
+    // ── Always-on state update (call every tick regardless of regime) ────────
+    // Tracks spread history so wide→tight compression can be detected even when
+    // BREAKOUT/DEAD regime prevents entry. Without this, check_signal() only ran
+    // during GRIND/BUILDUP and missed the compression that happened in BREAKOUT.
+    void update_state(int symbol_id, double spread_bps) {
+        if (symbol_id < 0 || symbol_id >= MAX_SYMBOLS) return;
+        SymState& st = states_[symbol_id];
+        // Update ring buffer
+        st.spread_history[st.spread_head % 8] = spread_bps;
+        st.spread_head++;
+        if (st.spread_count < 8) st.spread_count++;
+        // Track wide phase
+        if (spread_bps >= WIDE_THRESH_BPS) {
+            st.wide_tick_count++;
+            if (st.wide_tick_count >= MIN_WIDE_TICKS) st.was_wide = true;
+        } else if (spread_bps < WIDE_THRESH_BPS * 0.8) {
+            st.wide_tick_count = std::max(0, st.wide_tick_count - 1);
+            if (st.wide_tick_count == 0) st.was_wide = false;
+        }
+        st.prev_spread = spread_bps;
+        st.spread_init = true;
+    }
+
     // ── Main signal check ────────────────────────────────────────────────────
     // Returns true if a compression signal fires.
-    // direction: +1 = long (bid-heavy book), -1 = short (not used — spot only)
+    // IMPORTANT: call update_state() every tick before calling check_signal().
+    // check_signal() only checks for the compression event — state tracking
+    // is now in update_state() so it runs even when regime blocks entry.
     bool check_signal(int symbol_id, double spread_bps, double book_imbalance,
                       int64_t now_ms, int& direction) {
         if (symbol_id < 0 || symbol_id >= MAX_SYMBOLS) return false;
@@ -85,41 +110,22 @@ public:
         // Cooldown guard
         if (now_ms - st.last_signal_ts < COOLDOWN_MS) return false;
 
-        // Update spread ring buffer
-        st.spread_history[st.spread_head % 8] = spread_bps;
-        st.spread_head++;
-        if (st.spread_count < 8) st.spread_count++;
+        // No book data yet
+        if (!st.spread_init) return false;
 
-        // Track wide phase
-        if (spread_bps >= WIDE_THRESH_BPS) {
-            st.wide_tick_count++;
-            if (st.wide_tick_count >= MIN_WIDE_TICKS) st.was_wide = true;
-        } else {
-            // Spread is no longer wide — check for compression signal
-            if (st.was_wide && spread_bps <= TIGHT_THRESH_BPS) {
-                // Compression event detected
-                // Require book imbalance to confirm direction
-                if (book_imbalance >= MIN_IMBALANCE) {
-                    // Long signal: spread compressed AND bid-heavy book
-                    direction = 1;
-                    st.last_signal_ts = now_ms;
-                    st.was_wide = false;
-                    st.wide_tick_count = 0;
-                    std::printf("[SPREAD-COMPRESS] sym=%d | spread=%.2fbp (was wide) | imbal=%.3f | LONG signal\n",
-                        symbol_id, spread_bps, book_imbalance);
-                    std::fflush(stdout);
-                    return true;
-                }
-            }
-            // Reset wide tracking when spread normalises
-            if (spread_bps < WIDE_THRESH_BPS * 0.8) {
-                st.wide_tick_count = std::max(0, st.wide_tick_count - 1);
-                if (st.wide_tick_count == 0) st.was_wide = false;
+        // Signal: was wide, now compressed below tight threshold with bid pressure
+        if (st.was_wide && spread_bps <= TIGHT_THRESH_BPS) {
+            if (book_imbalance >= MIN_IMBALANCE) {
+                direction = 1;
+                st.last_signal_ts = now_ms;
+                st.was_wide = false;
+                st.wide_tick_count = 0;
+                std::printf("[SPREAD-COMPRESS] sym=%d | spread=%.2fbp (was wide) | imbal=%.3f | LONG signal\n",
+                    symbol_id, spread_bps, book_imbalance);
+                std::fflush(stdout);
+                return true;
             }
         }
-
-        st.prev_spread = spread_bps;
-        st.spread_init = true;
         return false;
     }
 

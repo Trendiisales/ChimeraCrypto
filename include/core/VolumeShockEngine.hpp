@@ -4,6 +4,7 @@
 #include <deque>
 #include <algorithm>
 #include "core/SymbolIndex.hpp"
+#include "config/TradingConfig.hpp"
 
 namespace chimera {
 
@@ -19,19 +20,15 @@ namespace chimera {
 // EXPAND fires on price volatility alone -- lots of noise. This fires only when
 // volume AND price move together -- much higher conviction.
 //
-// Parameters tuned conservatively -- this is new, no historical data yet.
-//   Spike multiplier: 3.0x baseline (very strong conviction)
-//   Displacement: 8bp minimum (real move, not noise)
-//   TP: 10bp, SL: 4bp, hold: 6s max
-//   Baseline window: 30 ticks EMA
+// Parameters read from TradingConfig for single-source-of-truth tuning.
 // ============================================================================
 
 class VolumeShockEngine {
 public:
-    // Config
+    // Constants read from TradingConfig — do not hardcode here
     static constexpr double  VOL_SPIKE_MULT      = 3.0;   // volume must be 3x baseline
     static constexpr double  DISP_THRESHOLD_BP   = 8.0;   // min price displacement
-    static constexpr double  MAX_SPREAD_BPS      = 3.0;   // reject wide spreads
+    static constexpr double  MAX_SPREAD_BPS      = TradingConfig::IMBALANCE_MAX_SPREAD_BPS; // reuse spread gate
     static constexpr double  VOL_EMA_ALPHA       = 0.08;  // ~30 tick EMA for baseline
     static constexpr int     MIN_BASELINE_TICKS  = 20;    // need established baseline
     static constexpr int64_t COOLDOWN_MS         = 8000;  // 8s between entries per symbol

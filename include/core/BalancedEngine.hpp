@@ -2552,19 +2552,41 @@ private:
     // Conservative params: TP=10bp, SL=4bp, hold=6s, 8s cooldown.
     // ======================================================================
     bool check_vol_shock(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
+        const char* sym = sym_short(id);
+        std::string key = std::string(sym) + " VOLSHOCK";
+
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
-        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) return false;
+
+        // AUDIT 2026-03-21: added regime gate — was firing in DEAD market with no edge
+        if (s.regime == REGIME_DEAD) {
+            rejection_throttle_.record(key, "regime_dead");
+            return false;
+        }
+
+        if (latency_ms > TradingConfig::LATENCY_LEADLAG_MAX_MS) {
+            rejection_throttle_.record(key, "latency_high");
+            return false;
+        }
 
         const MarketTick& t = s.last_tick;
-        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
-        if (t.spread_bps > VolumeShockEngine::MAX_SPREAD_BPS) return false;
+        if (t.bid <= 0.0 || t.ask <= 0.0) {
+            rejection_throttle_.record(key, "no_book_data");
+            return false;
+        }
+        if (t.spread_bps > VolumeShockEngine::MAX_SPREAD_BPS) {
+            rejection_throttle_.record(key, "spread_wide");
+            return false;
+        }
 
         double volume = t.bid_size + t.ask_size;
         int direction = 0;
-        if (!vol_shock_.on_tick(id, price, volume, t.spread_bps, ts, direction)) return false;
+        if (!vol_shock_.on_tick(id, price, volume, t.spread_bps, ts, direction)) {
+            rejection_throttle_.record(key, "no_vol_shock_signal");
+            return false;
+        }
 
-        std::printf("[VOLSHOCK] %s | vol_ratio=%.2f | price=%.4f | latency=%.1fms | ENTERING LONG\n",
-                    sym_short(id), vol_shock_.get_vol_ratio(id), price, latency_ms);
+        std::printf("[VOLSHOCK] %s | vol_ratio=%.2f | price=%.4f | latency=%.1fms | regime=%s | ENTERING LONG\n",
+                    sym, vol_shock_.get_vol_ratio(id), price, latency_ms, regime_name(s.regime));
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_VOLSHOCK, true);
@@ -2869,7 +2891,10 @@ private:
     bool check_mm_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const bool starved = startup_starved_mode(ts);
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
-        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
+        if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "latency_high");
+            return false;
+        }
 
         // Best in GRIND — MM rebalancing is a ranging-market phenomenon
         const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
@@ -2877,10 +2902,16 @@ private:
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
             return false;
         }
-        if (!s.mm_imbal_init || s.mm_drift_ticks < 20) return false;
+        if (!s.mm_imbal_init || s.mm_drift_ticks < 20) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_warmed_up");
+            return false;
+        }
 
         const MarketTick& t = s.last_tick;
-        if (t.bid <= 0.0 || t.ask <= 0.0) return false;
+        if (t.bid <= 0.0 || t.ask <= 0.0) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " MM", "no_book_data");
+            return false;
+        }
         const double max_spread_bps = starved ? 2.5 : TradingConfig::MM_MAX_SPREAD_BPS;
         if (t.spread_bps > max_spread_bps) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "spread_wide");
@@ -3003,6 +3034,7 @@ private:
 
         int direction = 0;
         if (!session_mom_.check_signal(id, price, vol_ratio, btc_disp_bp, ts, direction)) {
+            rejection_throttle_.record(std::string(sym_short(id)) + " SESS", "signal_not_ready");
             return false;
         }
 

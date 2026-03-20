@@ -82,7 +82,7 @@ public:
 
 private:
     static constexpr int    POLL_INTERVAL_SECS  = 300;  // 5 min
-    static constexpr double EXTREME_FEAR_THRESH = 25.0; // below = risk-on signal
+    static constexpr double EXTREME_FEAR_THRESH = 15.0; // AUDIT 2026-03-21: tightened 25->15. At 25 the signal fired throughout entire sustained bear markets. 15 = genuine capitulation spike, not prolonged fear. Also requires delta > +3 (fear INCREASING from yesterday = capitulation event, not drift).
     static constexpr double EXTREME_GREED_THRESH= 75.0; // above = risk-off signal
 
     std::atomic<double> price_{0.0};        // current F&G value (0-100)
@@ -116,7 +116,14 @@ private:
 
         // Compute signal
         int sig = 0;
-        if (curr <= EXTREME_FEAR_THRESH)  sig = -1;  // risk-on: extreme fear = longs favoured
+        // AUDIT 2026-03-21: added delta filter for risk-on signal.
+        // Extreme Fear (score <= 15) is necessary but NOT sufficient.
+        // Also require delta <= -3 (sentiment getting MORE fearful today vs yesterday)
+        // = genuine capitulation spike. A flat or improving delta means the market
+        // has been fearful for days — that's a sustained downtrend, not a buy signal.
+        // Without delta filter: fired throughout entire bear markets (F&G 11 for weeks).
+        // With delta filter: only fires when fear SPIKES sharply in a single day.
+        if (curr <= EXTREME_FEAR_THRESH && delta <= -3.0) sig = -1;  // risk-on: acute capitulation
         if (curr >= EXTREME_GREED_THRESH) sig =  1;  // risk-off: extreme greed = fade longs
         signal_dir_.store(sig, std::memory_order_relaxed);
 

@@ -545,6 +545,11 @@ function updateBoostPanel(data) {
   if (equity) equity.textContent = '$' + (10000 + pnl).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
   set('tb-trades', data.total_trades || 0);
   set('tb-positions', data.open_positions || 0);
+  // Show build version (git hash) in header — populated once from first API response
+  if (data.build_ver) {
+    const bv = $('build-ver');
+    if (bv && bv.textContent === 'v?') bv.textContent = 'v' + data.build_ver;
+  }
   const lat = data.latency_p95 || 0;
   // WS Delay p95: Binance WS gateway delay. Same AWS Tokyo: our net ~0.5ms, Binance pipeline ~35ms = ~36ms total. Normal.
   // Green <25ms, amber 25-50ms, red >50ms = genuine feed problem.

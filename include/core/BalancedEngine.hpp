@@ -27,6 +27,8 @@
 #include "reinforcement/AdaptiveReinforcementLayer.hpp"
 #include "market_data/FundingRateFetcher.hpp"
 #include "core/NGASLeadLagEngine.hpp"
+#include "core/FundingSignalEngine.hpp"
+#include "live/CoinbaseWSFeed.hpp"
 #include "core/StatArbEngine.hpp"
 #include "core/SessionMomentumEngine.hpp"
 #include "core/SpreadCompressionEngine.hpp"
@@ -199,6 +201,9 @@ struct SymbolState {
 
     // NGAS lead-lag: track last entry time per symbol
     int64_t last_ngas_entry_ts = 0;
+
+    // FundingSignalEngine: track last entry time per symbol
+    int64_t last_funding_signal_ts = 0;
 
     // Aggressive flow EMAs — used for LEADLAG confirmation gate
     // Alpha=0.05 → ~20-tick window (~200-500ms at typical tick rate)
@@ -884,6 +889,13 @@ public:
     }
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
+    void set_funding_signal(FundingSignalEngine* fs) { funding_signal_ = fs; }
+    void update_coinbase_btc(double price, int64_t ts_ms) {
+        coinbase_btc_price_.store(
+            *reinterpret_cast<const uint64_t*>(&price),
+            std::memory_order_relaxed);
+        coinbase_btc_ts_.store(ts_ms, std::memory_order_relaxed);
+    }
     void set_executor(SpotExecutor* e)              { executor_ = e; }
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
@@ -3745,8 +3757,12 @@ private:
     VolumeShockEngine  vol_shock_;
     LimitOrderManager limit_orders_[MAX_SYMBOLS];  // One per symbol
     ShadowLogger shadow_log_;
-    FundingRateFetcher*  funding_ = nullptr;  // optional  set from main()
-    NGASLeadLagEngine*   ngas_    = nullptr;  // optional  set from main()
+    FundingRateFetcher*  funding_        = nullptr;  // optional  set from main()
+    NGASLeadLagEngine*   ngas_           = nullptr;  // optional  set from main()
+    FundingSignalEngine* funding_signal_ = nullptr;  // optional  set from main()
+    // Coinbase BTC-USD cross-exchange price (lock-free atomic)
+    std::atomic<uint64_t> coinbase_btc_price_{0};   // bit-cast double
+    std::atomic<int64_t>  coinbase_btc_ts_{0};      // exchange timestamp ms
     StatArbEngine        statarb_;
     SessionMomentumEngine session_mom_;
     SpreadCompressionEngine spread_compress_;

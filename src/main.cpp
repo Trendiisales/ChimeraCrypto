@@ -305,6 +305,7 @@ int main() {
     //  0. Rolling log — install first so all output is captured
     g_logger = new RollingLogger();
     printf("[STARTUP] Rolling log: %s (7-day retention)\n", g_logger->current_path().c_str());
+    printf("[STARTUP] Build version: " BUILD_VERSION "\n");
     fflush(stdout);
 
     //  1. Single-instance lock  must be first 

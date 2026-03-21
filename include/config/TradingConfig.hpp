@@ -84,7 +84,7 @@ struct TradingConfig {
     // BTC must move at least this many bp in the lookback window to signal
     // Raised 810bp: at 8bp too many weak moves were triggering. 10bp filters
     // for genuine momentum that ETH/SOL reliably follows.
-    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 7.0;   // raised 5->7bp: 5bp fired too many weak moves that reversed (17 x -7.58bp cluster)
+    static constexpr double LEADLAG_BTC_THRESHOLD_BP  = 5.0;   // lowered 7->5bp: OB+flow gates now protect quality; 7bp caused 8hr no-trade in low-vol
     // LEADLAG confirmation gates (added Mar 2026)
     // OB ratio: bid_size/ask_size must exceed this — filters neutral/bearish book
     static constexpr double LEADLAG_CONFIRM_OB_RATIO   = 1.08; // bid 8% > ask
@@ -522,6 +522,10 @@ struct TradingConfig {
     // In dead zone: max 1 position, raise imbalance threshold by this factor
     static constexpr double DEAD_ZONE_IMBAL_MULT  = 1.5;
     static constexpr int    DEAD_ZONE_MAX_POS     = 1;
+    // HARD KILL WINDOW: 02:00-07:00 UTC = Asia dead tape
+    // AUDIT 2026-03-21: 46 trades in this window, -152bp, avg -3.3bp, 6% WR. Kill completely.
+    static constexpr int    KILL_WINDOW_START_UTC = 2;
+    static constexpr int    KILL_WINDOW_END_UTC   = 7;
     static constexpr int    MAX_CONCURRENT_POSITIONS = 5;
     static constexpr int    LEADLAG_PRIME_START_UTC   = 1;
     static constexpr int    LEADLAG_PRIME_END_UTC     = 5;

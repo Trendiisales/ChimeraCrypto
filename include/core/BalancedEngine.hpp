@@ -1758,7 +1758,7 @@ private:
         // Real moves sustain. Fake moves are already reversing by the time
         // we check. Eliminates most SL hits on LEADLAG.
         double btc_now_bp = leadlag_.btc_move_bp();
-        double sustain_threshold = TradingConfig::LEADLAG_BTC_THRESHOLD_BP * 0.6;
+        double sustain_threshold = TradingConfig::LEADLAG_BTC_THRESHOLD_BP * 0.75;
         if (std::fabs(btc_now_bp) < sustain_threshold) {
             rejection_throttle_.record(key, "btc_move_not_sustained");
             return false;

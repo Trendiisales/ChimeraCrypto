@@ -1,6 +1,6 @@
 // ============================================================================
 // CoinbaseWSFeed.cpp
-// Chimera — Coinbase Advanced Trade WebSocket feed (BTC-USD spot price)
+// Chimera -- Coinbase Advanced Trade WebSocket feed (BTC-USD spot price)
 // ============================================================================
 
 #include "live/CoinbaseWSFeed.hpp"
@@ -9,15 +9,11 @@
 #include <cstring>
 #include <chrono>
 #include <thread>
+#include <vector>
 #include <algorithm>
 
 namespace chimera {
 
-// ── Subscribe payload ────────────────────────────────────────────────────────
-// Coinbase Advanced Trade WS: subscribe to "ticker" channel for BTC-USD.
-// "ticker" fires on every matched trade with price + timestamp.
-//
-// Docs: https://docs.cdp.coinbase.com/advanced-trade/docs/ws-channels#ticker-channel
 const char* CoinbaseWSFeed::SUBSCRIBE_MSG =
     "{"
         "\"type\":\"subscribe\","
@@ -25,12 +21,7 @@ const char* CoinbaseWSFeed::SUBSCRIBE_MSG =
         "\"channel\":\"ticker\""
     "}";
 
-// ── Static instance pointer for lws C callback ───────────────────────────────
-// lws callbacks are C-style — we stash 'this' here so ws_callback can reach it.
-// Safe: only one CoinbaseWSFeed instance exists (matches BinanceWSFeed pattern).
 static CoinbaseWSFeed* g_coinbase_feed = nullptr;
-
-// ── Constructor / Destructor ─────────────────────────────────────────────────
 
 CoinbaseWSFeed::CoinbaseWSFeed() {
     g_coinbase_feed = this;
@@ -41,25 +32,20 @@ CoinbaseWSFeed::~CoinbaseWSFeed() {
     g_coinbase_feed = nullptr;
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
-
 void CoinbaseWSFeed::set_callback(PriceCallback cb) {
     callback_ = std::move(cb);
 }
 
 void CoinbaseWSFeed::start() {
-    if (running_.exchange(true)) return;   // already running
+    if (running_.exchange(true)) return;
     thread_ = std::thread([this]{ run(); });
 }
 
 void CoinbaseWSFeed::stop() {
-    if (!running_.exchange(false)) return; // already stopped
-    // lws_cancel_service wakes the poll loop so the thread can exit cleanly
+    if (!running_.exchange(false)) return;
     if (context_) lws_cancel_service(context_);
     if (thread_.joinable()) thread_.join();
 }
-
-// ── WebSocket callback (C-style, called by libwebsockets) ────────────────────
 
 int CoinbaseWSFeed::ws_callback(struct lws* wsi,
                                 enum lws_callback_reasons reason,
@@ -69,28 +55,21 @@ int CoinbaseWSFeed::ws_callback(struct lws* wsi,
     auto* self = g_coinbase_feed;
 
     switch (reason) {
-
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
-        std::printf("[COINBASE-WS] Connected to advanced-trade-ws.coinbase.com
-");
+        std::printf("[COINBASE-WS] Connected to advanced-trade-ws.coinbase.com\n");
         std::fflush(stdout);
-        // Request a writeable callback immediately so we can send subscribe
         lws_callback_on_writable(wsi);
         break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE: {
-        // Send subscribe message (one-shot on connect)
         static bool subscribed = false;
         if (!subscribed) {
             subscribed = true;
             size_t msg_len = std::strlen(SUBSCRIBE_MSG);
-            // lws requires LWS_PRE bytes of padding before the payload
             std::vector<unsigned char> buf(LWS_PRE + msg_len);
             std::memcpy(buf.data() + LWS_PRE, SUBSCRIBE_MSG, msg_len);
-            lws_write(wsi, buf.data() + LWS_PRE,
-                      msg_len, LWS_WRITE_TEXT);
-            std::printf("[COINBASE-WS] Subscribed to BTC-USD ticker
-");
+            lws_write(wsi, buf.data() + LWS_PRE, msg_len, LWS_WRITE_TEXT);
+            std::printf("[COINBASE-WS] Subscribed to BTC-USD ticker\n");
             std::fflush(stdout);
         }
         break;
@@ -99,10 +78,7 @@ int CoinbaseWSFeed::ws_callback(struct lws* wsi,
     case LWS_CALLBACK_CLIENT_RECEIVE: {
         auto recv_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-
-        // lws may fragment large messages — accumulate until final fragment
         self->recv_buf_.append(static_cast<const char*>(in), len);
-
         if (lws_is_final_fragment(wsi)) {
             self->handle_message(self->recv_buf_, recv_ms);
             self->recv_buf_.clear();
@@ -111,15 +87,13 @@ int CoinbaseWSFeed::ws_callback(struct lws* wsi,
     }
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-        std::printf("[COINBASE-WS] Connection error — will reconnect
-");
+        std::printf("[COINBASE-WS] Connection error -- will reconnect\n");
         std::fflush(stdout);
         self->wsi_ = nullptr;
         break;
 
     case LWS_CALLBACK_CLIENT_CLOSED:
-        std::printf("[COINBASE-WS] Connection closed — will reconnect
-");
+        std::printf("[COINBASE-WS] Connection closed -- will reconnect\n");
         std::fflush(stdout);
         self->wsi_ = nullptr;
         break;
@@ -127,49 +101,23 @@ int CoinbaseWSFeed::ws_callback(struct lws* wsi,
     default:
         break;
     }
-
     return 0;
 }
 
-// ── Message handler ──────────────────────────────────────────────────────────
-
 void CoinbaseWSFeed::handle_message(const std::string& msg, int64_t recv_ms) {
-    // Coinbase Advanced Trade ticker event shape:
-    // {
-    //   "channel":"ticker",
-    //   "events":[{
-    //     "type":"update",
-    //     "tickers":[{
-    //       "type":"ticker",
-    //       "product_id":"BTC-USD",
-    //       "price":"67234.56",
-    //       "time":"2026-03-21T12:34:56.789Z"
-    //     }]
-    //   }]
-    // }
-    //
-    // We extract "price" and "time" from the first ticker object.
-
-    // Quick guard: must be a ticker channel message
     if (msg.find("\"channel\":\"ticker\"") == std::string::npos &&
         msg.find("\"type\":\"ticker\"")    == std::string::npos) {
-        // Could be subscriptions_ack or heartbeat — ignore silently
         return;
     }
 
     double price = extract_dbl(msg, "price");
-    if (price <= 0.0) return;   // malformed or non-price event
+    if (price <= 0.0) return;
 
-    // Use exchange timestamp if available, else fallback to local recv time
-    // Coinbase sends ISO-8601 "time" field — convert to epoch ms
     int64_t ts_ms = recv_ms;
     std::string time_str = extract_str(msg, "time");
     if (!time_str.empty()) {
-        // Parse ISO-8601: "2026-03-21T12:34:56.789Z"
-        // We use only seconds precision here (subsecond not critical for macro signal)
         struct tm t{};
         int ms_part = 0;
-        // sscanf handles the fixed ISO format
         if (std::sscanf(time_str.c_str(),
                 "%4d-%2d-%2dT%2d:%2d:%2d.%dZ",
                 &t.tm_year, &t.tm_mon, &t.tm_mday,
@@ -183,12 +131,8 @@ void CoinbaseWSFeed::handle_message(const std::string& msg, int64_t recv_ms) {
         }
     }
 
-    if (callback_) {
-        callback_(price, ts_ms);
-    }
+    if (callback_) callback_(price, ts_ms);
 }
-
-// ── Run loop (dedicated thread) ──────────────────────────────────────────────
 
 void CoinbaseWSFeed::run() {
     static constexpr struct lws_protocols protocols[] = {
@@ -197,8 +141,6 @@ void CoinbaseWSFeed::run() {
     };
 
     while (running_.load(std::memory_order_acquire)) {
-
-        // Build lws context
         struct lws_context_creation_info ctx_info{};
         ctx_info.port      = CONTEXT_PORT_NO_LISTEN;
         ctx_info.protocols = protocols;
@@ -208,29 +150,26 @@ void CoinbaseWSFeed::run() {
 
         context_ = lws_create_context(&ctx_info);
         if (!context_) {
-            std::printf("[COINBASE-WS] Failed to create lws context — retrying in 5s
-");
+            std::printf("[COINBASE-WS] Failed to create lws context -- retrying in 5s\n");
             std::fflush(stdout);
             std::this_thread::sleep_for(std::chrono::seconds(5));
             continue;
         }
 
-        // Connect
         struct lws_client_connect_info conn{};
-        conn.context     = context_;
-        conn.address     = "advanced-trade-ws.coinbase.com";
-        conn.port        = 443;
-        conn.path        = "/";
-        conn.host        = conn.address;
-        conn.origin      = conn.address;
+        conn.context        = context_;
+        conn.address        = "advanced-trade-ws.coinbase.com";
+        conn.port           = 443;
+        conn.path           = "/";
+        conn.host           = conn.address;
+        conn.origin         = conn.address;
         conn.ssl_connection = LCCSCF_USE_SSL;
-        conn.protocol    = protocols[0].name;
-        conn.pwsi        = &wsi_;
+        conn.protocol       = protocols[0].name;
+        conn.pwsi           = &wsi_;
 
         wsi_ = lws_client_connect_via_info(&conn);
         if (!wsi_) {
-            std::printf("[COINBASE-WS] lws_client_connect_via_info failed — retrying in 5s
-");
+            std::printf("[COINBASE-WS] connect failed -- retrying in 5s\n");
             std::fflush(stdout);
             lws_context_destroy(context_);
             context_ = nullptr;
@@ -238,9 +177,8 @@ void CoinbaseWSFeed::run() {
             continue;
         }
 
-        // Service loop — runs until connection drops or stop() is called
         while (running_.load(std::memory_order_acquire) && wsi_ != nullptr) {
-            lws_service(context_, 50);   // 50ms poll timeout
+            lws_service(context_, 50);
         }
 
         lws_context_destroy(context_);
@@ -249,48 +187,34 @@ void CoinbaseWSFeed::run() {
 
         if (!running_.load(std::memory_order_acquire)) break;
 
-        // Reconnect delay
-        std::printf("[COINBASE-WS] Reconnecting in 2s...
-");
+        std::printf("[COINBASE-WS] Reconnecting in 2s...\n");
         std::fflush(stdout);
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 
-    std::printf("[COINBASE-WS] Feed thread exited cleanly.
-");
+    std::printf("[COINBASE-WS] Feed thread exited cleanly.\n");
     std::fflush(stdout);
 }
 
-// ── Manual JSON extractors ───────────────────────────────────────────────────
-// Consistent with BinanceWSFeed — no external json lib, minimal allocation.
-
 double CoinbaseWSFeed::extract_dbl(const std::string& msg, const std::string& key) {
-    // Matches: "key":"value"  OR  "key":value
-    std::string needle_quoted = "\"" + key + "\":\"";
-    std::string needle_bare   = "\"" + key + "\":";
-
-    // Try quoted string first (Coinbase sends price as a quoted string)
-    auto pos = msg.find(needle_quoted);
+    std::string needle_q = "\"" + key + "\":\"";
+    auto pos = msg.find(needle_q);
     if (pos != std::string::npos) {
-        pos += needle_quoted.size();
+        pos += needle_q.size();
         auto end = msg.find('"', pos);
         if (end != std::string::npos) {
-            try { return std::stod(msg.substr(pos, end - pos)); }
-            catch (...) { return 0.0; }
+            try { return std::stod(msg.substr(pos, end - pos)); } catch (...) {}
         }
     }
-
-    // Bare numeric
-    pos = msg.find(needle_bare);
+    std::string needle_b = "\"" + key + "\":";
+    pos = msg.find(needle_b);
     if (pos != std::string::npos) {
-        pos += needle_bare.size();
+        pos += needle_b.size();
         auto end = msg.find_first_of(",}\"]", pos);
         if (end != std::string::npos) {
-            try { return std::stod(msg.substr(pos, end - pos)); }
-            catch (...) { return 0.0; }
+            try { return std::stod(msg.substr(pos, end - pos)); } catch (...) {}
         }
     }
-
     return 0.0;
 }
 
@@ -301,8 +225,7 @@ int64_t CoinbaseWSFeed::extract_i64(const std::string& msg, const std::string& k
     pos += needle.size();
     auto end = msg.find_first_of(",}\"]", pos);
     if (end == std::string::npos) return 0;
-    try { return std::stoll(msg.substr(pos, end - pos)); }
-    catch (...) { return 0; }
+    try { return std::stoll(msg.substr(pos, end - pos)); } catch (...) { return 0; }
 }
 
 std::string CoinbaseWSFeed::extract_str(const std::string& msg, const std::string& key) {

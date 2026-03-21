@@ -22,6 +22,7 @@ namespace chimera {
 
 class OrderbookImbalanceEngine {
 public:
+    static constexpr double ROUND_TRIP_COST_BP = 8.0;
     struct Stats {
         bool   active;
         double size_R;
@@ -95,12 +96,13 @@ public:
             bool timeout = (ts - entry_ts_) > 2000;
 
             if (tp || sl || timeout) {
-                total_pnl_bp_ += move_bp * pos_size_R_;
+                double net_bp = move_bp - ROUND_TRIP_COST_BP;
+                total_pnl_bp_ += net_bp * pos_size_R_;
                 total_trades_++;
-                if (move_bp > 0) wins_++;
+                if (net_bp > 0) wins_++;
                 const char* reason = tp ? "TP" : (sl ? "SL" : "TIMEOUT");
-                std::printf("[OBI-EXIT] %s | pnl=%.2fbp | reason=%s | total=%.1fbp\n",
-                    symbol_.c_str(), move_bp, reason, total_pnl_bp_);
+                std::printf("[OBI-EXIT] %s | net=%.2fbp (gross=%.2f cost=%.1f) | reason=%s | total=%.1fbp\n",
+                    symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP, reason, total_pnl_bp_);
                 std::fflush(stdout);
                 pos_active_     = false;
                 cooldown_ticks_ = 40;

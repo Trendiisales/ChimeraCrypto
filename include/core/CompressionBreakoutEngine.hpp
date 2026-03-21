@@ -44,6 +44,7 @@ struct CompressionPosition {
 
 class CompressionBreakoutEngine {
 public:
+    static constexpr double ROUND_TRIP_COST_BP = 8.0;
     CompressionPosition pos;
     
     std::string symbol;

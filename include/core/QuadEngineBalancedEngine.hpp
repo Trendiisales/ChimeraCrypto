@@ -4,6 +4,9 @@
 #include "core/StructuralEngine.hpp"
 #include "core/ConvexShockEngine.hpp"
 #include "core/CompressionBreakoutEngine.hpp"
+#include "core/OrderbookImbalanceEngine.hpp"
+#include "core/AggressiveFlowEngine.hpp"
+#include "core/PullbackContinuationEngine.hpp"
 #include "core/RegimeStateAllocator.hpp"
 #include "telemetry/SimpleHttpServer.hpp"
 #include <sstream>
@@ -38,6 +41,13 @@ public:
         // Initialize signal engines
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             structural_[i] = StructuralEngine(sym_full(i));
+
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            obi_[i]  = OrderbookImbalanceEngine(sym_full(i));
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            afe_[i]  = AggressiveFlowEngine(sym_full(i));
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            pce_[i]  = PullbackContinuationEngine(sym_full(i));
         
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             convex_[i] = ConvexShockEngine(sym_full(i));
@@ -184,8 +194,50 @@ public:
             ts,
             available_R
         );
-        
-        // 7. Enforce directional dominance
+
+        // 7b. Update flow EMAs for AggressiveFlowEngine
+        update_flow_ema(id, tick.agg_buy_volume, tick.agg_sell_volume);
+
+        // Recalculate available_R after structural/convex/compression
+        double obi_R = obi_[id].pos_active_ ? obi_[id].pos_size_R_ : 0.0;
+        double afe_R = afe_[id].pos_active_ ? afe_[id].pos_size_R_ : 0.0;
+        double pce_R = pce_[id].pos_active_ ? pce_[id].pos_size_R_ : 0.0;
+        used_R = micro_R + structural_R + convex_R + compression_R + obi_R + afe_R + pce_R;
+        available_R = std::max(0.0, dynamic_cap - used_R);
+
+        // 7c. Orderbook Imbalance Engine
+        obi_[id].evaluate(
+            price,
+            tick.book_imbalance,
+            tick.spread_bps,
+            ms.vol_ratio,
+            ts,
+            available_R
+        );
+
+        // 7d. Aggressive Flow Engine
+        afe_[id].evaluate(
+            price,
+            ms.buy_vol_ema,
+            ms.sell_vol_ema,
+            tick.spread_bps,
+            ms.vol_ratio,
+            ts,
+            available_R
+        );
+
+        // 7e. Pullback Continuation Engine
+        pce_[id].evaluate(
+            price,
+            ms.displacement_bp,
+            ms.acceleration_bp,
+            tick.spread_bps,
+            ms.vol_ratio,
+            ts,
+            available_R
+        );
+
+        // 8. Enforce directional dominance
         enforce_directional_dominance(id);
     }
     
@@ -308,10 +360,32 @@ public:
             json << "\"compression_total_pnl_bp\":" << compression_stats.total_pnl_bp << ",";
             json << "\"compression_total_trades\":" << compression_stats.total_trades << ",";
             json << "\"compression_ticks\":" << compression_stats.compression_ticks << ",";
-            
+
+            // OBI
+            auto obi_s = obi_[i].get_stats();
+            json << "\"obi_active\":" << (obi_s.active ? "true" : "false") << ",";
+            json << "\"obi_total_pnl_bp\":" << obi_s.total_pnl_bp << ",";
+            json << "\"obi_total_trades\":" << obi_s.total_trades << ",";
+            json << "\"obi_win_rate\":" << obi_s.win_rate << ",";
+
+            // AFE
+            auto afe_s = afe_[i].get_stats();
+            json << "\"afe_active\":" << (afe_s.active ? "true" : "false") << ",";
+            json << "\"afe_total_pnl_bp\":" << afe_s.total_pnl_bp << ",";
+            json << "\"afe_total_trades\":" << afe_s.total_trades << ",";
+            json << "\"afe_win_rate\":" << afe_s.win_rate << ",";
+
+            // PCE
+            auto pce_s = pce_[i].get_stats();
+            json << "\"pce_active\":" << (pce_s.active ? "true" : "false") << ",";
+            json << "\"pce_total_pnl_bp\":" << pce_s.total_pnl_bp << ",";
+            json << "\"pce_total_trades\":" << pce_s.total_trades << ",";
+            json << "\"pce_win_rate\":" << pce_s.win_rate << ",";
+
             // Portfolio
             double micro_R = ms.micro_active ? 1.0 : 0.0;
-            double portfolio_R = micro_R + structural_stats.size_R + convex_stats.size_R + compression_stats.size_R;
+            double portfolio_R = micro_R + structural_stats.size_R + convex_stats.size_R + compression_stats.size_R
+                                + obi_[i].pos_size_R_ + afe_[i].pos_size_R_ + pce_[i].pos_size_R_;
             json << "\"portfolio_R\":"  << portfolio_R << ",";
 
             // Signal readiness (0.0-1.0) for GUI "close to trading" display
@@ -346,6 +420,9 @@ private:
     StructuralEngine structural_[MAX_SYMBOLS];
     ConvexShockEngine convex_[MAX_SYMBOLS];
     CompressionBreakoutEngine compression_[MAX_SYMBOLS];
+    OrderbookImbalanceEngine  obi_[MAX_SYMBOLS];
+    AggressiveFlowEngine      afe_[MAX_SYMBOLS];
+    PullbackContinuationEngine pce_[MAX_SYMBOLS];
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
 
@@ -375,6 +452,12 @@ private:
     double prev_convex_pnl_[MAX_SYMBOLS]         = {};
     int    prev_compression_trades_[MAX_SYMBOLS] = {};
     double prev_compression_pnl_[MAX_SYMBOLS]    = {};
+    int    prev_obi_trades_[MAX_SYMBOLS]         = {};
+    double prev_obi_pnl_[MAX_SYMBOLS]            = {};
+    int    prev_afe_trades_[MAX_SYMBOLS]         = {};
+    double prev_afe_pnl_[MAX_SYMBOLS]            = {};
+    int    prev_pce_trades_[MAX_SYMBOLS]         = {};
+    double prev_pce_pnl_[MAX_SYMBOLS]            = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
     std::string last_written_trade_key_;  // dedup guard  prevents double-writes
@@ -532,6 +615,33 @@ private:
             prev_compression_trades_[id] = xs.total_trades;
             prev_compression_pnl_[id]    = xs.total_pnl_bp;
         }
+
+        // OBI exit detected
+        auto os = obi_[id].get_stats();
+        if (os.total_trades > prev_obi_trades_[id]) {
+            double trade_pnl = os.total_pnl_bp - prev_obi_pnl_[id];
+            push_trade(sym_short(id), "OBI", trade_pnl, os.entry_price, px);
+            prev_obi_trades_[id] = os.total_trades;
+            prev_obi_pnl_[id]    = os.total_pnl_bp;
+        }
+
+        // AFE exit detected
+        auto as = afe_[id].get_stats();
+        if (as.total_trades > prev_afe_trades_[id]) {
+            double trade_pnl = as.total_pnl_bp - prev_afe_pnl_[id];
+            push_trade(sym_short(id), "AFE", trade_pnl, as.entry_price, px);
+            prev_afe_trades_[id] = as.total_trades;
+            prev_afe_pnl_[id]    = as.total_pnl_bp;
+        }
+
+        // PCE exit detected
+        auto ps = pce_[id].get_stats();
+        if (ps.total_trades > prev_pce_trades_[id]) {
+            double trade_pnl = ps.total_pnl_bp - prev_pce_pnl_[id];
+            push_trade(sym_short(id), "PCE", trade_pnl, ps.entry_price, px);
+            prev_pce_trades_[id] = ps.total_trades;
+            prev_pce_pnl_[id]    = ps.total_pnl_bp;
+        }
     }
     
     struct SimpleMarketState {
@@ -553,6 +663,11 @@ private:
         // Per-symbol anchor for displacement (was incorrectly static/shared)
         double anchor_price = 0.0;
         int tick_counter = 0;
+
+        // Flow EMAs for AggressiveFlowEngine
+        double buy_vol_ema  = 0.0;
+        double sell_vol_ema = 0.0;
+        bool   flow_init    = false;
     };
     
     SimpleMarketState market_state_[MAX_SYMBOLS];
@@ -604,6 +719,21 @@ private:
         ms.last_price = price;
         ms.tick_counter++;
         ms.micro_active = (balanced_.get_open_positions() > 0);
+
+        // Flow EMA update for AggressiveFlowEngine (alpha=0.05, ~20-tick window)
+        // Note: called with tick.agg_buy_volume/sell_volume from on_tick
+    }
+
+    void update_flow_ema(int id, double buy_vol, double sell_vol) {
+        auto& ms = market_state_[id];
+        if (!ms.flow_init) {
+            ms.buy_vol_ema  = buy_vol;
+            ms.sell_vol_ema = sell_vol;
+            ms.flow_init    = true;
+        } else {
+            ms.buy_vol_ema  = 0.95 * ms.buy_vol_ema  + 0.05 * buy_vol;
+            ms.sell_vol_ema = 0.95 * ms.sell_vol_ema + 0.05 * sell_vol;
+        }
     }
     
     void enforce_directional_dominance(int id) {

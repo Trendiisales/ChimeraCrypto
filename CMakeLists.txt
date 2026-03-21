@@ -37,6 +37,7 @@ set(CHIMERA_SOURCES
     src/main.cpp
     src/live/BinanceWSFeed.cpp
     src/live/CoinbaseWSFeed.cpp
+    src/live/PerpFeed.cpp
     src/live/SpotExecutor.cpp
     src/core/Portfolio.cpp
     src/core/StatefulGovernor.cpp

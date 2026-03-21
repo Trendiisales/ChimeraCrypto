@@ -548,7 +548,7 @@ function updateBoostPanel(data) {
   // Show build version (git hash) in header — populated once from first API response
   if (data.build_ver) {
     const bv = $('build-ver');
-    if (bv && bv.textContent === 'v?') bv.textContent = 'v' + data.build_ver;
+    bv.textContent = 'v' + data.build_ver;
   }
   const lat = data.latency_p95 || 0;
   // WS Delay p95: Binance WS gateway delay. Same AWS Tokyo: our net ~0.5ms, Binance pipeline ~35ms = ~36ms total. Normal.

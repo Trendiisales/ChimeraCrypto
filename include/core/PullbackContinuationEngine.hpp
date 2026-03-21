@@ -47,6 +47,7 @@ public:
         double   acceleration_bp,    // price change acceleration
         double   spread_bps,
         double   vol_ratio,
+        double   perp_funding_rate,  // current perp funding rate (fractional)
         int64_t  ts,
         double   available_R
     ) {
@@ -57,6 +58,10 @@ public:
             // Need a clear uptrend (displacement > 20bp above anchor)
             // and a pullback signal (acceleration negative = price decelerating)
             if (displacement_bp < 20.0)  return;  // not trending enough up
+
+            // Perp funding gate: if longs are heavily crowded, pullback may be start of reversal
+            // funding > 0.05% (5bp/8h) = longs very crowded, skip pullback continuation
+            if (perp_funding_rate > 0.0005) return;
             if (acceleration_bp > -2.0)  return;  // no pullback deceleration yet
             if (vol_ratio < 1.2)         return;  // needs elevated vol
             if (spread_bps > 3.0)        return;  // tight spread required
@@ -69,8 +74,8 @@ public:
             pos_mfe_bp_  = 0.0;
             pos_mae_bp_  = 0.0;
 
-            std::printf("[PCE-ENTRY] %s | disp=%.1fbp | accel=%.2fbp | vol=%.2f | size=%.1fR\n",
-                symbol_.c_str(), displacement_bp, acceleration_bp, vol_ratio, pos_size_R_);
+            std::printf("[PCE-ENTRY] %s | disp=%.1fbp | accel=%.2fbp | vol=%.2f | funding=%.5f | size=%.1fR\n",
+                symbol_.c_str(), displacement_bp, acceleration_bp, vol_ratio, perp_funding_rate, pos_size_R_);
             std::fflush(stdout);
         }
         else {

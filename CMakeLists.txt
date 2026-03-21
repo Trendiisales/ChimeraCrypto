@@ -36,6 +36,7 @@ include_directories(
 set(CHIMERA_SOURCES
     src/main.cpp
     src/live/BinanceWSFeed.cpp
+    src/live/CoinbaseWSFeed.cpp
     src/live/SpotExecutor.cpp
     src/core/Portfolio.cpp
     src/core/StatefulGovernor.cpp

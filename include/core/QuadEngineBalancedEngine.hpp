@@ -213,10 +213,19 @@ public:
 
         // Build version — git commit hash injected at compile time via -DBUILD_VERSION
         // Falls back to "dev" if not set (local builds without CI)
-#ifndef BUILD_VERSION
-#define BUILD_VERSION "dev"
-#endif
-        json << "\"build_ver\":\"" << BUILD_VERSION << "\",";
+        // Build version read dynamically at runtime
+        {
+            char _ghash[64] = "unknown";
+            FILE* _fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
+            if (_fp) {
+                if (fgets(_ghash, sizeof(_ghash), _fp)) {
+                    size_t _l = strlen(_ghash);
+                    if (_l > 0 && _ghash[_l-1] == '\n') _ghash[_l-1] = '\0';
+                }
+                pclose(_fp);
+            }
+            json << "\"build_ver\":\"" << _ghash << "\",";
+        }
 
         for (int _pi = 0; _pi < MAX_SYMBOLS; ++_pi)
             json << "\"" << sym_full(_pi) << "_price\":" << market_state_[_pi].last_price << ",";

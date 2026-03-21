@@ -81,6 +81,7 @@ struct ConvexPosition {
 
 class ConvexShockEngine {
 public:
+    static constexpr double ROUND_TRIP_COST_BP = 8.0;
     ConvexPosition pos;
     
     std::string symbol;

@@ -740,6 +740,10 @@ public:
 
         // Time-of-day session gating
         int utc_hour = (int)((ts / 3600000LL) % 24);
+        // HARD KILL WINDOW: 02:00-07:00 UTC — Asia dead tape, 46 trades -152bp
+        bool kill_window = (utc_hour >= TradingConfig::KILL_WINDOW_START_UTC &&
+                            utc_hour <  TradingConfig::KILL_WINDOW_END_UTC);
+        if (kill_window) return;
         bool dead_zone = (utc_hour >= TradingConfig::SESSION_DEAD_START_UTC &&
                           utc_hour <  TradingConfig::SESSION_DEAD_END_UTC);
         const bool shadow_mode = is_shadow_mode();
@@ -2376,17 +2380,17 @@ private:
             || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM
             || s.pos.layer == LAYER_SPREAD_COMPRESS || s.pos.layer == LAYER_DIVERGENCE) {
             const double round_trip_cost = TradingConfig::MAKER_ROUND_TRIP_BP;
-            // VWAP: arm at 1.5bp (tighter — 7 trades showed MFE>2bp then reversed to loss)
-            // All others: arm at cost+1.5bp
+            // VWAP: arm at 1.5bp, LIQ: arm at 2bp, others: arm at cost+1.5bp
             const double arm_bp = (s.pos.layer == LAYER_VWAP)
                 ? TradingConfig::VWAP_TRAIL_ARM_BP
+                : (s.pos.layer == LAYER_LIQUIDATION)
+                ? 2.0
                 : (s.pos.partial_exit_done ? round_trip_cost + 0.5 : round_trip_cost + 1.5);
             if (peak_profit_bp >= arm_bp) {
-                // VWAP: lock 60% of peak (tighter — convert reversal losses to small wins)
-                // VWAP after partial trigger: lock 70%
-                // All others: lock 50% of peak profit
+                // VWAP: lock 60%, LIQ: lock 65% (cascades reverse fast), others: lock 50%
                 const double lock_pct = (s.pos.layer == LAYER_VWAP)
                     ? (s.pos.partial_exit_done ? 0.70 : TradingConfig::VWAP_TRAIL_LOCK_PCT)
+                    : (s.pos.layer == LAYER_LIQUIDATION) ? 0.65
                     : (s.pos.partial_exit_done ? 0.65 : 0.50);
                 const double floor_bp = std::max(round_trip_cost + 0.5,
                                                   peak_profit_bp * lock_pct);
@@ -2394,6 +2398,7 @@ private:
                     std::printf("[TRAIL-50PCT] %s | %s | peak=%.2fbp floor=%.2fbp now=%.2fbp lock=%.0f%%\n",
                         sym_short(id),
                         (s.pos.layer == LAYER_VWAP) ? "VWAP" :
+                        (s.pos.layer == LAYER_LIQUIDATION) ? "LIQ" :
                         (s.pos.layer == LAYER_STATARB) ? "STATARB" :
                         (s.pos.layer == LAYER_SESSION_MOM) ? "SESS" : "LEADLAG",
                         peak_profit_bp, floor_bp, move_bp, lock_pct * 100.0);

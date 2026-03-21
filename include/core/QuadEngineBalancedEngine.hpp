@@ -7,6 +7,7 @@
 #include "core/OrderbookImbalanceEngine.hpp"
 #include "core/AggressiveFlowEngine.hpp"
 #include "core/PullbackContinuationEngine.hpp"
+#include "live/PerpFeed.hpp"
 #include "core/RegimeStateAllocator.hpp"
 #include "telemetry/SimpleHttpServer.hpp"
 #include <sstream>
@@ -206,33 +207,39 @@ public:
         available_R = std::max(0.0, dynamic_cap - used_R);
 
         // 7c. Orderbook Imbalance Engine
+        double perp_basis_bp = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->basis_bp(id, price) : 0.0;
+        double perp_flow     = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->perp_flow_ratio(id) : 0.0;
+        double perp_funding  = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->funding_rate(id)    : 0.0;
         obi_[id].evaluate(
             price,
             tick.book_imbalance,
             tick.spread_bps,
             ms.vol_ratio,
+            perp_basis_bp,
             ts,
             available_R
         );
 
-        // 7d. Aggressive Flow Engine
+        // 7d. Aggressive Flow Engine (spot + perp flow confirmation)
         afe_[id].evaluate(
             price,
             ms.buy_vol_ema,
             ms.sell_vol_ema,
             tick.spread_bps,
             ms.vol_ratio,
+            perp_flow,
             ts,
             available_R
         );
 
-        // 7e. Pullback Continuation Engine
+        // 7e. Pullback Continuation Engine (perp funding as crowd signal)
         pce_[id].evaluate(
             price,
             ms.displacement_bp,
             ms.acceleration_bp,
             tick.spread_bps,
             ms.vol_ratio,
+            perp_funding,
             ts,
             available_R
         );
@@ -253,6 +260,7 @@ public:
     void set_ngas_engine(chimera::NGASLeadLagEngine* n)      { balanced_.set_ngas_engine(n); }
     void set_funding_signal(chimera::FundingSignalEngine* fs) { balanced_.set_funding_signal(fs); }
     void update_coinbase_btc(double price, int64_t ts_ms)     { balanced_.update_coinbase_btc(price, ts_ms); }
+    void set_perp_feed(chimera::PerpFeed* pf)                 { perp_feed_ = pf; }
     LiquidationEngine& liq_engine() { return balanced_.liq_engine(); }
     void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
     void set_latency(double ms) { last_latency_ms_ = ms; }
@@ -428,6 +436,7 @@ private:
 
     double last_latency_ms_  = 0.0;  // per-tick age for signal gating
     double lat_p95_display_  = 0.0;  // rolling p95 for GUI display only
+    PerpFeed*            perp_feed_     = nullptr;  // optional -- set from main()
 
     // Trade log ring buffer
     struct TradeRecord {

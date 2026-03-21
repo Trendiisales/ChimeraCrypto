@@ -22,6 +22,7 @@
 #include "core/NGASLeadLagEngine.hpp"
 #include "core/FundingSignalEngine.hpp"
 #include "live/CoinbaseWSFeed.hpp"
+#include "live/PerpFeed.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
 #include "execution/NetworkLatencySystem.hpp"
 #include "core/SymbolIndex.hpp"
@@ -270,6 +271,7 @@ Chimera::NetworkLatencySystem  g_network_latency;
 chimera::NGASFetcher           g_ngas_fetcher;
 chimera::NGASLeadLagEngine     g_ngas_engine;
 chimera::FundingSignalEngine   g_funding_signal;
+chimera::PerpFeed              g_perp_feed;
 
 static std::atomic<bool> g_running{true};
 static std::atomic<int>  g_sig_count{0};
@@ -441,6 +443,12 @@ int main() {
     std::printf("[STARTUP] Coinbase BTC-USD feed started (cross-exchange reference)\n");
     std::fflush(stdout);
 
+    // Perp feed — fstream.binance.com markPrice + aggTrade per symbol
+    g_perp_feed.start();
+    controller.set_perp_feed(&g_perp_feed);
+    std::printf("[STARTUP] Perp feed started (fstream.binance.com markPrice+aggTrade)\n");
+    std::fflush(stdout);
+
     std::printf("[STARTUP] Feed live. Calibrating latency...\n");
     std::printf("[CONFIG] Regime thresholds: GRINDBUILDUP=%.2f  BUILDUPBREAKOUT=%.2f\n",
         chimera::TradingConfig::REGIME_GRIND_EXIT_TO_BUILDUP,
@@ -476,6 +484,7 @@ int main() {
 
     feed.stop();
     coinbase_feed.stop();
+    g_perp_feed.stop();
     shutdown_done = true;
     if (watchdog.joinable()) watchdog.join();
     std::printf("[SHUTDOWN] fills=%d errors=%d trades=%d pnl=%.2fbp\n",

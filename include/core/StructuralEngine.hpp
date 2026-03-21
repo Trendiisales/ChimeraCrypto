@@ -178,13 +178,14 @@ public:
         }
         
         if (should_exit) {
-            double final_pnl = pnl_bp * pos.size_R;  // Scale by size
+            double gross_pnl  = pnl_bp;
+            double final_pnl  = (pnl_bp - ROUND_TRIP_COST_BP) * pos.size_R;  // net after 8bp cost
             total_pnl_bp += final_pnl;
             total_trades++;
             if (final_pnl > 0) winning_trades++;
             
-            std::printf("[STRUCTURAL-EXIT] %s | pnl=%.2fbp | size=%.1fR | mfe=%.1f | mae=%.1f | reason=%s | total=%.1fbp\n",
-                symbol.c_str(), final_pnl, pos.size_R, pos.mfe_bp, pos.mae_bp, 
+            std::printf("[STRUCTURAL-EXIT] %s | net=%.2fbp (gross=%.2f cost=%.1f) | size=%.1fR | mfe=%.1f | mae=%.1f | reason=%s | total=%.1fbp\n",
+                symbol.c_str(), final_pnl, gross_pnl, ROUND_TRIP_COST_BP, pos.size_R, pos.mfe_bp, pos.mae_bp,
                 exit_reason.c_str(), total_pnl_bp);
             std::fflush(stdout);
             

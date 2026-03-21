@@ -45,6 +45,7 @@ public:
         double   book_imbalance,
         double   spread_bps,
         double   vol_ratio,
+        double   perp_basis_bp,  // (perp_mark - spot) / spot * 10000. + = perp premium
         int64_t  ts,
         double   available_R
     ) {
@@ -60,6 +61,10 @@ public:
 
             // Gate: extreme imbalance required
             if (std::fabs(book_imbalance) < 0.45) return;
+
+            // Perp confirmation: basis should not be strongly positive (longs already crowded)
+            // If perp is at big premium (>8bp), spot long likely already priced in
+            if (perp_basis_bp > 8.0) return;
 
             if (available_R < 0.5) return;
 
@@ -80,8 +85,8 @@ public:
                 return;
             }
 
-            std::printf("[OBI-ENTRY] %s | imbal=%.2f | spread=%.2fbp | vol=%.2f | size=%.1fR\n",
-                symbol_.c_str(), book_imbalance, spread_bps, vol_ratio, pos_size_R_);
+            std::printf("[OBI-ENTRY] %s | imbal=%.2f | spread=%.2fbp | vol=%.2f | basis=%.1fbp | size=%.1fR\n",
+                symbol_.c_str(), book_imbalance, spread_bps, vol_ratio, perp_basis_bp, pos_size_R_);
             std::fflush(stdout);
         }
         else {

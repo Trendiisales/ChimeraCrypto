@@ -46,6 +46,7 @@ public:
         double   sell_ema,
         double   spread_bps,
         double   vol_ratio,
+        double   perp_flow_ratio,  // (perp_buy - perp_sell) / total, -1..+1
         int64_t  ts,
         double   available_R
     ) {
@@ -65,6 +66,10 @@ public:
             // Spot only: only enter LONG when buy flow dominates strongly
             if (flow_ratio < 0.30) return;  // buy must be >65% of total flow
 
+            // Perp confirmation: perp flow should also be buy-dominated (or neutral)
+            // If perp is selling aggressively while spot buys, spot pump likely short-lived
+            if (perp_flow_ratio < -0.20) return;
+
             pos_active_  = true;
             entry_price_ = price;
             pos_size_R_  = std::min(1.2, available_R);
@@ -73,8 +78,8 @@ public:
             pos_mfe_bp_  = 0.0;
             pos_mae_bp_  = 0.0;
 
-            std::printf("[AFE-ENTRY] %s | flow_ratio=%.2f | vol=%.2f | spread=%.2fbp | size=%.1fR\n",
-                symbol_.c_str(), flow_ratio, vol_ratio, spread_bps, pos_size_R_);
+            std::printf("[AFE-ENTRY] %s | spot_flow=%.2f | perp_flow=%.2f | vol=%.2f | spread=%.2fbp | size=%.1fR\n",
+                symbol_.c_str(), flow_ratio, perp_flow_ratio, vol_ratio, spread_bps, pos_size_R_);
             std::fflush(stdout);
         }
         else {

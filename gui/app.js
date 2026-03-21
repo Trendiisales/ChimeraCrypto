@@ -30,7 +30,7 @@ function unlockAudio() {
     src.buffer = buf; src.connect(audioCtx.destination); src.start(0);
     audioUnlocked = true;
     const btn = document.getElementById('audio-unlock');
-    if (btn) { btn.textContent = 'MUTED OFF'; btn.style.color = 'var(--green)'; }
+    if (btn) { btn.textContent = 'BELL ON'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'var(--green)'; btn.style.background = 'rgba(0,230,118,.1)'; }
   } catch(e) {}
 }
 
@@ -38,10 +38,14 @@ function playWin() {
   if (!audioUnlocked || !audioCtx) return;
   try {
     const now = audioCtx.currentTime;
+    const comp = audioCtx.createDynamicsCompressor();
+    comp.threshold.value = -3; comp.ratio.value = 4;
+    comp.attack.value = 0.003; comp.release.value = 0.1;
+    comp.connect(audioCtx.destination);
     [[0, 880, 1040], [0.22, 1100, 1320]].forEach(([t, f1, f2]) => {
       [f1, f2].forEach((freq, i) => {
         const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
-        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.connect(gain); gain.connect(comp);
         osc.type = 'sine'; osc.frequency.setValueAtTime(freq, now + t);
         gain.gain.setValueAtTime(0, now + t);
         gain.gain.linearRampToValueAtTime(i === 0 ? 1.8 : 0.9, now + t + 0.008);

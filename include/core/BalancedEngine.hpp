@@ -891,9 +891,9 @@ public:
     void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
     void set_funding_signal(FundingSignalEngine* fs) { funding_signal_ = fs; }
     void update_coinbase_btc(double price, int64_t ts_ms) {
-        coinbase_btc_price_.store(
-            *reinterpret_cast<const uint64_t*>(&price),
-            std::memory_order_relaxed);
+        uint64_t bits;
+        __builtin_memcpy(&bits, &price, sizeof(bits));
+        coinbase_btc_price_.store(bits, std::memory_order_relaxed);
         coinbase_btc_ts_.store(ts_ms, std::memory_order_relaxed);
     }
     void set_executor(SpotExecutor* e)              { executor_ = e; }

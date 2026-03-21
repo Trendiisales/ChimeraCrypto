@@ -40,6 +40,7 @@ struct StructuralPosition {
 
 class StructuralEngine {
 public:
+    static constexpr double ROUND_TRIP_COST_BP = 8.0;
     StructuralPosition pos;
     StructDirection last_exit_direction = StructDirection::NONE;
     bool active = false;

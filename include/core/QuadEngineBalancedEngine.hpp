@@ -199,6 +199,8 @@ public:
     int get_open_positions() const { return balanced_.get_open_positions(); }
     void set_funding_fetcher(chimera::FundingRateFetcher* f) { balanced_.set_funding_fetcher(f); }
     void set_ngas_engine(chimera::NGASLeadLagEngine* n)      { balanced_.set_ngas_engine(n); }
+    void set_funding_signal(chimera::FundingSignalEngine* fs) { balanced_.set_funding_signal(fs); }
+    void update_coinbase_btc(double price, int64_t ts_ms)     { balanced_.update_coinbase_btc(price, ts_ms); }
     LiquidationEngine& liq_engine() { return balanced_.liq_engine(); }
     void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
     void set_latency(double ms) { last_latency_ms_ = ms; }

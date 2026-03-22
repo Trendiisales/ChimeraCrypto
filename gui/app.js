@@ -352,6 +352,7 @@ function updateLivePositions(data) {
     const short = sym.replace("usdt","").toUpperCase();
     if (d.bracket_active) positions.push({sym:short,eng:"BRACKET",move:d.bracket_move_bp||0,mfe:d.bracket_mfe_bp||0,trail_floor:d.bracket_trail_floor||-9999,trail_armed:d.bracket_trail_armed||false,sl_bp:28,trail_arm_bp:40});
     if (d.basis_active)   positions.push({sym:short,eng:"BASIS",  move:d.basis_move_bp||0,  mfe:d.basis_mfe_bp||0,  trail_floor:d.basis_trail_floor||-9999,  trail_armed:d.basis_trail_armed||false,  sl_bp:12,trail_arm_bp:20});
+    if (d.fundwin_active) positions.push({sym:short,eng:"FUND-WIN",move:d.fundwin_move_bp||0,mfe:d.fundwin_mfe_bp||0,trail_floor:-9999,trail_armed:(d.fundwin_mfe_bp||0)>=30,sl_bp:20,trail_arm_bp:30});
     if (d.liq_active)     positions.push({sym:short,eng:"LIQ",    move:d.liq_move_bp||0,    mfe:d.liq_mfe_bp||0,    trail_floor:-9999,                        trail_armed:(d.liq_mfe_bp||0)>=30,      sl_bp:20,trail_arm_bp:30});
   });
   if (!positions.length) {
@@ -530,6 +531,20 @@ function updateAll(data) {
         if(bkBar)bkBar.style.width='0%';
       }
     }
+    // FUNDING WINDOW badge (BTC/ETH only)
+    if (sym === 'btcusdt' || sym === 'ethusdt') {
+      const fwBadge=$('badge-'+sym+'-fundwin'), fwVal=$('badge-val-'+sym+'-fundwin');
+      if (fwBadge) {
+        const secs=d.fundwin_secs_to_next||9999, rateBp=d.fundwin_rate_bp||0;
+        const mins=Math.floor(secs/60), ss=secs%60;
+        const timeStr=mins+'m'+String(ss).padStart(2,'0')+'s';
+        if(d.fundwin_active){fwBadge.className='eng-badge active';const mv=d.fundwin_move_bp||0;if(fwVal)fwVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';}
+        else if(secs<=180&&Math.abs(rateBp)>=1.5){fwBadge.className='eng-badge armed';if(fwVal)fwVal.textContent=timeStr+' '+(rateBp>=0?'+':'')+rateBp.toFixed(1)+'bp';}
+        else if(secs<=600){fwBadge.className='eng-badge watching';if(fwVal)fwVal.textContent=timeStr;}
+        else{fwBadge.className='eng-badge';if(fwVal)fwVal.textContent=timeStr;}
+      }
+    }
+
     // BASIS badge — shows live perp basis value only
     const baBadge=$('badge-'+sym+'-basis'),baVal=$('badge-val-'+sym+'-basis');
     if (baBadge) {

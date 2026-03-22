@@ -61,9 +61,17 @@ public:
     static constexpr double BREAKOUT_BP      = 12.0;
     static constexpr double ENTRY_BUFFER_BP  = 3.0;
     static constexpr double STOP_BP          = 28.0;
-    static constexpr double TARGET_BP        = 300.0; // hard cap — trail exits long before this
-    static constexpr double TRAIL_ARM_BP     = 40.0;  // start trailing once +40bp in profit
-    static constexpr double TRAIL_DIST_BP    = 20.0;  // trail 20bp below peak (locks 50%+ once running)
+    static constexpr double TARGET_BP        = 2000.0; // hard cap — effectively unlimited, trail always exits first
+    static constexpr double TRAIL_ARM_BP     = 40.0;   // start trailing once +40bp profit
+
+    // Dynamic trail distance — tighter as move gets larger to capture more of big runs
+    static double trail_distance_bp(double peak_bp) {
+        if (peak_bp < 50.0)  return 20.0;
+        if (peak_bp < 100.0) return 18.0;
+        if (peak_bp < 200.0) return 15.0;
+        if (peak_bp < 300.0) return 12.0;
+        return 8.0;  // >= 300bp: 8bp trail captures 97%+
+    }
     static constexpr double LIQ_THRESHOLD    = 25000.0;   // $25k notional (lowered from $150k for low-vol sessions)
     static constexpr double PERP_LEAD_BP     = 5.0;
     static constexpr int64_t COOLDOWN_MS     = 120000;    // 2 min per symbol
@@ -208,9 +216,10 @@ public:
         pos.mfe_bp = std::max(pos.mfe_bp, move_bp);
         pos.mae_bp = std::min(pos.mae_bp, move_bp);
 
-        // Update trailing stop once armed
+        // Update trailing stop once armed — tighter as move gets bigger
         if (pos.mfe_bp >= TRAIL_ARM_BP) {
-            double trail_floor = pos.mfe_bp - TRAIL_DIST_BP;
+            double dist       = trail_distance_bp(pos.mfe_bp);
+            double trail_floor = pos.mfe_bp - dist;
             pos.stop_price = std::max(pos.stop_price,
                 pos.entry_price * (1.0 + trail_floor / 10000.0));
         }

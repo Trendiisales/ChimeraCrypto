@@ -258,10 +258,13 @@ function renderTradeLog() {
 
 function bestReadiness(d) {
   if (!d) return 0;
+  // Bracket range_pct feeds into readiness — a fully-built range is at 1.0
+  const bracket_pct = d.bracket_range_pct || 0;
   return Math.max(
     d.structural_readiness  || 0,
     d.convex_readiness      || 0,
-    d.compression_readiness || 0
+    d.compression_readiness || 0,
+    bracket_pct
   );
 }
 
@@ -392,6 +395,7 @@ function updateAll(data) {
       ['obi',         d.obi_active],
       ['afe',         d.afe_active],
       ['pce',         d.pce_active],
+      ['bracket',     d.bracket_active],
     ];
     let anyActive = false;
     engs.forEach(([eng, active]) => {

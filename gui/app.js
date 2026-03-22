@@ -252,19 +252,58 @@ function renderTradeLog() {
   }).join('');
 }
 
-// CARD READINESS GRADIENT
-// Score 0-1 based on vol_ratio + displacement + compression_ticks
-// Maps to colour: grey(0) -> yellow(0.4) -> cyan(0.7) -> green(1.0)
-function readinessColor(d) {
-  if (!d) return 'var(--dim)';
-  const vol    = Math.min(1, Math.max(0, ((d.vol_ratio||1) - 1.0) / 0.8));
-  const disp   = Math.min(1, Math.abs(d.displacement_bp||0) / 30);
-  const comp   = Math.min(1, (d.compression_ticks||0) / 100);
-  const score  = vol * 0.5 + disp * 0.3 + comp * 0.2;
-  if (score < 0.2) return 'var(--dim)';
-  if (score < 0.45) return 'rgba(255,214,0,.6)';
-  if (score < 0.7)  return 'rgba(0,212,255,.7)';
-  return 'rgba(0,230,118,.9)';
+// CARD READINESS — uses engine-specific readiness scores from backend
+// structural_readiness, convex_readiness, compression_readiness (0.0-1.0)
+// Best score of any active engine = overall card readiness
+
+function bestReadiness(d) {
+  if (!d) return 0;
+  return Math.max(
+    d.structural_readiness  || 0,
+    d.convex_readiness      || 0,
+    d.compression_readiness || 0
+  );
+}
+
+function readinessColor(score) {
+  if (score < 0.15) return { bg: 'var(--dim)',              fill: 'var(--dim)' };
+  if (score < 0.40) return { bg: 'rgba(255,214,0,.15)',     fill: 'rgba(255,214,0,.8)' };
+  if (score < 0.65) return { bg: 'rgba(0,212,255,.12)',     fill: 'rgba(0,212,255,.9)' };
+  if (score < 0.85) return { bg: 'rgba(0,230,118,.15)',     fill: 'rgba(0,230,118,.9)' };
+  return             { bg: 'rgba(0,230,118,.25)',           fill: '#00e676' };
+}
+
+function updateCardReadiness(sym, d) {
+  const score  = bestReadiness(d);
+  const pct    = Math.round(score * 100);
+  const colors = readinessColor(score);
+
+  // Bar background tint
+  const bar = $('bar-'+sym);
+  if (bar) bar.style.background = colors.bg;
+
+  // Fill width
+  const fill = $('bar-fill-'+sym);
+  if (fill) {
+    fill.style.width      = pct + '%';
+    fill.style.background = colors.fill;
+    // Pulse animation when >= 80%
+    fill.style.boxShadow  = pct >= 80 ? '0 0 8px ' + colors.fill : 'none';
+  }
+
+  // Percentage label — hide at 0, colour-code as it rises
+  const lbl = $('rdy-'+sym);
+  if (lbl) {
+    if (pct <= 5) {
+      lbl.textContent = '';
+    } else {
+      lbl.textContent = pct + '%';
+      lbl.style.color = pct >= 80 ? 'var(--green)'
+                      : pct >= 50 ? 'var(--accent)'
+                      : pct >= 25 ? 'var(--yellow)'
+                      : 'var(--muted)';
+    }
+  }
 }
 
 function regimePillClass(state) {
@@ -328,8 +367,7 @@ function updateAll(data) {
     if (!d) return;
 
     // Readiness bar
-    const bar = $('bar-'+sym);
-    if (bar) bar.style.background = readinessColor(d);
+    updateCardReadiness(sym, d);
 
     // Regime pill
     const state = d.regime_state || 'NEUTRAL';

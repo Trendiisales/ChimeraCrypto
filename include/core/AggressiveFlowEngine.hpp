@@ -46,11 +46,14 @@ public:
         double   sell_ema,
         double   spread_bps,
         double   vol_ratio,
-        double   perp_flow_ratio,  // (perp_buy - perp_sell) / total, -1..+1
+        double   perp_flow_ratio,
+        int      regime,         // 0=DEAD,1=GRIND,2=BUILDUP,3=BREAKOUT
         int64_t  ts,
         double   available_R
     ) {
-        if (cooldown_ticks_ > 0) { cooldown_ticks_--; return; }
+        if (ts < cooldown_until_ms_) return;
+        // AFE is momentum: only valid in BUILDUP or BREAKOUT (vol expanding)
+        if (regime < 2) return;  // require BUILDUP or BREAKOUT
 
         if (!pos_active_) {
 
@@ -102,7 +105,7 @@ public:
                     symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP, reason, total_pnl_bp_);
                 std::fflush(stdout);
                 pos_active_     = false;
-                cooldown_ticks_ = 50;
+                cooldown_until_ms_ = ts + 60000;  // 60s cooldown
             }
         }
     }
@@ -117,7 +120,7 @@ public:
 
     bool   pos_active_     = false;
     double pos_size_R_     = 0.0;
-    int    cooldown_ticks_ = 0;
+    int64_t cooldown_until_ms_ = 0;
 
 private:
     std::string symbol_;

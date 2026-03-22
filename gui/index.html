@@ -116,6 +116,22 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .sym-pnl{font-family:var(--fh);font-size:11px;font-weight:700;margin-left:auto}
 .sym-pnl.pos{color:var(--green)}.sym-pnl.neg{color:var(--red)}.sym-pnl.zero{color:var(--muted)}
 
+/* LIVE POSITION PANEL */
+.live-panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:6px}
+.live-panel-title{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);margin-bottom:8px}
+.live-pos{display:grid;grid-template-columns:60px 50px 70px 70px 70px 80px 1fr;align-items:center;gap:4px;padding:6px 0;border-bottom:1px solid var(--border)}
+.live-pos:last-child{border-bottom:none}
+.lp-sym{font-family:var(--fh);font-size:11px;font-weight:900;color:var(--text)}
+.lp-eng{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 5px;border-radius:2px;background:rgba(0,212,255,.15);color:var(--accent)}
+.lp-move{font-family:var(--fm);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.lp-move.pos{color:var(--green)}.lp-move.neg{color:var(--red)}
+.lp-mfe{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lp-trail{font-size:10px;font-weight:600}
+.lp-trail.armed{color:var(--yellow)}.lp-trail.locked{color:var(--green)}
+.lp-bar-wrap{height:6px;background:var(--dim);border-radius:3px;overflow:hidden;position:relative}
+.lp-bar-fill{height:100%;border-radius:3px;transition:width .3s ease,background .3s}
+.lp-bar-trail{position:absolute;top:0;height:100%;width:2px;background:var(--yellow);border-radius:1px}
+.live-pos-empty{padding:8px 0;color:var(--muted);font-size:11px;font-style:italic}
 /* BOTTOM SECTION: left=session stats, right=trade log */
 .bottom-section{
   display:grid;
@@ -507,6 +523,12 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   </div><!-- /sym-grid -->
 
   <!-- BOTTOM SECTION -->
+  <!-- LIVE POSITIONS PANEL -->
+  <div class="live-panel" id="live-positions-panel">
+    <div class="live-panel-title">◉ LIVE POSITIONS</div>
+    <div id="live-positions-list"><div class="live-pos-empty">No open positions</div></div>
+  </div>
+
   <div class="bottom-section">
 
     <!-- LEFT: Session stats + engine breakdown -->

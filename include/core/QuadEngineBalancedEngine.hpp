@@ -9,6 +9,7 @@
 #include "core/PullbackContinuationEngine.hpp"
 #include "core/LiqBracketEngine.hpp"
 #include "core/BasisMomentumEngine.hpp"
+#include "core/FundingWindowEngine.hpp"
 #include "live/PerpFeed.hpp"
 #include "core/RegimeStateAllocator.hpp"
 #include "telemetry/SimpleHttpServer.hpp"
@@ -55,6 +56,9 @@ public:
             bracket_[i] = LiqBracketEngine(sym_full(i));
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             basis_[i] = BasisMomentumEngine(sym_full(i));
+        // FundingWindow: BTC and ETH only
+        fund_win_[0] = FundingWindowEngine(sym_full(0));
+        fund_win_[1] = FundingWindowEngine(sym_full(1));
         
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             convex_[i] = ConvexShockEngine(sym_full(i));
@@ -292,6 +296,15 @@ public:
             );
         }
 
+        // 7h. Funding Window Engine — BTC and ETH only, pre-funding 3min window
+        if (id <= 1 && perp_feed_ && perp_feed_->ready(id)) {
+            double fw_rate  = perp_feed_->funding_rate(id);
+            double fw_basis = perp_feed_->basis_bp(id, price);
+            double fw_avail = std::max(0.0, dynamic_cap - used_R
+                             - (fund_win_[id].pos_active_ ? fund_win_[id].pos_size_R_ : 0.0));
+            fund_win_[id].evaluate(price, fw_rate, fw_basis, ts, fw_avail);
+        }
+
         // 8. Enforce directional dominance
         enforce_directional_dominance(id);
     }
@@ -440,6 +453,24 @@ public:
             json << "\"pce_total_trades\":" << pce_s.total_trades << ",";
             json << "\"pce_win_rate\":" << pce_s.win_rate << ",";
 
+            // Funding Window (BTC/ETH only)
+            if (i <= 1) {
+                double fw_rate  = (perp_feed_ && perp_feed_->ready(i)) ? perp_feed_->funding_rate(i) : 0.0;
+                double fw_basis = (perp_feed_ && perp_feed_->ready(i)) ? perp_feed_->basis_bp(i, ms.last_price) : 0.0;
+                auto fw_s = fund_win_[i].get_stats(fw_rate, fw_basis);
+                json << "\"fundwin_active\":"      << (fw_s.active ? "true" : "false") << ",";
+                json << "\"fundwin_secs_to_next\":" << fw_s.secs_to_next_funding << ",";
+                json << "\"fundwin_rate_bp\":"     << (fw_s.current_rate * 10000.0) << ",";
+                json << "\"fundwin_total_pnl\":"   << fw_s.total_pnl_bp << ",";
+                json << "\"fundwin_trades\":"      << fw_s.total_trades << ",";
+                if (fw_s.active) {
+                    double fw_move = fw_s.entry_price > 0
+                        ? (ms.last_price - fw_s.entry_price) / fw_s.entry_price * 10000.0 : 0.0;
+                    json << "\"fundwin_move_bp\":"  << fw_move << ",";
+                    json << "\"fundwin_mfe_bp\":"   << fw_s.mfe_bp << ",";
+                }
+            }
+
             // Basis Momentum
             auto ba_s = basis_[i].get_stats();
             json << "\"basis_active\":"     << (ba_s.active ? "true" : "false") << ",";
@@ -545,6 +576,7 @@ private:
     PullbackContinuationEngine pce_[MAX_SYMBOLS];
     LiqBracketEngine           bracket_[MAX_SYMBOLS];
     BasisMomentumEngine        basis_[MAX_SYMBOLS];
+    FundingWindowEngine        fund_win_[2];  // BTC=0, ETH=1 only
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
 
@@ -601,6 +633,8 @@ private:
     double prev_bracket_pnl_[MAX_SYMBOLS]        = {};
     int    prev_basis_trades_[MAX_SYMBOLS]        = {};
     double prev_basis_pnl_[MAX_SYMBOLS]           = {};
+    int    prev_fundwin_trades_[2]                 = {};
+    double prev_fundwin_pnl_[2]                    = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
     std::string last_written_trade_key_;  // dedup guard  prevents double-writes
@@ -784,6 +818,17 @@ private:
             push_trade(sym_short(id), "PCE", trade_pnl, ps.entry_price, px);
             prev_pce_trades_[id] = ps.total_trades;
             prev_pce_pnl_[id]    = ps.total_pnl_bp;
+        }
+
+        // FUNDING WINDOW exit detected (BTC/ETH only)
+        if (id <= 1) {
+            auto fw = fund_win_[id].get_stats();
+            if (fw.total_trades > prev_fundwin_trades_[id]) {
+                double trade_pnl = fw.total_pnl_bp - prev_fundwin_pnl_[id];
+                push_trade(sym_short(id), "FUND-WIN", trade_pnl, fw.entry_price, px);
+                prev_fundwin_trades_[id] = fw.total_trades;
+                prev_fundwin_pnl_[id]    = fw.total_pnl_bp;
+            }
         }
 
         // BASIS MOMENTUM exit detected

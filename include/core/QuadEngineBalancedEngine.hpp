@@ -210,39 +210,55 @@ public:
         double perp_basis_bp = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->basis_bp(id, price) : 0.0;
         double perp_flow     = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->perp_flow_ratio(id) : 0.0;
         double perp_funding  = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->funding_rate(id)    : 0.0;
-        obi_[id].evaluate(
-            price,
-            tick.book_imbalance,
-            tick.spread_bps,
-            ms.vol_ratio,
-            perp_basis_bp,
-            ts,
-            available_R
-        );
+        // OBI gate: GRIND regime only (mean-reversion fails in trend)
+        bool allow_obi = (ms.regime == 1) && allow_micro_engine_trade(ts) && (allocator_[id].get_state() != VolState::DEAD);
+        if (allow_obi) {
+            obi_[id].evaluate(
+                price,
+                tick.book_imbalance,
+                tick.spread_bps,
+                ms.vol_ratio,
+                perp_basis_bp,
+                ms.regime,
+                ts,
+                available_R
+            );
+            if (obi_[id].pos_active_) micro_engine_trades_in_window_--; // refund if already active
+        }
 
-        // 7d. Aggressive Flow Engine (spot + perp flow confirmation)
-        afe_[id].evaluate(
-            price,
-            ms.buy_vol_ema,
-            ms.sell_vol_ema,
-            tick.spread_bps,
-            ms.vol_ratio,
-            perp_flow,
-            ts,
-            available_R
-        );
+        // AFE gate: BUILDUP or BREAKOUT only (momentum engine)
+        bool allow_afe = (ms.regime >= 2) && allow_micro_engine_trade(ts) && (allocator_[id].get_state() != VolState::DEAD);
+        if (allow_afe) {
+            afe_[id].evaluate(
+                price,
+                ms.buy_vol_ema,
+                ms.sell_vol_ema,
+                tick.spread_bps,
+                ms.vol_ratio,
+                perp_flow,
+                ms.regime,
+                ts,
+                available_R
+            );
+            if (afe_[id].pos_active_) micro_engine_trades_in_window_--;
+        }
 
-        // 7e. Pullback Continuation Engine (perp funding as crowd signal)
-        pce_[id].evaluate(
-            price,
-            ms.displacement_bp,
-            ms.acceleration_bp,
-            tick.spread_bps,
-            ms.vol_ratio,
-            perp_funding,
-            ts,
-            available_R
-        );
+        // PCE gate: BUILDUP or BREAKOUT only (trend continuation)
+        bool allow_pce = (ms.regime >= 2) && allow_micro_engine_trade(ts) && (allocator_[id].get_state() != VolState::DEAD);
+        if (allow_pce) {
+            pce_[id].evaluate(
+                price,
+                ms.displacement_bp,
+                ms.acceleration_bp,
+                tick.spread_bps,
+                ms.vol_ratio,
+                perp_funding,
+                ms.regime,
+                ts,
+                available_R
+            );
+            if (pce_[id].pos_active_) micro_engine_trades_in_window_--;
+        }
 
         // 8. Enforce directional dominance
         enforce_directional_dominance(id);
@@ -437,6 +453,22 @@ private:
     double last_latency_ms_  = 0.0;  // per-tick age for signal gating
     double lat_p95_display_  = 0.0;  // rolling p95 for GUI display only
     PerpFeed*            perp_feed_     = nullptr;  // optional -- set from main()
+
+    // Global rate limiter for OBI/AFE/PCE: max 5 trades per 60s total
+    int     micro_engine_trades_in_window_ = 0;
+    int64_t micro_engine_window_start_ms_  = 0;
+    static constexpr int   MICRO_ENGINE_MAX_PER_MIN  = 5;
+    static constexpr int64_t MICRO_ENGINE_WINDOW_MS  = 60000;
+
+    bool allow_micro_engine_trade(int64_t ts) {
+        if (ts - micro_engine_window_start_ms_ > MICRO_ENGINE_WINDOW_MS) {
+            micro_engine_trades_in_window_ = 0;
+            micro_engine_window_start_ms_  = ts;
+        }
+        if (micro_engine_trades_in_window_ >= MICRO_ENGINE_MAX_PER_MIN) return false;
+        micro_engine_trades_in_window_++;
+        return true;
+    }
 
     // Trade log ring buffer
     struct TradeRecord {

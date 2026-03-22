@@ -7,6 +7,7 @@
 #include "core/OrderbookImbalanceEngine.hpp"
 #include "core/AggressiveFlowEngine.hpp"
 #include "core/PullbackContinuationEngine.hpp"
+#include "core/LiqBracketEngine.hpp"
 #include "live/PerpFeed.hpp"
 #include "core/RegimeStateAllocator.hpp"
 #include "telemetry/SimpleHttpServer.hpp"
@@ -49,6 +50,8 @@ public:
             afe_[i]  = AggressiveFlowEngine(sym_full(i));
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             pce_[i]  = PullbackContinuationEngine(sym_full(i));
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            bracket_[i] = LiqBracketEngine(sym_full(i));
         
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             convex_[i] = ConvexShockEngine(sym_full(i));
@@ -260,6 +263,24 @@ public:
             if (pce_[id].pos_active_) micro_engine_trades_in_window_--;
         }
 
+        // 7f. Liquidation Bracket Engine — COMPRESSION only, liq+perp gated
+        // Capital gate: only if significant room left after other engines
+        double bracket_available = std::max(0.0, dynamic_cap - used_R - obi_R - afe_R - pce_R);
+        if (bracket_available >= 0.5) {
+            double bracket_liq     = balanced_.liq_engine().get_notional(id);
+            double bracket_basis   = perp_feed_ && perp_feed_->ready(id)
+                                     ? perp_feed_->basis_bp(id, price) : 0.0;
+            bracket_[id].evaluate(
+                price,
+                ms.vol_ratio,
+                bracket_liq,
+                bracket_basis,
+                ms.regime,
+                ts,
+                bracket_available
+            );
+        }
+
         // 8. Enforce directional dominance
         enforce_directional_dominance(id);
     }
@@ -406,10 +427,19 @@ public:
             json << "\"pce_total_trades\":" << pce_s.total_trades << ",";
             json << "\"pce_win_rate\":" << pce_s.win_rate << ",";
 
+            // Bracket
+            auto bk_s = bracket_[i].get_stats();
+            json << "\"bracket_active\":" << (bk_s.active ? "true" : "false") << ",";
+            json << "\"bracket_total_pnl_bp\":" << bk_s.total_pnl_bp << ",";
+            json << "\"bracket_total_trades\":" << bk_s.total_trades << ",";
+            json << "\"bracket_win_rate\":" << bk_s.win_rate << ",";
+            json << "\"bracket_range_pct\":" << bk_s.range_pct << ",";
+
             // Portfolio
             double micro_R = ms.micro_active ? 1.0 : 0.0;
             double portfolio_R = micro_R + structural_stats.size_R + convex_stats.size_R + compression_stats.size_R
-                                + obi_[i].pos_size_R_ + afe_[i].pos_size_R_ + pce_[i].pos_size_R_;
+                                + obi_[i].pos_size_R_ + afe_[i].pos_size_R_ + pce_[i].pos_size_R_
+                                + bracket_[i].pos.size_R;
             json << "\"portfolio_R\":"  << portfolio_R << ",";
 
             // Signal readiness (0.0-1.0) for GUI "close to trading" display
@@ -447,6 +477,7 @@ private:
     OrderbookImbalanceEngine  obi_[MAX_SYMBOLS];
     AggressiveFlowEngine      afe_[MAX_SYMBOLS];
     PullbackContinuationEngine pce_[MAX_SYMBOLS];
+    LiqBracketEngine           bracket_[MAX_SYMBOLS];
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
 
@@ -499,6 +530,8 @@ private:
     double prev_afe_pnl_[MAX_SYMBOLS]            = {};
     int    prev_pce_trades_[MAX_SYMBOLS]         = {};
     double prev_pce_pnl_[MAX_SYMBOLS]            = {};
+    int    prev_bracket_trades_[MAX_SYMBOLS]     = {};
+    double prev_bracket_pnl_[MAX_SYMBOLS]        = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
     std::string last_written_trade_key_;  // dedup guard  prevents double-writes
@@ -682,6 +715,15 @@ private:
             push_trade(sym_short(id), "PCE", trade_pnl, ps.entry_price, px);
             prev_pce_trades_[id] = ps.total_trades;
             prev_pce_pnl_[id]    = ps.total_pnl_bp;
+        }
+
+        // BRACKET exit detected
+        auto bks = bracket_[id].get_stats();
+        if (bks.total_trades > prev_bracket_trades_[id]) {
+            double trade_pnl = bks.total_pnl_bp - prev_bracket_pnl_[id];
+            push_trade(sym_short(id), "BRACKET", trade_pnl, bks.entry_price, px);
+            prev_bracket_trades_[id] = bks.total_trades;
+            prev_bracket_pnl_[id]    = bks.total_pnl_bp;
         }
     }
     

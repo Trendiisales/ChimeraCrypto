@@ -134,9 +134,9 @@ struct TradingConfig {
     static constexpr double  LIQ_MIN_BOOK_IMBALANCE = 0.08;     // require at least mild bid pressure
     static constexpr double  LIQ_MIN_VOL_RATIO      = 0.90;     // avoid dead tape
     static constexpr double  LIQ_MAX_VOL_RATIO      = 2.40;     // avoid panic blow-off fills
-    static constexpr double  LIQ_TP_BP              = 10.0;     // raised from 6bp: now maker entry (~4bp cost), 10bp TP = +3bp net at 55% WR
-    static constexpr double  LIQ_SL_BP              = 3.0;      // raised from 2bp: tighter SL was too tight for maker fill noise
-    static constexpr int64_t LIQ_MAX_HOLD_MS        = 3000;     // 3s: cascade resolves fast; maker fill adds ~400ms, 3s total is safe
+    static constexpr double  LIQ_TP_BP              = 150.0;    // Option B: trail target — cascades run 100-500bp, exit via trail not fixed TP
+    static constexpr double  LIQ_SL_BP              = 20.0;     // Option B: wider SL to survive noise before cascade runs
+    static constexpr int64_t LIQ_MAX_HOLD_MS        = 30000;    // Option B: 30s — let cascade run, trail will exit before timeout
 
 
     // -------------------------------------------------------------------------

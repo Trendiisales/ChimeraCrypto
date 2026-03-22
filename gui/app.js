@@ -169,6 +169,10 @@ function fmtPrice(p, sym) {
 }
 
 function updateWinRate() {
+  // Recalculate from current session only — ignore historical sessions
+  const sess = currentSessionTrades().filter(t => t.s !== 'SESSION');
+  wins = 0; losses = 0;
+  sess.forEach(t => { if (+t.p > 0) wins++; else if (+t.p < 0) losses++; else wins++; });
   const t = wins + losses;
   const wr = t > 0 ? (wins / t * 100).toFixed(0) + '%' : '--%';
   const wrEl = $('ts-wr');

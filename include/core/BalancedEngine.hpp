@@ -415,11 +415,15 @@ public:
         //   LIQ:     needs more data but signal logic is sound
         //   OFI:     24 trades 0% WR -95bp - PERMANENTLY DISABLED
         //   VACUUM:  17 trades 0% WR -53bp - PERMANENTLY DISABLED
-        edge_gate_[EDGE_LEADLAG].enabled = true;
-        edge_gate_[EDGE_VWAP].enabled    = true;   // 33% WR, only winning engine
-        edge_gate_[EDGE_LIQ].enabled     = true;   // event-driven, sound logic
-        edge_gate_[EDGE_SPREAD_COMPRESS].enabled = true;  // new: spread compression signal
-        edge_gate_[EDGE_DIVERGE].enabled         = true;  // new: cross-symbol divergence
+        // OPTION B: only LIQ engine enabled — all others disabled at 15bp cost floor
+        // LEADLAG: TP=15bp gross = 0bp net — cannot make money
+        // VWAP: TP=14bp gross = -1bp net — guaranteed loss
+        // SPREAD_COMPRESS/DIVERGE: targets too small for 15bp cost
+        edge_gate_[EDGE_LEADLAG].enabled = false;
+        edge_gate_[EDGE_VWAP].enabled    = false;
+        edge_gate_[EDGE_LIQ].enabled     = true;   // LIQ only: 40bp TP = +25bp net
+        edge_gate_[EDGE_SPREAD_COMPRESS].enabled = false;
+        edge_gate_[EDGE_DIVERGE].enabled         = false;
         // IMBAL: re-enabled as live shadow — starts parked (enabled=false), auto-promotes
         // after 30 trades with avg_pnl >= 0.8bp. Strict threshold (0.42) + spread < 1.5bp
         // compensates for maker cost floor.

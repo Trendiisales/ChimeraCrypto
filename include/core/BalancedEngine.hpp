@@ -1477,6 +1477,13 @@ private:
     }
 
     bool edge_gate_allows(int id, EdgeEngineKey key, int64_t ts) {
+        // Option B hard-lock: these engines cannot self-promote regardless of sample history
+        // They are disabled because their TP is insufficient to cover 15bp round-trip cost
+        if (key == EDGE_MM      || key == EDGE_SWEEP    || key == EDGE_LEADLAG ||
+            key == EDGE_VWAP   || key == EDGE_OFI      || key == EDGE_VACUUM  ||
+            key == EDGE_SPREAD_COMPRESS || key == EDGE_DIVERGE) {
+            return false;
+        }
         auto& g = edge_gate_[key];
         evaluate_edge_gate(key, ts);
         if (g.enabled) return true;

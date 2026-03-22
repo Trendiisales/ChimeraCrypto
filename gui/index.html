@@ -72,9 +72,9 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .sym-ready-pct{font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:1px;opacity:0.8;margin-left:auto}
 
 /* Card body */
-.sym-card-body{padding:10px 12px}
-.sym-name{font-family:var(--fh);font-size:12px;font-weight:900;letter-spacing:2px;color:var(--muted)}
-.sym-price{font-size:22px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:3px 0}
+.sym-card-body{padding:8px 10px}
+.sym-name{font-family:var(--fh);font-size:13px;font-weight:900;letter-spacing:2px;color:var(--muted)}
+.sym-price{font-size:20px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:2px 0}
 .sym-price.up{color:var(--green)}.sym-price.down{color:var(--red)}
 .sym-regime-pill{
   display:inline-block;font-family:var(--fh);font-size:9px;font-weight:700;
@@ -89,15 +89,12 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 /* Card metrics row */
 .sym-metrics{display:flex;justify-content:space-between;margin-top:4px}
 .sym-metric{display:flex;flex-direction:column;align-items:center}
-.sm-label{font-size:8px;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;font-family:var(--fh)}
-.sm-val{font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.sm-label{font-size:8px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:var(--fh)}
+.sm-val{font-size:11px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
 .sm-val.pos{color:var(--green)}.sm-val.neg{color:var(--red)}.sm-val.accent{color:var(--accent)}
 
 /* Engine dots row */
 .sym-engines{display:flex;gap:4px;margin-top:8px;align-items:center}
-.sym-metrics2{display:flex;justify-content:space-between;margin-top:5px;padding-top:5px;border-top:1px solid var(--border)}
-.sm-val2{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
-.sm-pnl-pos{color:var(--green)}.sm-pnl-neg{color:var(--red)}.sm-pnl-zero{color:var(--muted)}
 .eng-dot{
   width:8px;height:8px;border-radius:50%;
   background:var(--dim);border:1px solid var(--border2);
@@ -253,12 +250,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-btc">--</span></div>
           <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-btc">0</span></div>
         </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-btc">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-btc">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-btc">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-btc">0.0</span></div>
-        </div>
         <div class="sym-engines">
           <div class="eng-dot" id="ed-btc-micro" title="MICRO"></div>
           <div class="eng-dot" id="ed-btc-structural" title="STRUCT"></div>
@@ -289,12 +280,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-eth">--</span></div>
           <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-eth">--</span></div>
           <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-eth">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-eth">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-eth">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-eth">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-eth">0.0</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-dot" id="ed-eth-micro" title="MICRO"></div>
@@ -327,12 +312,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-sol">--</span></div>
           <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-sol">0</span></div>
         </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-sol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-sol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-sol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-sol">0.0</span></div>
-        </div>
         <div class="sym-engines">
           <div class="eng-dot" id="ed-sol-micro" title="MICRO"></div>
           <div class="eng-dot" id="ed-sol-structural" title="STRUCT"></div>
@@ -363,12 +342,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-bnb">--</span></div>
           <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-bnb">--</span></div>
           <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-bnb">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-bnb">0.0</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-dot" id="ed-bnb-micro" title="MICRO"></div>
@@ -401,12 +374,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-avax">--</span></div>
           <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-avax">0</span></div>
         </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-avax">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-avax">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-avax">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-avax">0.0</span></div>
-        </div>
         <div class="sym-engines">
           <div class="eng-dot" id="ed-avax-micro" title="MICRO"></div>
           <div class="eng-dot" id="ed-avax-structural" title="STRUCT"></div>
@@ -438,12 +405,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-link">--</span></div>
           <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-link">0</span></div>
         </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-link">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-link">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-link">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-link">0.0</span></div>
-        </div>
         <div class="sym-engines">
           <div class="eng-dot" id="ed-link-micro" title="MICRO"></div>
           <div class="eng-dot" id="ed-link-structural" title="STRUCT"></div>
@@ -458,39 +419,33 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
       </div>
     </div>
 
-    <!-- POL -->
-    <div class="sym-card" id="sb-pol">
-      <div class="sym-card-bar" id="bar-pol"><div class="sym-card-bar-fill" id="bar-fill-pol"></div></div>
+    <!-- XRP -->
+    <div class="sym-card" id="sb-xrp">
+      <div class="sym-card-bar" id="bar-xrp"><div class="sym-card-bar-fill" id="bar-fill-xrp"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">POL</span>
-          <span class="sym-ready-pct" id="rdy-pol" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-pol">+0.00bp</span>
+          <span class="sym-name">XRP</span>
+          <span class="sym-ready-pct" id="rdy-xrp" style="color:var(--muted)">0%</span>
+          <span class="sym-pnl zero" id="mini-pnl-xrp">+0.00bp</span>
         </div>
-        <div class="sym-price" id="px-pol">--</div>
-        <span class="sym-regime-pill rp-neutral" id="reg-pol">NEUTRAL</span>
+        <div class="sym-price" id="px-xrp">--</div>
+        <span class="sym-regime-pill rp-neutral" id="reg-xrp">NEUTRAL</span>
         <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-pol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-pol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-pol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-pol">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm-label">FUND</span><span class="sm-val2 sm-pnl-zero" id="fn-pol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BASIS</span><span class="sm-val2 sm-pnl-zero" id="bs-pol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">LIQ $</span><span class="sm-val2 sm-pnl-zero" id="lq-pol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">SES PNL</span><span class="sm-val2 sm-pnl-zero" id="sp-pol">0.0</span></div>
+          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-xrp">--</span></div>
+          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-xrp">--</span></div>
+          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-xrp">--</span></div>
+          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-xrp">0</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-pol-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-pol-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-pol-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-pol-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-pol-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-pol-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-pol-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-pol-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <span class="eng-dot-label" id="edl-pol">FLAT</span>
+          <div class="eng-dot" id="ed-xrp-micro" title="MICRO"></div>
+          <div class="eng-dot" id="ed-xrp-structural" title="STRUCT"></div>
+          <div class="eng-dot" id="ed-xrp-convex" title="CONVEX"></div>
+          <div class="eng-dot" id="ed-xrp-compression" title="COMPR"></div>
+          <div class="eng-dot" id="ed-xrp-obi" title="OBI"></div>
+          <div class="eng-dot" id="ed-xrp-afe" title="AFE"></div>
+          <div class="eng-dot" id="ed-xrp-pce" title="PCE"></div>
+          <div class="eng-dot" id="ed-xrp-bracket" title="BRACKET" style="border-radius:2px"></div>
+          <span class="eng-dot-label" id="edl-xrp">FLAT</span>
         </div>
       </div>
     </div>

@@ -447,6 +447,7 @@ function updateAll(data) {
       ['afe',         d.afe_active],
       ['pce',         d.pce_active],
       ['bracket',     d.bracket_active],
+      ['basis',       d.basis_active],
     ];
     let anyActive = false;
     engs.forEach(([eng, active]) => {

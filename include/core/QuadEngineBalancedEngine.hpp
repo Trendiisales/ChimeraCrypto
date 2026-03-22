@@ -467,6 +467,16 @@ public:
             json << "\"bracket_total_trades\":" << bk_s.total_trades << ",";
             json << "\"bracket_win_rate\":" << bk_s.win_rate << ",";
             json << "\"bracket_range_pct\":" << bk_s.range_pct << ",";
+            {
+                const char* bk_state_str =
+                    bk_s.state == LiqBracketEngine::State::IDLE         ? "IDLE"
+                  : bk_s.state == LiqBracketEngine::State::RANGE_BUILD  ? "RANGE_BUILD"
+                  : bk_s.state == LiqBracketEngine::State::WAIT_CONFIRM ? "WAIT_CONFIRM"
+                  : bk_s.state == LiqBracketEngine::State::ARMED        ? "ARMED"
+                  : bk_s.state == LiqBracketEngine::State::IN_POSITION  ? "IN_POSITION"
+                  : "COOLDOWN";
+                json << "\"bracket_state\":\"" << bk_state_str << "\"," ;
+            }
             // Live bracket position data
             if (bk_s.active) {
                 double bk_move = bk_s.entry_price > 0

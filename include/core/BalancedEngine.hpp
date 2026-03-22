@@ -424,7 +424,7 @@ public:
         edge_gate_[EDGE_LIQ].enabled     = true;   // LIQ only: 40bp TP = +25bp net
         edge_gate_[EDGE_SPREAD_COMPRESS].enabled = false;
         edge_gate_[EDGE_DIVERGE].enabled         = false;
-        edge_gate_[EDGE_MM].enabled              = false;  // MM-PRESSURE: TP too small for 15bp cost
+        edge_gate_[EDGE_MM].enabled              = true;   // Re-enabled with trail, BTC/ETH only
         edge_gate_[EDGE_SWEEP].enabled           = false;  // SWEEP: taker entry, cost too high
         // IMBAL: re-enabled as live shadow — starts parked (enabled=false), auto-promotes
         // after 30 trades with avg_pnl >= 0.8bp. Strict threshold (0.42) + spread < 1.5bp
@@ -1477,13 +1477,10 @@ private:
     }
 
     bool edge_gate_allows(int id, EdgeEngineKey key, int64_t ts) {
-        // Option B hard-lock: these engines cannot self-promote regardless of sample history
-        // They are disabled because their TP is insufficient to cover 15bp round-trip cost
-        if (key == EDGE_MM      || key == EDGE_SWEEP    || key == EDGE_LEADLAG ||
-            key == EDGE_VWAP   || key == EDGE_OFI      || key == EDGE_VACUUM  ||
-            key == EDGE_SPREAD_COMPRESS || key == EDGE_DIVERGE) {
-            return false;
-        }
+        if (key == EDGE_SWEEP || key == EDGE_LEADLAG || key == EDGE_VWAP ||
+            key == EDGE_OFI   || key == EDGE_VACUUM  ||
+            key == EDGE_SPREAD_COMPRESS || key == EDGE_DIVERGE) return false;
+        if (key == EDGE_MM && id > 1) return false;
         auto& g = edge_gate_[key];
         evaluate_edge_gate(key, ts);
         if (g.enabled) return true;
@@ -2407,20 +2404,23 @@ private:
         // Other layers retain original 50% lock at cost+1.5bp arm.
         if (is_leadlag_layer || s.pos.layer == LAYER_VWAP || s.pos.layer == LAYER_LIQUIDATION
             || s.pos.layer == LAYER_STATARB || s.pos.layer == LAYER_SESSION_MOM
-            || s.pos.layer == LAYER_SPREAD_COMPRESS || s.pos.layer == LAYER_DIVERGENCE) {
+            || s.pos.layer == LAYER_SPREAD_COMPRESS || s.pos.layer == LAYER_DIVERGENCE
+            || s.pos.layer == LAYER_MM_PRESSURE) {
             const double round_trip_cost = TradingConfig::MAKER_ROUND_TRIP_BP;
             // VWAP: arm at 1.5bp, LIQ: arm at 2bp, others: arm at cost+1.5bp
             const double arm_bp = (s.pos.layer == LAYER_VWAP)
                 ? TradingConfig::VWAP_TRAIL_ARM_BP
                 : (s.pos.layer == LAYER_LIQUIDATION)
-                ? 30.0  // Option B: arm trail at 30bp
+                ? 30.0
+                : (s.pos.layer == LAYER_MM_PRESSURE)
+                ? TradingConfig::MM_TRAIL_ARM_BP
                 : (s.pos.partial_exit_done ? round_trip_cost + 0.5 : round_trip_cost + 1.5);
             if (peak_profit_bp >= arm_bp) {
                 // VWAP: lock 60%, LIQ: lock 65% (cascades reverse fast), others: lock 50%
                 const double lock_pct = (s.pos.layer == LAYER_VWAP)
                     ? (s.pos.partial_exit_done ? 0.70 : TradingConfig::VWAP_TRAIL_LOCK_PCT)
-                    : (s.pos.layer == LAYER_LIQUIDATION) ? [&](){
-                        // Dynamic: 8-20bp trail depending on peak size
+                    : (s.pos.layer == LAYER_LIQUIDATION || s.pos.layer == LAYER_MM_PRESSURE)
+                    ? [&](){
                         double dist = peak_profit_bp < 50  ? 20.0
                                     : peak_profit_bp < 100 ? 18.0
                                     : peak_profit_bp < 200 ? 15.0

@@ -49,9 +49,9 @@ public:
     static constexpr double ROUND_TRIP_COST_BP  = 15.0; // 7.5bp/side BNB discount
 
     // Entry gates
-    static constexpr double ENTRY_THRESHOLD_BP  = 5.0;  // basis must be above +5bp
-    static constexpr double DELTA_TRIGGER_BP    = 8.0;  // basis must have risen 8bp+ this tick
-    static constexpr double FLOW_CONFIRM        = 0.20; // perp buy flow > 20% dominance
+    static constexpr double ENTRY_THRESHOLD_BP  = 8.0;  // raised 5->8bp: require bigger spike
+    static constexpr double DELTA_TRIGGER_BP    = 12.0; // raised 8->12bp: require sharper spike
+    static constexpr double FLOW_CONFIRM        = 0.30; // raised 0.20->0.30: stronger flow required
 
     // Exit levels
     static constexpr double TARGET_BP           = 2000.0; // hard cap — unlimited, trail always exits first
@@ -65,7 +65,7 @@ public:
         if (peak_bp < 300.0) return 12.0;
         return 8.0;  // >= 300bp: 8bp trail captures 97%+
     }
-    static constexpr double STOP_BP             = 12.0; // spot moving wrong way
+    static constexpr double STOP_BP             = 8.0;  // tightened 12->8bp: cut loss faster
     static constexpr double EXIT_BASIS_BP       = -2.0; // early exit: basis collapsed
 
     // Timing
@@ -148,10 +148,12 @@ public:
             bool sl       = move_bp <= -STOP_BP;
             bool trail    = (pos_mfe_bp_ >= TRAIL_ARM_BP) && (move_bp <= trail_stop_bp_);
             bool timeout  = (ts - entry_ts_) > MAX_HOLD_MS;
-            // Early exit: basis collapsed — perp move absorbed, spot won't follow
-            bool basis_collapse = (basis_bp < EXIT_BASIS_BP) && (move_bp > -5.0);
+            // Early exit: basis collapsed — edge is gone regardless of P&L
+            bool basis_collapse = (basis_bp < EXIT_BASIS_BP);
+            // Also exit if basis goes negative and we have no profit yet
+            bool basis_fading   = (basis_bp < 2.0) && (move_bp < 5.0) && ((ts - entry_ts_) > 3000);
 
-            if (tp || sl || trail || timeout || basis_collapse) {
+            if (tp || sl || trail || timeout || basis_collapse || basis_fading) {
                 double net_bp = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
                 total_pnl_bp_ += net_bp;
                 total_trades_++;
@@ -161,6 +163,7 @@ public:
                                    : tp    ? "TP"
                                    : sl    ? "SL"
                                    : basis_collapse ? "BASIS_COLLAPSE"
+                                   : basis_fading   ? "BASIS_FADING"
                                    : "TIMEOUT";
 
                 std::printf("[BASIS-EXIT] %s | net=%.2fbp (gross=%.2f cost=%.1f) | reason=%s | basis_now=%.2fbp | mfe=%.1f mae=%.1f | total=%.1fbp\n",

@@ -74,7 +74,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 /* Card body */
 .sym-card-body{padding:10px 12px}
 .sym-name{font-family:var(--fh);font-size:13px;font-weight:900;letter-spacing:2px;color:var(--muted)}
-.sym-price{font-size:24px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:3px 0}
+.sym-price{font-size:28px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:4px 0}
 .sym-price.up{color:var(--green)}.sym-price.down{color:var(--red)}
 .sym-regime-pill{
   display:inline-block;font-family:var(--fh);font-size:9px;font-weight:700;
@@ -100,17 +100,22 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .sm2-val{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--muted)}
 .sm2-val.pos{color:var(--green)}.sm2-val.neg{color:var(--red)}.sm2-val.zero{color:var(--muted)}
 .sym-regime-pill{margin-bottom:5px}
-.eng-dot{
-  width:8px;height:8px;border-radius:50%;
-  background:var(--dim);border:1px solid var(--border2);
-  transition:background .3s;
-  position:relative;
-}
-.eng-dot.active{background:var(--green);border-color:var(--green);box-shadow:0 0 6px var(--green);animation:pulse-eng .8s infinite}
-.eng-dot.armed{background:var(--yellow);border-color:var(--yellow);animation:pulse-arm 1s infinite}
-@keyframes pulse-eng{0%,100%{opacity:1}50%{opacity:.5}}
+.eng-dot{display:none}.eng-dot-label{display:none}
 @keyframes pulse-arm{0%,100%{opacity:1}50%{opacity:.3}}
-.eng-dot-label{font-size:8px;color:var(--muted);font-family:var(--fh);letter-spacing:.5px}
+.sym-engines{display:flex;gap:4px;margin-top:8px}
+.eng-badge{flex:1;display:flex;flex-direction:column;align-items:center;padding:5px 3px;border-radius:3px;border:1px solid var(--border2);background:var(--dim);transition:all .3s;cursor:default}
+.eng-badge.active{border-color:var(--green);background:rgba(0,230,118,.12);box-shadow:0 0 6px rgba(0,230,118,.15);animation:pulse-arm 1.2s infinite}
+.eng-badge.armed{border-color:var(--yellow);background:rgba(255,214,0,.1);animation:pulse-arm 1s infinite}
+.eng-badge.watching{border-color:rgba(0,212,255,.4);background:rgba(0,212,255,.06)}
+.eng-badge-name{font-family:var(--fh);font-size:8px;font-weight:700;letter-spacing:.8px;color:var(--muted)}
+.eng-badge.active .eng-badge-name{color:var(--green)}
+.eng-badge.armed .eng-badge-name{color:var(--yellow)}
+.eng-badge.watching .eng-badge-name{color:var(--accent)}
+.eng-badge-val{font-size:9px;font-weight:600;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.eng-badge.active .eng-badge-val,.eng-badge.armed .eng-badge-val{color:#fff}
+.eng-badge-bar{width:100%;height:2px;background:var(--border2);border-radius:1px;margin-top:3px;overflow:hidden}
+.eng-badge-bar-fill{height:100%;background:var(--accent);border-radius:1px;transition:width .5s ease}
+.eng-badge.active .eng-badge-bar-fill{background:var(--green)}
 
 /* P&L badge on card */
 .sym-pnl{font-family:var(--fh);font-size:11px;font-weight:700;margin-left:auto}
@@ -119,19 +124,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 /* LIVE POSITION PANEL */
 .live-panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:6px}
 .live-panel-title{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);margin-bottom:8px}
-.live-pos{display:grid;grid-template-columns:60px 50px 70px 70px 70px 80px 1fr;align-items:center;gap:4px;padding:6px 0;border-bottom:1px solid var(--border)}
+.live-pos{display:grid;grid-template-columns:55px 60px 85px 85px 1fr;align-items:center;gap:10px;padding:12px 4px;border-bottom:1px solid var(--border)}
 .live-pos:last-child{border-bottom:none}
 .lp-sym{font-family:var(--fh);font-size:11px;font-weight:900;color:var(--text)}
 .lp-eng{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 5px;border-radius:2px;background:rgba(0,212,255,.15);color:var(--accent)}
-.lp-move{font-family:var(--fm);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.lp-move{font-family:var(--fm);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
 .lp-move.pos{color:var(--green)}.lp-move.neg{color:var(--red)}
 .lp-mfe{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
-.lp-trail{font-size:10px;font-weight:600}
+.lp-trail{font-size:11px;font-weight:600;line-height:1.4}
 .lp-trail.armed{color:var(--yellow)}.lp-trail.locked{color:var(--green)}
-.lp-bar-wrap{height:6px;background:var(--dim);border-radius:3px;overflow:hidden;position:relative}
+.lp-bar-wrap{height:10px;background:var(--dim);border-radius:5px;overflow:hidden;position:relative;margin-top:4px}
 .lp-bar-fill{height:100%;border-radius:3px;transition:width .3s ease,background .3s}
 .lp-bar-trail{position:absolute;top:0;height:100%;width:2px;background:var(--yellow);border-radius:1px}
-.live-pos-empty{padding:8px 0;color:var(--muted);font-size:11px;font-style:italic}
+.live-pos-empty{padding:18px 0;color:var(--muted);font-size:12px;font-style:italic;text-align:center;letter-spacing:.5px}
 /* BOTTOM SECTION: left=session stats, right=trade log */
 .bottom-section{
   display:grid;
@@ -278,16 +283,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-btc">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-btc-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-btc-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-btc-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-btc-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-btc-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-btc-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-btc-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-btc-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-btc-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-btc">FLAT</span>
+          <div class="eng-badge" id="badge-btc-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-btc-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-btc-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-btc-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-btc" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-btc-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-btc-basis">--</span>
+          </div>
         </div>
       </div>
     </div>
@@ -316,16 +324,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-eth">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-eth-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-eth-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-eth-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-eth-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-eth-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-eth-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-eth-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-eth-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-eth-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-eth">FLAT</span>
+          <div class="eng-badge" id="badge-eth-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-eth-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-eth-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-eth-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-eth" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-eth-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-eth-basis">--</span>
+          </div>
         </div>
       </div>
     </div>
@@ -354,16 +365,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-sol">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-sol-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-sol-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-sol-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-sol-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-sol-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-sol-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-sol-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-sol-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-sol-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-sol">FLAT</span>
+          <div class="eng-badge" id="badge-sol-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-sol-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-sol-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-sol-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-sol" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-sol-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-sol-basis">--</span>
+          </div>
         </div>
       </div>
     </div>
@@ -392,16 +406,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-bnb">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-bnb-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-bnb-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-bnb-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-bnb-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-bnb-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-bnb-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-bnb-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-bnb-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-bnb-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-bnb">FLAT</span>
+          <div class="eng-badge" id="badge-bnb-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-bnb-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-bnb-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-bnb-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-bnb" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-bnb-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-bnb-basis">--</span>
+          </div>
         </div>
       </div>
     </div>
@@ -430,16 +447,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-avax">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-avax-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-avax-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-avax-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-avax-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-avax-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-avax-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-avax-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-avax-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-avax-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-avax">FLAT</span>
+          <div class="eng-badge" id="badge-avax-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-avax-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-avax-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-avax-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-avax" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-avax-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-avax-basis">--</span>
+          </div>
         </div>
       </div>
     </div>
@@ -468,16 +488,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-link">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-link-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-link-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-link-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-link-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-link-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-link-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-link-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-link-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-link-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-link">FLAT</span>
+          <div class="eng-badge" id="badge-link-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-link-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-link-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-link-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-link" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-link-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-link-basis">--</span>
+          </div>
         </div>
       </div>
     </div>
@@ -506,16 +529,19 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-xrp">--</span></div>
         </div>
         <div class="sym-engines">
-          <div class="eng-dot" id="ed-xrp-micro" title="MICRO"></div>
-          <div class="eng-dot" id="ed-xrp-structural" title="STRUCT"></div>
-          <div class="eng-dot" id="ed-xrp-convex" title="CONVEX"></div>
-          <div class="eng-dot" id="ed-xrp-compression" title="COMPR"></div>
-          <div class="eng-dot" id="ed-xrp-obi" title="OBI"></div>
-          <div class="eng-dot" id="ed-xrp-afe" title="AFE"></div>
-          <div class="eng-dot" id="ed-xrp-pce" title="PCE"></div>
-          <div class="eng-dot" id="ed-xrp-bracket" title="BRACKET" style="border-radius:2px"></div>
-          <div class="eng-dot" id="ed-xrp-basis" title="BASIS" style="border-radius:50%;border-style:dashed"></div>
-          <span class="eng-dot-label" id="edl-xrp">FLAT</span>
+          <div class="eng-badge" id="badge-xrp-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-xrp-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-xrp-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-xrp-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-xrp" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-xrp-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-xrp-basis">--</span>
+          </div>
         </div>
       </div>
     </div>

@@ -341,6 +341,48 @@ function regimePillClass(state) {
 let firstPoll = true;
 let lastKnownUptimeHours = null;
 
+// LIVE POSITIONS PANEL
+function updateLivePositions(data) {
+  const list = document.getElementById("live-positions-list");
+  if (!list) return;
+  const positions = [];
+  const syms = ["btcusdt","ethusdt","solusdt","bnbusdt","avaxusdt","linkusdt","xrpusdt"];
+  syms.forEach(sym => {
+    const d = data[sym]; if (!d) return;
+    const short = sym.replace("usdt","").toUpperCase();
+    if (d.bracket_active) positions.push({sym:short,eng:"BRACKET",move:d.bracket_move_bp||0,mfe:d.bracket_mfe_bp||0,trail_floor:d.bracket_trail_floor||-9999,trail_armed:d.bracket_trail_armed||false,sl_bp:28,trail_arm_bp:40});
+    if (d.basis_active)   positions.push({sym:short,eng:"BASIS",  move:d.basis_move_bp||0,  mfe:d.basis_mfe_bp||0,  trail_floor:d.basis_trail_floor||-9999,  trail_armed:d.basis_trail_armed||false,  sl_bp:12,trail_arm_bp:20});
+    if (d.liq_active)     positions.push({sym:short,eng:"LIQ",    move:d.liq_move_bp||0,    mfe:d.liq_mfe_bp||0,    trail_floor:-9999,                        trail_armed:(d.liq_mfe_bp||0)>=30,      sl_bp:20,trail_arm_bp:30});
+  });
+  if (!positions.length) {
+    list.innerHTML='<div class="live-pos-empty">No open positions — waiting for LIQ / BRACKET / BASIS setup</div>';
+    return;
+  }
+  const cost=15;
+  list.innerHTML=positions.map(p=>{
+    const mv=+p.move,mfe=+p.mfe,net=mv-cost;
+    const maxBp=Math.max(200,mfe+50);
+    const movePct=Math.max(0,Math.min(100,mv/maxBp*100));
+    const trailPct=p.trail_armed&&p.trail_floor>-9999?Math.max(0,Math.min(100,p.trail_floor/maxBp*100)):0;
+    const barColor=p.trail_armed?(mv>p.trail_floor+5?"var(--green)":"var(--yellow)"):(mv>0?"rgba(0,212,255,.7)":"var(--red)");
+    let trailTxt="",trailClass="";
+    if(p.trail_armed&&p.trail_floor>-9999){trailTxt="TRAIL FLOOR: +"+(p.trail_floor).toFixed(0)+"bp (net +"+(Math.max(0,p.trail_floor-cost)).toFixed(0)+"bp)";trailClass=mv>p.trail_floor+15?"locked":"armed";}
+    else if(mfe>=p.trail_arm_bp*0.6){trailTxt="arming at +"+p.trail_arm_bp+"bp...";trailClass="armed";}
+    else{trailTxt="SL -"+p.sl_bp+"bp  |  trail arms at +"+p.trail_arm_bp+"bp";}
+    return `<div class="live-pos">
+      <span class="lp-sym">${p.sym}</span>
+      <span class="lp-eng">${p.eng}</span>
+      <span class="lp-move ${mv>=0?"pos":"neg"}">${mv>=0?"+":""}${mv.toFixed(1)}bp</span>
+      <span class="lp-mfe">peak +${mfe.toFixed(1)}bp</span>
+      <span class="lp-move ${net>=0?"pos":"neg"}" style="font-size:11px">${net>=0?"+":""}${net.toFixed(1)}bp net</span>
+      <span class="lp-trail ${trailClass}">${trailTxt}</span>
+      <div style="flex:1"><div class="lp-bar-wrap">
+        <div class="lp-bar-fill" style="width:${movePct}%;background:${barColor}"></div>
+        ${trailPct>0?`<div class="lp-bar-trail" style="left:${trailPct}%"></div>`:""}
+      </div></div></div>`;
+  }).join("");
+}
+
 function updateAll(data) {
   if (!data) return;
   if (!uptimeStart) uptimeStart = Date.now();
@@ -491,6 +533,7 @@ function updateAll(data) {
   }
 
   if (data.trade_log) mergeTrades(data.trade_log, firstPoll);
+  updateLivePositions(data);
   firstPoll = false;
 }
 

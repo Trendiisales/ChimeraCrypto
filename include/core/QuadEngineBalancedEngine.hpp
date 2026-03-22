@@ -137,11 +137,8 @@ public:
         
         // 6. Run signal engines with dynamic capital allocation + ECONOMIC GATES
         
-        // STRUCTURAL GATE: 15bp+ displacement, 1.4+ vol ratio
-        bool allow_structural = 
-            std::abs(ms.displacement_bp) >= 15.0 &&
-            ms.vol_ratio >= 1.4 &&
-            allocator_[id].get_state() != VolState::DEAD;
+        // STRUCTURAL: DISABLED (Option B — 15bp cost floor, 25bp TP insufficient)
+        bool allow_structural = false; // net +10bp TP requires 73% WR, not viable
         
         if (allow_structural) {
             structural_[id].evaluate(
@@ -160,11 +157,8 @@ public:
         used_R = micro_R + structural_R + convex_R + compression_R;
         available_R = std::max(0.0, dynamic_cap - used_R);
         
-        // CONVEX GATE: 30bp+ displacement, 15bp+ acceleration, 1.8+ vol ratio
-        bool allow_convex =
-            std::abs(ms.displacement_bp) >= 30.0 &&
-            std::abs(ms.acceleration_bp) >= 15.0 &&
-            ms.vol_ratio >= 1.8;
+        // CONVEX: DISABLED (Option B — 40bp TP gives +25bp net, needs 54% WR, insufficient samples)
+        bool allow_convex = false;
         
         if (allow_convex) {
             convex_[id].evaluate(
@@ -185,9 +179,9 @@ public:
         used_R = micro_R + structural_R + convex_R + compression_R;
         available_R = std::max(0.0, dynamic_cap - used_R);
         
-        // COMPRESSION GATE: Allow compression detection always
-        // (it has its own 100-tick arming + 15bp breakout logic)
-        compression_[id].evaluate(
+        // COMPRESSION: DISABLED (Option B — 30bp TP gives +15bp net, needs 67% WR, not viable)
+        // compression_[id].evaluate(  // RE-ENABLE when targets raised to 60bp+
+        if (false) compression_[id].evaluate(
             price,
             ms.vol_ratio,
             ms.displacement_bp,
@@ -213,8 +207,8 @@ public:
         double perp_basis_bp = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->basis_bp(id, price) : 0.0;
         double perp_flow     = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->perp_flow_ratio(id) : 0.0;
         double perp_funding  = perp_feed_ && perp_feed_->ready(id) ? perp_feed_->funding_rate(id)    : 0.0;
-        // OBI gate: GRIND regime only (mean-reversion fails in trend)
-        bool allow_obi = (ms.regime == 1) && allow_micro_engine_trade(ts) && (allocator_[id].get_state() != VolState::DEAD);
+        // OBI: DISABLED (Option B — 25bp TP gives +10bp net, needs 69% WR, not viable)
+        bool allow_obi = false;
         if (allow_obi) {
             obi_[id].evaluate(
                 price,
@@ -229,8 +223,8 @@ public:
             if (obi_[id].pos_active_) micro_engine_trades_in_window_--; // refund if already active
         }
 
-        // AFE gate: BUILDUP or BREAKOUT only (momentum engine)
-        bool allow_afe = (ms.regime >= 2) && allow_micro_engine_trade(ts) && (allocator_[id].get_state() != VolState::DEAD);
+        // AFE: DISABLED (Option B — 30bp TP gives +15bp net, needs 61% WR, marginal)
+        bool allow_afe = false;
         if (allow_afe) {
             afe_[id].evaluate(
                 price,
@@ -246,8 +240,8 @@ public:
             if (afe_[id].pos_active_) micro_engine_trades_in_window_--;
         }
 
-        // PCE gate: BUILDUP or BREAKOUT only (trend continuation)
-        bool allow_pce = (ms.regime >= 2) && allow_micro_engine_trade(ts) && (allocator_[id].get_state() != VolState::DEAD);
+        // PCE: DISABLED (Option B — 30bp TP gives +15bp net, needs 61% WR, marginal)
+        bool allow_pce = false;
         if (allow_pce) {
             pce_[id].evaluate(
                 price,

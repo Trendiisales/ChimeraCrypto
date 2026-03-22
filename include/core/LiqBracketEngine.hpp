@@ -62,7 +62,7 @@ public:
     static constexpr double ENTRY_BUFFER_BP  = 3.0;
     static constexpr double STOP_BP          = 28.0;
     static constexpr double TARGET_BP        = 70.0;
-    static constexpr double LIQ_THRESHOLD    = 150000.0;  // $150k notional
+    static constexpr double LIQ_THRESHOLD    = 25000.0;   // $25k notional (lowered from $150k for low-vol sessions)
     static constexpr double PERP_LEAD_BP     = 5.0;
     static constexpr int64_t COOLDOWN_MS     = 120000;    // 2 min per symbol
 
@@ -115,10 +115,10 @@ public:
         int64_t  ts,
         double   available_R
     ) {
-        // REGIME GATE: only run in COMPRESSION (regime 0 or 1 = DEAD/GRIND)
-        if (regime >= 2) {
-            // If we have an active position, keep managing it even in expansion
-            if (!pos.active) return;
+        // REGIME GATE: block only in BREAKOUT (regime 3) — don't chase breakouts
+        // GRIND and BUILDUP are valid for range-building and confirmation
+        if (regime >= 3) {
+            if (!pos.active) return;  // allow managing active position
         }
 
         if (ts < cooldown_until_ms_) return;
@@ -147,7 +147,7 @@ public:
                 if (range_bp < MIN_RANGE_BP) return;
                 if (range_bp > MAX_RANGE_BP) { state = State::IDLE; return; }
                 // Also require vol is genuinely compressed
-                if (vol_ratio >= 0.85) return;  // not compressed enough
+                if (vol_ratio >= 1.2) return;   // range builds unless vol actively expanding
                 state = State::WAIT_CONFIRM;
                 std::printf("[BRACKET] %s range built: %.1fbp over %d ticks | h=%.2f l=%.2f\n",
                     symbol_.c_str(), range_bp, range_ticks_, range_high_, range_low_);

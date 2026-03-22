@@ -484,25 +484,33 @@ function updateAll(data) {
     if (card) card.className = 'sym-card' + (d.micro_active ? ' active' : '');
 
     // Engine dots
-    const engs = [
-      ['micro',       d.micro_active],
-      ['structural',  d.structural_active],
-      ['convex',      d.convex_active],
-      ['compression', d.compression_active],
-      ['obi',         d.obi_active],
-      ['afe',         d.afe_active],
-      ['pce',         d.pce_active],
-      ['bracket',     d.bracket_active],
-      ['basis',       d.basis_active],
-    ];
-    let anyActive = false;
-    engs.forEach(([eng, active]) => {
-      const dot = $('ed-'+sym+'-'+eng);
-      if (dot) dot.className = 'eng-dot' + (active ? ' active' : '');
-      if (active) anyActive = true;
-    });
-    const lbl = $('edl-'+sym);
-    if (lbl) lbl.textContent = anyActive ? 'ACTIVE' : 'FLAT';
+    // LIQ badge
+    const liqBadge=$('badge-'+sym+'-liq'), liqVal=$('badge-val-'+sym+'-liq');
+    if (liqBadge) {
+      const liqNot=d.liq_notional||0;
+      if (d.liq_active||d.micro_active){liqBadge.className='eng-badge active';if(liqVal)liqVal.textContent='IN TRADE';}
+      else if(liqNot>=25000){liqBadge.className='eng-badge armed';if(liqVal)liqVal.textContent=liqNot>=1000000?'$'+(liqNot/1000000).toFixed(1)+'M':'$'+(liqNot/1000).toFixed(0)+'k!';}
+      else if(liqNot>=500){liqBadge.className='eng-badge watching';if(liqVal)liqVal.textContent='$'+(liqNot/1000).toFixed(1)+'k';}
+      else{liqBadge.className='eng-badge';if(liqVal)liqVal.textContent='WAIT';}
+    }
+    // BRACKET badge
+    const bkBadge=$('badge-'+sym+'-bracket'),bkVal=$('badge-val-'+sym+'-bracket'),bkBar=$('badge-bar-'+sym);
+    if (bkBadge) {
+      const rp=Math.round((d.bracket_range_pct||0)*100);
+      if(d.bracket_active){bkBadge.className='eng-badge active';const mv=d.bracket_move_bp||0;if(bkVal)bkVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';if(bkBar)bkBar.style.width='100%';}
+      else if(rp>=80){bkBadge.className='eng-badge armed';if(bkVal)bkVal.textContent='ARMED '+rp+'%';if(bkBar)bkBar.style.width=rp+'%';}
+      else if(rp>=20){bkBadge.className='eng-badge watching';if(bkVal)bkVal.textContent='RANGE '+rp+'%';if(bkBar)bkBar.style.width=rp+'%';}
+      else{bkBadge.className='eng-badge';if(bkVal)bkVal.textContent='IDLE';if(bkBar)bkBar.style.width='0%';}
+    }
+    // BASIS badge
+    const baBadge=$('badge-'+sym+'-basis'),baVal=$('badge-val-'+sym+'-basis');
+    if (baBadge) {
+      const basis=d.perp_basis_bp||0;
+      if(d.basis_active){baBadge.className='eng-badge active';const mv=d.basis_move_bp||0;if(baVal)baVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';}
+      else if(basis>=5){baBadge.className='eng-badge armed';if(baVal)baVal.textContent='+'+basis.toFixed(1)+'bp SPIKE';}
+      else if(basis>=2){baBadge.className='eng-badge watching';if(baVal)baVal.textContent='+'+basis.toFixed(1)+'bp';}
+      else{baBadge.className='eng-badge';if(baVal)baVal.textContent=(basis>=0?'+':'')+basis.toFixed(1)+'bp';}
+    }
 
     // Mini P&L + trades
     const symTrades = currentSessionTrades().filter(t => (t.s||'').replace('USDT','').toUpperCase() === short);

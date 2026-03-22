@@ -43,15 +43,18 @@ public:
 
     void evaluate(
         double   price,
-        double   displacement_bp,    // current displacement from rolling anchor
-        double   acceleration_bp,    // price change acceleration
+        double   displacement_bp,
+        double   acceleration_bp,
         double   spread_bps,
         double   vol_ratio,
-        double   perp_funding_rate,  // current perp funding rate (fractional)
+        double   perp_funding_rate,
+        int      regime,         // 0=DEAD,1=GRIND,2=BUILDUP,3=BREAKOUT
         int64_t  ts,
         double   available_R
     ) {
-        if (cooldown_ticks_ > 0) { cooldown_ticks_--; return; }
+        if (ts < cooldown_until_ms_) return;
+        // PCE is trend continuation: only valid in BUILDUP or BREAKOUT
+        if (regime < 2) return;  // require BUILDUP or BREAKOUT
 
         if (!pos_active_) {
 
@@ -98,7 +101,7 @@ public:
                     symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP, reason, total_pnl_bp_);
                 std::fflush(stdout);
                 pos_active_     = false;
-                cooldown_ticks_ = 60;
+                cooldown_until_ms_ = ts + 90000;  // 90s cooldown
             }
         }
     }
@@ -113,7 +116,7 @@ public:
 
     bool   pos_active_     = false;
     double pos_size_R_     = 0.0;
-    int    cooldown_ticks_ = 0;
+    int64_t cooldown_until_ms_ = 0;
 
 private:
     std::string symbol_;

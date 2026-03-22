@@ -382,6 +382,43 @@ function updateAll(data) {
     set('dp-'+sym,  d.displacement_bp != null ? d.displacement_bp.toFixed(1)+'bp' : '--');
     set('cap-'+sym, d.dynamic_cap_R != null ? d.dynamic_cap_R.toFixed(1)+'R' : '--');
 
+    // Row 2: funding, basis, liquidation notional, session PnL
+    const fnEl = $('fn-'+sym);
+    if (fnEl) {
+      const fr = d.perp_funding_rate;
+      if (fr != null && fr !== 0) {
+        const frBp = (fr * 10000).toFixed(2);
+        fnEl.textContent = (fr>=0?'+':'')+frBp+'bp';
+        fnEl.className = 'sm2-val '+(fr>0.0003?'neg':fr<-0.0002?'pos':'zero');
+      } else { fnEl.textContent='--'; fnEl.className='sm2-val zero'; }
+    }
+    const bsEl = $('bs-'+sym);
+    if (bsEl) {
+      const basis = d.perp_basis_bp;
+      if (basis != null && Math.abs(basis) > 0.05) {
+        bsEl.textContent = (basis>=0?'+':'')+basis.toFixed(1)+'bp';
+        bsEl.className = 'sm2-val '+(basis>5?'neg':basis<-5?'pos':'zero');
+      } else { bsEl.textContent='--'; bsEl.className='sm2-val zero'; }
+    }
+    const lqEl = $('lq-'+sym);
+    if (lqEl) {
+      const liq = d.liq_notional;
+      if (liq != null && liq >= 500) {
+        lqEl.textContent = liq>=1000000?'$'+(liq/1000000).toFixed(1)+'M':liq>=1000?'$'+(liq/1000).toFixed(0)+'k':'$'+liq.toFixed(0);
+        lqEl.className = 'sm2-val '+(liq>=25000?'pos':'zero');
+      } else { lqEl.textContent='--'; lqEl.className='sm2-val zero'; }
+    }
+    const spEl = $('sp-'+sym);
+    if (spEl) {
+      const pnls=[d.structural_total_pnl_bp,d.convex_total_pnl_bp,d.compression_total_pnl_bp,
+                   d.obi_total_pnl_bp,d.afe_total_pnl_bp,d.pce_total_pnl_bp,d.bracket_total_pnl_bp];
+      const tot = pnls.reduce((a,v)=>a+(v||0),0);
+      if (Math.abs(tot) > 0.01) {
+        spEl.textContent=(tot>=0?'+':'')+tot.toFixed(1)+'bp';
+        spEl.className='sm2-val '+(tot>0?'pos':tot<0?'neg':'zero');
+      } else { spEl.textContent='--'; spEl.className='sm2-val zero'; }
+    }
+
     // Card active state
     const card = $('sb-'+sym);
     if (card) card.className = 'sym-card' + (d.micro_active ? ' active' : '');

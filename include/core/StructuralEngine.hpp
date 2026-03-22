@@ -40,7 +40,7 @@ struct StructuralPosition {
 
 class StructuralEngine {
 public:
-    static constexpr double ROUND_TRIP_COST_BP = 8.0;
+    static constexpr double ROUND_TRIP_COST_BP = 15.0; // 7.5bp/side with BNB discount (0.075%/side)
     StructuralPosition pos;
     StructDirection last_exit_direction = StructDirection::NONE;
     bool active = false;
@@ -180,7 +180,7 @@ public:
         
         if (should_exit) {
             double gross_pnl  = pnl_bp;
-            double final_pnl  = (pnl_bp - ROUND_TRIP_COST_BP) * pos.size_R;  // net after 8bp cost
+            double final_pnl  = (pnl_bp - ROUND_TRIP_COST_BP) * pos.size_R;  // net after 15bp cost (BNB discount)
             total_pnl_bp += final_pnl;
             total_trades++;
             if (final_pnl > 0) winning_trades++;

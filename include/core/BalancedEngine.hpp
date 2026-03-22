@@ -451,10 +451,10 @@ public:
         std::printf(" Capital Control Layer: ENABLED                                \n");
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
-        std::printf(" Active Engines: LEADLAG (trend-gated) | LIQ | VWAP-REV      \n");
-        std::printf(" Shadow Engines: IMBAL (parked, auto-promotes after 30 trades) \n");
-        std::printf(" Parked Engines: SWEEP (no samples yet)                       \n");
-        std::printf(" HARD DISABLED:  OFI (0%% WR -95bp) | VACUUM (0%% WR -53bp)   \n");
+        std::printf(" Active Engines: LIQ only (Option B — 15bp cost floor)        \n");
+        std::printf(" DISABLED:  LEADLAG|VWAP|MM|SPREAD|DIVERGE|FUND|NGAS|STATARB  \n");
+        std::printf(" REASON:    All disabled engines have TP < 20bp gross          \n");
+        std::printf(" QUAD:      BRACKET | BASIS | FUND-WINDOW active               \n");
         std::printf(" AUDIT 2026-03-21 FIXES:                                       \n");
         std::printf("   VWAP entry: 20->12bp | Trend filter: 5->8bp gap            \n");
         std::printf("   Regime min ticks: 30->50 | LIQ notional: 500k->1M          \n");

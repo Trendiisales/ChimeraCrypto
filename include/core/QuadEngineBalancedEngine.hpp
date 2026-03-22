@@ -292,7 +292,7 @@ public:
         // Build version read dynamically at runtime
         {
             char _ghash[64] = "unknown";
-            FILE* _fp = popen("git -C \"$(dirname \"$(readlink -f /proc/self/exe)\")\" rev-parse --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null", "r");
+            FILE* _fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
             if (_fp) {
                 if (fgets(_ghash, sizeof(_ghash), _fp)) {
                     size_t _l = strlen(_ghash);

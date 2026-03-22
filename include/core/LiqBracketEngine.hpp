@@ -15,9 +15,9 @@
 //
 // COST MODEL (taker entry + taker exit):
 //   Round-trip cost: 8bp
-//   net TP:  70 - 8 = +62bp
-//   net SL: -28 - 8 = -36bp
-//   Break-even WR: 36 / (62+36) = 36.7% -- positive EV above 37% WR
+//   net TP:  80 - 15 = +65bp
+//   net SL: -28 - 15 = -43bp
+//   Break-even WR: 43 / (65+43) = 39.8% -- positive EV above 40% WR
 //
 // REGIME GATE:
 //   Only fires when COMPRESSION regime (low vol, tight range).
@@ -52,7 +52,7 @@ namespace chimera {
 
 class LiqBracketEngine {
 public:
-    static constexpr double ROUND_TRIP_COST_BP = 8.0;
+    static constexpr double ROUND_TRIP_COST_BP = 15.0; // 7.5bp/side with BNB discount
 
     // Parameters
     static constexpr double MIN_RANGE_BP     = 20.0;
@@ -61,7 +61,7 @@ public:
     static constexpr double BREAKOUT_BP      = 12.0;
     static constexpr double ENTRY_BUFFER_BP  = 3.0;
     static constexpr double STOP_BP          = 28.0;
-    static constexpr double TARGET_BP        = 70.0;
+    static constexpr double TARGET_BP        = 80.0;  // raised: net +65bp after 15bp cost
     static constexpr double LIQ_THRESHOLD    = 25000.0;   // $25k notional (lowered from $150k for low-vol sessions)
     static constexpr double PERP_LEAD_BP     = 5.0;
     static constexpr int64_t COOLDOWN_MS     = 120000;    // 2 min per symbol

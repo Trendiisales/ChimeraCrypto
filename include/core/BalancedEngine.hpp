@@ -2406,13 +2406,14 @@ private:
             const double arm_bp = (s.pos.layer == LAYER_VWAP)
                 ? TradingConfig::VWAP_TRAIL_ARM_BP
                 : (s.pos.layer == LAYER_LIQUIDATION)
-                ? 2.0
+                ? 30.0  // Option B: arm trail at 30bp — let cascade build before locking
                 : (s.pos.partial_exit_done ? round_trip_cost + 0.5 : round_trip_cost + 1.5);
             if (peak_profit_bp >= arm_bp) {
-                // VWAP: lock 60%, LIQ: lock 65% (cascades reverse fast), others: lock 50%
+                // VWAP: lock 60%, LIQ: lock trail-based (trail 15bp below peak), others: lock 50%
                 const double lock_pct = (s.pos.layer == LAYER_VWAP)
                     ? (s.pos.partial_exit_done ? 0.70 : TradingConfig::VWAP_TRAIL_LOCK_PCT)
-                    : (s.pos.layer == LAYER_LIQUIDATION) ? 0.65
+                    : (s.pos.layer == LAYER_LIQUIDATION)
+                    ? std::max(0.50, (peak_profit_bp - 15.0) / peak_profit_bp)  // trail 15bp below peak
                     : (s.pos.partial_exit_done ? 0.65 : 0.50);
                 const double floor_bp = std::max(round_trip_cost + 0.5,
                                                   peak_profit_bp * lock_pct);

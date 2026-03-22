@@ -61,7 +61,9 @@ public:
     static constexpr double BREAKOUT_BP      = 12.0;
     static constexpr double ENTRY_BUFFER_BP  = 3.0;
     static constexpr double STOP_BP          = 28.0;
-    static constexpr double TARGET_BP        = 80.0;  // raised: net +65bp after 15bp cost
+    static constexpr double TARGET_BP        = 300.0; // hard cap — trail exits long before this
+    static constexpr double TRAIL_ARM_BP     = 40.0;  // start trailing once +40bp in profit
+    static constexpr double TRAIL_DIST_BP    = 20.0;  // trail 20bp below peak (locks 50%+ once running)
     static constexpr double LIQ_THRESHOLD    = 25000.0;   // $25k notional (lowered from $150k for low-vol sessions)
     static constexpr double PERP_LEAD_BP     = 5.0;
     static constexpr int64_t COOLDOWN_MS     = 120000;    // 2 min per symbol
@@ -198,7 +200,7 @@ public:
         }
     }
 
-    // manage() called every tick when in position
+    // manage() called every tick when in position — trailing stop
     bool manage(double price, int64_t ts) {
         if (!pos.active) return false;
 
@@ -206,17 +208,24 @@ public:
         pos.mfe_bp = std::max(pos.mfe_bp, move_bp);
         pos.mae_bp = std::min(pos.mae_bp, move_bp);
 
-        bool tp = (price >= pos.target_price);
-        bool sl = (price <= pos.stop_price);
+        // Update trailing stop once armed
+        if (pos.mfe_bp >= TRAIL_ARM_BP) {
+            double trail_floor = pos.mfe_bp - TRAIL_DIST_BP;
+            pos.stop_price = std::max(pos.stop_price,
+                pos.entry_price * (1.0 + trail_floor / 10000.0));
+        }
+
+        bool tp = move_bp >= TARGET_BP;           // hard cap
+        bool sl = price <= pos.stop_price;        // initial SL or trail floor
 
         if (tp || sl) {
             double net_bp = (move_bp - ROUND_TRIP_COST_BP) * pos.size_R;
             total_pnl_bp_ += net_bp;
             total_trades_++;
             if (net_bp > 0) wins_++;
-            const char* reason = tp ? "TP" : "SL";
-            std::printf("[BRACKET-EXIT] %s | net=%.2fbp (gross=%.2f cost=%.1f) | reason=%s | total=%.1fbp\n",
-                symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP, reason, total_pnl_bp_);
+            const char* reason = (move_bp >= TRAIL_ARM_BP) ? "TRAIL" : (tp ? "TP" : "SL");
+            std::printf("[BRACKET-EXIT] %s | net=%.2fbp (gross=%.2f cost=%.1f) | reason=%s | mfe=%.1f | total=%.1fbp\n",
+                symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP, reason, pos.mfe_bp, total_pnl_bp_);
             std::fflush(stdout);
             exit_trade(ts);
             return true;

@@ -54,9 +54,17 @@ public:
     static constexpr double FLOW_CONFIRM        = 0.20; // perp buy flow > 20% dominance
 
     // Exit levels
-    static constexpr double TARGET_BP           = 200.0; // hard cap — trail exits before this
-    static constexpr double TRAIL_ARM_BP        = 20.0;  // start trailing once +20bp profit
-    static constexpr double TRAIL_DIST_BP       = 10.0;  // trail 10bp below peak
+    static constexpr double TARGET_BP           = 2000.0; // hard cap — unlimited, trail always exits first
+    static constexpr double TRAIL_ARM_BP        = 20.0;   // start trailing once +20bp profit
+
+    // Dynamic trail distance — tighter as move gets larger to capture more of big runs
+    static double trail_distance_bp(double peak_bp) {
+        if (peak_bp < 50.0)  return 20.0;
+        if (peak_bp < 100.0) return 18.0;
+        if (peak_bp < 200.0) return 15.0;
+        if (peak_bp < 300.0) return 12.0;
+        return 8.0;  // >= 300bp: 8bp trail captures 97%+
+    }
     static constexpr double STOP_BP             = 12.0; // spot moving wrong way
     static constexpr double EXIT_BASIS_BP       = -2.0; // early exit: basis collapsed
 
@@ -130,14 +138,15 @@ public:
             pos_mfe_bp_ = std::max(pos_mfe_bp_, move_bp);
             pos_mae_bp_ = std::min(pos_mae_bp_, move_bp);
 
-            // Update trailing stop once armed
+            // Update trailing stop once armed — dynamic distance
             if (move_bp >= TRAIL_ARM_BP) {
-                trail_stop_bp_ = std::max(trail_stop_bp_, move_bp - TRAIL_DIST_BP);
+                double dist = trail_distance_bp(pos_mfe_bp_);
+                trail_stop_bp_ = std::max(trail_stop_bp_, pos_mfe_bp_ - dist);
             }
 
             bool tp       = move_bp >= TARGET_BP;
             bool sl       = move_bp <= -STOP_BP;
-            bool trail    = (move_bp >= TRAIL_ARM_BP) && (move_bp <= trail_stop_bp_);
+            bool trail    = (pos_mfe_bp_ >= TRAIL_ARM_BP) && (move_bp <= trail_stop_bp_);
             bool timeout  = (ts - entry_ts_) > MAX_HOLD_MS;
             // Early exit: basis collapsed — perp move absorbed, spot won't follow
             bool basis_collapse = (basis_bp < EXIT_BASIS_BP) && (move_bp > -5.0);

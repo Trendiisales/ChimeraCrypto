@@ -435,6 +435,14 @@ public:
             json << "\"bracket_win_rate\":" << bk_s.win_rate << ",";
             json << "\"bracket_range_pct\":" << bk_s.range_pct << ",";
 
+            // Perp feed data for GUI display
+            double _pbasis  = (perp_feed_ && perp_feed_->ready(i)) ? perp_feed_->basis_bp(i, ms.last_price) : 0.0;
+            double _pfund   = (perp_feed_ && perp_feed_->ready(i)) ? perp_feed_->funding_rate(i) : 0.0;
+            double _liqnot  = balanced_.liq_engine().get_notional(i);
+            json << "\"perp_basis_bp\":"    << _pbasis  << ",";
+            json << "\"perp_funding_rate\":" << _pfund   << ",";
+            json << "\"liq_notional\":"       << _liqnot  << ",";
+
             // Portfolio
             double micro_R = ms.micro_active ? 1.0 : 0.0;
             double portfolio_R = micro_R + structural_stats.size_R + convex_stats.size_R + compression_stats.size_R

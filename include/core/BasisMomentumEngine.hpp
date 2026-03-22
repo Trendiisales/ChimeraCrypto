@@ -54,12 +54,14 @@ public:
     static constexpr double FLOW_CONFIRM        = 0.20; // perp buy flow > 20% dominance
 
     // Exit levels
-    static constexpr double TARGET_BP           = 35.0; // spot catching up to perp
+    static constexpr double TARGET_BP           = 200.0; // hard cap — trail exits before this
+    static constexpr double TRAIL_ARM_BP        = 20.0;  // start trailing once +20bp profit
+    static constexpr double TRAIL_DIST_BP       = 10.0;  // trail 10bp below peak
     static constexpr double STOP_BP             = 12.0; // spot moving wrong way
     static constexpr double EXIT_BASIS_BP       = -2.0; // early exit: basis collapsed
 
     // Timing
-    static constexpr int64_t MAX_HOLD_MS        = 4000; // 4s max — if perp doesn't pull spot fast, abort
+    static constexpr int64_t MAX_HOLD_MS        = 15000; // 15s — trail will exit; basis collapse exits early
     static constexpr int64_t COOLDOWN_MS        = 90000;// 90s cooldown per symbol
 
     struct Stats {
@@ -128,20 +130,27 @@ public:
             pos_mfe_bp_ = std::max(pos_mfe_bp_, move_bp);
             pos_mae_bp_ = std::min(pos_mae_bp_, move_bp);
 
+            // Update trailing stop once armed
+            if (move_bp >= TRAIL_ARM_BP) {
+                trail_stop_bp_ = std::max(trail_stop_bp_, move_bp - TRAIL_DIST_BP);
+            }
+
             bool tp       = move_bp >= TARGET_BP;
             bool sl       = move_bp <= -STOP_BP;
+            bool trail    = (move_bp >= TRAIL_ARM_BP) && (move_bp <= trail_stop_bp_);
             bool timeout  = (ts - entry_ts_) > MAX_HOLD_MS;
             // Early exit: basis collapsed — perp move absorbed, spot won't follow
             bool basis_collapse = (basis_bp < EXIT_BASIS_BP) && (move_bp > -5.0);
 
-            if (tp || sl || timeout || basis_collapse) {
+            if (tp || sl || trail || timeout || basis_collapse) {
                 double net_bp = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
                 total_pnl_bp_ += net_bp;
                 total_trades_++;
                 if (net_bp > 0) wins_++;
 
-                const char* reason = tp ? "TP"
-                                   : sl ? "SL"
+                const char* reason = trail ? "TRAIL"
+                                   : tp    ? "TP"
+                                   : sl    ? "SL"
                                    : basis_collapse ? "BASIS_COLLAPSE"
                                    : "TIMEOUT";
 
@@ -150,8 +159,9 @@ public:
                     reason, basis_bp, pos_mfe_bp_, pos_mae_bp_, total_pnl_bp_);
                 std::fflush(stdout);
 
-                pos_active_  = false;
-                entry_price_ = 0.0;
+                pos_active_     = false;
+                entry_price_    = 0.0;
+                trail_stop_bp_  = -9999.0;
                 cooldown_until_ms_ = ts + COOLDOWN_MS;
             }
         }
@@ -175,6 +185,7 @@ private:
 
     double  prev_basis_bp_     = 0.0;
     double  entry_basis_       = 0.0;
+    double  trail_stop_bp_     = -9999.0; // current trail floor in bp from entry
     double  pos_mfe_bp_        = 0.0;
     double  pos_mae_bp_        = 0.0;
     int64_t entry_ts_          = 0;

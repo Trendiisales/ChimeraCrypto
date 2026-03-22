@@ -8,7 +8,7 @@
 //         Uses agg_buy_volume / agg_sell_volume EMA ratio from MarketTick.
 //
 // DATA USED: tick.agg_buy_volume, tick.agg_sell_volume, vol_ratio
-// HOLD: 3000ms max, TP=18bp, SL=12bp
+// HOLD: 3000ms max, TP=30bp gross(+22bp net), SL=8bp gross(-16bp net)
 // SIZE: 0.5-1.2R
 // SPOT ONLY: long side only (buy flow dominant)
 // ============================================================================
@@ -54,7 +54,7 @@ public:
 
         if (!pos_active_) {
 
-            if (vol_ratio < 1.1)  return;
+            if (vol_ratio < 1.2)  return;  // raised 1.1->1.2: need genuine vol surge
             if (spread_bps > 3.0) return;
             if (available_R < 0.5) return;
 
@@ -64,7 +64,7 @@ public:
             double flow_ratio = (buy_ema - sell_ema) / total;
 
             // Spot only: only enter LONG when buy flow dominates strongly
-            if (flow_ratio < 0.30) return;  // buy must be >65% of total flow
+            if (flow_ratio < 0.40) return;  // raised 0.30->0.40: need strong conviction
 
             // Perp confirmation: perp flow should also be buy-dominated (or neutral)
             // If perp is selling aggressively while spot buys, spot pump likely short-lived
@@ -88,8 +88,8 @@ public:
             pos_mfe_bp_ = std::max(pos_mfe_bp_, move_bp);
             pos_mae_bp_ = std::min(pos_mae_bp_, move_bp);
 
-            bool tp      = move_bp >= 18.0;
-            bool sl      = move_bp <= -12.0;
+            bool tp      = move_bp >= 30.0;  // raised 18->30bp: net +22bp after 8bp cost
+            bool sl      = move_bp <= -8.0;   // tightened 12->8bp: net -16bp after 8bp cost
             bool timeout = (ts - entry_ts_) > 3000;
 
             if (tp || sl || timeout) {

@@ -384,10 +384,12 @@ public:
             json << "\"regime_multiplier\":" << allocator_[i].get_multiplier() << ",";
             json << "\"dynamic_cap_R\":" << allocator_[i].allowed_R(2.0) << ",";
             
-            // Micro  BalancedEngine handles all symbols together, no per-symbol micro stats
+            // Micro/LIQ — BalancedEngine
             json << "\"micro_active\":" << (ms.micro_active ? "true" : "false") << ",";
             json << "\"micro_total_pnl_bp\":0.0,";
             json << "\"micro_total_trades\":0,";
+            // liq_active is same as micro_active — BalancedEngine handles per-symbol in s.pos
+            json << "\"liq_active\":" << (ms.micro_active ? "true" : "false") << ",";
             
             // Structural
             json << "\"structural_active\":" << (structural_stats.active ? "true" : "false") << ",";
@@ -444,6 +446,19 @@ public:
             json << "\"basis_total_pnl_bp\":" << ba_s.total_pnl_bp << ",";
             json << "\"basis_total_trades\":" << ba_s.total_trades << ",";
             json << "\"basis_win_rate\":"    << ba_s.win_rate << ",";
+            if (ba_s.active) {
+                double ba_move = ba_s.entry_price > 0
+                    ? (ms.last_price - ba_s.entry_price) / ba_s.entry_price * 10000.0 : 0.0;
+                double ba_trail_dist = ba_s.mfe_bp < 50 ? 20.0 : ba_s.mfe_bp < 100 ? 18.0
+                                     : ba_s.mfe_bp < 200 ? 15.0 : 12.0;
+                double ba_trail_floor = ba_s.mfe_bp >= 20.0
+                    ? ba_s.mfe_bp - ba_trail_dist : -9999.0;
+                json << "\"basis_entry\":" << ba_s.entry_price << ",";
+                json << "\"basis_move_bp\":" << ba_move << ",";
+                json << "\"basis_mfe_bp\":" << ba_s.mfe_bp << ",";
+                json << "\"basis_trail_floor\":" << ba_trail_floor << ",";
+                json << "\"basis_trail_armed\":" << (ba_s.mfe_bp >= 20.0 ? "true" : "false") << ",";
+            }
 
             // Bracket
             auto bk_s = bracket_[i].get_stats();
@@ -452,6 +467,21 @@ public:
             json << "\"bracket_total_trades\":" << bk_s.total_trades << ",";
             json << "\"bracket_win_rate\":" << bk_s.win_rate << ",";
             json << "\"bracket_range_pct\":" << bk_s.range_pct << ",";
+            // Live bracket position data
+            if (bk_s.active) {
+                double bk_move = bk_s.entry_price > 0
+                    ? (ms.last_price - bk_s.entry_price) / bk_s.entry_price * 10000.0 : 0.0;
+                double bk_trail_arm = 40.0;
+                double bk_trail_dist = bk_move < 50 ? 20.0 : bk_move < 100 ? 18.0
+                                     : bk_move < 200 ? 15.0 : bk_move < 300 ? 12.0 : 8.0;
+                double bk_trail_floor = bk_s.mfe_bp >= bk_trail_arm
+                    ? bk_s.mfe_bp - bk_trail_dist : -9999.0;
+                json << "\"bracket_entry\":" << bk_s.entry_price << ",";
+                json << "\"bracket_move_bp\":" << bk_move << ",";
+                json << "\"bracket_mfe_bp\":" << bk_s.mfe_bp << ",";
+                json << "\"bracket_trail_floor\":" << bk_trail_floor << ",";
+                json << "\"bracket_trail_armed\":" << (bk_s.mfe_bp >= bk_trail_arm ? "true" : "false") << ",";
+            }
 
             // Perp feed data for GUI display
             double _pbasis  = (perp_feed_ && perp_feed_->ready(i)) ? perp_feed_->basis_bp(i, ms.last_price) : 0.0;

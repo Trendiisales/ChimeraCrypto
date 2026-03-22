@@ -458,12 +458,13 @@ struct TradingConfig {
     // Edge: persistent slow book imbalance + upward price drift + OFI confirmation
     // Maker entry. TP=20bp, SL=7bp → EV +6.5bp at 50% WR after ~4bp maker cost.
     // Only fires in GRIND regime — MM rebalancing is a ranging-market phenomenon.
-    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.20;  // slow imbal EMA > 0.20 (bid-heavy)
-    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 3.0;   // cumulative drift > 3bp over window
-    static constexpr double MM_MAX_SPREAD_BPS       = 2.0;   // tight spread required
-    static constexpr double MM_TP_BP                = 20.0;  // slow drift captured 20-80bp raw
-    static constexpr double MM_SL_BP               = 7.0;   // wider SL: slower signal, more noise
-    static constexpr int64_t MM_MAX_HOLD_MS         = 20000; // 20s: inventory pressure resolves slowly
+    static constexpr double MM_IMBAL_EMA_THRESHOLD  = 0.25;  // raised 0.20->0.25: stronger bid pressure required
+    static constexpr double MM_DRIFT_BPS_THRESHOLD  = 5.0;   // raised 3->5bp: more conviction required
+    static constexpr double MM_MAX_SPREAD_BPS       = 1.5;   // tightened 2.0->1.5: only deep liquid markets
+    static constexpr double MM_TP_BP                = 150.0; // hard cap — trail exits before this
+    static constexpr double MM_SL_BP               = 10.0;  // tightened: cut faster if wrong
+    static constexpr double MM_TRAIL_ARM_BP         = 25.0;  // arm trail at +25bp profit
+    static constexpr int64_t MM_MAX_HOLD_MS         = 45000; // 45s: let trail work
 
     // -------------------------------------------------------------------------
     // STAT ARB  BTC/ETH cointegration spread mean reversion

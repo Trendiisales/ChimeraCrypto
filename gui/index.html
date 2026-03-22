@@ -67,7 +67,9 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .sym-card.active{border-color:var(--green);box-shadow:0 0 12px rgba(0,230,118,.15)}
 
 /* Readiness gradient bar at top of card */
-.sym-card-bar{height:3px;width:100%;background:var(--dim);transition:background .5s}
+.sym-card-bar{height:6px;width:100%;background:var(--dim);position:relative;overflow:hidden;transition:background .5s}
+.sym-card-bar-fill{position:absolute;left:0;top:0;height:100%;width:0%;transition:width .6s ease,background .5s;border-radius:0 2px 2px 0}
+.sym-ready-pct{font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:1px;opacity:0.8;margin-left:auto}
 
 /* Card body */
 .sym-card-body{padding:8px 10px}
@@ -233,10 +235,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- BTC -->
     <div class="sym-card" id="sb-btc">
-      <div class="sym-card-bar" id="bar-btc"></div>
+      <div class="sym-card-bar" id="bar-btc"><div class="sym-card-bar-fill" id="bar-fill-btc"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">BTC</span>
+          <span class="sym-ready-pct" id="rdy-btc" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-btc">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-btc">--</div>
@@ -262,10 +265,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- ETH -->
     <div class="sym-card" id="sb-eth">
-      <div class="sym-card-bar" id="bar-eth"></div>
+      <div class="sym-card-bar" id="bar-eth"><div class="sym-card-bar-fill" id="bar-fill-eth"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">ETH</span>
+          <span class="sym-ready-pct" id="rdy-eth" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-eth">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-eth">--</div>
@@ -291,10 +295,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- SOL -->
     <div class="sym-card" id="sb-sol">
-      <div class="sym-card-bar" id="bar-sol"></div>
+      <div class="sym-card-bar" id="bar-sol"><div class="sym-card-bar-fill" id="bar-fill-sol"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">SOL</span>
+          <span class="sym-ready-pct" id="rdy-sol" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-sol">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-sol">--</div>
@@ -320,10 +325,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- BNB -->
     <div class="sym-card" id="sb-bnb">
-      <div class="sym-card-bar" id="bar-bnb"></div>
+      <div class="sym-card-bar" id="bar-bnb"><div class="sym-card-bar-fill" id="bar-fill-bnb"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">BNB</span>
+          <span class="sym-ready-pct" id="rdy-bnb" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-bnb">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-bnb">--</div>
@@ -349,10 +355,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- AVAX -->
     <div class="sym-card" id="sb-avax">
-      <div class="sym-card-bar" id="bar-avax"></div>
+      <div class="sym-card-bar" id="bar-avax"><div class="sym-card-bar-fill" id="bar-fill-avax"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">AVAX</span>
+          <span class="sym-ready-pct" id="rdy-avax" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-avax">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-avax">--</div>
@@ -378,10 +385,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- LINK -->
     <div class="sym-card" id="sb-link">
-      <div class="sym-card-bar" id="bar-link"></div>
+      <div class="sym-card-bar" id="bar-link"><div class="sym-card-bar-fill" id="bar-fill-link"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">LINK</span>
+          <span class="sym-ready-pct" id="rdy-link" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-link">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-link">--</div>
@@ -407,10 +415,11 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 
     <!-- POL -->
     <div class="sym-card" id="sb-pol">
-      <div class="sym-card-bar" id="bar-pol"></div>
+      <div class="sym-card-bar" id="bar-pol"><div class="sym-card-bar-fill" id="bar-fill-pol"></div></div>
       <div class="sym-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">POL</span>
+          <span class="sym-ready-pct" id="rdy-pol" style="color:var(--muted)">0%</span>
           <span class="sym-pnl zero" id="mini-pnl-pol">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-pol">--</div>

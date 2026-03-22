@@ -21,7 +21,7 @@ namespace chimera {
 //
 // COST STRUCTURE (Binance spot taker):
 //   Fee per side:           0.04% = 4bp
-//   Round trip fees:        8bp
+//   Round trip fees:        20bp (0.10% x2, VIP0 no BNB) / 15bp (with BNB discount)
 //   Spread (BTC):           ~0.5bp each side = 1bp
 //   Slippage estimate:      1-2bp
 //   TOTAL ROUND TRIP COST:  ~10-12bp
@@ -59,12 +59,13 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // COST FLOOR  minimum edge to beat round-trip cost
     // -------------------------------------------------------------------------
-    // Taker fees (8bp) + spread (1bp) + slippage (1bp) = ~10bp per round trip.
+    // Taker fees (20bp) at VIP0 0.10%/side. With BNB discount (25% off): 15bp.
+    // Slippage (~0.5bp each side) adds ~1bp. Conservative floor: 20bp no-BNB, 15bp with BNB.
     // Any signal with expected edge below this is a guaranteed loser.
     // AUDIT FIX (2026-03-17): cost_bps in live_config.json was 6.5 — misaligned
     // with measured 10-12bp true cost. Raised all floors to match reality.
-    static constexpr double COST_FLOOR_BP = 12.0;        // taker round trip floor (LEADLAG/IMPULSE etc)
-    static constexpr double EXPANSION_COST_FLOOR_BP = 10.0; // raised from 8bp: EXPANSION net-negative below 10bp
+    static constexpr double COST_FLOOR_BP = 22.0;        // taker round trip floor: 20bp fees + 1bp slippage + 1bp buffer
+    static constexpr double EXPANSION_COST_FLOOR_BP = 22.0; // matches COST_FLOOR_BP: 20bp taker round-trip
 
 
     // -------------------------------------------------------------------------
@@ -330,7 +331,7 @@ struct TradingConfig {
     // MAKER ORDER MODE
     // -------------------------------------------------------------------------
     // true  = post limit orders (maker rebate ~1bp/side = ~4bp round trip)
-    // false = market orders    (taker fee  ~4bp/side = ~10bp round trip)
+    // false = market orders    (taker fee  10bp/side = 20bp round trip at VIP0)
     // Saving: ~6bp per trade. This is the single biggest lever available.
     static constexpr bool MAKER_MODE = true;
 
@@ -349,16 +350,17 @@ struct TradingConfig {
     static constexpr int64_t MAKER_LEADLAG_TIMEOUT_MS   =  200;
     static constexpr int64_t MAKER_IMPULSE_TIMEOUT_MS   =  500;
 
-    // Cost floor recalibrated for maker fees:
-    // Maker fee: ~1bp/side rebate = -2bp total
+    // Cost floor for maker-style entries:
+    // VIP0 maker: 10bp/side = 20bp round trip. With BNB (25% off): 7.5bp/side = 15bp round trip.
+    // Using BNB discount as default since that is the practical setup:
     // Spread: 0bp (we are the spread, not crossing it)
     // Slippage: ~0.5bp (limit fills at our price, minimal slip)
     // Total maker round-trip cost: ~3-4bp
     // Use 4bp as conservative floor.
-    static constexpr double MAKER_COST_FLOOR_BP = 4.0;
+    static constexpr double MAKER_COST_FLOOR_BP = 15.0;  // 7.5bp/side with BNB 25% discount
     // Round-trip costs used in exit() net PnL calculation (BUG4 FIX)
-    static constexpr double TAKER_ROUND_TRIP_BP = 8.0;  // 4bp/side VIP0 taker fee (IMPULSE/ETH-LEAD when active)
-    static constexpr double MAKER_ROUND_TRIP_BP = 4.0;  // ~1bp rebate/side + ~2bp spread
+    static constexpr double TAKER_ROUND_TRIP_BP = 20.0; // 10bp/side VIP0 spot taker (0.10% per side)
+    static constexpr double MAKER_ROUND_TRIP_BP = 15.0; // 7.5bp/side with BNB 25% discount (0.075% per side)
 
     // -------------------------------------------------------------------------
     // FUNDING RATE SIGNAL ENGINE  spot long when shorts crowded on perp

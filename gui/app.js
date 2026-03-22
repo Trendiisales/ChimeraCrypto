@@ -9,7 +9,7 @@ const SYMBOLS = [
   { short: 'BNB',  full: 'bnbusdt'  },
   { short: 'AVAX', full: 'avaxusdt' },
   { short: 'LINK', full: 'linkusdt' },
-  { short: 'POL',  full: 'polusdt'  },
+  { short: 'XRP',  full: 'xrpusdt'  },
 ];
 
 let localTrades = [];
@@ -149,7 +149,7 @@ function fmtHold(ms) {
 function fmtPrice(p, sym) {
   if (!p || p <= 0) return '--';
   const s = (sym || '').toUpperCase();
-  if (s === 'SOL' || s === 'LINK' || s === 'POL') return '$' + (+p).toFixed(3);
+  if (s === 'SOL' || s === 'LINK' || s === 'XRP') return '$' + (+p).toFixed(3);
   if (s === 'AVAX') return '$' + (+p).toFixed(2);
   return '$' + (+p).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
 }
@@ -381,42 +381,6 @@ function updateAll(data) {
     set('vr-'+sym,  d.vol_ratio != null ? d.vol_ratio.toFixed(2) : '--');
     set('dp-'+sym,  d.displacement_bp != null ? d.displacement_bp.toFixed(1)+'bp' : '--');
     set('cap-'+sym, d.dynamic_cap_R != null ? d.dynamic_cap_R.toFixed(1)+'R' : '--');
-
-    // Row 2: funding rate, perp basis, liquidation notional, session PnL
-    const fnEl = $('fn-'+sym);
-    if (fnEl) {
-      const fr = d.perp_funding_rate;
-      if (fr != null) {
-        const frBp = (fr * 10000).toFixed(2);
-        fnEl.textContent = frBp + 'bp';
-        fnEl.className = 'sm-val2 ' + (fr > 0.0003 ? 'sm-pnl-neg' : fr < -0.0002 ? 'sm-pnl-pos' : 'sm-pnl-zero');
-      } else { fnEl.textContent = '--'; }
-    }
-    const bsEl = $('bs-'+sym);
-    if (bsEl) {
-      const basis = d.perp_basis_bp;
-      if (basis != null) {
-        bsEl.textContent = (basis >= 0 ? '+' : '') + basis.toFixed(1) + 'bp';
-        bsEl.className = 'sm-val2 ' + (basis > 5 ? 'sm-pnl-neg' : basis < -5 ? 'sm-pnl-pos' : 'sm-pnl-zero');
-      } else { bsEl.textContent = '--'; }
-    }
-    const lqEl = $('lq-'+sym);
-    if (lqEl) {
-      const liq = d.liq_notional;
-      if (liq != null && liq > 0) {
-        lqEl.textContent = liq >= 1000 ? '$' + (liq/1000).toFixed(0)+'k' : '$'+liq.toFixed(0);
-        lqEl.className = 'sm-val2 ' + (liq >= 25000 ? 'sm-pnl-pos' : 'sm-pnl-zero');
-      } else { lqEl.textContent = '--'; lqEl.className = 'sm-val2 sm-pnl-zero'; }
-    }
-    const spEl = $('sp-'+sym);
-    if (spEl) {
-      // Sum all engine PnLs for this symbol
-      const pnls = [d.structural_total_pnl_bp, d.convex_total_pnl_bp, d.compression_total_pnl_bp,
-                    d.obi_total_pnl_bp, d.afe_total_pnl_bp, d.pce_total_pnl_bp, d.bracket_total_pnl_bp];
-      const total = pnls.reduce((a, v) => a + (v || 0), 0);
-      spEl.textContent = (total >= 0 ? '+' : '') + total.toFixed(1) + 'bp';
-      spEl.className = 'sm-val2 ' + (total > 0 ? 'sm-pnl-pos' : total < 0 ? 'sm-pnl-neg' : 'sm-pnl-zero');
-    }
 
     // Card active state
     const card = $('sb-'+sym);

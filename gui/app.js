@@ -484,32 +484,73 @@ function updateAll(data) {
     if (card) card.className = 'sym-card' + (d.micro_active ? ' active' : '');
 
     // Engine dots
-    // LIQ badge
+    // LIQ badge — shows liquidation notional building
     const liqBadge=$('badge-'+sym+'-liq'), liqVal=$('badge-val-'+sym+'-liq');
     if (liqBadge) {
       const liqNot=d.liq_notional||0;
-      if (d.liq_active||d.micro_active){liqBadge.className='eng-badge active';if(liqVal)liqVal.textContent='IN TRADE';}
-      else if(liqNot>=25000){liqBadge.className='eng-badge armed';if(liqVal)liqVal.textContent=liqNot>=1000000?'$'+(liqNot/1000000).toFixed(1)+'M':'$'+(liqNot/1000).toFixed(0)+'k!';}
-      else if(liqNot>=500){liqBadge.className='eng-badge watching';if(liqVal)liqVal.textContent='$'+(liqNot/1000).toFixed(1)+'k';}
-      else{liqBadge.className='eng-badge';if(liqVal)liqVal.textContent='WAIT';}
+      if (d.liq_active||d.micro_active){
+        liqBadge.className='eng-badge active';
+        if(liqVal)liqVal.textContent='IN TRADE';
+      } else if(liqNot>=25000){
+        // Threshold met — waiting for price breakout
+        liqBadge.className='eng-badge armed';
+        const k=liqNot>=1000000?'$'+(liqNot/1000000).toFixed(1)+'M':'$'+(liqNot/1000).toFixed(0)+'k';
+        if(liqVal)liqVal.textContent=k+' LIQ';
+      } else if(liqNot>=1000){
+        liqBadge.className='eng-badge watching';
+        if(liqVal)liqVal.textContent='$'+(liqNot/1000).toFixed(1)+'k';
+      } else{
+        liqBadge.className='eng-badge';
+        if(liqVal)liqVal.textContent='--';
+      }
     }
-    // BRACKET badge
+    // BRACKET badge — shows range building progress honestly
     const bkBadge=$('badge-'+sym+'-bracket'),bkVal=$('badge-val-'+sym+'-bracket'),bkBar=$('badge-bar-'+sym);
     if (bkBadge) {
+      const st=d.bracket_state||''; // IDLE/RANGE_BUILD/WAIT_CONFIRM/ARMED/IN_POSITION/COOLDOWN
       const rp=Math.round((d.bracket_range_pct||0)*100);
-      if(d.bracket_active){bkBadge.className='eng-badge active';const mv=d.bracket_move_bp||0;if(bkVal)bkVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';if(bkBar)bkBar.style.width='100%';}
-      else if(rp>=80){bkBadge.className='eng-badge armed';if(bkVal)bkVal.textContent='ARMED '+rp+'%';if(bkBar)bkBar.style.width=rp+'%';}
-      else if(rp>=20){bkBadge.className='eng-badge watching';if(bkVal)bkVal.textContent='RANGE '+rp+'%';if(bkBar)bkBar.style.width=rp+'%';}
-      else{bkBadge.className='eng-badge';if(bkVal)bkVal.textContent='IDLE';if(bkBar)bkBar.style.width='0%';}
+      if(d.bracket_active){
+        bkBadge.className='eng-badge active';
+        const mv=d.bracket_move_bp||0;
+        if(bkVal)bkVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';
+        if(bkBar)bkBar.style.width='100%';
+      } else if(rp>0&&rp<100){
+        // Actively building range
+        bkBadge.className='eng-badge watching';
+        if(bkVal)bkVal.textContent='RANGE '+rp+'%';
+        if(bkBar)bkBar.style.width=rp+'%';
+      } else if(rp===100){
+        // Range complete, waiting for liq+perp confirmation
+        bkBadge.className='eng-badge watching';
+        if(bkVal)bkVal.textContent='WAIT CONFIRM';
+        if(bkBar)bkBar.style.width='100%';
+      } else{
+        bkBadge.className='eng-badge';
+        if(bkVal)bkVal.textContent='--';
+        if(bkBar)bkBar.style.width='0%';
+      }
     }
-    // BASIS badge
+    // BASIS badge — shows live perp basis value only
     const baBadge=$('badge-'+sym+'-basis'),baVal=$('badge-val-'+sym+'-basis');
     if (baBadge) {
       const basis=d.perp_basis_bp||0;
-      if(d.basis_active){baBadge.className='eng-badge active';const mv=d.basis_move_bp||0;if(baVal)baVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';}
-      else if(basis>=5){baBadge.className='eng-badge armed';if(baVal)baVal.textContent='+'+basis.toFixed(1)+'bp SPIKE';}
-      else if(basis>=2){baBadge.className='eng-badge watching';if(baVal)baVal.textContent='+'+basis.toFixed(1)+'bp';}
-      else{baBadge.className='eng-badge';if(baVal)baVal.textContent=(basis>=0?'+':'')+basis.toFixed(1)+'bp';}
+      if(d.basis_active){
+        baBadge.className='eng-badge active';
+        const mv=d.basis_move_bp||0;
+        if(baVal)baVal.textContent=(mv>=0?'+':'')+mv.toFixed(1)+'bp';
+      } else if(Math.abs(basis)<0.1){
+        // No perp data yet
+        baBadge.className='eng-badge';
+        if(baVal)baVal.textContent='--';
+      } else if(basis>=5){
+        // Basis spike — approaching entry threshold
+        baBadge.className='eng-badge armed';
+        if(baVal)baVal.textContent='+'+basis.toFixed(1)+'bp';
+      } else{
+        // Normal basis reading
+        baBadge.className='eng-badge';
+        if(baVal)baVal.textContent=(basis>=0?'+':'')+basis.toFixed(1)+'bp';
+      }
     }
 
     // Mini P&L + trades

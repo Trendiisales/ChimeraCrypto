@@ -45,11 +45,14 @@ public:
         double   book_imbalance,
         double   spread_bps,
         double   vol_ratio,
-        double   perp_basis_bp,  // (perp_mark - spot) / spot * 10000. + = perp premium
+        double   perp_basis_bp,
+        int      regime,         // 0=DEAD,1=GRIND,2=BUILDUP,3=BREAKOUT
         int64_t  ts,
         double   available_R
     ) {
-        if (cooldown_ticks_ > 0) { cooldown_ticks_--; return; }
+        if (ts < cooldown_until_ms_) return;
+        // OBI is mean-reversion: only valid in GRIND (ranging, low vol)
+        if (regime != 1) return;  // require GRIND regime
 
         if (!pos_active_) {
 
@@ -110,7 +113,7 @@ public:
                     symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP, reason, total_pnl_bp_);
                 std::fflush(stdout);
                 pos_active_     = false;
-                cooldown_ticks_ = 40;
+                cooldown_until_ms_ = ts + 60000;  // 60s cooldown per symbol
             }
         }
     }
@@ -125,7 +128,7 @@ public:
 
     bool   pos_active_  = false;
     double pos_size_R_  = 0.0;
-    int    cooldown_ticks_ = 0;
+    int64_t cooldown_until_ms_ = 0;  // time-based cooldown
 
 private:
     std::string symbol_;

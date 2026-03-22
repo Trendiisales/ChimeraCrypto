@@ -22,20 +22,32 @@ let uptimeStart = null;
 
 // AUDIO
 function unlockAudio() {
-  if (audioUnlocked) return;
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    // Play a silent buffer to fully unlock
     const buf = audioCtx.createBuffer(1, 1, 22050);
     const src = audioCtx.createBufferSource();
     src.buffer = buf; src.connect(audioCtx.destination); src.start(0);
     audioUnlocked = true;
     const btn = document.getElementById('audio-unlock');
-    if (btn) { btn.textContent = 'BELL ON'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'var(--green)'; btn.style.background = 'rgba(0,230,118,.1)'; }
-  } catch(e) {}
+    if (btn) {
+      btn.textContent = 'BELL ON';
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'var(--green)';
+      btn.style.background = 'rgba(0,230,118,.1)';
+    }
+  } catch(e) { console.warn('Audio unlock failed:', e); }
 }
 
 function playWin() {
-  if (!audioUnlocked || !audioCtx) return;
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+  if (!audioUnlocked) return;
   try {
     const now = audioCtx.currentTime;
     const comp = audioCtx.createDynamicsCompressor();
@@ -57,7 +69,9 @@ function playWin() {
 }
 
 function playLoss() {
-  if (!audioUnlocked || !audioCtx) return;
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+  if (!audioUnlocked) return;
   try {
     const now = audioCtx.currentTime;
     const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();

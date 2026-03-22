@@ -424,6 +424,8 @@ public:
         edge_gate_[EDGE_LIQ].enabled     = true;   // LIQ only: 40bp TP = +25bp net
         edge_gate_[EDGE_SPREAD_COMPRESS].enabled = false;
         edge_gate_[EDGE_DIVERGE].enabled         = false;
+        edge_gate_[EDGE_MM].enabled              = false;  // MM-PRESSURE: TP too small for 15bp cost
+        edge_gate_[EDGE_SWEEP].enabled           = false;  // SWEEP: taker entry, cost too high
         // IMBAL: re-enabled as live shadow — starts parked (enabled=false), auto-promotes
         // after 30 trades with avg_pnl >= 0.8bp. Strict threshold (0.42) + spread < 1.5bp
         // compensates for maker cost floor.
@@ -803,8 +805,9 @@ public:
             // Mean-reversion signals are exempt — they want price below trend
             // Only block the momentum/event engines
             if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-            if (try_funding_entry(id, price, ts, s, latency_ms)) return;
-            if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+            // FUND/NGAS: DISABLED (Option B — not viable at 15bp cost)
+            // if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+            // if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
             // Block remaining momentum signals during downtrend
             // (LEADLAG, VOLSHOCK, SESSION_MOM, MM-PRESSURE all chase moves — not suitable in downtrend)
             // Fall through to mean-reversion block below
@@ -813,14 +816,16 @@ public:
                 if (edge_gate_allows(id, EDGE_VWAP, ts)           && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
                 if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
                 if (edge_gate_allows(id, EDGE_DIVERGE, ts)         && check_divergence(id, price, ts, s, latency_ms)) return;
-                if (check_statarb(id, price, ts, s, latency_ms)) return;
+                // STATARB: DISABLED (Option B — targets too small for 15bp cost)
+            // if (check_statarb(id, price, ts, s, latency_ms)) return;
             }
             return;
         }
 
         if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
-        if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+        // FUND/NGAS: DISABLED (Option B)
+        // if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+        // if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
@@ -867,7 +872,8 @@ public:
             // NEW: BTC/ETH cointegration stat arb (BTC and ETH only)
             if (check_statarb(id, price, ts, s, latency_ms)) return;
             // NEW: Session open momentum (London/NY/Asia opens)
-            if (check_session_momentum(id, price, ts, s, latency_ms)) return;
+            // SESSION_MOM: DISABLED (Option B)
+            //if (check_session_momentum(id, price, ts, s, latency_ms)) return;
         }
     }
     

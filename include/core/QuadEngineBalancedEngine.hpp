@@ -8,6 +8,7 @@
 #include "core/AggressiveFlowEngine.hpp"
 #include "core/PullbackContinuationEngine.hpp"
 #include "core/LiqBracketEngine.hpp"
+#include "core/BasisMomentumEngine.hpp"
 #include "live/PerpFeed.hpp"
 #include "core/RegimeStateAllocator.hpp"
 #include "telemetry/SimpleHttpServer.hpp"
@@ -52,6 +53,8 @@ public:
             pce_[i]  = PullbackContinuationEngine(sym_full(i));
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             bracket_[i] = LiqBracketEngine(sym_full(i));
+        for (int i = 0; i < MAX_SYMBOLS; ++i)
+            basis_[i] = BasisMomentumEngine(sym_full(i));
         
         for (int i = 0; i < MAX_SYMBOLS; ++i)
             convex_[i] = ConvexShockEngine(sym_full(i));
@@ -275,6 +278,20 @@ public:
             );
         }
 
+        // 7g. Basis Momentum Engine — perp basis spike leads spot
+        if (perp_feed_ && perp_feed_->ready(id)) {
+            double basis_available = std::max(0.0, dynamic_cap - used_R
+                                              - (basis_[id].pos_active_ ? basis_[id].pos_size_R_ : 0.0));
+            basis_[id].evaluate(
+                price,
+                perp_basis_bp,
+                perp_flow,
+                ms.vol_ratio,
+                ts,
+                basis_available
+            );
+        }
+
         // 8. Enforce directional dominance
         enforce_directional_dominance(id);
     }
@@ -421,6 +438,13 @@ public:
             json << "\"pce_total_trades\":" << pce_s.total_trades << ",";
             json << "\"pce_win_rate\":" << pce_s.win_rate << ",";
 
+            // Basis Momentum
+            auto ba_s = basis_[i].get_stats();
+            json << "\"basis_active\":"     << (ba_s.active ? "true" : "false") << ",";
+            json << "\"basis_total_pnl_bp\":" << ba_s.total_pnl_bp << ",";
+            json << "\"basis_total_trades\":" << ba_s.total_trades << ",";
+            json << "\"basis_win_rate\":"    << ba_s.win_rate << ",";
+
             // Bracket
             auto bk_s = bracket_[i].get_stats();
             json << "\"bracket_active\":" << (bk_s.active ? "true" : "false") << ",";
@@ -480,6 +504,7 @@ private:
     AggressiveFlowEngine      afe_[MAX_SYMBOLS];
     PullbackContinuationEngine pce_[MAX_SYMBOLS];
     LiqBracketEngine           bracket_[MAX_SYMBOLS];
+    BasisMomentumEngine        basis_[MAX_SYMBOLS];
     std::vector<RegimeStateAllocator> allocator_;  // Use vector instead of array
     SimpleHttpServer http_server_;
 
@@ -534,6 +559,8 @@ private:
     double prev_pce_pnl_[MAX_SYMBOLS]            = {};
     int    prev_bracket_trades_[MAX_SYMBOLS]     = {};
     double prev_bracket_pnl_[MAX_SYMBOLS]        = {};
+    int    prev_basis_trades_[MAX_SYMBOLS]        = {};
+    double prev_basis_pnl_[MAX_SYMBOLS]           = {};
 
     static constexpr const char* TRADE_LOG_FILE = "data/trade_log.json";
     std::string last_written_trade_key_;  // dedup guard  prevents double-writes
@@ -717,6 +744,15 @@ private:
             push_trade(sym_short(id), "PCE", trade_pnl, ps.entry_price, px);
             prev_pce_trades_[id] = ps.total_trades;
             prev_pce_pnl_[id]    = ps.total_pnl_bp;
+        }
+
+        // BASIS MOMENTUM exit detected
+        auto bas = basis_[id].get_stats();
+        if (bas.total_trades > prev_basis_trades_[id]) {
+            double trade_pnl = bas.total_pnl_bp - prev_basis_pnl_[id];
+            push_trade(sym_short(id), "BASIS", trade_pnl, bas.entry_price, px);
+            prev_basis_trades_[id] = bas.total_trades;
+            prev_basis_pnl_[id]    = bas.total_pnl_bp;
         }
 
         // BRACKET exit detected

@@ -7,7 +7,7 @@
 //         fade the imbalance direction (contrarian — imbalance usually reverts).
 //
 // DATA USED: tick.book_imbalance, vol_ratio, displacement_bp
-// HOLD: 2000ms max, TP=12bp, SL=10bp
+// HOLD: 2000ms max, TP=25bp gross(+17bp net), SL=7bp gross(-15bp net)
 // SIZE: 0.5-1.0R, limited by available_R
 // COST FLOOR: 12bp (taker round-trip) -- only enter if spread is tight
 // ============================================================================
@@ -54,13 +54,13 @@ public:
         if (!pos_active_) {
 
             // Gate: need elevated vol (genuine pressure, not noise)
-            if (vol_ratio < 1.15) return;
+            if (vol_ratio < 1.25) return;  // raised 1.15->1.25
 
             // Gate: spread must be tight -- we are taker, cost floor = 12bp
             if (spread_bps > 2.5) return;
 
             // Gate: extreme imbalance required
-            if (std::fabs(book_imbalance) < 0.45) return;
+            if (std::fabs(book_imbalance) < 0.55) return;  // raised 0.45->0.55: extreme imbalance only
 
             // Perp confirmation: basis should not be strongly positive (longs already crowded)
             // If perp is at big premium (>8bp), spot long likely already priced in
@@ -96,8 +96,8 @@ public:
             pos_mfe_bp_ = std::max(pos_mfe_bp_, move_bp);
             pos_mae_bp_ = std::min(pos_mae_bp_, move_bp);
 
-            bool tp      = move_bp >= 12.0;
-            bool sl      = move_bp <= -10.0;
+            bool tp      = move_bp >= 25.0;  // raised 12->25bp: net +17bp after 8bp cost
+            bool sl      = move_bp <= -7.0;   // tightened 10->7bp: net -15bp after 8bp cost
             bool timeout = (ts - entry_ts_) > 2000;
 
             if (tp || sl || timeout) {

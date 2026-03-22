@@ -11,7 +11,7 @@
 //             anchor (displacement shrinks), then re-enter LONG.
 //
 // DATA USED: displacement_bp, vol_ratio, spread_bps, acceleration_bp
-// HOLD: 4000ms max, TP=20bp, SL=12bp
+// HOLD: 4000ms max, TP=30bp gross(+22bp net), SL=8bp gross(-16bp net)
 // SIZE: 0.5-1.0R
 // SPOT ONLY: long side only
 // ============================================================================
@@ -57,12 +57,12 @@ public:
 
             // Need a clear uptrend (displacement > 20bp above anchor)
             // and a pullback signal (acceleration negative = price decelerating)
-            if (displacement_bp < 20.0)  return;  // not trending enough up
+            if (displacement_bp < 25.0)  return;  // raised 20->25bp: need stronger trend
 
             // Perp funding gate: if longs are heavily crowded, pullback may be start of reversal
             // funding > 0.05% (5bp/8h) = longs very crowded, skip pullback continuation
             if (perp_funding_rate > 0.0005) return;
-            if (acceleration_bp > -2.0)  return;  // no pullback deceleration yet
+            if (acceleration_bp > -3.0)  return;  // tightened -2->-3bp: need clear pullback
             if (vol_ratio < 1.2)         return;  // needs elevated vol
             if (spread_bps > 3.0)        return;  // tight spread required
             if (available_R < 0.5)       return;
@@ -84,8 +84,8 @@ public:
             pos_mfe_bp_ = std::max(pos_mfe_bp_, move_bp);
             pos_mae_bp_ = std::min(pos_mae_bp_, move_bp);
 
-            bool tp      = move_bp >= 20.0;
-            bool sl      = move_bp <= -12.0;
+            bool tp      = move_bp >= 30.0;  // raised 20->30bp: net +22bp after 8bp cost
+            bool sl      = move_bp <= -8.0;   // tightened 12->8bp: net -16bp after 8bp cost
             bool timeout = (ts - entry_ts_) > 4000;
 
             if (tp || sl || timeout) {

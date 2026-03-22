@@ -282,8 +282,8 @@ public:
             );
         }
 
-        // 7g. Basis Momentum Engine — perp basis spike leads spot
-        if (perp_feed_ && perp_feed_->ready(id)) {
+        // 7g. Basis Momentum Engine — BTC and ETH only (depth required for perp->spot lead-lag)
+        if (id <= 1 && perp_feed_ && perp_feed_->ready(id)) {
             double basis_available = std::max(0.0, dynamic_cap - used_R
                                               - (basis_[id].pos_active_ ? basis_[id].pos_size_R_ : 0.0));
             basis_[id].evaluate(

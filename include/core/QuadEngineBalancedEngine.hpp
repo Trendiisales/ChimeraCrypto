@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/TradingConfig.hpp"
 #include "core/BalancedEngine.hpp"
 #include "core/StructuralEngine.hpp"
 #include "core/ConvexShockEngine.hpp"
@@ -107,6 +108,20 @@ public:
     }
     
     void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        // ── KILL WINDOW: block ALL engines 02:00-07:00 UTC (Asia dead tape) ──
+        // BalancedEngine has its own internal kill window, but LIQ, MM, BRACKET,
+        // BASIS, and FUND-WIN bypass BalancedEngine and route through here.
+        // This single gate catches every sub-engine. All 59 recorded trades in the
+        // trade log fired 03:00-07:15 UTC in dead tape — this fixes that.
+        {
+            int utc_hour = static_cast<int>((ts / 3600000LL) % 24);
+            if (utc_hour >= TradingConfig::KILL_WINDOW_START_UTC &&
+                utc_hour <  TradingConfig::KILL_WINDOW_END_UTC) {
+                return;
+            }
+        }
+        // ── END KILL WINDOW ───────────────────────────────────────────────────
+
         last_latency_ms_ = latency_ms;  // raw per-tick age for signal gating
         // Derive scalar price for engines that don't need full tick
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;

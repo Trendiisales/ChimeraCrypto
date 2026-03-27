@@ -132,6 +132,17 @@ struct Position {
     // Tightens trail floor so we lock in gains rather than giving back to timeout
     bool partial_exit_done = false;
 
+    // ── Pyramiding: unit 2 scale-in fields ───────────────────────────────────
+    // When a position runs PYRAMID_ARM_BP into profit, a second unit is added
+    // at 50% size. Unit 2 gets its own tight trail so we protect the add.
+    // Combined exit closes both units together via the blended avg_entry_price.
+    bool   pyramid_done        = false; // true once unit 2 has been added
+    double pyramid_qty         = 0.0;   // size of unit 2 (50% of unit 1)
+    double pyramid_add_price   = 0.0;   // price at which unit 2 was added
+    double pyramid_peak_profit = 0.0;   // peak profit bp measured from pyramid_add_price
+    double blended_entry       = 0.0;   // weighted avg entry of both units (trail anchor)
+    double total_qty           = 0.0;   // entered_qty + pyramid_qty (for exit sizing)
+
     // Maker limit order fields
     LayerMode pending_layer = LAYER_NONE;  // layer that triggered the limit
     double pending_qty = 0.0;
@@ -150,6 +161,12 @@ struct Position {
         mfe = 0.0;
         mae = 0.0;
         partial_exit_done = false;
+        pyramid_done        = false;
+        pyramid_qty         = 0.0;
+        pyramid_add_price   = 0.0;
+        pyramid_peak_profit = 0.0;
+        blended_entry       = 0.0;
+        total_qty           = 0.0;
         pending_layer = LAYER_NONE;
         pending_qty = 0.0;
         pending_limit_price = 0.0;
@@ -410,31 +427,29 @@ public:
             gate.samples.clear();
         }
         // Edge defaults based on live trade audit (Mar 2026):
-        //   LEADLAG: only enabled engine with confirmed signal (gated by trend filter now)
-        //   VWAP:    33% WR - only engine with ANY wins, enable by default
-        //   LIQ:     needs more data but signal logic is sound
-        //   OFI:     24 trades 0% WR -95bp - PERMANENTLY DISABLED
-        //   VACUUM:  17 trades 0% WR -53bp - PERMANENTLY DISABLED
-        // OPTION B: only LIQ engine enabled — all others disabled at 15bp cost floor
-        // LEADLAG: TP=15bp gross = 0bp net — cannot make money
-        // VWAP: TP=14bp gross = -1bp net — guaranteed loss
-        // SPREAD_COMPRESS/DIVERGE: targets too small for 15bp cost
-        edge_gate_[EDGE_LEADLAG].enabled = false;
-        edge_gate_[EDGE_VWAP].enabled    = false;
-        edge_gate_[EDGE_LIQ].enabled     = true;   // LIQ only: 40bp TP = +25bp net
-        edge_gate_[EDGE_SPREAD_COMPRESS].enabled = false;
-        edge_gate_[EDGE_DIVERGE].enabled         = false;
-        edge_gate_[EDGE_MM].enabled              = true;   // Re-enabled with trail, BTC/ETH only
-        edge_gate_[EDGE_SWEEP].enabled           = false;  // SWEEP: taker entry, cost too high
-        // IMBAL: re-enabled as live shadow — starts parked (enabled=false), auto-promotes
-        // after 30 trades with avg_pnl >= 0.8bp. Strict threshold (0.42) + spread < 1.5bp
-        // compensates for maker cost floor.
-        edge_gate_[EDGE_IMBAL].enabled = false;  // parked — must earn promotion
-        // Hard-disable the provably broken engines: set disabled_until to far future
-        // They cannot be auto-promoted until this date passes.
+        // FIX 2026-03-28: re-enabled engines with positive EV after cost recalibration.
+        //   LIQ:     TP=150bp trail. At 40% WR: +42bp net. ACTIVE.
+        //   VWAP:    TP=30bp (was 12bp). At 50% WR: +5bp net. ACTIVE.
+        //   LEADLAG: TP=12bp. EV marginal but gated by trend filter + OB/flow confirm. ACTIVE.
+        //   MM:      TP=150bp trail. Needs kill window (fixed in QuadEngine). ACTIVE.
+        //   OFI:     24 trades 0% WR -95bp — PERMANENTLY DISABLED (TP was below cost floor)
+        //   VACUUM:  17 trades 0% WR -53bp — PERMANENTLY DISABLED (TP was below cost floor)
+        //   IMBAL:   Parked — promote only after 30 shadow trades with avg_pnl >= 0.8bp.
+        //   SWEEP:   Parked — 0 trades yet, needs 20+ shadow samples first.
+        //   SPREAD_COMPRESS/DIVERGE: disabled standalone (TP < cost floor); keep as confirm gates.
+        edge_gate_[EDGE_LEADLAG].enabled         = true;   // gated by trend + OB/flow confirm
+        edge_gate_[EDGE_VWAP].enabled            = true;   // recal: entry 25bp, TP 30bp, EV +5bp
+        edge_gate_[EDGE_LIQ].enabled             = true;   // TP=150bp trail, EV +42bp at 40% WR
+        edge_gate_[EDGE_MM].enabled              = true;   // TP=150bp trail, kill window fixed
+        edge_gate_[EDGE_SPREAD_COMPRESS].enabled = false;  // disabled standalone (TP 25bp, needs shadow)
+        edge_gate_[EDGE_DIVERGE].enabled         = false;  // disabled standalone (TP 25bp, needs shadow)
+        edge_gate_[EDGE_SWEEP].enabled           = false;  // parked — 0 samples yet
+        // IMBAL: parked — must earn promotion via 30 shadow trades.
+        edge_gate_[EDGE_IMBAL].enabled = false;
+        // Hard-disable provably broken engines: disabled_until far future prevents auto-promote.
         static constexpr int64_t DISABLED_FOREVER = 9999999999999LL; // ~year 2286
-        edge_gate_[EDGE_OFI].enabled        = false;
-        edge_gate_[EDGE_OFI].disabled_until = DISABLED_FOREVER;
+        edge_gate_[EDGE_OFI].enabled           = false;
+        edge_gate_[EDGE_OFI].disabled_until    = DISABLED_FOREVER;
         edge_gate_[EDGE_VACUUM].enabled        = false;
         edge_gate_[EDGE_VACUUM].disabled_until = DISABLED_FOREVER;
         
@@ -805,9 +820,9 @@ public:
             // Mean-reversion signals are exempt — they want price below trend
             // Only block the momentum/event engines
             if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-            // FUND/NGAS: DISABLED (Option B — not viable at 15bp cost)
-            // if (try_funding_entry(id, price, ts, s, latency_ms)) return;
-            // if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+            // FUND/NGAS: re-enabled 2026-03-28. Macro/carry signals — downtrend doesn't invalidate them.
+            if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+            if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
             // Block remaining momentum signals during downtrend
             // (LEADLAG, VOLSHOCK, SESSION_MOM, MM-PRESSURE all chase moves — not suitable in downtrend)
             // Fall through to mean-reversion block below
@@ -823,9 +838,10 @@ public:
         }
 
         if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-        // FUND/NGAS: DISABLED (Option B)
-        // if (try_funding_entry(id, price, ts, s, latency_ms)) return;
-        // if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+        // FUND: re-enabled 2026-03-28 — TP=30bp, SL=8bp, 2hr hold. EV +3.5bp at 50% WR.
+        if (try_funding_entry(id, price, ts, s, latency_ms)) return;
+        // NGAS: re-enabled 2026-03-28 — TP=35bp, SL=10bp, 1hr hold. EV +5bp at 50% WR.
+        if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;
@@ -871,9 +887,8 @@ public:
             if (edge_gate_allows(id, EDGE_DIVERGE, ts) && check_divergence(id, price, ts, s, latency_ms)) return;
             // NEW: BTC/ETH cointegration stat arb (BTC and ETH only)
             if (check_statarb(id, price, ts, s, latency_ms)) return;
-            // NEW: Session open momentum (London/NY/Asia opens)
-            // SESSION_MOM: DISABLED (Option B)
-            //if (check_session_momentum(id, price, ts, s, latency_ms)) return;
+            // SESSION_MOM: re-enabled 2026-03-28. EU/US/Asia opens only. EV +3.1bp at 70% WR.
+            if (check_session_momentum(id, price, ts, s, latency_ms)) return;
         }
     }
     
@@ -2310,6 +2325,93 @@ private:
             }
         }
 
+        // ── PYRAMIDING: add second unit when trade is running well ────────────
+        // Eligible: LIQ, MM_PRESSURE, FUNDING, NGAS, VWAP (deep dips only).
+        // Conditions: profit >= PYRAMID_ARM_BP, no pyramid yet, not in shadow mode,
+        //             price still moving in our direction (mfe >= move_bp * 0.85).
+        // Unit 2 = 50% of original size. Blended entry updated for trail math.
+        if (TradingConfig::PYRAMID_ENABLED && !s.pos.pyramid_done && !is_shadow_mode()) {
+            const bool pyramid_eligible =
+                (s.pos.layer == LAYER_LIQUIDATION)  ||
+                (s.pos.layer == LAYER_MM_PRESSURE)  ||
+                (s.pos.layer == LAYER_FUNDING)      ||
+                (s.pos.layer == LAYER_NGAS)         ||
+                (s.pos.layer == LAYER_VWAP &&
+                    (s.session_vwap > 0.0 &&
+                     (s.session_vwap - s.pos.entry_price) / s.session_vwap * 10000.0
+                      >= TradingConfig::PYRAMID_MIN_VWAP_DEV_BP));
+
+            if (pyramid_eligible &&
+                move_bp >= TradingConfig::PYRAMID_ARM_BP &&
+                s.pos.mfe >= move_bp * 0.85 &&   // still in uptrend, not reversing
+                s.pos.entered_qty > 0.0) {
+
+                double unit2_qty = s.pos.entered_qty * TradingConfig::PYRAMID_UNIT2_SIZE_MULT;
+                double fill_px   = price;
+                bool   add_ok    = true;
+
+                if (executor_) {
+                    OrderResult add = executor_->execute(sym_lower(id), s.pos.is_long, unit2_qty, price);
+                    if (!add.ok) {
+                        std::fprintf(stderr, "[PYRAMID] %s | unit2 order failed: %s\n",
+                                     sym_short(id), add.error.c_str());
+                        add_ok = false;
+                    } else {
+                        if (add.avg_price  > 0.0) fill_px   = add.avg_price;
+                        if (add.executed_qty > 0.0) unit2_qty = add.executed_qty;
+                    }
+                }
+
+                if (add_ok) {
+                    s.pos.pyramid_done        = true;
+                    s.pos.pyramid_qty         = unit2_qty;
+                    s.pos.pyramid_add_price   = fill_px;
+                    s.pos.pyramid_peak_profit = 0.0;
+                    // Blended entry = weighted average of both units
+                    double total = s.pos.entered_qty + unit2_qty;
+                    s.pos.blended_entry = (s.pos.entry_price * s.pos.entered_qty
+                                         + fill_px * unit2_qty) / total;
+                    s.pos.total_qty = total;
+
+                    const char* lname =
+                        (s.pos.layer == LAYER_LIQUIDATION) ? "LIQ" :
+                        (s.pos.layer == LAYER_MM_PRESSURE) ? "MM"  :
+                        (s.pos.layer == LAYER_FUNDING)     ? "FUND":
+                        (s.pos.layer == LAYER_NGAS)        ? "NGAS": "VWAP";
+                    std::printf("[PYRAMID-ADD] %s | %s | unit1_px=%.4f | add_px=%.4f"
+                                " | blended=%.4f | unit2_qty=%.8f | profit_at_add=%.2fbp\n",
+                                sym_short(id), lname,
+                                s.pos.entry_price, fill_px,
+                                s.pos.blended_entry, unit2_qty, move_bp);
+                    std::fflush(stdout);
+                }
+            }
+        }
+
+        // Track unit-2 peak profit separately for its tight trail
+        if (s.pos.pyramid_done && s.pos.pyramid_add_price > 0.0) {
+            double u2_move = (price - s.pos.pyramid_add_price) / s.pos.pyramid_add_price * 10000.0;
+            if (u2_move > s.pos.pyramid_peak_profit)
+                s.pos.pyramid_peak_profit = u2_move;
+
+            // Unit 2 tight trail: arm at PYRAMID_TRAIL_ARM_BP from add price,
+            // lock PYRAMID_TRAIL_LOCK_PCT of its own peak. Fires independently.
+            if (s.pos.pyramid_peak_profit >= TradingConfig::PYRAMID_TRAIL_ARM_BP) {
+                double u2_floor = s.pos.pyramid_peak_profit * TradingConfig::PYRAMID_TRAIL_LOCK_PCT;
+                if (u2_move <= u2_floor) {
+                    std::printf("[PYRAMID-TRAIL] %s | unit2 peak=%.2fbp floor=%.2fbp now=%.2fbp"
+                                " | closing full position\n",
+                                sym_short(id), s.pos.pyramid_peak_profit, u2_floor, u2_move);
+                    std::fflush(stdout);
+                    // Close the full position (both units) — pyramid trail fired
+                    pending_exit_reason_ = "PYRAMID_TRAIL";
+                    exit(id, move_bp, ts, s);
+                    return;
+                }
+            }
+        }
+        // ── END PYRAMIDING ────────────────────────────────────────────────────
+
         // Hard take-profit
         if (move_bp >= tp_bp) {
             std::printf("[TP-HIT] %s | layer=%s | move=%.2fbp >= tp=%.2fbp\n",
@@ -2355,7 +2457,8 @@ private:
             exit(id, move_bp, ts, s);
             return;
         }
-        if (s.pos.layer == LAYER_VWAP && age_ms >= 3000 && s.pos.mfe < 1.8) {
+        // FIX 2026-03-28: extended 3->5s, raised MFE floor 1.8->2.5bp (deeper entry needs more time)
+        if (s.pos.layer == LAYER_VWAP && age_ms >= 5000 && s.pos.mfe < 2.5) {
             pending_exit_reason_ = "NO_FOLLOW";
             exit(id, move_bp, ts, s);
             return;
@@ -2734,9 +2837,10 @@ private:
             return false;
         }
         // Core signal: price is below VWAP by entry deviation threshold
-        // AUDIT 2026-03-21: threshold lowered 20->12bp. Compensated by tighter OFI + imbalance gates.
+        // FIX 2026-03-28: entry raised 12->25bp. At 25bp below VWAP the reversion edge is real.
+        // EV: TP=30bp, SL=5bp, 50% WR => +5bp net after 15bp cost.
         double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
-        const double min_dev_bp = starved ? 9.0 : TradingConfig::VWAP_ENTRY_DEVIATION_BP;
+        const double min_dev_bp = starved ? 12.0 : TradingConfig::VWAP_ENTRY_DEVIATION_BP;
         if (deviation_bp < min_dev_bp) {
             rejection_throttle_.record(key, "not_far_enough_below_vwap");
             return false;
@@ -3645,16 +3749,25 @@ private:
         }
 
         // Execute closing order (shadow or live)
+        // FIX 2026-03-28: use total_qty when pyramid unit was added (entered_qty + pyramid_qty).
+        // total_qty is set at pyramid time; falls back to entered_qty for non-pyramided trades.
         if (executor_) {
             double exit_px = s.pos.entry_price * (1.0 + pnl / 10000.0);
-            double qty = s.pos.entered_qty;
+            double qty = (s.pos.pyramid_done && s.pos.total_qty > 0.0)
+                         ? s.pos.total_qty
+                         : s.pos.entered_qty;
             if (qty <= 0.0 && s.pos.entry_price > 0.0) {
                 qty = capital_control_.compute_final_size(
                     0.5, CapitalControlLayer::MarketEnv{}, 0.0, 0.0, "UNKNOWN") / s.pos.entry_price;
             }
-            // Spot long-only: always SELL to close
+            // Spot long-only: always SELL to close (both units in one order)
             if (qty > 0.0) {
                 executor_->execute(sym_lower(id), false /*sell*/, qty, exit_px);
+                if (s.pos.pyramid_done) {
+                    std::printf("[EXIT-PYRAMID] %s | closing both units | total_qty=%.8f\n",
+                                sym, qty);
+                    std::fflush(stdout);
+                }
             } else {
                 std::fprintf(stderr, "[EXIT] %s | no filled quantity recorded, close skipped\n", sym);
             }

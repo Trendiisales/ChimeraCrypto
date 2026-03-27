@@ -407,6 +407,75 @@ public:
     bool   is_ready()      const { return ready_; }
     int    orders_sent()   const { return orders_sent_.load(); }
 
+    // -----------------------------------------------------------------------
+    // cancel_all_open_orders — DELETE /api/v3/openOrders for a symbol
+    // Used by emergency kill to cancel any pending limit orders first.
+    // -----------------------------------------------------------------------
+    bool cancel_all_open_orders(const std::string& symbol) {
+        if (!ready_ || shadow_mode_) return true;
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::string ts = timestamp_ms();
+        std::ostringstream qs;
+        qs << "symbol=" << symbol
+           << "&recvWindow=5000"
+           << "&timestamp=" << ts;
+        std::string payload = qs.str();
+        payload += "&signature=" + sign(payload);
+        std::string body;
+        long http_code = 0;
+        del("/api/v3/openOrders", payload, body, http_code);
+        std::printf("[REST] cancel_all_open_orders %s => http=%ld\n", symbol.c_str(), http_code);
+        std::fflush(stdout);
+        return (http_code == 200);
+    }
+
+    // -----------------------------------------------------------------------
+    // market_sell — fire an immediate MARKET SELL for qty of symbol.
+    // Used by emergency kill to flatten an open position at market price.
+    // -----------------------------------------------------------------------
+    OrderResult market_sell(const std::string& symbol, double qty) {
+        OrderResult r;
+        if (!ready_) return r;
+        if (shadow_mode_) {
+            r.ok = true; r.shadow = true;
+            r.status = "SHADOW_SELL"; r.executed_qty = qty;
+            std::printf("[SHADOW-KILL] MARKET SELL %s qty=%.8f\n", symbol.c_str(), qty);
+            std::fflush(stdout);
+            return r;
+        }
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::string ts = timestamp_ms();
+        std::ostringstream qty_ss;
+        qty_ss << std::fixed << std::setprecision(8) << qty;
+        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string cid = symbol.substr(0,3) + "KILL" + std::to_string(now_us);
+        if (cid.size() > 36) cid = cid.substr(cid.size()-36);
+        std::ostringstream qs;
+        qs << "symbol="    << symbol
+           << "&side=SELL"
+           << "&type=MARKET"
+           << "&quantity="       << qty_ss.str()
+           << "&newClientOrderId=" << cid
+           << "&recvWindow=5000"
+           << "&timestamp="      << ts;
+        std::string payload = qs.str();
+        payload += "&signature=" + sign(payload);
+        std::string body;
+        long http_code = 0;
+        post("/api/v3/order", payload, body, http_code);
+        if (http_code == 200) {
+            r.ok = true;
+            r.status = "KILL_FILLED";
+            std::printf("[KILL] MARKET SELL %s qty=%.8f => FILLED\n", symbol.c_str(), qty);
+        } else {
+            r.error = "HTTP " + std::to_string(http_code) + ": " + body;
+            std::fprintf(stderr, "[KILL] MARKET SELL %s FAILED: %s\n", symbol.c_str(), r.error.c_str());
+        }
+        std::fflush(stdout);
+        return r;
+    }
+
 private:
     std::string api_key_;
     std::string api_secret_;

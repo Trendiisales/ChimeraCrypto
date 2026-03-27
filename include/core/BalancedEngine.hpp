@@ -49,7 +49,7 @@
 #include "logging/ShadowLogger.hpp"
 #include "core/LimitOrderManager.hpp"
 #include "core/PnLGovernor.hpp"
-
+#include "core/PositionJournal.hpp"
 namespace chimera {
 
 enum LayerMode {
@@ -931,6 +931,158 @@ public:
     int    get_total_trades()   const { return total_trades_; }
     int    get_open_positions() const { return open_positions_; }
 
+    // -----------------------------------------------------------------------
+    // save_positions — write all open positions to disk journal.
+    // Called after every enter() and exit() so state survives restart.
+    // -----------------------------------------------------------------------
+    void save_positions() {
+        std::vector<JournaledPosition> live;
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            const auto& s = symbols_[i];
+            if (s.pos.state != POS_OPEN && s.pos.state != POS_PENDING) continue;
+            JournaledPosition jp;
+            jp.sym              = sym_short(i);
+            jp.id               = i;
+            jp.layer            = layer_to_string(s.pos.layer);
+            jp.is_long          = s.pos.is_long;
+            jp.entry_price      = s.pos.entry_price;
+            jp.entry_ts         = s.pos.entry_ts;
+            jp.entered_qty      = s.pos.entered_qty;
+            jp.peak_price       = s.pos.peak_price;
+            jp.mfe              = s.pos.mfe;
+            jp.mae              = s.pos.mae;
+            jp.pyramid_done         = s.pos.pyramid_done;
+            jp.pyramid_qty          = s.pos.pyramid_qty;
+            jp.pyramid_add_price    = s.pos.pyramid_add_price;
+            jp.pyramid_peak_profit  = s.pos.pyramid_peak_profit;
+            jp.blended_entry        = s.pos.blended_entry;
+            jp.total_qty            = s.pos.total_qty;
+            jp.partial_exit_done    = s.pos.partial_exit_done;
+            live.push_back(jp);
+        }
+        PositionJournal::save(live);
+    }
+
+    // -----------------------------------------------------------------------
+    // restore_from_journal — reload positions saved from a previous run.
+    // Call at startup AFTER the feed is running (prices available).
+    // Re-instates pos.state=POS_OPEN so trailing stops and exits continue.
+    // -----------------------------------------------------------------------
+    void restore_from_journal() {
+        auto saved = PositionJournal::load();
+        if (saved.empty()) return;
+
+        std::printf("\n[JOURNAL] Restoring %zu open position(s) from previous session\n",
+                    saved.size());
+        std::fflush(stdout);
+
+        for (const auto& jp : saved) {
+            if (jp.id < 0 || jp.id >= MAX_SYMBOLS) continue;
+            auto& s = symbols_[jp.id];
+            if (s.pos.state != POS_FLAT) {
+                std::printf("[JOURNAL] %s already has a position, skipping journal restore\n",
+                            jp.sym.c_str());
+                continue;
+            }
+
+            LayerMode lm = string_to_layer(jp.layer);
+            s.pos.state             = POS_OPEN;
+            s.pos.layer             = lm;
+            s.pos.is_long           = jp.is_long;
+            s.pos.entry_price       = jp.entry_price;
+            s.pos.entry_ts          = jp.entry_ts;
+            s.pos.entered_qty       = jp.entered_qty;
+            s.pos.peak_price        = jp.peak_price > 0 ? jp.peak_price : jp.entry_price;
+            s.pos.mfe               = jp.mfe;
+            s.pos.mae               = jp.mae;
+            s.pos.pyramid_done          = jp.pyramid_done;
+            s.pos.pyramid_qty           = jp.pyramid_qty;
+            s.pos.pyramid_add_price     = jp.pyramid_add_price;
+            s.pos.pyramid_peak_profit   = jp.pyramid_peak_profit;
+            s.pos.blended_entry         = jp.blended_entry;
+            s.pos.total_qty             = jp.total_qty;
+            s.pos.partial_exit_done     = jp.partial_exit_done;
+            s.pos.open_ticks            = 999;  // skip min-hold check on restored positions
+            open_positions_++;
+
+            std::printf("[JOURNAL] RESTORED %s | layer=%s | entry=%.4f | qty=%.8f | mfe=%.2fbp | pyramid=%s\n",
+                        jp.sym.c_str(), jp.layer.c_str(), jp.entry_price, jp.entered_qty,
+                        jp.mfe, jp.pyramid_done ? "YES" : "no");
+            std::fflush(stdout);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // emergency_flatten_all — immediately close every open position at market.
+    // Called by GUI kill button. Cancels pending limits first, then market sells.
+    // -----------------------------------------------------------------------
+    void emergency_flatten_all() {
+        std::printf("\n[EMERGENCY-KILL] Flattening ALL positions (%d open)\n", open_positions_);
+        std::fflush(stdout);
+
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            auto& s = symbols_[i];
+            if (s.pos.state == POS_FLAT) continue;
+
+            double qty = 0.0;
+            if (s.pos.state == POS_OPEN) {
+                qty = (s.pos.pyramid_done && s.pos.total_qty > 0.0)
+                      ? s.pos.total_qty : s.pos.entered_qty;
+            } else if (s.pos.state == POS_PENDING) {
+                qty = s.pos.pending_qty;
+            }
+
+            std::printf("[EMERGENCY-KILL] %s | state=%s | qty=%.8f\n",
+                        sym_short(i),
+                        s.pos.state == POS_OPEN ? "OPEN" : "PENDING",
+                        qty);
+            std::fflush(stdout);
+
+            if (executor_) {
+                executor_->emergency_flatten(sym_lower(i), qty);
+            }
+
+            // Force-reset position in engine state
+            pending_exit_reason_ = "EMERGENCY_KILL";
+            double move_bp = s.pos.entry_price > 0
+                ? (s.last_price - s.pos.entry_price) / s.pos.entry_price * 10000.0 : 0.0;
+            exit(i, move_bp, std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(), s);
+        }
+
+        // Wipe journal — positions are now flat
+        PositionJournal::clear();
+        std::printf("[EMERGENCY-KILL] Done. All positions closed.\n");
+        std::fflush(stdout);
+    }
+
+    // -----------------------------------------------------------------------
+    // emergency_flatten_symbol — flatten one symbol by short name e.g. "BTC"
+    // -----------------------------------------------------------------------
+    void emergency_flatten_symbol(const std::string& sym_name) {
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            if (std::string(sym_short(i)) != sym_name) continue;
+            auto& s = symbols_[i];
+            if (s.pos.state == POS_FLAT) {
+                std::printf("[EMERGENCY-KILL] %s already flat\n", sym_name.c_str());
+                std::fflush(stdout);
+                return;
+            }
+            double qty = (s.pos.pyramid_done && s.pos.total_qty > 0.0)
+                         ? s.pos.total_qty : s.pos.entered_qty;
+            if (executor_) executor_->emergency_flatten(sym_lower(i), qty);
+            pending_exit_reason_ = "EMERGENCY_KILL";
+            double move_bp = s.pos.entry_price > 0
+                ? (s.last_price - s.pos.entry_price) / s.pos.entry_price * 10000.0 : 0.0;
+            exit(i, move_bp, std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(), s);
+            save_positions();
+            return;
+        }
+        std::printf("[EMERGENCY-KILL] Symbol %s not found\n", sym_name.c_str());
+        std::fflush(stdout);
+    }
+
     // Per-layer adaptive sizing state — for GUI layer-adapt panel
     // Returns JSON fragment (no outer braces) ready to embed in telemetry payload
     std::string get_layer_adapt_json() const {
@@ -1023,6 +1175,58 @@ public:
     }
     
 private:
+    // -----------------------------------------------------------------------
+    // layer_to_string / string_to_layer — for position journal persistence
+    // -----------------------------------------------------------------------
+    static const char* layer_to_string(LayerMode m) {
+        switch (m) {
+            case LAYER_MICRO:            return "IMBAL";
+            case LAYER_IMPULSE:          return "IMPULSE";
+            case LAYER_EXPANSION:        return "EXPAND";
+            case LAYER_LEADLAG:          return "LEADLAG";
+            case LAYER_LEADLAG_ETH_SOL:  return "LL-ETH-SOL";
+            case LAYER_VACUUM:           return "VACUUM";
+            case LAYER_VWAP:             return "VWAP";
+            case LAYER_LIQUIDATION:      return "LIQ";
+            case LAYER_FUNDING:          return "FUND";
+            case LAYER_NGAS:             return "NGAS";
+            case LAYER_ETH_LEAD:         return "ETH-LEAD";
+            case LAYER_SOL_LEAD:         return "SOL-LEAD";
+            case LAYER_VOLSHOCK:         return "VOLSHOCK";
+            case LAYER_OFI:              return "OFI";
+            case LAYER_SWEEP:            return "SWEEP";
+            case LAYER_MM_PRESSURE:      return "MM-PRESSURE";
+            case LAYER_STATARB:          return "STATARB";
+            case LAYER_SESSION_MOM:      return "SESS-MOM";
+            case LAYER_SPREAD_COMPRESS:  return "SPREAD-COMPRESS";
+            case LAYER_DIVERGENCE:       return "DIVERGE";
+            default:                     return "UNKNOWN";
+        }
+    }
+    static LayerMode string_to_layer(const std::string& s) {
+        if (s == "IMBAL")           return LAYER_MICRO;
+        if (s == "IMPULSE")         return LAYER_IMPULSE;
+        if (s == "EXPAND")          return LAYER_EXPANSION;
+        if (s == "LEADLAG")         return LAYER_LEADLAG;
+        if (s == "LL-ETH-SOL")      return LAYER_LEADLAG_ETH_SOL;
+        if (s == "VACUUM")          return LAYER_VACUUM;
+        if (s == "VWAP")            return LAYER_VWAP;
+        if (s == "LIQ")             return LAYER_LIQUIDATION;
+        if (s == "FUND")            return LAYER_FUNDING;
+        if (s == "NGAS")            return LAYER_NGAS;
+        if (s == "ETH-LEAD")        return LAYER_ETH_LEAD;
+        if (s == "SOL-LEAD")        return LAYER_SOL_LEAD;
+        if (s == "VOLSHOCK")        return LAYER_VOLSHOCK;
+        if (s == "OFI")             return LAYER_OFI;
+        if (s == "SWEEP")           return LAYER_SWEEP;
+        if (s == "MM-PRESSURE")     return LAYER_MM_PRESSURE;
+        if (s == "STATARB")         return LAYER_STATARB;
+        if (s == "SESS-MOM")        return LAYER_SESSION_MOM;
+        if (s == "SPREAD-COMPRESS") return LAYER_SPREAD_COMPRESS;
+        if (s == "DIVERGE")         return LAYER_DIVERGENCE;
+        return LAYER_NONE;
+    }
+
     // PHASE 2: Market data update
     // tick carries REAL bid/ask/depth/trade data from the live feed.
     // No fake constants. If a field is 0.0, the feed hasn't sent it yet 
@@ -3632,6 +3836,8 @@ private:
                 symbol_full, mode, fill_price, (int)s.regime, final_weight
             ));
         }
+        // Journal: persist new position so a restart can restore it
+        save_positions();
     }
     
     void exit(int id, double pnl, int64_t ts, SymbolState& s) {
@@ -3881,10 +4087,12 @@ private:
         
         s.pos.reset();
         open_positions_--;
-        
+
         if (open_positions_ == 0 && ts > layer_lock_until_) {
             system_state_ = SYS_IDLE;
         }
+        // Journal: update persisted state — position is now closed
+        save_positions();
     }
     
     SymbolState symbols_[MAX_SYMBOLS];

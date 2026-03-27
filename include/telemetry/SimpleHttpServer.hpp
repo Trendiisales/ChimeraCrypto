@@ -18,21 +18,28 @@ namespace chimera {
 
 class SimpleHttpServer {
 public:
-    using StateCallback = std::function<std::string()>;
-    
-    SimpleHttpServer(int port = 8080) 
-        : port_(port), running_(false), state_callback_(nullptr) {
-        // Resolve GUI directory at runtime using HOME env, fallback to /home/jo
+    using StateCallback   = std::function<std::string()>;
+    using CommandCallback = std::function<std::string(const std::string& cmd, const std::string& body)>;
+
+    SimpleHttpServer(int port = 8080)
+        : port_(port), running_(false), state_callback_(nullptr), command_callback_(nullptr) {
         const char* home = std::getenv("HOME");
         gui_dir_ = std::string(home ? home : "/home/jo") + "/ChimeraCrypto/gui/";
     }
-    
+
     ~SimpleHttpServer() {
         stop();
     }
-    
+
     void set_state_callback(StateCallback callback) {
         state_callback_ = callback;
+    }
+
+    // Wire this to handle POST /api/kill and POST /api/flatten
+    // cmd = "kill_all" | "flatten:<sym>"
+    // Returns JSON string to send back to client
+    void set_command_callback(CommandCallback callback) {
+        command_callback_ = callback;
     }
     
     bool start() {
@@ -107,19 +114,39 @@ private:
     }
     
     void handle_client(int client_fd) {
-        char buffer[4096];
+        char buffer[8192];
         ssize_t bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-        
+
         if (bytes <= 0) return;
-        
+
         buffer[bytes] = '\0';
         std::string request(buffer);
-        
+
         // Parse request line
         std::istringstream iss(request);
         std::string method, path, version;
         iss >> method >> path >> version;
-        
+
+        // CORS preflight
+        if (method == "OPTIONS") {
+            std::string r =
+                "HTTP/1.1 204 No Content\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+                "Access-Control-Allow-Headers: Content-Type\r\n"
+                "Connection: close\r\n\r\n";
+            send_all(client_fd, r);
+            return;
+        }
+
+        // Extract POST body (after blank line separator)
+        std::string post_body;
+        if (method == "POST") {
+            auto sep = request.find("\r\n\r\n");
+            if (sep != std::string::npos)
+                post_body = request.substr(sep + 4);
+        }
+
         if (path == "/" || path == "/index.html") {
             serve_file(client_fd, "index.html", "text/html");
         } else if (path == "/app.js") {
@@ -130,6 +157,12 @@ private:
             serve_file(client_fd, "favicon.svg", "image/svg+xml");
         } else if (path == "/api/state") {
             serve_state(client_fd);
+        } else if (method == "POST" && path == "/api/kill") {
+            // Emergency kill all — flatten every open position immediately
+            serve_command(client_fd, "kill_all", post_body);
+        } else if (method == "POST" && path == "/api/flatten") {
+            // Flatten specific symbol: body = {"sym":"BTC"}
+            serve_command(client_fd, "flatten", post_body);
         } else {
             send_404(client_fd);
         }
@@ -173,6 +206,21 @@ private:
         send_all(client_fd, response.str());
     }
     
+    void serve_command(int client_fd, const std::string& cmd, const std::string& body) {
+        std::string result = command_callback_
+            ? command_callback_(cmd, body)
+            : "{\"ok\":false,\"error\":\"no handler\"}";
+
+        std::ostringstream response;
+        response << "HTTP/1.1 200 OK\r\n"
+                 << "Content-Type: application/json\r\n"
+                 << "Content-Length: " << result.size() << "\r\n"
+                 << "Access-Control-Allow-Origin: *\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << result;
+        send_all(client_fd, response.str());
+    }
+
     void serve_state(int client_fd) {
         std::string json = state_callback_ ? state_callback_() : "{}";
         
@@ -204,7 +252,8 @@ private:
     int server_fd_ = -1;
     std::atomic<bool> running_;
     std::thread server_thread_;
-    StateCallback state_callback_;
+    StateCallback   state_callback_;
+    CommandCallback command_callback_;
     std::string gui_dir_;  // resolved at construction: $HOME/ChimeraCrypto/gui/
 };
 

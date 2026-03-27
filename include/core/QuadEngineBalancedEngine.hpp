@@ -74,10 +74,41 @@ public:
         http_server_.set_state_callback([this]() {
             return generate_state_json();
         });
-        
+
+        // Emergency kill command — fired by GUI kill button
+        http_server_.set_command_callback([this](const std::string& cmd, const std::string& body) -> std::string {
+            if (cmd == "kill_all") {
+                std::printf("[QUAD-ENGINE] EMERGENCY KILL ALL received from GUI\n");
+                std::fflush(stdout);
+                balanced_.emergency_flatten_all();
+                return "{\"ok\":true,\"msg\":\"All positions flattened\"}";
+            }
+            if (cmd == "flatten") {
+                // body = {"sym":"BTC"}
+                auto pos = body.find("\"sym\":\"");
+                if (pos != std::string::npos) {
+                    pos += 7;
+                    auto end = body.find('"', pos);
+                    if (end != std::string::npos) {
+                        std::string sym = body.substr(pos, end - pos);
+                        std::printf("[QUAD-ENGINE] FLATTEN %s received from GUI\n", sym.c_str());
+                        std::fflush(stdout);
+                        balanced_.emergency_flatten_symbol(sym);
+                        return "{\"ok\":true,\"msg\":\"Flattened " + sym + "\"}";
+                    }
+                }
+                return "{\"ok\":false,\"error\":\"missing sym in body\"}";
+            }
+            return "{\"ok\":false,\"error\":\"unknown command\"}";
+        });
+
         if (!http_server_.start()) {
             std::fprintf(stderr, "[QUAD-ENGINE] Failed to start HTTP server\n");
         }
+
+        // Restore any positions that were open when the engine last stopped.
+        // Must be called after http_server_.start() so the GUI can reflect them.
+        balanced_.restore_from_journal();
         
         std::printf("\n");
         std::printf("\n");

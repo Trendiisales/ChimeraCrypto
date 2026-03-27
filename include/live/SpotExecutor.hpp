@@ -236,6 +236,23 @@ public:
     int   fills()     const { return fills_.load();     }
     int   errors()    const { return errors_.load();    }
 
+    // -----------------------------------------------------------------------
+    // emergency_flatten — cancel all open orders for a symbol then market sell qty.
+    // Called by emergency kill button. Works in both shadow and live mode.
+    // -----------------------------------------------------------------------
+    bool emergency_flatten(const std::string& symbol_lower, double qty) {
+        std::string sym_upper = symbol_lower;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+        std::printf("[EMERGENCY-KILL] Flattening %s qty=%.8f\n", sym_upper.c_str(), qty);
+        std::fflush(stdout);
+        rest_.cancel_all_open_orders(sym_upper);
+        if (qty > 0.0) {
+            auto r = rest_.market_sell(sym_upper, qty);
+            return r.ok;
+        }
+        return true;
+    }
+
 private:
     BinanceREST         rest_;
     std::atomic<int>    fills_{0};

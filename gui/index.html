@@ -224,11 +224,39 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 ::-webkit-scrollbar{width:3px;height:3px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* Kill modal */
+#kill-modal{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.75);align-items:center;justify-content:center}
+#kill-modal.show{display:flex}
+.kill-box{background:var(--surface);border:2px solid var(--red);border-radius:6px;padding:32px 40px;text-align:center;max-width:380px;box-shadow:0 0 40px rgba(255,61,87,.3)}
+.kill-title{font-family:var(--fh);font-size:22px;font-weight:900;letter-spacing:6px;color:var(--red);margin-bottom:8px}
+.kill-sub{font-size:12px;color:var(--muted);letter-spacing:1px;line-height:1.7;margin-bottom:24px}
+.kill-sub strong{color:var(--text)}
+.kill-actions{display:flex;gap:12px;justify-content:center}
+.kill-confirm{background:var(--red);color:#fff;border:none;padding:10px 28px;border-radius:3px;font-size:13px;font-family:inherit;font-weight:700;letter-spacing:2px;cursor:pointer;transition:opacity .15s}
+.kill-confirm:hover{opacity:.85}
+.kill-cancel{background:transparent;color:var(--muted);border:1px solid var(--border2);padding:10px 22px;border-radius:3px;font-size:12px;font-family:inherit;cursor:pointer;letter-spacing:1px}
+.kill-cancel:hover{color:var(--text);border-color:var(--text)}
+.kill-status{margin-top:16px;font-size:11px;min-height:16px;letter-spacing:1px}
+.kill-status.ok{color:var(--green)}.kill-status.err{color:var(--red)}
 </style>
 </head>
 <body>
 <div id="poll-error"><span id="poll-error-count">ERR0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
 <div id="win-flash">WIN</div>
+
+<!-- EMERGENCY KILL MODAL -->
+<div id="kill-modal">
+  <div class="kill-box">
+    <div class="kill-title">⚡ KILL ALL</div>
+    <div class="kill-sub">This will <strong>market-sell every open position</strong> immediately at current market price.<br>Cannot be undone.</div>
+    <div class="kill-actions">
+      <button class="kill-cancel" onclick="hideKillModal()">CANCEL</button>
+      <button class="kill-confirm" onclick="executeKill()">FLATTEN ALL NOW</button>
+    </div>
+    <div class="kill-status" id="kill-status"></div>
+  </div>
+</div>
 
 <!-- TOPBAR -->
 <div class="topbar">
@@ -247,6 +275,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   </div>
   <div class="tb-right">
     <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:3px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px">UNMUTE</button>
+    <button id="kill-btn" onclick="showKillModal()" style="background:rgba(255,61,87,.15);color:var(--red);border:1px solid var(--red);padding:4px 14px;border-radius:2px;font-size:10px;font-family:inherit;cursor:pointer;letter-spacing:2px;font-weight:700;transition:all .15s" onmouseover="this.style.background='rgba(255,61,87,.35)'" onmouseout="this.style.background='rgba(255,61,87,.15)'">⚡ KILL ALL</button>
     <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
     <span id="conn-badge" class="badge badge-disc">OFFLINE</span>
     <div id="live-dot" class="dot"></div>

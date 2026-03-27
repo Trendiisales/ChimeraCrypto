@@ -661,3 +661,54 @@ updateWinRate();
 poll();
 setInterval(poll, 1000);
 setInterval(updateUptime, 1000);
+
+// ── EMERGENCY KILL ─────────────────────────────────────────────────────────
+function showKillModal() {
+  const m = document.getElementById('kill-modal');
+  const s = document.getElementById('kill-status');
+  if (s) s.textContent = '';
+  if (m) m.classList.add('show');
+}
+
+function hideKillModal() {
+  const m = document.getElementById('kill-modal');
+  if (m) m.classList.remove('show');
+}
+
+// Close modal on backdrop click
+document.getElementById('kill-modal').addEventListener('click', function(e) {
+  if (e.target === this) hideKillModal();
+});
+
+// Close on Escape key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') hideKillModal();
+});
+
+async function executeKill() {
+  const btn = document.querySelector('.kill-confirm');
+  const status = document.getElementById('kill-status');
+  if (btn) { btn.textContent = 'SENDING...'; btn.disabled = true; }
+  if (status) { status.textContent = ''; status.className = 'kill-status'; }
+
+  try {
+    const res = await fetch('/api/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(8000)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      if (status) { status.textContent = '✓ ' + (data.msg || 'All positions flattened'); status.className = 'kill-status ok'; }
+      setTimeout(hideKillModal, 1800);
+    } else {
+      if (status) { status.textContent = '✗ ' + (data.error || 'Unknown error'); status.className = 'kill-status err'; }
+    }
+  } catch(e) {
+    if (status) { status.textContent = '✗ Request failed: ' + e.message; status.className = 'kill-status err'; }
+  } finally {
+    if (btn) { btn.textContent = 'FLATTEN ALL NOW'; btn.disabled = false; }
+  }
+}
+// ── END EMERGENCY KILL ──────────────────────────────────────────────────────

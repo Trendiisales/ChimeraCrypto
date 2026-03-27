@@ -109,31 +109,51 @@ public:
         // Restore any positions that were open when the engine last stopped.
         // Must be called after http_server_.start() so the GUI can reflect them.
         balanced_.restore_from_journal();
-        
-        std::printf("\n");
-        std::printf("\n");
-        std::printf("         QUAD ENGINE + REGIME ALLOCATOR FRAMEWORK              \n");
-        std::printf("\n");
-        std::printf(" SIGNAL ENGINES:                                                \n");
-        std::printf("    MICRO (BalancedEngine):    10-30bp (15bp min)             \n");
-        std::printf("    STRUCTURAL:                30-150bp riders                 \n");
-        std::printf("    CONVEX SHOCK:              20bp+ acceleration              \n");
-        std::printf("    COMPRESSION BREAKOUT:      Tight range  expansion         \n");
-        std::printf("                                                                \n");
-        std::printf(" CAPITAL INTELLIGENCE:                                          \n");
-        std::printf("    Regime State Allocator:    Dynamic capital scaling        \n");
-        std::printf("     - DEAD (0.0x)              Kill all trading                \n");
-        std::printf("     - COMPRESSION (0.5x)       Conservative sizing             \n");
-        std::printf("     - EXPANSION (1.0x)         Normal sizing                   \n");
-        std::printf("     - SHOCK (1.5x)             Aggressive scaling              \n");
-        std::printf("                                                                \n");
-        std::printf(" Portfolio Cap: 2.0R base  0-3.0R dynamic per symbol          \n");
-        std::printf(" GUI: http://154.45.251.118:8080                               \n");
-        std::printf("\n");
-        std::printf("\n");
-        std::fflush(stdout);
-    }
-    
+
+        // Print accurate startup banner with current git hash
+        {
+            char git_hash[64] = "unknown";
+            FILE* fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
+            if (fp) {
+                if (fgets(git_hash, sizeof(git_hash), fp)) {
+                    size_t l = strlen(git_hash);
+                    if (l > 0 && git_hash[l-1] == '\n') git_hash[l-1] = '\0';
+                }
+                pclose(fp);
+            }
+            std::printf("\n");
+            std::printf("  ╔══════════════════════════════════════════════════════╗\n");
+            std::printf("  ║          CHIMERA QUAD ENGINE  build %-8s        ║\n", git_hash);
+            std::printf("  ╠══════════════════════════════════════════════════════╣\n");
+            std::printf("  ║  ACTIVE STRATEGIES                                   ║\n");
+            std::printf("  ║    LIQ CASCADE     TP=150bp trail  SL=20bp  ✓       ║\n");
+            std::printf("  ║    VWAP REVERSION  TP=30bp  entry≥25bp  SL=5bp ✓   ║\n");
+            std::printf("  ║    LEADLAG         TP=12bp  BTC→ETH/SOL     ✓       ║\n");
+            std::printf("  ║    MM PRESSURE     TP=150bp trail  SL=10bp  ✓       ║\n");
+            std::printf("  ║    FUNDING CARRY   TP=30bp  2hr hold        ✓       ║\n");
+            std::printf("  ║    NGAS LEAD-LAG   TP=35bp  1hr hold        ✓       ║\n");
+            std::printf("  ║    VOLSHOCK        TP=25bp  maker entry     ✓       ║\n");
+            std::printf("  ║    STAT ARB        TP=20bp  BTC/ETH z>2     ✓       ║\n");
+            std::printf("  ║    SESSION MOM     TP=22bp  EU/US opens     ✓       ║\n");
+            std::printf("  ║    BASIS MOMENTUM  trail    BTC/ETH only    ✓       ║\n");
+            std::printf("  ║    FUND WINDOW     trail    pre-funding     ✓       ║\n");
+            std::printf("  ║    LIQ BRACKET     trail    BTC/ETH/SOL     ✓       ║\n");
+            std::printf("  ╠══════════════════════════════════════════════════════╣\n");
+            std::printf("  ║  SYMBOL SIZING                                       ║\n");
+            std::printf("  ║    BTC 1.00x  ETH 0.80x  SOL 0.60x  BNB 0.40x      ║\n");
+            std::printf("  ║    AVAX/LINK/XRP 0.15x  (thin books, minimal size)  ║\n");
+            std::printf("  ╠══════════════════════════════════════════════════════╣\n");
+            std::printf("  ║  COST FLOOR: 15bp maker / 22bp taker                ║\n");
+            std::printf("  ║  KILL WINDOW: 02:00-07:00 UTC (dead tape)           ║\n");
+            std::printf("  ║  PYRAMIDING: armed at +30bp, unit2=50%% size        ║\n");
+            std::printf("  ║  PERSISTENCE: positions survive restart             ║\n");
+            std::printf("  ║  GUI: http://154.45.251.118:8080                    ║\n");
+            std::printf("  ╚══════════════════════════════════════════════════════╝\n");
+            std::printf("\n");
+            std::fflush(stdout);
+        }
+    }  // end constructor
+
     ~QuadEngineBalancedEngine() {
         http_server_.stop();
     }
@@ -310,10 +330,10 @@ public:
             if (pce_[id].pos_active_) micro_engine_trades_in_window_--;
         }
 
-        // 7f. Liquidation Bracket Engine — COMPRESSION only, liq+perp gated
+        // 7f. Liquidation Bracket Engine — BTC/ETH/SOL only (alts have too-thin books for bracket)
         // Capital gate: only if significant room left after other engines
         double bracket_available = std::max(0.0, dynamic_cap - used_R - obi_R - afe_R - pce_R);
-        if (bracket_available >= 0.5) {
+        if (bracket_available >= 0.5 && id <= 2) {  // BTC=0, ETH=1, SOL=2 only
             double bracket_liq     = balanced_.liq_engine().get_notional(id);
             double bracket_basis   = perp_feed_ && perp_feed_->ready(id)
                                      ? perp_feed_->basis_bp(id, price) : 0.0;

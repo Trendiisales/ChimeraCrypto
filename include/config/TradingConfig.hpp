@@ -276,7 +276,7 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // VOLUME SHOCK CONTINUATION
     // -------------------------------------------------------------------------
-    static constexpr double  VOLSHOCK_TP_BP            = 18.0;
+    static constexpr double  VOLSHOCK_TP_BP            = 25.0;  // FIX 2026-03-28: raised 18->25bp (18bp only 3bp above 15bp cost floor)
     static constexpr double  VOLSHOCK_SL_BP            =  4.0;
     static constexpr int64_t VOLSHOCK_MAX_HOLD_MS      = 6000;
 
@@ -380,7 +380,7 @@ struct TradingConfig {
     static constexpr int    MAX_CONCURRENT_POSITIONS  = 5;
     static constexpr int    LEADLAG_PRIME_START_UTC   = 1;
     static constexpr int    LEADLAG_PRIME_END_UTC     = 5;
-    static constexpr double LEADLAG_OFFPEAK_SIZE_MULT = 0.5;
+    static constexpr double LEADLAG_OFFPEAK_SIZE_MULT = 0.5;  // Wintermute 2025: altcoin rallies shorter, stay with 0.5x off-peak
     static constexpr double RISK_FRACTION             = 0.02;
     static constexpr double MAX_TOTAL_EXPOSURE_PCT    = 0.25;
 };

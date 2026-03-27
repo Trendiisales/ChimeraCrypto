@@ -831,8 +831,9 @@ public:
                 if (edge_gate_allows(id, EDGE_VWAP, ts)           && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
                 if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
                 if (edge_gate_allows(id, EDGE_DIVERGE, ts)         && check_divergence(id, price, ts, s, latency_ms)) return;
-                // STATARB: DISABLED (Option B — targets too small for 15bp cost)
-            // if (check_statarb(id, price, ts, s, latency_ms)) return;
+                // STATARB: active — cointegrated spread reverts regardless of trend direction
+                // Buying the cheap leg is VALID in a downtrend (cheap = even cheaper = even better entry)
+                if (check_statarb(id, price, ts, s, latency_ms)) return;
             }
             return;
         }
@@ -3677,12 +3678,19 @@ private:
         // Per-symbol multiplier  data driven
         // SOL: best performer. ETH: weakest. New symbols (BNB/AVAX/LINK/POL): neutral until data.
         // sym_mult: per-symbol size bias
-        // BUG6 FIX: AVAX/LINK/POL was 4x — thin books + few trades = unacceptable live risk
-        // Capped at 1.5 until 50+ live net-positive trades confirmed per symbol
-        double sym_mult = (id == 4 || id == 5 || id == 6) ? 1.5 :  // AVAX/LINK/POL: thin books, capped until live confirmed
-                          (id == 2) ? 1.2 :   // SOL: good WR, modest boost
-                          (id == 1) ? 0.7 :   // ETH: weakest performer, suppressed
-                                      1.0;    // BTC/BNB: neutral
+        // AUDIT 2026-03-28: Wintermute 2025 report confirms altcoin rallies shorter and less persistent.
+        // Liquidity concentrated in BTC/ETH — alts have thin books and fast reversals.
+        // AVAX/LINK/XRP (id 4,5,6): reduced to 0.15x — minimal size, these are near-worthless in
+        //   current market structure. Not worth holding positions on thin-book tokens.
+        // BNB (id 3): 0.4x — somewhat liquid but not BTC/ETH quality.
+        // SOL (id 2): 0.6x — decent liquidity, follows BTC reliably, keep moderate size.
+        // ETH (id 1): 0.8x — deep book, strong BTC correlation, near-BTC quality.
+        // BTC (id 0): 1.0x — deepest liquidity, tightest spreads, primary engine.
+        double sym_mult = (id == 4 || id == 5 || id == 6) ? 0.15 :  // AVAX/LINK/XRP: near-zero, thin books
+                          (id == 3) ? 0.40 :   // BNB: reduced, moderate liquidity
+                          (id == 2) ? 0.60 :   // SOL: decent liquidity
+                          (id == 1) ? 0.80 :   // ETH: near-BTC quality
+                                      1.00;    // BTC: primary
         legacy_size_mult *= sym_mult;
 
         if (consecutive_losses_ >= 2) {

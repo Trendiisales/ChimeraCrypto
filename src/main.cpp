@@ -142,8 +142,9 @@ private:
     void open_today() {
         std::lock_guard<std::mutex> lk(mtx_);
         if (file_.is_open()) { file_.flush(); file_.close(); }
-        mkdir(LOG_DIR, 0755);
-        current_path_ = std::string(LOG_DIR) + "/chimera_" + utc_date_str() + ".log";
+        std::string log_dir = get_log_dir();
+        mkdir(log_dir.c_str(), 0755);
+        current_path_ = log_dir + "/chimera_" + utc_date_str() + ".log";
         file_.open(current_path_, std::ios::app);
         current_day_ = utc_day();
         if (file_.is_open()) {

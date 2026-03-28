@@ -68,7 +68,7 @@ public:
             double already_moved_bp = (crypto_price - crypto_price_at_signal_[id])
                                       / crypto_price_at_signal_[id] * 10000.0;
             if (already_moved_bp >= TradingConfig::NGAS_CRYPTO_MOVED_MAX_BP) {
-                std::printf("[NGAS-ENGINE] %s crypto already moved %.2fbp — too late\\n",
+                std::printf("[NGAS-ENGINE] %s crypto already moved %.2fbp — too late\n",
                     sym_short(id), already_moved_bp);
                 std::fflush(stdout);
                 clear_signal(id);
@@ -82,7 +82,7 @@ public:
         double ngas_chg = fetcher_->change_pct();
         double ngas_px  = fetcher_->price();
 
-        std::printf("[NGAS-ENGINE] %s | ngas=%.4f | chg=%.2f%% | crypto=%.4f | LONG signal valid\\n",
+        std::printf("[NGAS-ENGINE] %s | ngas=%.4f | chg=%.2f%% | crypto=%.4f | LONG signal valid\n",
             sym_short(id), ngas_px, ngas_chg, crypto_price);
         std::fflush(stdout);
 

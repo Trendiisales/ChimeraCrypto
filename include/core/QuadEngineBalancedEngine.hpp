@@ -140,10 +140,10 @@ public:
             std::printf("  ╠══════════════════════════════════════════════════════╣\n");
             std::printf("  ║  SYMBOL SIZING                                       ║\n");
             std::printf("  ║    BTC 1.00x  ETH 0.80x  SOL 0.60x  BNB 0.40x      ║\n");
-            std::printf("  ║    AVAX/LINK/XRP 0.15x  (thin books, minimal size)  ║\n");
+            std::printf("  ║    AVAX/LINK 0.15x  XRP 0.40x  (BNB-tier liquidity) ║\n");
             std::printf("  ╠══════════════════════════════════════════════════════╣\n");
             std::printf("  ║  COST FLOOR: 15bp maker / 22bp taker                ║\n");
-            std::printf("  ║  KILL WINDOW: 02:00-07:00 UTC (dead tape)           ║\n");
+            std::printf("  ║  24/7 TRADING: no kill window — crypto never sleeps  ║\n");
             std::printf("  ║  PYRAMIDING: armed at +30bp, unit2=50%% size        ║\n");
             std::printf("  ║  PERSISTENCE: positions survive restart             ║\n");
             std::printf("  ║  GUI: http://154.45.251.118:8080                    ║\n");
@@ -158,31 +158,15 @@ public:
     }
     
     void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
-        // ── KILL WINDOW: block ALL engines 02:00-07:00 UTC (Asia dead tape) ──
-        // BalancedEngine has its own internal kill window, but LIQ, MM, BRACKET,
-        // BASIS, and FUND-WIN bypass BalancedEngine and route through here.
-        // This single gate catches every sub-engine. All 59 recorded trades in the
-        // trade log fired 03:00-07:15 UTC in dead tape — this fixes that.
-        {
-            int utc_hour = static_cast<int>((ts / 3600000LL) % 24);
-            if (utc_hour >= TradingConfig::KILL_WINDOW_START_UTC &&
-                utc_hour <  TradingConfig::KILL_WINDOW_END_UTC) {
-                return;
-            }
-        }
-        // ── END KILL WINDOW ───────────────────────────────────────────────────
-
-        last_latency_ms_ = latency_ms;  // raw per-tick age for signal gating
-        // Derive scalar price for engines that don't need full tick
+        last_latency_ms_ = latency_ms;
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
 
-        // 1. Run original BalancedEngine (micro) - passes full tick for real data
+        // ALWAYS update market state and run BalancedEngine — GUI needs live prices
+        // GUI always has live prices. Trading gates enforced inside each engine.
         balanced_.on_tick(id, tick, ts, latency_ms);
-        // Detect new trade completions and log them
         check_new_trades(id);
-        
-        // 2. Update market state
         update_market_state(id, price, ts);
+
         
         auto& ms = market_state_[id];
         

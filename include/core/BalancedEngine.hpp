@@ -431,7 +431,7 @@ public:
         //   LIQ:     TP=150bp trail. At 40% WR: +42bp net. ACTIVE.
         //   VWAP:    TP=30bp (was 12bp). At 50% WR: +5bp net. ACTIVE.
         //   LEADLAG: TP=12bp. EV marginal but gated by trend filter + OB/flow confirm. ACTIVE.
-        //   MM:      TP=150bp trail. Needs kill window (fixed in QuadEngine). ACTIVE.
+        //   MM:      TP=150bp trail. ACTIVE.
         //   OFI:     24 trades 0% WR -95bp — PERMANENTLY DISABLED (TP was below cost floor)
         //   VACUUM:  17 trades 0% WR -53bp — PERMANENTLY DISABLED (TP was below cost floor)
         //   IMBAL:   Parked — promote only after 30 shadow trades with avg_pnl >= 0.8bp.
@@ -440,7 +440,7 @@ public:
         edge_gate_[EDGE_LEADLAG].enabled         = true;   // gated by trend + OB/flow confirm
         edge_gate_[EDGE_VWAP].enabled            = true;   // recal: entry 25bp, TP 30bp, EV +5bp
         edge_gate_[EDGE_LIQ].enabled             = true;   // TP=150bp trail, EV +42bp at 40% WR
-        edge_gate_[EDGE_MM].enabled              = true;   // TP=150bp trail, kill window fixed
+        edge_gate_[EDGE_MM].enabled              = true;   // TP=150bp trail
         edge_gate_[EDGE_SPREAD_COMPRESS].enabled = false;  // disabled standalone (TP 25bp, needs shadow)
         edge_gate_[EDGE_DIVERGE].enabled         = false;  // disabled standalone (TP 25bp, needs shadow)
         edge_gate_[EDGE_SWEEP].enabled           = false;  // parked — 0 samples yet
@@ -765,10 +765,6 @@ public:
 
         // Time-of-day session gating
         int utc_hour = (int)((ts / 3600000LL) % 24);
-        // HARD KILL WINDOW: 02:00-07:00 UTC — Asia dead tape, 46 trades -152bp
-        bool kill_window = (utc_hour >= TradingConfig::KILL_WINDOW_START_UTC &&
-                            utc_hour <  TradingConfig::KILL_WINDOW_END_UTC);
-        if (kill_window) return;
         bool dead_zone = (utc_hour >= TradingConfig::SESSION_DEAD_START_UTC &&
                           utc_hour <  TradingConfig::SESSION_DEAD_END_UTC);
         const bool shadow_mode = is_shadow_mode();

@@ -66,7 +66,7 @@ public:
             }
         }).detach();
 
-        std::printf("[NGAS-FETCHER] Background poll started (every %ds)\\n",
+        std::printf("[NGAS-FETCHER] Background poll started (every %ds)\n",
                     POLL_INTERVAL_SECS);
         std::fflush(stdout);
     }
@@ -74,7 +74,7 @@ public:
     void fetch_once() {
         bool ok = fetch_fear_greed();
         if (!ok) {
-            std::printf("[NGAS-FETCHER] Fear & Greed fetch failed — retaining last value=%.0f\\n",
+            std::printf("[NGAS-FETCHER] Fear & Greed fetch failed — retaining last value=%.0f\n",
                         price_.load(std::memory_order_relaxed));
             std::fflush(stdout);
         }
@@ -137,7 +137,7 @@ private:
             curr <= 60  ? "Neutral" :
             curr <= 80  ? "Greed" : "Extreme Greed";
 
-        std::printf("[NGAS-FETCHER] Fear & Greed: %.0f (%s) | delta=%.1f | signal=%s\\n",
+        std::printf("[NGAS-FETCHER] Fear & Greed: %.0f (%s) | delta=%.1f | signal=%s\n",
             curr, classification, delta,
             sig == -1 ? "RISK-ON (longs favoured)" :
             sig ==  1 ? "RISK-OFF (reduce longs)"  : "NEUTRAL");

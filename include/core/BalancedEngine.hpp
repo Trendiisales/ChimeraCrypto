@@ -29,6 +29,7 @@
 #include "core/NGASLeadLagEngine.hpp"
 #include "core/FundingSignalEngine.hpp"
 #include "live/CoinbaseWSFeed.hpp"
+#include "live/PerpFeed.hpp"
 #include "core/StatArbEngine.hpp"
 #include "core/SessionMomentumEngine.hpp"
 #include "core/SpreadCompressionEngine.hpp"
@@ -881,6 +882,18 @@ public:
     void set_funding_fetcher(FundingRateFetcher* f) { funding_ = f; }
     void set_ngas_engine(NGASLeadLagEngine* n)     { ngas_ = n; }
     void set_funding_signal(FundingSignalEngine* fs) { funding_signal_ = fs; }
+    void set_perp_feed(PerpFeed* pf) { perp_feed_ = pf; }
+    // Perp data accessors for LEADLAG/VOLSHOCK confirmation
+    double get_perp_basis(int id, double spot) const {
+        return (perp_feed_ && perp_feed_->ready(id)) ? perp_feed_->basis_bp(id, spot) : 0.0;
+    }
+    double get_perp_flow(int id) const {
+        return (perp_feed_ && perp_feed_->ready(id)) ? perp_feed_->perp_flow_ratio(id) : 0.0;
+    }
+    double get_perp_funding(int id) const {
+        return (perp_feed_ && perp_feed_->ready(id)) ? perp_feed_->funding_rate(id) : 0.0;
+    }
+
     void update_coinbase_btc(double price, int64_t ts_ms) {
         uint64_t bits;
         __builtin_memcpy(&bits, &price, sizeof(bits));
@@ -2011,8 +2024,24 @@ private:
             return false;
         }
 
-        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | ob_imbal=%.2f | flow=%.2f | latency=%.1fms | ENTERING LONG\n",
-                    sym, leadlag_.btc_move_bp(), btc_now_bp, ob_imbalance, flow_ratio, latency_ms);
+        // ── PERP CONFIRMATION (bonus gate, not hard required) ────────────────
+        // If perp feed is available, use basis + flow as directional confirmation.
+        // Perp leads spot by 30-100ms — same direction = higher conviction.
+        // Not a hard gate: if perp data unavailable, trade fires on OB+flow alone.
+        double perp_basis = get_perp_basis(id, price);
+        double perp_flow  = get_perp_flow(id);
+        bool perp_confirms = (perp_basis > 2.0 && perp_flow > 0.1);  // perp premium + buy flow
+        bool perp_available = (perp_feed_ && perp_feed_->ready(id));
+        // Only reject on perp signal if perp is active AND strongly against us
+        if (perp_available && perp_basis < -5.0) {
+            // Perp in deep discount while spot going up = divergence, skip
+            rejection_throttle_.record(key, "perp_divergence");
+            return false;
+        }
+
+        std::printf("[LEADLAG] %s | btc_move=%.2fbp | sustain=%.2fbp | ob=%.2f | flow=%.2f | perp_basis=%.1fbp | perp_flow=%.2f | lat=%.1fms | LONG\n",
+                    sym, leadlag_.btc_move_bp(), btc_now_bp, ob_imbalance, flow_ratio,
+                    perp_basis, perp_flow, latency_ms);
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_LEADLAG, true);
@@ -2369,17 +2398,34 @@ private:
             sl_bp     = TradingConfig::NGAS_SL_BP;
             max_hold  = TradingConfig::NGAS_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG) {
-            // TP=25bp. SL=5bp. Hold 8s max.
-            // TIERED TRAIL: arms at 8bp, distance tightens as move extends.
-            // Captures extended runs while protecting gains on smaller moves.
+            // TP=25bp. SL=5bp. No timeout when profitable.
+            // TIERED TRAIL: arms at 8bp, tightens as move extends.
+            // PERP COLLAPSE EXIT: if perp basis inverts sharply, spot reversal imminent.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_SL_BP;
             max_hold  = TradingConfig::LEADLAG_MAX_HOLD_MS;
+
+            // Perp collapse: if perp flips to strong discount while in profit, exit now
+            // before spot follows. This is the single best early exit signal on crypto.
+            if (s.pos.mfe >= 5.0 && move_bp > 0.0) {
+                double pb = get_perp_basis(id, price);
+                double pf = get_perp_flow(id);
+                if (perp_feed_ && perp_feed_->ready(id) && pb < -8.0 && pf < -0.2) {
+                    std::printf("[LEADLAG-PERP-EXIT] %s | perp_basis=%.1fbp perp_flow=%.2f | exiting before spot follows\n",
+                        sym_short(id), pb, pf);
+                    std::fflush(stdout);
+                    pending_exit_reason_ = "PERP_COLLAPSE";
+                    exit(id, move_bp, ts, s);
+                    return;
+                }
+            }
+
             if (s.pos.mfe >= 8.0) {
-                // Tiered trail distance: tighter as move extends to capture more
-                double trail_dist = s.pos.mfe < 15.0 ? 6.0 :   // 8-15bp: 6bp trail
+                // Tiered trail distance: tighter as move extends
+                double trail_dist = s.pos.mfe < 15.0 ? 6.0 :   // 8-15bp:  6bp trail
                                    s.pos.mfe < 20.0 ? 5.0 :    // 15-20bp: 5bp trail
-                                                      4.0;      // 20bp+: 4bp trail (tight)
+                                   s.pos.mfe < 40.0 ? 4.0 :    // 20-40bp: 4bp trail
+                                                      3.0;      // 40bp+:   3bp trail (very tight)
                 double trail_floor = s.pos.mfe - trail_dist;
                 if (move_bp < trail_floor) {
                     std::printf("[LEADLAG-TRAIL] %s | peak=%.2fbp dist=%.1fbp floor=%.2fbp now=%.2fbp\n",
@@ -2391,13 +2437,22 @@ private:
                 }
             }
         } else if (s.pos.layer == LAYER_LEADLAG_ETH_SOL) {
-            // TP=25bp, SL=5bp, hold 8s. Tiered trail same as LEADLAG.
+            // TP=25bp, SL=5bp. No timeout when profitable. Tiered trail + perp collapse exit.
             tp_bp     = TradingConfig::LEADLAG_ETH_SOL_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_ETH_SOL_SL_BP;
             max_hold  = TradingConfig::LEADLAG_ETH_SOL_MAX_HOLD_MS;
+            if (s.pos.mfe >= 5.0 && move_bp > 0.0) {
+                double pb = get_perp_basis(id, price);
+                double pf = get_perp_flow(id);
+                if (perp_feed_ && perp_feed_->ready(id) && pb < -8.0 && pf < -0.2) {
+                    pending_exit_reason_ = "PERP_COLLAPSE";
+                    exit(id, move_bp, ts, s); return;
+                }
+            }
             if (s.pos.mfe >= 8.0) {
                 double trail_dist = s.pos.mfe < 15.0 ? 6.0 :
-                                   s.pos.mfe < 20.0 ? 5.0 : 4.0;
+                                   s.pos.mfe < 20.0 ? 5.0 :
+                                   s.pos.mfe < 40.0 ? 4.0 : 3.0;
                 double trail_floor = s.pos.mfe - trail_dist;
                 if (move_bp < trail_floor) {
                     std::printf("[LL-ETH-TRAIL] %s | peak=%.2fbp dist=%.1fbp floor=%.2fbp now=%.2fbp\n",
@@ -2771,25 +2826,12 @@ private:
             }
         }
 
-        // Time-based forced exit
-        // EXCEPTION: suppress timeout if the trail is armed and we are profitable.
-        // A 50bp LEADLAG run should not be killed at 8s — let it trail to completion.
-        // Only timeout if trade is stagnant (MFE < 8bp) or trail not yet armed.
-        const bool trail_armed = (
-            (s.pos.layer == LAYER_LEADLAG ||
-             s.pos.layer == LAYER_LEADLAG_ETH_SOL ||
-             s.pos.layer == LAYER_ETH_LEAD ||
-             s.pos.layer == LAYER_VOLSHOCK ||
-             s.pos.layer == LAYER_SESSION_MOM) &&
-            s.pos.mfe >= 8.0 && move_bp > 0.0);
-        // For trail engines with large targets, extend hold if still running
-        const bool trail_engine_running = (
-            (s.pos.layer == LAYER_LIQUIDATION ||
-             s.pos.layer == LAYER_MM_PRESSURE ||
-             s.pos.layer == LAYER_FUNDING     ||
-             s.pos.layer == LAYER_NGAS) &&
-            s.pos.mfe >= 20.0 && move_bp > 0.0);
-        if (ts - s.pos.entry_ts > max_hold && !trail_armed && !trail_engine_running) {
+        // Time-based forced exit — only fires if trade is stagnant (no profit).
+        // If the trail is doing its job (move_bp > 0, mfe > SL), there is NO timeout.
+        // A running trade is managed entirely by the trailing stop — not time.
+        // Timeout only protects against stuck positions that never moved.
+        const bool position_is_running = (move_bp > 0.0 && s.pos.mfe > sl_bp);
+        if (ts - s.pos.entry_ts > max_hold && !position_is_running) {
             std::printf("[MAX-HOLD] %s | hold=%ldms > %ldms\n",
                 sym_short(id),
                 (long)(ts - s.pos.entry_ts), (long)max_hold);
@@ -4141,6 +4183,7 @@ private:
     FundingRateFetcher*  funding_        = nullptr;  // optional  set from main()
     NGASLeadLagEngine*   ngas_           = nullptr;  // optional  set from main()
     FundingSignalEngine* funding_signal_ = nullptr;  // optional  set from main()
+    PerpFeed*            perp_feed_      = nullptr;  // perp basis/flow/funding signals
     // Coinbase BTC-USD cross-exchange price (lock-free atomic)
     std::atomic<uint64_t> coinbase_btc_price_{0};   // bit-cast double
     std::atomic<int64_t>  coinbase_btc_ts_{0};      // exchange timestamp ms

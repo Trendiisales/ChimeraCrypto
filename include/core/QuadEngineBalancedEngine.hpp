@@ -370,7 +370,10 @@ public:
     void set_ngas_engine(chimera::NGASLeadLagEngine* n)      { balanced_.set_ngas_engine(n); }
     void set_funding_signal(chimera::FundingSignalEngine* fs) { balanced_.set_funding_signal(fs); }
     void update_coinbase_btc(double price, int64_t ts_ms)     { balanced_.update_coinbase_btc(price, ts_ms); }
-    void set_perp_feed(chimera::PerpFeed* pf)                 { perp_feed_ = pf; }
+    void set_perp_feed(chimera::PerpFeed* pf) {
+        perp_feed_ = pf;
+        balanced_.set_perp_feed(pf);  // wire perp signals into BalancedEngine too
+    }
     LiquidationEngine& liq_engine() { return balanced_.liq_engine(); }
     void set_executor(chimera::SpotExecutor* e)              { balanced_.set_executor(e); }
     void set_latency(double ms) { last_latency_ms_ = ms; }

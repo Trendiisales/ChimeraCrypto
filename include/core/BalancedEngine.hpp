@@ -2369,34 +2369,44 @@ private:
             sl_bp     = TradingConfig::NGAS_SL_BP;
             max_hold  = TradingConfig::NGAS_MAX_HOLD_MS;
         } else if (s.pos.layer == LAYER_LEADLAG) {
-            // TP=8bp ceiling. SL=3bp. Hold 5s max.
-            // TRAIL FLOOR: arm at 3bp profit, lock in 75% of peak.
-            // Rationale: 90% of trades exit TIMEOUT. avg MFE=5.9bp, avg giveback=0.9bp.
-            // Worst case: ETH MFE=7.6bp → exit=0.16bp (gave back 7.4bp).
-            // Trail floor: exit immediately if price drops below 75% of MFE peak.
+            // TP=25bp. SL=5bp. Hold 8s max.
+            // TIERED TRAIL: arms at 8bp, distance tightens as move extends.
+            // Captures extended runs while protecting gains on smaller moves.
             tp_bp     = TradingConfig::LEADLAG_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_SL_BP;
             max_hold  = TradingConfig::LEADLAG_MAX_HOLD_MS;
-            if (s.pos.mfe >= 3.0 && move_bp < s.pos.mfe * 0.75) {
-                std::printf("[LEADLAG-TRAIL] %s | peak=%.2fbp floor=%.2fbp now=%.2fbp\n",
-                    sym_short(id), s.pos.mfe, s.pos.mfe * 0.75, move_bp);
-                std::fflush(stdout);
-                pending_exit_reason_ = "TRAIL_FLOOR";
-                exit(id, move_bp, ts, s);
-                return;
+            if (s.pos.mfe >= 8.0) {
+                // Tiered trail distance: tighter as move extends to capture more
+                double trail_dist = s.pos.mfe < 15.0 ? 6.0 :   // 8-15bp: 6bp trail
+                                   s.pos.mfe < 20.0 ? 5.0 :    // 15-20bp: 5bp trail
+                                                      4.0;      // 20bp+: 4bp trail (tight)
+                double trail_floor = s.pos.mfe - trail_dist;
+                if (move_bp < trail_floor) {
+                    std::printf("[LEADLAG-TRAIL] %s | peak=%.2fbp dist=%.1fbp floor=%.2fbp now=%.2fbp\n",
+                        sym_short(id), s.pos.mfe, trail_dist, trail_floor, move_bp);
+                    std::fflush(stdout);
+                    pending_exit_reason_ = "TRAIL_FLOOR";
+                    exit(id, move_bp, ts, s);
+                    return;
+                }
             }
         } else if (s.pos.layer == LAYER_LEADLAG_ETH_SOL) {
-            // ETHSOL: TP=12bp, SL=5bp, hold 2.5s. Same trail floor as LEADLAG.
+            // TP=25bp, SL=5bp, hold 8s. Tiered trail same as LEADLAG.
             tp_bp     = TradingConfig::LEADLAG_ETH_SOL_TP_BP;
             sl_bp     = TradingConfig::LEADLAG_ETH_SOL_SL_BP;
             max_hold  = TradingConfig::LEADLAG_ETH_SOL_MAX_HOLD_MS;
-            if (s.pos.mfe >= 3.0 && move_bp < s.pos.mfe * 0.75) {
-                std::printf("[LL-ETH-SOL-TRAIL] %s | peak=%.2fbp floor=%.2fbp now=%.2fbp\n",
-                    sym_short(id), s.pos.mfe, s.pos.mfe * 0.75, move_bp);
-                std::fflush(stdout);
-                pending_exit_reason_ = "TRAIL_FLOOR";
-                exit(id, move_bp, ts, s);
-                return;
+            if (s.pos.mfe >= 8.0) {
+                double trail_dist = s.pos.mfe < 15.0 ? 6.0 :
+                                   s.pos.mfe < 20.0 ? 5.0 : 4.0;
+                double trail_floor = s.pos.mfe - trail_dist;
+                if (move_bp < trail_floor) {
+                    std::printf("[LL-ETH-TRAIL] %s | peak=%.2fbp dist=%.1fbp floor=%.2fbp now=%.2fbp\n",
+                        sym_short(id), s.pos.mfe, trail_dist, trail_floor, move_bp);
+                    std::fflush(stdout);
+                    pending_exit_reason_ = "TRAIL_FLOOR";
+                    exit(id, move_bp, ts, s);
+                    return;
+                }
             }
         } else if (s.pos.layer == LAYER_MICRO) {
             // TP=12bp gross  +2bp net. SL=3bp. Hold 8s max.
@@ -2513,13 +2523,24 @@ private:
                 (s.pos.layer == LAYER_MM_PRESSURE)  ||
                 (s.pos.layer == LAYER_FUNDING)      ||
                 (s.pos.layer == LAYER_NGAS)         ||
+                (s.pos.layer == LAYER_LEADLAG)      ||  // 25bp TP: pyramid at 15bp
+                (s.pos.layer == LAYER_ETH_LEAD)     ||  // same
+                (s.pos.layer == LAYER_VOLSHOCK)     ||  // 25bp TP: pyramid at 15bp
+                (s.pos.layer == LAYER_SESSION_MOM)  ||  // 22bp TP: pyramid at 12bp
                 (s.pos.layer == LAYER_VWAP &&
                     (s.session_vwap > 0.0 &&
                      (s.session_vwap - s.pos.entry_price) / s.session_vwap * 10000.0
                       >= TradingConfig::PYRAMID_MIN_VWAP_DEV_BP));
 
+            // Dynamic arm threshold: smaller for short-TP engines, larger for trail engines
+            double pyramid_arm = (
+                s.pos.layer == LAYER_LEADLAG     ||
+                s.pos.layer == LAYER_ETH_LEAD   ||
+                s.pos.layer == LAYER_VOLSHOCK) ? 12.0 :   // arm at 12bp for 25bp TP engines
+                s.pos.layer == LAYER_SESSION_MOM ? 10.0 : // arm at 10bp for 22bp TP
+                TradingConfig::PYRAMID_ARM_BP;             // 30bp for trail engines (LIQ/MM/etc)
             if (pyramid_eligible &&
-                move_bp >= TradingConfig::PYRAMID_ARM_BP &&
+                move_bp >= pyramid_arm &&
                 s.pos.mfe >= move_bp * 0.85 &&   // still in uptrend, not reversing
                 s.pos.entered_qty > 0.0) {
 

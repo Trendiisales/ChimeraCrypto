@@ -48,7 +48,7 @@ public:
     // Tier 1: BTC -> alts — read thresholds from TradingConfig (single source of truth)
     static constexpr double  BTC_MOVE_THRESHOLD_BP = TradingConfig::LEADLAG_BTC_THRESHOLD_BP; // 7.0bp
     static constexpr double  TARGET_MOVED_MAX_BP   = TradingConfig::LEADLAG_TARGET_MAX_BP;    // 3.0bp
-    static constexpr int64_t LOOKBACK_MS           = 300;  // extended 180->300ms: more samples, same edge window
+    static constexpr int64_t LOOKBACK_MS           = 400;  // 5bp BTC threshold needs wider window to build
     static constexpr int     MIN_BTC_SAMPLES       = 3;
 
     // Tier 2: ETH -> alts

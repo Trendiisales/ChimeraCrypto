@@ -75,10 +75,10 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // LEAD-LAG SIGNAL PARAMETERS
     // -------------------------------------------------------------------------
-    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 2.5;  // lowered 3.5->2.5bp: BTC moves in 2-3bp bursts in low-vol
+    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 5.0;  // needs 5bp BTC move to get 25bp alt continuation
     static constexpr double  LEADLAG_CONFIRM_OB_RATIO   = 1.08;
     static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.04;
-    static constexpr double  LEADLAG_TARGET_MAX_BP      = 4.5;  // raised 3.0->4.5bp: valid signals rejected too early
+    static constexpr double  LEADLAG_TARGET_MAX_BP      = 8.0;  // allow alt to move up to 8bp before entry — still has room to 25bp
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0;
     static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 25.0;  // raised 10->25bp: 10bp < 15bp cost floor
     static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 6.0;   // raised 3->6bp
@@ -264,9 +264,9 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // ETH/SOL LEAD-LAG (DISABLED — insufficient WR at cost floor)
     // -------------------------------------------------------------------------
-    static constexpr double  ETH_LEAD_TP_BP            = 12.0;
-    static constexpr double  ETH_LEAD_SL_BP            =  3.0;
-    static constexpr int64_t ETH_LEAD_MAX_HOLD_MS      = 5000;
+    static constexpr double  ETH_LEAD_TP_BP            = 25.0;  // raised 12->25bp: same cost floor issue as LEADLAG
+    static constexpr double  ETH_LEAD_SL_BP            =  5.0;  // raised 3->5bp: matches LEADLAG
+    static constexpr int64_t ETH_LEAD_MAX_HOLD_MS      = 8000;  // extended 5->8s
     static constexpr double  ETH_LEAD_SUSTAIN_MULT     =  0.6;
     static constexpr double  SOL_LEAD_TP_BP            = 14.0;
     static constexpr double  SOL_LEAD_SL_BP            =  3.5;

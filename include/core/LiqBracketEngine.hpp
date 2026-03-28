@@ -57,7 +57,7 @@ public:
     // Parameters
     static constexpr double MIN_RANGE_BP     = 20.0;
     static constexpr double MAX_RANGE_BP     = 60.0;
-    static constexpr int    MIN_RANGE_TICKS  = 50;
+    static constexpr int    MIN_RANGE_TICKS  = 200;  // ~20s of compression needed for meaningful bracket
     static constexpr double BREAKOUT_BP      = 12.0;
     static constexpr double ENTRY_BUFFER_BP  = 3.0;
     static constexpr double STOP_BP          = 28.0;
@@ -72,7 +72,7 @@ public:
         if (peak_bp < 300.0) return 12.0;
         return 8.0;  // >= 300bp: 8bp trail captures 97%+
     }
-    static constexpr double LIQ_THRESHOLD    = 25000.0;   // $25k notional (lowered from $150k for low-vol sessions)
+    static constexpr double LIQ_THRESHOLD    = 150000.0;  // $150k notional — real cascade events only
     static constexpr double PERP_LEAD_BP     = 5.0;
     static constexpr int64_t COOLDOWN_MS     = 120000;    // 2 min per symbol
 

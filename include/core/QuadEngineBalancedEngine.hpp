@@ -316,7 +316,7 @@ public:
         // 7f. Liquidation Bracket Engine — BTC/ETH/SOL only (alts have too-thin books for bracket)
         // Capital gate: only if significant room left after other engines
         double bracket_available = std::max(0.0, dynamic_cap - used_R - obi_R - afe_R - pce_R);
-        if (bracket_available >= 0.5 && id <= 2) {  // BTC=0, ETH=1, SOL=2 only
+        if (bracket_available >= 0.5 && (id <= 3 || id == 6)) {  // BTC/ETH/SOL/BNB/XRP — liquid enough for bracket
             double bracket_liq     = balanced_.liq_engine().get_notional(id);
             double bracket_basis   = perp_feed_ && perp_feed_->ready(id)
                                      ? perp_feed_->basis_bp(id, price) : 0.0;

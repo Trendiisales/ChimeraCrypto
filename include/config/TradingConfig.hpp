@@ -75,7 +75,7 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // LEAD-LAG SIGNAL PARAMETERS
     // -------------------------------------------------------------------------
-    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 3.5;  // lowered 5.0->3.5bp: 5bp never fires in low-vol tape
+    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 2.5;  // lowered 3.5->2.5bp: BTC moves in 2-3bp bursts in low-vol
     static constexpr double  LEADLAG_CONFIRM_OB_RATIO   = 1.08;
     static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.04;
     static constexpr double  LEADLAG_TARGET_MAX_BP      = 4.5;  // raised 3.0->4.5bp: valid signals rejected too early

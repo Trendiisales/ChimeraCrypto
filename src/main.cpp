@@ -57,7 +57,18 @@
 class RollingLogger {
 public:
     static constexpr int LOG_KEEP_DAYS = 7;
-    static constexpr const char* LOG_DIR = "logs";
+    // Log directory: always next to the binary, never relative to CWD
+    static std::string get_log_dir() {
+        char exe_path[4096] = {};
+        ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path)-1);
+        if (len <= 0) return "logs";
+        exe_path[len] = '\0';
+        std::string dir(exe_path);
+        auto slash = dir.rfind('/');
+        if (slash != std::string::npos) dir = dir.substr(0, slash);
+        return dir + "/logs";
+    }
+    static constexpr const char* LOG_DIR_FALLBACK = "logs";
 
     RollingLogger() { open_today(); }
 
@@ -146,8 +157,9 @@ private:
         // called under mtx_
         if (utc_day() != current_day_) {
             if (file_.is_open()) { file_.flush(); file_.close(); }
-            mkdir(LOG_DIR, 0755);
-            current_path_ = std::string(LOG_DIR) + "/chimera_" + utc_date_str() + ".log";
+            std::string log_dir = get_log_dir();
+            mkdir(log_dir.c_str(), 0755);
+            current_path_ = log_dir + "/chimera_" + utc_date_str() + ".log";
             file_.open(current_path_, std::ios::app);
             current_day_ = utc_day();
             if (file_.is_open()) {
@@ -160,7 +172,8 @@ private:
 
     void purge_old_logs() {
         // called under mtx_
-        DIR* dir = opendir(LOG_DIR);
+        std::string log_dir = get_log_dir();
+        DIR* dir = opendir(log_dir.c_str());
         if (!dir) return;
         std::vector<std::string> files;
         struct dirent* ent;
@@ -168,7 +181,7 @@ private:
             std::string name(ent->d_name);
             if (name.rfind("chimera_", 0) == 0 && name.size() > 4 &&
                 name.substr(name.size()-4) == ".log") {
-                files.push_back(std::string(LOG_DIR) + "/" + name);
+                files.push_back(log_dir + "/" + name);
             }
         }
         closedir(dir);

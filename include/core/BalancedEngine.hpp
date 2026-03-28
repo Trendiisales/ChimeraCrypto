@@ -799,39 +799,9 @@ public:
         // IMPORTANT: mean-reversion signals (VWAP, DIVERGE, SPREAD-COMPRESS) are EXEMPT —
         // they fire precisely BECAUSE price dropped vs trend. Blocking them defeats their purpose.
         // Only block if gap is >= 5bp (genuine downtrend, not tick noise).
-        const bool trend_ok = trend_allows_long(id);
-        if (!trend_ok) {
-            static int64_t last_trend_log_[MAX_SYMBOLS] = {};
-            if (ts - last_trend_log_[id] > 30000) {
-                double gap_bp = (trend_ema_slow_[id] - trend_ema_fast_[id]) / trend_ema_fast_[id] * 10000.0;
-                std::printf("[TREND-FILTER] %s | downtrend gap=%.2fbp (fast=%.2f slow=%.2f) | blocking momentum signals\n",
-                    sym_short(id), gap_bp, trend_ema_fast_[id], trend_ema_slow_[id]);
-                std::fflush(stdout);
-                last_trend_log_[id] = ts;
-            }
-            // Record in rejection throttle so REJECTION-SUMMARY shows trend blocks
-            rejection_throttle_.record(std::string(sym_short(id)) + " LEADLAG", "trend_filter_down");
-            rejection_throttle_.record(std::string(sym_short(id)) + " VOLSHOCK", "trend_filter_down");
-            // Mean-reversion signals are exempt — they want price below trend
-            // Only block the momentum/event engines
-            if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
-            // FUND/NGAS: re-enabled 2026-03-28. Macro/carry signals — downtrend doesn't invalidate them.
-            if (try_funding_entry(id, price, ts, s, latency_ms)) return;
-            if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
-            // Block remaining momentum signals during downtrend
-            // (LEADLAG, VOLSHOCK, SESSION_MOM, MM-PRESSURE all chase moves — not suitable in downtrend)
-            // Fall through to mean-reversion block below
-            const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
-            if (has_book) {
-                if (edge_gate_allows(id, EDGE_VWAP, ts)           && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
-                if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
-                if (edge_gate_allows(id, EDGE_DIVERGE, ts)         && check_divergence(id, price, ts, s, latency_ms)) return;
-                // STATARB: active — cointegrated spread reverts regardless of trend direction
-                // Buying the cheap leg is VALID in a downtrend (cheap = even cheaper = even better entry)
-                if (check_statarb(id, price, ts, s, latency_ms)) return;
-            }
-            return;
-        }
+        // Trend filter removed: LEADLAG fires on BTC momentum pulling alts regardless
+        // of the alt's own trend direction. A 10bp EMA gap on SOL should not block
+        // a valid BTC-led signal. All engines have their own EV gates.
 
         if (edge_gate_allows(id, EDGE_LIQ, ts) && try_liquidation_entry(id, price, ts, s, latency_ms)) return;
         // FUND: re-enabled 2026-03-28 — TP=30bp, SL=8bp, 2hr hold. EV +3.5bp at 50% WR.

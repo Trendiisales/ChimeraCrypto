@@ -1697,8 +1697,10 @@ private:
     }
 
     bool edge_gate_allows(int id, EdgeEngineKey key, int64_t ts) {
-        if (key == EDGE_SWEEP || key == EDGE_LEADLAG || key == EDGE_VWAP ||
-            key == EDGE_OFI   || key == EDGE_VACUUM  ||
+        // Hard-disabled engines only: SWEEP (no samples yet), OFI/VACUUM (proven losers -95bp/-53bp),
+        // SPREAD_COMPRESS/DIVERGE (TP < cost floor, confirm-only not standalone).
+        // LEADLAG and VWAP are ACTIVE — enabled=true in constructor. Do NOT block them here.
+        if (key == EDGE_SWEEP  || key == EDGE_OFI    || key == EDGE_VACUUM ||
             key == EDGE_SPREAD_COMPRESS || key == EDGE_DIVERGE) return false;
         if (key == EDGE_MM && id > 1) return false;
         auto& g = edge_gate_[key];

@@ -43,21 +43,27 @@ set(CHIMERA_SOURCES
     src/core/StatefulGovernor.cpp
 )
 
-execute_process(
-    COMMAND git rev-parse --short HEAD
+# ── Build version: re-stamped on EVERY make, not just cmake configure ────────
+# execute_process() only runs at configure time — running make after a new
+# commit without re-running cmake leaves the hash stale. Fix: custom ALL target
+# writes build_version.h on every make; main.cpp depends on it so it recompiles.
+set(VERSION_HEADER "${CMAKE_BINARY_DIR}/build_version.h")
+
+add_custom_target(gen_version ALL
+    COMMAND bash -c "echo '#pragma once' > ${VERSION_HEADER} && echo '#define BUILD_VERSION "'$(git -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD 2>/dev/null || echo unknown)'"' >> ${VERSION_HEADER}"
+    BYPRODUCTS ${VERSION_HEADER}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_COMMIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
+    COMMENT "Stamping git hash into build_version.h"
 )
-if(NOT GIT_COMMIT_HASH)
-    set(GIT_COMMIT_HASH "unknown")
-endif()
-message(STATUS "Build version: ${GIT_COMMIT_HASH}")
 
 add_executable(chimera ${CHIMERA_SOURCES})
+add_dependencies(chimera gen_version)
 
-target_compile_definitions(chimera PRIVATE BUILD_VERSION="${GIT_COMMIT_HASH}")
+# Force main.cpp to recompile when the version header changes
+set_property(SOURCE ${CMAKE_SOURCE_DIR}/src/main.cpp
+    APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
+
+target_include_directories(chimera PRIVATE ${CMAKE_BINARY_DIR})
 
 target_link_libraries(chimera
     OpenSSL::SSL

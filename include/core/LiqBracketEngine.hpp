@@ -14,7 +14,7 @@
 //   3. Perp leading spot    -> confirms the move is real, not a fake wick
 //
 // COST MODEL (taker entry + taker exit):
-//   Round-trip cost: 8bp
+//   Round-trip cost: 15bp (7.5bp/side with BNB discount = TradingConfig::MAKER_ROUND_TRIP_BP)
 //   net TP:  80 - 15 = +65bp
 //   net SL: -28 - 15 = -43bp
 //   Break-even WR: 43 / (65+43) = 39.8% -- positive EV above 40% WR
@@ -24,14 +24,14 @@
 //   QuadEngine passes ms.regime; engine returns immediately if regime >= 2.
 //   Prevents bracket firing into an already-trending market.
 //
-// PARAMETERS (all calibrated for 8bp round-trip cost):
+// PARAMETERS (all calibrated for 15bp round-trip cost, MAKER_ROUND_TRIP_BP):
 //   MIN_RANGE_BP     = 20bp  (range must be meaningful)
 //   MAX_RANGE_BP     = 60bp  (range must not be a trend already)
 //   MIN_RANGE_TICKS  = 50    (~5s of data at typical tick rate)
 //   BREAKOUT_BP      = 12bp  (breakout must clear range edge)
 //   ENTRY_BUFFER_BP  = 3bp   (enter slightly beyond breakout)
 //   STOP_BP          = 28bp  (tight enough to limit loss, wide enough for noise)
-//   TARGET_BP        = 70bp  (must clear 8bp cost with room to spare)
+//   TARGET_BP        = unlimited trail  (trail exits; must clear 15bp cost)
 //   LIQ_THRESHOLD    = $150k (meaningful liquidation, not noise)
 //   PERP_LEAD_BP     = 5bp   (perp must be leading spot clearly)
 //   COOLDOWN_MS      = 120s  (prevents re-entry after exit)
@@ -52,7 +52,7 @@ namespace chimera {
 
 class LiqBracketEngine {
 public:
-    static constexpr double ROUND_TRIP_COST_BP = 15.0; // 7.5bp/side with BNB discount
+    static constexpr double ROUND_TRIP_COST_BP = TradingConfig::MAKER_ROUND_TRIP_BP; // 15bp
 
     // Parameters
     static constexpr double MIN_RANGE_BP     = 20.0;

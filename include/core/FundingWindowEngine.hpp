@@ -1,4 +1,5 @@
 #pragma once
+#include "config/TradingConfig.hpp"
 // ============================================================================
 // FundingWindowEngine.hpp
 // Chimera — Pre-Funding Window Trading Engine
@@ -50,7 +51,7 @@ namespace chimera {
 
 class FundingWindowEngine {
 public:
-    static constexpr double   ROUND_TRIP_COST_BP  = 15.0;
+    static constexpr double   ROUND_TRIP_COST_BP  = TradingConfig::MAKER_ROUND_TRIP_BP; // 15bp
     static constexpr double   RATE_THRESHOLD      = 0.00015; // 15bp/8h minimum
     static constexpr double   BASIS_THRESHOLD     = 3.0;     // 3bp basis dislocation
     static constexpr int      WINDOW_SECS         = 180;     // 3 min before funding

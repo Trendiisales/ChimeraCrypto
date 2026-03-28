@@ -1,4 +1,5 @@
 #pragma once
+#include "config/TradingConfig.hpp"
 // ============================================================================
 // BasisMomentumEngine.hpp
 // Chimera — Perp Basis Momentum Engine (SPOT LONG ONLY)
@@ -46,7 +47,7 @@ namespace chimera {
 
 class BasisMomentumEngine {
 public:
-    static constexpr double ROUND_TRIP_COST_BP  = 15.0; // 7.5bp/side BNB discount
+    static constexpr double ROUND_TRIP_COST_BP  = TradingConfig::MAKER_ROUND_TRIP_BP; // 15bp
 
     // Entry gates
     static constexpr double ENTRY_THRESHOLD_BP  = 8.0;  // raised 5->8bp: require bigger spike

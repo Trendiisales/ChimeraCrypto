@@ -856,7 +856,7 @@ public:
         // SOL-LEAD: 0% WR, net -17bp -- HARD DISABLED
         // if (check_sol_lead(id, price, ts, s, latency_ms)) return;
         // VOLSHOCK: maker entry now wired (layer_id=7, ask-0.1*spread, 500ms)
-        // At maker cost 4bp: EV = 0.55*14 - 0.45*4 = 7.7-1.8 = +5.9bp at 55% WR
+        // At maker cost 15bp: EV = 0.55*25 - 0.45*4 = 13.75-1.8 = +11.95bp at 55% WR (TP now 25bp)
         // Requires vol spike 3x baseline + displacement 8bp — higher conviction than EXPAND
         // AUDIT 2026-03-21: added has_book guard — VOLSHOCK was logging "no_book_data"
         // for SOL/LINK/AVAX/POL because bookTicker arrives later than aggTrade at startup.
@@ -3090,7 +3090,7 @@ private:
     // confirms buy aggression, price tends to follow 10-40 bps within seconds.
     // Fires in GRIND or BUILDUP only (BREAKOUT has its own momentum engines).
     // Maker entry — the edge is structural, not latency-sensitive.
-    // EV at 45% WR: 0.45*18 - 0.55*6 = 8.1 - 3.3 = +4.8bp net (after ~4bp maker cost)
+    // EV at 45% WR with 15bp cost: 0.45*(35-15) - 0.55*6 = +5.7bp net — viable at new TP=35bp
     // =========================================================================
     bool check_ofi_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const bool starved = startup_starved_mode(ts);
@@ -3175,7 +3175,7 @@ private:
     // collapse on the same side signals a stop run.  We trade momentum continuation
     // (the most reliable outcome — 60-70% of sweeps continue 20-80 bps).
     // Taker entry only — sweep edges decay in <200ms, maker fill is uncertain.
-    // EV at 55% WR: 0.55*22 - 0.45*8 = 12.1 - 3.6 = +8.5bp net (after ~8bp taker)
+    // EV at 55% WR with 20bp taker cost: 0.55*(30-20) - 0.45*8 = +2.1bp net — marginal, keep parked
     // =========================================================================
     bool check_sweep(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
@@ -3530,9 +3530,8 @@ private:
         }
 
         // COST FLOOR GATE — per-layer, based on actual execution model
-        // TAKER layers (post at ask, guaranteed fill): 8bp round trip cost → 12bp floor
-        //   LEADLAG, IMPULSE, ETH_LEAD, SOL_LEAD, VOLSHOCK, LIQUIDATION
-        // MAKER layers (post below mid, rebate): ~4bp cost → 4bp floor
+        // TAKER layers: 20bp round trip (10bp/side VIP0) = TradingConfig::TAKER_ROUND_TRIP_BP
+        // MAKER layers: 15bp round trip (7.5bp/side with BNB) = TradingConfig::MAKER_ROUND_TRIP_BP
         //   IMBALANCE, EXPANSION, VWAP, VACUUM
         // LEADLAG/LL-ETH-SOL now use aggressive maker entry — cost ~4bp, floor = MAKER
         // Pure taker layers (IMPULSE etc disabled but kept for correctness if re-enabled)
@@ -3853,10 +3852,9 @@ private:
         std::string symbol_full = sym_full(id);
 
         // NET PnL: subtract round-trip cost based on actual execution model
-        // Taker layers (post at ask): 8bp round trip (4bp/side at VIP0)
-        // Maker layers (post below mid): 4bp round trip (rebate ~1bp/side, spread ~2bp)
-        // LEADLAG and LL-ETH-SOL now use aggressive maker entry (layer_id=4)
-        // Cost ~4bp round trip (maker rebate), not 8bp taker
+        // Taker layers: 20bp round trip (10bp/side VIP0) = TradingConfig::TAKER_ROUND_TRIP_BP
+        // Maker layers: 15bp round trip (7.5bp/side with BNB) = TradingConfig::MAKER_ROUND_TRIP_BP
+        // All active layers use maker entry — only disabled taker layers (SWEEP/IMPULSE) use taker cost
         double round_trip_cost = layer_uses_taker_entry(s.pos.layer)
                                ? TradingConfig::TAKER_ROUND_TRIP_BP
                                : TradingConfig::MAKER_ROUND_TRIP_BP;

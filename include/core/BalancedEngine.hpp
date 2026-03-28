@@ -2611,7 +2611,16 @@ private:
         // ── END PYRAMIDING ────────────────────────────────────────────────────
 
         // Hard take-profit
-        if (move_bp >= tp_bp) {
+        // TP exit — suppress for trail-armed LEADLAG/VOLSHOCK/SESSION_MOM so
+        // extended runs are captured by the trail rather than cut at fixed TP.
+        const bool tp_suppress = (
+            (s.pos.layer == LAYER_LEADLAG ||
+             s.pos.layer == LAYER_LEADLAG_ETH_SOL ||
+             s.pos.layer == LAYER_ETH_LEAD ||
+             s.pos.layer == LAYER_VOLSHOCK ||
+             s.pos.layer == LAYER_SESSION_MOM) &&
+            s.pos.mfe >= 8.0);  // trail armed — let it run
+        if (!tp_suppress && move_bp >= tp_bp) {
             std::printf("[TP-HIT] %s | layer=%s | move=%.2fbp >= tp=%.2fbp\n",
                 sym_short(id),
                 (s.pos.layer == LAYER_MICRO)   ? "IMBAL"   :
@@ -2763,7 +2772,24 @@ private:
         }
 
         // Time-based forced exit
-        if (ts - s.pos.entry_ts > max_hold) {
+        // EXCEPTION: suppress timeout if the trail is armed and we are profitable.
+        // A 50bp LEADLAG run should not be killed at 8s — let it trail to completion.
+        // Only timeout if trade is stagnant (MFE < 8bp) or trail not yet armed.
+        const bool trail_armed = (
+            (s.pos.layer == LAYER_LEADLAG ||
+             s.pos.layer == LAYER_LEADLAG_ETH_SOL ||
+             s.pos.layer == LAYER_ETH_LEAD ||
+             s.pos.layer == LAYER_VOLSHOCK ||
+             s.pos.layer == LAYER_SESSION_MOM) &&
+            s.pos.mfe >= 8.0 && move_bp > 0.0);
+        // For trail engines with large targets, extend hold if still running
+        const bool trail_engine_running = (
+            (s.pos.layer == LAYER_LIQUIDATION ||
+             s.pos.layer == LAYER_MM_PRESSURE ||
+             s.pos.layer == LAYER_FUNDING     ||
+             s.pos.layer == LAYER_NGAS) &&
+            s.pos.mfe >= 20.0 && move_bp > 0.0);
+        if (ts - s.pos.entry_ts > max_hold && !trail_armed && !trail_engine_running) {
             std::printf("[MAX-HOLD] %s | hold=%ldms > %ldms\n",
                 sym_short(id),
                 (long)(ts - s.pos.entry_ts), (long)max_hold);

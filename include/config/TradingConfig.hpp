@@ -80,12 +80,12 @@ struct TradingConfig {
     static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.04;
     static constexpr double  LEADLAG_TARGET_MAX_BP      = 4.5;  // raised 3.0->4.5bp: valid signals rejected too early
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0;
-    static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 10.0;
-    static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 3.0;
-    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS = 3000;
-    static constexpr double  LEADLAG_TP_BP              = 12.0;
-    static constexpr double  LEADLAG_SL_BP              = 3.0;
-    static constexpr int64_t LEADLAG_MAX_HOLD_MS        = 5000;
+    static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 25.0;  // raised 10->25bp: 10bp < 15bp cost floor
+    static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 6.0;   // raised 3->6bp
+    static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS = 10000; // extended 3->10s
+    static constexpr double  LEADLAG_TP_BP              = 30.0;  // raised 12->30bp: 12bp < 15bp cost floor = guaranteed loser
+    static constexpr double  LEADLAG_SL_BP              = 8.0;   // raised 3->8bp: matches wider TP target
+    static constexpr int64_t LEADLAG_MAX_HOLD_MS        = 15000; // extended 5->15s: give move time to develop
 
     // -------------------------------------------------------------------------
     // LIQUIDATION CASCADE ENGINE

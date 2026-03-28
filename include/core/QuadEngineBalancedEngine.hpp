@@ -127,7 +127,7 @@ public:
             std::printf("  ║  ACTIVE STRATEGIES                                   ║\n");
             std::printf("  ║    LIQ CASCADE     TP=150bp trail  SL=20bp  ✓       ║\n");
             std::printf("  ║    VWAP REVERSION  TP=30bp  entry≥25bp  SL=5bp ✓   ║\n");
-            std::printf("  ║    LEADLAG         TP=12bp  BTC→ETH/SOL     ✓       ║\n");
+            std::printf("  ║    LEADLAG         TP=30bp  BTC→ETH/SOL     ✓       ║\n");
             std::printf("  ║    MM PRESSURE     TP=150bp trail  SL=10bp  ✓       ║\n");
             std::printf("  ║    FUNDING CARRY   TP=30bp  2hr hold        ✓       ║\n");
             std::printf("  ║    NGAS LEAD-LAG   TP=35bp  1hr hold        ✓       ║\n");

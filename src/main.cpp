@@ -326,6 +326,9 @@ void signal_handler(int sig) {
 int main() {
     //  0. Rolling log — install first so all output is captured
     g_logger = new RollingLogger();
+    // Install BEFORE any other output so everything is captured in the log file.
+    // This redirects stdout+stderr through a pipe that tees to both terminal and file.
+    g_logger->install();
     printf("[STARTUP] Rolling log: %s (7-day retention)\n", g_logger->current_path().c_str());
     // Build version injected at compile time by CMake — always matches actual binary
     printf("[STARTUP] Build version: %s\n", BUILD_VERSION);

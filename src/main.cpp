@@ -307,16 +307,8 @@ int main() {
     //  0. Rolling log — install first so all output is captured
     g_logger = new RollingLogger();
     printf("[STARTUP] Rolling log: %s (7-day retention)\n", g_logger->current_path().c_str());
-    // Read git hash dynamically at runtime -- never stale
-    {
-        char git_hash[64] = "unknown";
-        FILE* fp = popen("git -C \"$(dirname \"$(readlink -f /proc/self/exe)\")\" rev-parse --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null", "r");
-        if (fp) { if (fgets(git_hash, sizeof(git_hash), fp)) {
-            size_t len = strlen(git_hash);
-            if (len > 0 && git_hash[len-1] == '\n') git_hash[len-1] = '\0';
-        } pclose(fp); }
-        printf("[STARTUP] Build version: %s\n", git_hash);
-    }
+    // Build version injected at compile time by CMake — always matches actual binary
+    printf("[STARTUP] Build version: %s\n", BUILD_VERSION);
     fflush(stdout);
 
     //  1. Single-instance lock  must be first 

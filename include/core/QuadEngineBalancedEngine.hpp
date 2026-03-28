@@ -110,17 +110,9 @@ public:
         // Must be called after http_server_.start() so the GUI can reflect them.
         balanced_.restore_from_journal();
 
-        // Print accurate startup banner with current git hash
+        // Print accurate startup banner — BUILD_VERSION injected at compile time by CMake
         {
-            char git_hash[64] = "unknown";
-            FILE* fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
-            if (fp) {
-                if (fgets(git_hash, sizeof(git_hash), fp)) {
-                    size_t l = strlen(git_hash);
-                    if (l > 0 && git_hash[l-1] == '\n') git_hash[l-1] = '\0';
-                }
-                pclose(fp);
-            }
+            const char* git_hash = BUILD_VERSION;
             std::printf("\n");
             std::printf("  ╔══════════════════════════════════════════════════════╗\n");
             std::printf("  ║          CHIMERA QUAD ENGINE  build %-8s        ║\n", git_hash);
@@ -400,19 +392,8 @@ public:
 
         // Build version — git commit hash injected at compile time via -DBUILD_VERSION
         // Falls back to "dev" if not set (local builds without CI)
-        // Build version read dynamically at runtime
-        {
-            char _ghash[64] = "unknown";
-            FILE* _fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
-            if (_fp) {
-                if (fgets(_ghash, sizeof(_ghash), _fp)) {
-                    size_t _l = strlen(_ghash);
-                    if (_l > 0 && _ghash[_l-1] == '\n') _ghash[_l-1] = '\0';
-                }
-                pclose(_fp);
-            }
-            json << "\"build_ver\":\"" << _ghash << "\",";
-        }
+        // Build version injected at compile time by CMake (BUILD_VERSION macro)
+        json << "\"build_ver\":\"" << BUILD_VERSION << "\",";
 
         for (int _pi = 0; _pi < MAX_SYMBOLS; ++_pi)
             json << "\"" << sym_full(_pi) << "_price\":" << market_state_[_pi].last_price << ",";

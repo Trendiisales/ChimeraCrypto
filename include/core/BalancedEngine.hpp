@@ -2863,8 +2863,18 @@ private:
         double sustain = TradingConfig::LEADLAG_ETH_SOL_THRESHOLD_BP * 0.6;
         if (std::fabs(eth_now_bp) < sustain) return false;
 
-        std::printf("[ETH-LEAD] %s | eth_move=%.2fbp | sustain=%.2fbp | latency=%.1fms | ENTERING LONG\n",
-                    sym_short(id), eth_now_bp, sustain, latency_ms);
+        // CONFIRMATION GATE 1: Orderbook imbalance (same as BTC leadlag)
+        const MarketTick& eth_t = symbols_[id].last_tick;
+        double eth_ob = (eth_t.ask_size > 1e-9) ? eth_t.bid_size / eth_t.ask_size : 0.0;
+        if (eth_ob < TradingConfig::LEADLAG_CONFIRM_OB_RATIO) return false;
+
+        // CONFIRMATION GATE 2: Aggressive buy flow
+        double eth_flow = (symbols_[id].sell_vol_ema > 1e-9)
+            ? symbols_[id].buy_vol_ema / symbols_[id].sell_vol_ema : 0.0;
+        if (eth_flow < TradingConfig::LEADLAG_CONFIRM_FLOW_RATIO) return false;
+
+        std::printf("[ETH-LEAD] %s | eth_move=%.2fbp | ob=%.2f | flow=%.2f | lat=%.1fms | ENTERING LONG\n",
+                    sym_short(id), eth_now_bp, eth_ob, eth_flow, latency_ms);
         std::fflush(stdout);
 
         enter(id, price, ts, s, LAYER_ETH_LEAD, true);

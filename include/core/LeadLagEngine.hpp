@@ -48,19 +48,19 @@ public:
     // Tier 1: BTC -> alts — read thresholds from TradingConfig (single source of truth)
     static constexpr double  BTC_MOVE_THRESHOLD_BP = TradingConfig::LEADLAG_BTC_THRESHOLD_BP; // 7.0bp
     static constexpr double  TARGET_MOVED_MAX_BP   = TradingConfig::LEADLAG_TARGET_MAX_BP;    // 3.0bp
-    static constexpr int64_t LOOKBACK_MS           = 180;
+    static constexpr int64_t LOOKBACK_MS           = 300;  // extended 180->300ms: more samples, same edge window
     static constexpr int     MIN_BTC_SAMPLES       = 3;
 
     // Tier 2: ETH -> alts
     static constexpr double  ETH_MOVE_THRESHOLD_BP   = TradingConfig::LEADLAG_ETH_SOL_THRESHOLD_BP; // 9.0bp
     static constexpr double  ETH_TARGET_MOVED_MAX_BP = 2.5;
-    static constexpr int64_t ETH_LOOKBACK_MS         = 160;
+    static constexpr int64_t ETH_LOOKBACK_MS         = 250;  // extended 160->250ms
     static constexpr int     MIN_ETH_SAMPLES         = 3;
 
     // Tier 3: SOL -> alts
     static constexpr double  SOL_MOVE_THRESHOLD_BP   = 9.0;
     static constexpr double  SOL_TARGET_MOVED_MAX_BP = 2.5;
-    static constexpr int64_t SOL_LOOKBACK_MS         = 120;
+    static constexpr int64_t SOL_LOOKBACK_MS         = 200;  // extended 120->200ms
     static constexpr int     MIN_SOL_SAMPLES         = 3;
 
     LeadLagEngine() {}
@@ -69,7 +69,7 @@ public:
         if (symbol_id < 0 || symbol_id >= MAX_SYMBOLS) return;
         auto& buf = buffers_[symbol_id];
         buf.push_back({price, now_ms});
-        while (!buf.empty() && now_ms - buf.front().ts_ms > 600)
+        while (!buf.empty() && now_ms - buf.front().ts_ms > 1000)  // extended to cover 300ms lookback
             buf.pop_front();
     }
 

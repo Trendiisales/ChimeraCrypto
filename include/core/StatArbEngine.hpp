@@ -163,8 +163,8 @@ public:
     void close(double exit_price, const std::string& reason, int64_t ts) {
         if (!pos_.active) return;
         double pnl_bp = (exit_price - pos_.entry_price) / pos_.entry_price * 10000.0;
-        // Subtract round trip cost (maker: ~4bp)
-        pnl_bp -= 4.0;
+        // Subtract round trip cost (maker 7.5bp/side with BNB: 15bp total)
+        pnl_bp -= 15.0;
         stats_.total_trades++;
         if (pnl_bp > 0) stats_.wins++;
         stats_.total_pnl_bp += pnl_bp;

@@ -610,7 +610,17 @@ public:
             json << "\"vol_ratio\":"        << ms.vol_ratio << ",";
             json << "\"displacement_bp\":"  << ms.displacement_bp << ",";
             json << "\"acceleration_bp\":"  << ms.acceleration_bp << ",";
-            json << "\"buildup_ticks\":"     << ms.buildup_ticks;
+            json << "\"buildup_ticks\":" << ms.buildup_ticks << ",";
+            // ── Active engine readiness signals for GUI ──────────────────
+            json << "\"btc_move_bp\":" << balanced_.get_btc_move_bp() << ",";
+            {
+                double _sv = balanced_.get_session_vwap(i);
+                double _vd = (_sv > 0 && ms.last_price > 0)
+                    ? (_sv - ms.last_price) / _sv * 10000.0 : 0.0;
+                json << "\"vwap_deviation_bp\":" << _vd << ",";
+                json << "\"vwap_ready\":" << (_sv > 0 ? "true" : "false") << ",";
+            }
+            json << "\"mm_imbal_ema\":" << balanced_.get_mm_imbal_ema(i);
             
             json << "}";
             if (i < MAX_SYMBOLS - 1) json << ",";

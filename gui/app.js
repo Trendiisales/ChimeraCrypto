@@ -276,14 +276,21 @@ function renderTradeLog() {
 
 function bestReadiness(d) {
   if (!d) return 0;
-  // Bracket range_pct feeds into readiness — a fully-built range is at 1.0
+  // Score ACTIVE engines only (structural/convex/compression are disabled)
+  // LEADLAG: BTC 180ms move vs 3.5bp threshold
+  const btcMove = Math.abs(d.btc_move_bp || 0);
+  const leadlag_pct = Math.min(1.0, btcMove / 3.5);
+  // VWAP: price below session VWAP vs 25bp entry threshold
+  const vwap_dev = d.vwap_deviation_bp || 0;
+  const vwap_rdy = (d.vwap_ready === true || d.vwap_ready === 'true');
+  const vwap_pct = vwap_rdy && vwap_dev > 0 ? Math.min(1.0, vwap_dev / 25.0) : 0;
+  // LIQ: notional building toward $1M threshold
+  const liq_pct = Math.min(1.0, (d.liq_notional || 0) / 1000000) * 0.7;
+  // MM: slow book imbalance EMA toward 0.25
+  const mm_pct = Math.min(1.0, (d.mm_imbal_ema || 0) / 0.25) * 0.5;
+  // Bracket range
   const bracket_pct = d.bracket_range_pct || 0;
-  return Math.max(
-    d.structural_readiness  || 0,
-    d.convex_readiness      || 0,
-    d.compression_readiness || 0,
-    bracket_pct
-  );
+  return Math.max(leadlag_pct, vwap_pct, liq_pct, mm_pct, bracket_pct);
 }
 
 function readinessColor(score) {
@@ -386,6 +393,7 @@ function updateLivePositions(data) {
 
 function updateAll(data) {
   if (!data) return;
+  window._lastApiData = data;
   if (!uptimeStart) uptimeStart = Date.now();
 
   // Restart detection
@@ -480,9 +488,13 @@ function updateAll(data) {
       } else { spEl.textContent='--'; spEl.className='sm2-val zero'; }
     }
 
-    // Card active state
+    // Card active state + imminent glow when readiness >= 75%
     const card = $('sb-'+sym);
-    if (card) card.className = 'sym-card' + (d.micro_active ? ' active' : '');
+    if (card) {
+      const _rs = bestReadiness(d);
+      const _imm = _rs >= 0.75 && !d.micro_active;
+      card.className = 'sym-card' + (d.micro_active ? ' active' : '') + (_imm ? ' imminent' : '');
+    }
 
     // Engine dots
     // LIQ badge — shows liquidation notional building

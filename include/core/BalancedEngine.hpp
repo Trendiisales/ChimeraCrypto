@@ -925,6 +925,10 @@ public:
     LiquidationEngine& liq_engine()                 { return liq_engine_; }
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
+    // Readiness signal accessors — used by QuadEngine for GUI imminent-trade display
+    double get_session_vwap(int id)  const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].session_vwap  : 0.0; }
+    double get_mm_imbal_ema(int id)  const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].mm_imbal_ema  : 0.0; }
+    double get_btc_move_bp()         const { return leadlag_.btc_move_bp(); }
     double get_win_boost_for(const std::string& engine) const {
         return capital_control_.win_boost_for(engine);
     }

@@ -1743,7 +1743,7 @@ private:
         // BTC(0): 56.7% WR +0.53bp/trade -- deep books eat the edge, 20% MFE capture, -2.72bp avg MAE. Not worth it.
         // ETH(1): 54% WR -10bp -- net loser
         // BNB(3): 28% WR -17bp -- active money destruction
-        // WINNERS: SOL(2), AVAX(4), LINK(5), POL(6) -- thin books, explosive moves, TP in <1s
+        // WINNERS: SOL(2), AVAX(4), LINK(5), XRP(6) -- thin/mid books, explosive moves, TP in <1s
         if (id == 0 || id == 1 || id == 3) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
@@ -1804,7 +1804,8 @@ private:
         // EXPAND symbol filter:
         //   Focus only on the thin alts where expansion moves are large enough
         //   to beat spot costs cleanly.
-        //   AVAX(4), LINK(5), POL(6): thin books, explosive moves, 3 live trades +22/+11/+22bp
+        //   AVAX(4), LINK(5): thin books, explosive moves
+        //   XRP(6): deeper books than AVAX/LINK but still eligible for EXPAND
         if (id != 4 && id != 5 && id != 6) {
             rejection_throttle_.record(key, "symbol_filtered");
             return false;
@@ -3694,13 +3695,14 @@ private:
         // sym_mult: per-symbol size bias
         // AUDIT 2026-03-28: Wintermute 2025 report confirms altcoin rallies shorter and less persistent.
         // Liquidity concentrated in BTC/ETH — alts have thin books and fast reversals.
-        // AVAX/LINK/XRP (id 4,5,6): reduced to 0.15x — minimal size, these are near-worthless in
-        //   current market structure. Not worth holding positions on thin-book tokens.
+        // AVAX/LINK (id 4,5): 0.15x — thin books, fast reversals
+        // XRP (id 6): 0.40x — deep books, ~$2.8B daily volume, BNB-tier liquidity
         // BNB (id 3): 0.4x — somewhat liquid but not BTC/ETH quality.
         // SOL (id 2): 0.6x — decent liquidity, follows BTC reliably, keep moderate size.
         // ETH (id 1): 0.8x — deep book, strong BTC correlation, near-BTC quality.
         // BTC (id 0): 1.0x — deepest liquidity, tightest spreads, primary engine.
-        double sym_mult = (id == 4 || id == 5 || id == 6) ? 0.15 :  // AVAX/LINK/XRP: near-zero, thin books
+        double sym_mult = (id == 4 || id == 5) ? 0.15 :  // AVAX/LINK: thin books, fast reversals
+                          (id == 6) ? 0.40 :   // XRP: deep books, ~$2.8B daily, BNB-tier
                           (id == 3) ? 0.40 :   // BNB: reduced, moderate liquidity
                           (id == 2) ? 0.60 :   // SOL: decent liquidity
                           (id == 1) ? 0.80 :   // ETH: near-BTC quality

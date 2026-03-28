@@ -12,9 +12,9 @@ namespace chimera {
 // LeadLagEngine -- N-symbol multi-leader lead-lag detector
 //
 // Leaders:
-//   BTC (id=0) -> ETH, SOL, BNB, AVAX, LINK, POL    (Tier 1)
-//   ETH (id=1) -> SOL, BNB, AVAX, LINK, POL          (Tier 2, NEW)
-//   SOL (id=2) -> AVAX, POL                           (Tier 3, NEW)
+//   BTC (id=0) -> ETH, SOL, BNB, AVAX, LINK, XRP    (Tier 1)
+//   ETH (id=1) -> SOL, BNB, AVAX, LINK, XRP          (Tier 2, NEW)
+//   SOL (id=2) -> AVAX, XRP                           (Tier 3, NEW)
 //
 // MEASURED LATENCY (Tokyo VPS -> Binance AWS Tokyo):
 //   WS feed p95: 18-25ms
@@ -34,11 +34,11 @@ struct PricePoint {
 };
 
 // Tier 2: ETH leads these follower ids
-static constexpr int ETH_FOLLOWERS[]    = { 2, 3, 4, 5, 6 }; // SOL, BNB, AVAX, LINK, POL
+static constexpr int ETH_FOLLOWERS[]    = { 2, 3, 4, 5, 6 }; // SOL, BNB, AVAX, LINK, XRP
 static constexpr int ETH_FOLLOWERS_N    = 5;
 
 // Tier 3: SOL leads these follower ids
-static constexpr int SOL_FOLLOWERS[]    = { 4, 6 };           // AVAX, POL
+static constexpr int SOL_FOLLOWERS[]    = { 4, 6 };           // AVAX, XRP
 static constexpr int SOL_FOLLOWERS_N    = 2;
 
 class LeadLagEngine {

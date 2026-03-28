@@ -466,9 +466,8 @@ public:
         std::printf(" Capital Control Layer: ENABLED                                \n");
         std::printf(" Execution Optimizer: ENABLED                                  \n");
         std::printf(" Reinforcement Layer: ENABLED                                  \n");
-        std::printf(" Active Engines: LIQ only (Option B — 15bp cost floor)        \n");
-        std::printf(" DISABLED:  LEADLAG|VWAP|MM|SPREAD|DIVERGE|FUND|NGAS|STATARB  \n");
-        std::printf(" REASON:    All disabled engines have TP < 20bp gross          \n");
+        std::printf(" Active Engines: LEADLAG | VWAP | LIQ | MM | FUND | NGAS | STATARB | SESSION_MOM \n");
+        std::printf(" DISABLED:  OFI(-95bp) | VACUUM(-53bp) | SWEEP(0 samples)      \n");
         std::printf(" QUAD:      BRACKET | BASIS | FUND-WINDOW active               \n");
         std::printf(" AUDIT 2026-03-21 FIXES:                                       \n");
         std::printf("   VWAP entry: 20->12bp | Trend filter: 5->8bp gap            \n");

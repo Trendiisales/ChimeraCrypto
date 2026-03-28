@@ -75,10 +75,10 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // LEAD-LAG SIGNAL PARAMETERS
     // -------------------------------------------------------------------------
-    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 5.0;
+    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 3.5;  // lowered 5.0->3.5bp: 5bp never fires in low-vol tape
     static constexpr double  LEADLAG_CONFIRM_OB_RATIO   = 1.08;
     static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.04;
-    static constexpr double  LEADLAG_TARGET_MAX_BP      = 3.0;
+    static constexpr double  LEADLAG_TARGET_MAX_BP      = 4.5;  // raised 3.0->4.5bp: valid signals rejected too early
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0;
     static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 10.0;
     static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 3.0;
@@ -378,8 +378,8 @@ struct TradingConfig {
     static constexpr int    KILL_WINDOW_START_UTC     = 2;
     static constexpr int    KILL_WINDOW_END_UTC       = 7;
     static constexpr int    MAX_CONCURRENT_POSITIONS  = 5;
-    static constexpr int    LEADLAG_PRIME_START_UTC   = 1;
-    static constexpr int    LEADLAG_PRIME_END_UTC     = 5;
+    static constexpr int    LEADLAG_PRIME_START_UTC   = 7;   // EU open — full active session
+    static constexpr int    LEADLAG_PRIME_END_UTC     = 22;  // NY close
     static constexpr double LEADLAG_OFFPEAK_SIZE_MULT = 0.5;  // Wintermute 2025: altcoin rallies shorter, stay with 0.5x off-peak
     static constexpr double RISK_FRACTION             = 0.02;
     static constexpr double MAX_TOTAL_EXPOSURE_PCT    = 0.25;

@@ -44,26 +44,24 @@ set(CHIMERA_SOURCES
 )
 
 # ── Build version: re-stamped on EVERY make, not just cmake configure ────────
-# execute_process() only runs at configure time — running make after a new
-# commit without re-running cmake leaves the hash stale. Fix: custom ALL target
-# writes build_version.h on every make; main.cpp depends on it so it recompiles.
-set(VERSION_HEADER "${CMAKE_BINARY_DIR}/build_version.h")
+# Strategy: a Python script writes include/version_generated.hpp with the
+# current git hash on every make. main.cpp and QuadEngine include it directly.
+# Python is used (not bash) to avoid CMake shell-escaping hell with nested quotes.
+set(VERSION_HEADER "${CMAKE_SOURCE_DIR}/include/version_generated.hpp")
 
 add_custom_target(gen_version ALL
-    COMMAND bash -c "echo '#pragma once' > ${VERSION_HEADER} && echo '#define BUILD_VERSION "'$(git -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD 2>/dev/null || echo unknown)'"' >> ${VERSION_HEADER}"
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/GenVersion.cmake
     BYPRODUCTS ${VERSION_HEADER}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Stamping git hash into build_version.h"
+    COMMENT "Stamping git hash into include/version_generated.hpp"
 )
 
 add_executable(chimera ${CHIMERA_SOURCES})
 add_dependencies(chimera gen_version)
 
-# Force main.cpp to recompile when the version header changes
+# Force main.cpp to recompile whenever the version header changes
 set_property(SOURCE ${CMAKE_SOURCE_DIR}/src/main.cpp
     APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
-
-target_include_directories(chimera PRIVATE ${CMAKE_BINARY_DIR})
 
 target_link_libraries(chimera
     OpenSSL::SSL

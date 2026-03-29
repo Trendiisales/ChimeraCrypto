@@ -847,7 +847,9 @@ public:
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
             // MM-PRESSURE: maker entry, GRIND-only, 3 confirmation gates — re-enabled
             // 1 trade sample was insufficient to park; structural edge is sound
-            if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            // MM-PRESSURE DISABLED: SL=10bp < 15bp cost floor = guaranteed 25bp loss on every SL hit
+        // Re-enable only after fixing: SL must be > cost floor, or add minimum profit gate
+        // if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
             // SPREAD-COMPRESS: spread wide->tight = MM directional commitment, maker bid
             if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
             // DIVERGE: BTC/ETH/SOL laggard snaps back to correlated peers, maker bid

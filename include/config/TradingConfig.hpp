@@ -81,10 +81,10 @@ struct TradingConfig {
     static constexpr double  LEADLAG_TARGET_MAX_BP      = 8.0;  // allow alt to move up to 8bp before entry — still has room to 25bp
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0;
     static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 25.0;  // raised 10->25bp: 10bp < 15bp cost floor
-    static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 6.0;   // raised 3->6bp
+    static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 15.0;  // raised to cost floor minimum
     static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS = 10000; // extended 3->10s
     static constexpr double  LEADLAG_TP_BP              = 30.0;  // raised 12->30bp: 12bp < 15bp cost floor = guaranteed loser
-    static constexpr double  LEADLAG_SL_BP              = 8.0;   // raised 3->8bp: matches wider TP target
+    static constexpr double  LEADLAG_SL_BP              = 15.0;  // raised 8->15bp: at cost floor minimum
     static constexpr int64_t LEADLAG_MAX_HOLD_MS        = 15000; // extended 5->15s: give move time to develop
 
     // -------------------------------------------------------------------------
@@ -159,7 +159,7 @@ struct TradingConfig {
     static constexpr double  VWAP_MIN_OFI_RATIO        = 0.15;  // FIX: raised 0.12→0.15
     static constexpr double  VWAP_MAX_SPREAD_BPS       = 1.8;
     static constexpr double  VWAP_TP_BP                = 30.0;  // FIX: 12→30bp
-    static constexpr double  VWAP_SL_BP                = 5.0;   // FIX: 3.5→5bp
+    static constexpr double  VWAP_SL_BP                = 15.0;  // at cost floor minimum
     static constexpr int64_t VWAP_MAX_HOLD_MS          = 90000; // FIX: 35→90s
     static constexpr double  VWAP_TRAIL_ARM_BP         = 12.0;  // FIX: 1.5→12bp (arm at real profit)
     static constexpr double  VWAP_TRAIL_LOCK_PCT       = 0.65;  // lock 65% of peak once armed
@@ -243,7 +243,7 @@ struct TradingConfig {
     // Pyramiding eligible: add 50% unit if funding still negative and up 30bp+.
     static constexpr double  FUNDING_SIG_THRESHOLD    = -0.0003;
     static constexpr double  FUNDING_SIG_TP_BP        = 30.0;
-    static constexpr double  FUNDING_SIG_SL_BP        = 8.0;
+    static constexpr double  FUNDING_SIG_SL_BP        = 15.0;  // raised 8->15bp: must exceed cost floor
     static constexpr int64_t FUNDING_SIG_MAX_HOLD_MS  = 7200000;   // 2 hours
     static constexpr int64_t FUNDING_SIG_COOLDOWN_MS  = 14400000;  // 4 hours
     static constexpr double  FUNDING_SIG_LATENCY_MAX  = 50.0;
@@ -256,7 +256,7 @@ struct TradingConfig {
     static constexpr double  NGAS_SPIKE_PCT            = 2.0;
     static constexpr double  NGAS_CRYPTO_MOVED_MAX_BP  = 25.0;
     static constexpr double  NGAS_TP_BP                = 35.0;
-    static constexpr double  NGAS_SL_BP                = 10.0;
+    static constexpr double  NGAS_SL_BP                = 15.0;  // raised 10->15bp: at minimum cost floor
     static constexpr int64_t NGAS_MAX_HOLD_MS          = 3600000;   // 1 hour
     static constexpr int64_t NGAS_COOLDOWN_MS          = 28800000;  // 8 hours
     static constexpr double  NGAS_LATENCY_MAX_MS       = 50.0;
@@ -265,7 +265,7 @@ struct TradingConfig {
     // ETH/SOL LEAD-LAG (DISABLED — insufficient WR at cost floor)
     // -------------------------------------------------------------------------
     static constexpr double  ETH_LEAD_TP_BP            = 25.0;  // raised 12->25bp: same cost floor issue as LEADLAG
-    static constexpr double  ETH_LEAD_SL_BP            =  5.0;  // raised 3->5bp: matches LEADLAG
+    static constexpr double  ETH_LEAD_SL_BP            = 15.0;  // raised to cost floor minimum
     static constexpr int64_t ETH_LEAD_MAX_HOLD_MS      = 8000;  // extended 5->8s
     static constexpr double  ETH_LEAD_SUSTAIN_MULT     =  0.6;
     static constexpr double  SOL_LEAD_TP_BP            = 14.0;
@@ -277,7 +277,7 @@ struct TradingConfig {
     // VOLUME SHOCK CONTINUATION
     // -------------------------------------------------------------------------
     static constexpr double  VOLSHOCK_TP_BP            = 25.0;  // FIX 2026-03-28: raised 18->25bp (18bp only 3bp above 15bp cost floor)
-    static constexpr double  VOLSHOCK_SL_BP            =  4.0;
+    static constexpr double  VOLSHOCK_SL_BP            = 15.0;  // at cost floor minimum
     static constexpr int64_t VOLSHOCK_MAX_HOLD_MS      = 6000;
 
     // -------------------------------------------------------------------------
@@ -315,7 +315,7 @@ struct TradingConfig {
     static constexpr double  MM_DRIFT_BPS_THRESHOLD   = 5.0;
     static constexpr double  MM_MAX_SPREAD_BPS        = 1.5;
     static constexpr double  MM_TP_BP                 = 150.0;  // trail target
-    static constexpr double  MM_SL_BP                 = 10.0;
+    static constexpr double  MM_SL_BP                 = 20.0;  // raised 10->20bp: must exceed 15bp cost floor
     static constexpr double  MM_TRAIL_ARM_BP          = 25.0;
     static constexpr int64_t MM_MAX_HOLD_MS           = 45000;
 
@@ -324,7 +324,7 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // EV: TP=20bp, SL=6bp. At 65% WR (cointegrated): 0.65*(20-15) - 0.35*6 = +1.15bp net.
     static constexpr double  STATARB_TP_BP            = 20.0;
-    static constexpr double  STATARB_SL_BP            = 6.0;
+    static constexpr double  STATARB_SL_BP            = 15.0;  // at cost floor minimum
     static constexpr int64_t STATARB_MAX_HOLD_MS      = 4 * 3600000LL;
     static constexpr int64_t STATARB_COOLDOWN_MS      = 1800000LL;
     static constexpr double  STATARB_ENTRY_ZSCORE     = 2.0;
@@ -350,7 +350,7 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // EV: TP=22bp, SL=6bp. At 70% WR (session open): 0.7*(22-15) - 0.3*6 = +3.1bp net.
     static constexpr double  SESSION_MOM_TP_BP        = 22.0;
-    static constexpr double  SESSION_MOM_SL_BP        = 6.0;
+    static constexpr double  SESSION_MOM_SL_BP        = 15.0;  // at cost floor minimum
     static constexpr int64_t SESSION_MOM_MAX_HOLD_MS  = 900000LL;  // 15 min
 
     // -------------------------------------------------------------------------

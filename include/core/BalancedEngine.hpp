@@ -808,7 +808,7 @@ public:
         // FUND: re-enabled 2026-03-28 — TP=30bp, SL=8bp, 2hr hold. EV +3.5bp at 50% WR.
         if (try_funding_entry(id, price, ts, s, latency_ms)) return;
         // NGAS: re-enabled 2026-03-28 — TP=35bp, SL=10bp, 1hr hold. EV +5bp at 50% WR.
-        if (try_ngas_entry(id, price, ts, s, latency_ms)) return;
+        // NGAS disabled: no correlation between natural gas and crypto at tick level
         bool ll_prime = (utc_hour >= TradingConfig::LEADLAG_PRIME_START_UTC &&
                          utc_hour <  TradingConfig::LEADLAG_PRIME_END_UTC);
         ll_offpeak_size_mult_ = ll_prime ? 1.0 : TradingConfig::LEADLAG_OFFPEAK_SIZE_MULT;

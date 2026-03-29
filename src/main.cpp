@@ -372,12 +372,7 @@ int main() {
         controller.set_funding_signal(&g_funding_signal);
     }).detach();
 
-    //  2c. NGAS fetcher  Natural Gas macro lead-lag signal 
-    g_ngas_engine.set_fetcher(&g_ngas_fetcher);
-    controller.set_ngas_engine(&g_ngas_engine);
-    g_ngas_fetcher.start();
-    std::printf("[STARTUP] NGAS macro fetcher started (5-min poll, NGO.F via stooq)\n");
-    std::fflush(stdout);
+    // NGAS disabled — no correlation between natural gas and crypto
 
     //  2b. Liquidation feed  Binance futures forceOrder stream 
     chimera::LiquidationFeed liq_feed;

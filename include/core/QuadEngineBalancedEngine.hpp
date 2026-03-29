@@ -130,7 +130,7 @@ public:
             std::printf("  ║    LEADLAG         TP=30bp  BTC→ETH/SOL     ✓       ║\n");
             std::printf("  ║    MM PRESSURE     TP=150bp trail  SL=10bp  ✓       ║\n");
             std::printf("  ║    FUNDING CARRY   TP=30bp  2hr hold        ✓       ║\n");
-            std::printf("  ║    NGAS LEAD-LAG   TP=35bp  1hr hold        ✓       ║\n");
+            std::printf("  ║    NGAS LEAD-LAG   disabled (no crypto correlation) ║\n");
             std::printf("  ║    VOLSHOCK        TP=25bp  maker entry     ✓       ║\n");
             std::printf("  ║    STAT ARB        TP=20bp  BTC/ETH z>2     ✓       ║\n");
             std::printf("  ║    SESSION MOM     TP=22bp  EU/US opens     ✓       ║\n");

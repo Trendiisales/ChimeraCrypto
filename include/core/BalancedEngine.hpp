@@ -1813,8 +1813,7 @@ private:
         }
 
         double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
-        const double min_vol_ratio = TradingConfig::EXPANSION_VOL_RATIO
-                                             : TradingConfig::EXPANSION_VOL_RATIO;
+        const double min_vol_ratio = TradingConfig::EXPANSION_VOL_RATIO;
         if (vol_ratio <= min_vol_ratio) {
             expand_confirm_ticks_[id] = 0;  // reset consecutive counter on weak tick
             rejection_throttle_.record(key, "weak_volatility");
@@ -1823,8 +1822,7 @@ private:
 
         // CONSECUTIVE TICK CONFIRMATION  require N ticks above threshold before entry
         // One tick above vol_ratio is noise. N consecutive ticks = genuine expansion.
-        const int confirm_ticks = TradingConfig::EXPANSION_CONFIRM_TICKS
-                                          : TradingConfig::EXPANSION_CONFIRM_TICKS;
+        const int confirm_ticks = TradingConfig::EXPANSION_CONFIRM_TICKS;
         expand_confirm_ticks_[id]++;
         if (expand_confirm_ticks_[id] < confirm_ticks) {
             rejection_throttle_.record(key, "confirm_ticks_pending");
@@ -1839,8 +1837,7 @@ private:
             return false;
         }
 
-        const int min_short_ticks = TradingConfig::EXPANSION_MIN_SHORT_TICKS
-                                            : TradingConfig::EXPANSION_MIN_SHORT_TICKS;
+        const int min_short_ticks = TradingConfig::EXPANSION_MIN_SHORT_TICKS;
         if ((int)s.short_returns.size() < min_short_ticks) {
             rejection_throttle_.record(key, "insufficient_ticks");
             return false;
@@ -2029,7 +2026,7 @@ private:
         // Not a hard gate: if perp data unavailable, trade fires on OB+flow alone.
         double perp_basis = get_perp_basis(id, price);
         double perp_flow  = get_perp_flow(id);
-        bool perp_confirms = (perp_basis > 2.0 && perp_flow > 0.1);  // perp premium + buy flow
+        // perp_confirms available: (perp_basis > 2.0 && perp_flow > 0.1)
         bool perp_available = (perp_feed_ && perp_feed_->ready(id));
         // Only reject on perp signal if perp is active AND strongly against us
         if (perp_available && perp_basis < -5.0) {

@@ -1778,7 +1778,6 @@ private:
     bool check_expansion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " EXPAND";
-        const bool starved = startup_starved_mode(ts);
 
         // EXPAND symbol filter:
         //   Focus only on the thin alts where expansion moves are large enough
@@ -1797,7 +1796,7 @@ private:
             rejection_throttle_.record(key, "already_in_expand");
             return false;
         }
-        const bool regime_ok = (s.regime == REGIME_BREAKOUT) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (s.regime == REGIME_BREAKOUT);
         if (!regime_ok) {
             rejection_throttle_.record(key, "weak_regime");
             return false;
@@ -1812,7 +1811,7 @@ private:
         }
 
         double vol_ratio = (long_vol > TradingConfig::VOL_MIN_LONG) ? (short_vol / long_vol) : 0.0;
-        const double min_vol_ratio = starved ? (TradingConfig::EXPANSION_VOL_RATIO - 0.10)
+        const double min_vol_ratio = TradingConfig::EXPANSION_VOL_RATIO
                                              : TradingConfig::EXPANSION_VOL_RATIO;
         if (vol_ratio <= min_vol_ratio) {
             expand_confirm_ticks_[id] = 0;  // reset consecutive counter on weak tick
@@ -1822,7 +1821,7 @@ private:
 
         // CONSECUTIVE TICK CONFIRMATION  require N ticks above threshold before entry
         // One tick above vol_ratio is noise. N consecutive ticks = genuine expansion.
-        const int confirm_ticks = starved ? std::max(1, TradingConfig::EXPANSION_CONFIRM_TICKS - 1)
+        const int confirm_ticks = TradingConfig::EXPANSION_CONFIRM_TICKS
                                           : TradingConfig::EXPANSION_CONFIRM_TICKS;
         expand_confirm_ticks_[id]++;
         if (expand_confirm_ticks_[id] < confirm_ticks) {
@@ -1838,7 +1837,7 @@ private:
             return false;
         }
 
-        const int min_short_ticks = starved ? std::max(8, TradingConfig::EXPANSION_MIN_SHORT_TICKS - 2)
+        const int min_short_ticks = TradingConfig::EXPANSION_MIN_SHORT_TICKS
                                             : TradingConfig::EXPANSION_MIN_SHORT_TICKS;
         if ((int)s.short_returns.size() < min_short_ticks) {
             rejection_throttle_.record(key, "insufficient_ticks");
@@ -1859,7 +1858,7 @@ private:
 
         // ORDER FLOW CONFIRMATION
         double flow = compute_flow_ratio(id);
-        double min_flow = starved ? 0.52 : TradingConfig::FLOW_CONFIRM_THRESHOLD;
+        double min_flow = TradingConfig::FLOW_CONFIRM_THRESHOLD;
         if (flow < min_flow) {
             rejection_throttle_.record(key, "weak_flow");
             return false;
@@ -1884,7 +1883,6 @@ private:
     bool check_imbalance(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " IMBAL";
-        const bool starved = startup_starved_mode(ts);
 
         // Per-symbol guard
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
@@ -1894,7 +1892,7 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (s.regime == REGIME_GRIND);
         if (!regime_ok) {
             rejection_throttle_.record(key, "not_grind");
             return false;
@@ -1906,7 +1904,7 @@ private:
             return false;
         }
         // Spread gate: tight spread = good fills. Wide = skip.
-        const double max_spread_bps = starved ? 2.0 : TradingConfig::IMBALANCE_MAX_SPREAD_BPS;
+        const double max_spread_bps = TradingConfig::IMBALANCE_MAX_SPREAD_BPS;
         if (t.spread_bps > max_spread_bps) {
             rejection_throttle_.record(key, "spread_wide");
             return false;
@@ -1919,7 +1917,6 @@ private:
                            utc_hour_imbal <  TradingConfig::SESSION_DEAD_END_UTC);
         double imbal_thresh = TradingConfig::IMBALANCE_THRESHOLD *
                               (dead_imbal ? TradingConfig::DEAD_ZONE_IMBAL_MULT : 1.0);
-        if (starved) imbal_thresh *= 0.85;
         if (std::abs(imbalance) < imbal_thresh) {
             rejection_throttle_.record(key, "weak_imbalance");
             return false;
@@ -3082,7 +3079,6 @@ private:
     bool check_vwap_reversion(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " VWAP";
-        const bool starved = startup_starved_mode(ts);
 
         // Per-symbol guard
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
@@ -3092,7 +3088,7 @@ private:
             return false;
         }
         // Only fires in GRIND  VWAP reversion fails in trending regimes
-        const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (s.regime == REGIME_GRIND);
         if (!regime_ok) {
             rejection_throttle_.record(key, "not_grind");
             return false;
@@ -3107,7 +3103,7 @@ private:
             rejection_throttle_.record(key, "no_book_data");
             return false;
         }
-        const double max_spread_bps = starved ? 2.5 : TradingConfig::VWAP_MAX_SPREAD_BPS;
+        const double max_spread_bps = TradingConfig::VWAP_MAX_SPREAD_BPS;
         if (t.spread_bps > max_spread_bps) {
             rejection_throttle_.record(key, "spread_wide");
             return false;
@@ -3116,19 +3112,19 @@ private:
         // FIX 2026-03-28: entry raised 12->25bp. At 25bp below VWAP the reversion edge is real.
         // EV: TP=30bp, SL=5bp, 50% WR => +5bp net after 15bp cost.
         double deviation_bp = (s.session_vwap - price) / s.session_vwap * 10000.0;
-        const double min_dev_bp = starved ? 12.0 : TradingConfig::VWAP_ENTRY_DEVIATION_BP;
+        const double min_dev_bp = TradingConfig::VWAP_ENTRY_DEVIATION_BP;
         if (deviation_bp < min_dev_bp) {
             rejection_throttle_.record(key, "not_far_enough_below_vwap");
             return false;
         }
         // Don't enter if too far below VWAP  that's a breakdown, not a dip
-        const double max_dev_bp = starved ? 45.0 : TradingConfig::VWAP_MAX_DEVIATION_BP;
+        const double max_dev_bp = TradingConfig::VWAP_MAX_DEVIATION_BP;
         if (deviation_bp > max_dev_bp) {
             rejection_throttle_.record(key, "too_far_below_vwap");
             return false;
         }
         // Book must show bid pressure  buyers are stepping in
-        const double min_imbal = starved ? 0.10 : TradingConfig::VWAP_MIN_IMBALANCE;
+        const double min_imbal = TradingConfig::VWAP_MIN_IMBALANCE;
         if (t.book_imbalance < min_imbal) {
             rejection_throttle_.record(key, "no_bid_confirmation");
             return false;
@@ -3140,7 +3136,7 @@ private:
             double total_ofi = s.ofi_buy_ema + s.ofi_sell_ema;
             if (total_ofi > 1e-9) {
                 double ofi_ratio = (s.ofi_buy_ema - s.ofi_sell_ema) / total_ofi;
-                const double min_ofi = starved ? 0.06 : TradingConfig::VWAP_MIN_OFI_RATIO;
+                const double min_ofi = TradingConfig::VWAP_MIN_OFI_RATIO;
                 if (ofi_ratio < min_ofi) {
                     rejection_throttle_.record(key, "ofi_sell_dominant");
                     return false;
@@ -3164,13 +3160,12 @@ private:
     // EV at 45% WR with 15bp cost: 0.45*(35-15) - 0.55*6 = +5.7bp net — viable at new TP=35bp
     // =========================================================================
     bool check_ofi_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const bool starved = startup_starved_mode(ts);
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) return false;
         const bool major_symbol = (id == 0 || id == 1);
 
         // Regime: GRIND or BUILDUP only
-        const bool regime_block = (s.regime == REGIME_DEAD) || (!starved && s.regime == REGIME_BREAKOUT);
+        const bool regime_block = (s.regime == REGIME_DEAD) || (s.regime == REGIME_BREAKOUT);
         if (regime_block) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "wrong_regime");
             return false;
@@ -3179,7 +3174,7 @@ private:
 
         const MarketTick& t = s.last_tick;
         if (t.bid <= 0.0 || t.ask <= 0.0) return false;
-        const double max_spread_bps = starved ? 2.5 : TradingConfig::OFI_MAX_SPREAD_BPS;
+        const double max_spread_bps = TradingConfig::OFI_MAX_SPREAD_BPS;
         if (t.spread_bps > max_spread_bps) {
             rejection_throttle_.record(std::string(sym_short(id)) + " OFI", "spread_wide");
             return false;
@@ -3190,7 +3185,7 @@ private:
         double ofi_ratio = (s.ofi_buy_ema - s.ofi_sell_ema) / total_flow;
 
         // Must exceed threshold in the long direction only (spot = long bias)
-        double min_ofi_ratio = starved ? 0.18 : TradingConfig::OFI_RATIO_THRESHOLD;
+        double min_ofi_ratio = TradingConfig::OFI_RATIO_THRESHOLD;
         if (major_symbol) {
             min_ofi_ratio = std::max(min_ofi_ratio, TradingConfig::OFI_MAJOR_RATIO_THRESHOLD);
         }
@@ -3205,7 +3200,7 @@ private:
             return false;
         }
         double vol_ratio = (t.agg_buy_volume + t.agg_sell_volume) / s.trade_size_ema;
-        double min_vol_spike = starved ? 1.2 : TradingConfig::OFI_VOLUME_SPIKE_MULT;
+        double min_vol_spike = TradingConfig::OFI_VOLUME_SPIKE_MULT;
         if (major_symbol) {
             min_vol_spike = std::max(min_vol_spike, TradingConfig::OFI_MAJOR_VOLUME_SPIKE_MULT);
         }
@@ -3215,7 +3210,7 @@ private:
         }
 
         // Book must also lean long (bid depth >= ask depth)
-        double min_book_imbal = starved ? 0.05 : TradingConfig::OFI_BOOK_CONFIRM_IMBAL;
+        double min_book_imbal = TradingConfig::OFI_BOOK_CONFIRM_IMBAL;
         if (major_symbol) {
             min_book_imbal = std::max(min_book_imbal, TradingConfig::OFI_MAJOR_BOOK_CONFIRM_IMBAL);
         }
@@ -3311,7 +3306,6 @@ private:
     // EV at 50% WR: 0.50*20 - 0.50*7 = 10 - 3.5 = +6.5bp net (after ~4bp maker)
     // =========================================================================
     bool check_mm_pressure(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        const bool starved = startup_starved_mode(ts);
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
         if (latency_ms > TradingConfig::LATENCY_IMBALANCE_MAX_MS) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "latency_high");
@@ -3319,7 +3313,7 @@ private:
         }
 
         // Best in GRIND — MM rebalancing is a ranging-market phenomenon
-        const bool regime_ok = (s.regime == REGIME_GRIND) || (starved && s.regime == REGIME_BUILDUP);
+        const bool regime_ok = (s.regime == REGIME_GRIND);
         if (!regime_ok) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "not_grind");
             return false;
@@ -3334,14 +3328,14 @@ private:
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "no_book_data");
             return false;
         }
-        const double max_spread_bps = starved ? 2.5 : TradingConfig::MM_MAX_SPREAD_BPS;
+        const double max_spread_bps = TradingConfig::MM_MAX_SPREAD_BPS;
         if (t.spread_bps > max_spread_bps) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "spread_wide");
             return false;
         }
 
         // Condition 1: slow book imbalance EMA must be positive (bid-heavy)
-        const double min_mm_imbal = starved ? 0.15 : TradingConfig::MM_IMBAL_EMA_THRESHOLD;
+        const double min_mm_imbal = TradingConfig::MM_IMBAL_EMA_THRESHOLD;
         if (s.mm_imbal_ema < min_mm_imbal) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "imbal_ema_low");
             return false;
@@ -3350,7 +3344,7 @@ private:
         // Condition 2: cumulative price drift must be positive (upward pressure)
         // Normalise drift as bps of current price
         double drift_bps = (s.mm_drift_sum / price) * 10000.0;
-        const double min_drift_bps = starved ? 2.0 : TradingConfig::MM_DRIFT_BPS_THRESHOLD;
+        const double min_drift_bps = TradingConfig::MM_DRIFT_BPS_THRESHOLD;
         if (drift_bps < min_drift_bps) {
             rejection_throttle_.record(std::string(sym_short(id)) + " MM", "drift_weak");
             return false;

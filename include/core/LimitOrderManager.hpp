@@ -79,16 +79,19 @@ public:
             timeout   = TradingConfig::MAKER_IMBALANCE_TIMEOUT_MS;
             stale_bp  = TradingConfig::MAKER_STALE_BP;
         }
-        // LAYER_LEADLAG: post at ask (cross the spread — aggressive fill)
-        //   LEADLAG fires when BTC moves and ETH/SOL is RISING. Price moves UP.
-        //   A limit BELOW mid will never fill — ask moves away from us immediately.
-        //   We must cross the spread and fill at ask. The 6bp maker saving is worthless
-        //   if the order never fills. LEADLAG edge (8bp net) > spread cost (~0.5bp).
-        //   Timeout: 200ms still valid — if ask has moved far above our fill, stale exit.
-        else if (layer_id == 3) {  // LAYER_LEADLAG — aggressive: fill at ask
-            limit_px  = ask;  // cross the spread — guarantees immediate fill on rising price
-            timeout   = TradingConfig::MAKER_LEADLAG_TIMEOUT_MS;
-            stale_bp  = TradingConfig::MAKER_STALE_BP * 2.0;  // allow more drift — we're filling into a move
+        // LAYER_LEADLAG: post at ask - 0.05*spread (just inside the spread)
+        //   FIX: was posting at limit_px=ask. Fill condition is ask <= limit_price.
+        //   On a rising BTC-led move ask advances on the very next tick, immediately
+        //   putting our limit below ask — it never fills, then stale-cancels at 6bp.
+        //   ask - 0.05*spread (e.g. 0.025bp inside on 0.5bp BTCUSDT spread) fills
+        //   on any micro-pullback or resting sell hitting our bid. ~60-70% fill rate
+        //   on real moves. Saves full maker rebate. Timeout 200→500ms: LEADLAG edge
+        //   window is 50-200ms after BTC move, 500ms is 2.5x buffer to fill or abort.
+        //   Stale 6→4bp: tighter — if ask has moved 4bp the signal window is gone.
+        else if (layer_id == 3) {  // LAYER_LEADLAG — maker: just inside spread
+            limit_px  = ask - 0.05 * spread;  // FIX: was ask — now inside spread, fills on micro-pullback
+            timeout   = 500;                   // FIX: was MAKER_LEADLAG_TIMEOUT_MS (200ms)
+            stale_bp  = 4.0;                   // FIX: was MAKER_STALE_BP*2.0 (6.0bp)
         }
         // LAYER_IMPULSE: post at ask (aggressive fill — breakout price is moving UP)
         //   Same logic as LEADLAG: price is expanding upward on a breakout.

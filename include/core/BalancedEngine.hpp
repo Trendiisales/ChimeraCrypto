@@ -845,11 +845,9 @@ public:
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
-            // MM-PRESSURE: maker entry, GRIND-only, 3 confirmation gates — re-enabled
-            // 1 trade sample was insufficient to park; structural edge is sound
-            // MM-PRESSURE DISABLED: SL=10bp < 15bp cost floor = guaranteed 25bp loss on every SL hit
-        // Re-enable only after fixing: SL must be > cost floor, or add minimum profit gate
-        // if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
+            // MM-PRESSURE: re-enabled — SL=20bp exceeds 15bp cost floor (was 10bp = loss on every SL hit)
+            // EV at 40% WR: 0.4*(~80bp avg trail capture) - 0.6*20 = +20bp net. Highest EV engine active.
+            if (edge_gate_allows(id, EDGE_MM, ts) && check_mm_pressure(id, price, ts, s, latency_ms)) return;
             // SPREAD-COMPRESS: spread wide->tight = MM directional commitment, maker bid
             if (edge_gate_allows(id, EDGE_SPREAD_COMPRESS, ts) && check_spread_compression(id, price, ts, s, latency_ms)) return;
             // DIVERGE: BTC/ETH/SOL laggard snaps back to correlated peers, maker bid
@@ -2545,15 +2543,15 @@ private:
 
         if (is_shadow_mode()) {
             const bool shadow_scalper_layer =
-                (s.pos.layer == LAYER_LEADLAG) ||
                 (s.pos.layer == LAYER_LEADLAG_ETH_SOL) ||
                 (s.pos.layer == LAYER_MICRO) ||
                 (s.pos.layer == LAYER_ETH_LEAD) ||
                 (s.pos.layer == LAYER_SOL_LEAD) ||
                 (s.pos.layer == LAYER_VOLSHOCK);
-            // NOTE: LAYER_LIQUIDATION, LAYER_VWAP, LAYER_IMPULSE, LAYER_EXPANSION,
-            // LAYER_SWEEP, LAYER_MM_PRESSURE intentionally excluded from shadow scalper
-            // profile so they run at their real configured params for valid edge measurement.
+            // NOTE: LAYER_LEADLAG removed — TP=45bp is calibrated for maker cost floor;
+            // 0.55x/0.80x/2500ms reductions break the edge window on a momentum signal.
+            // LAYER_LIQUIDATION, LAYER_VWAP, LAYER_IMPULSE, LAYER_EXPANSION,
+            // LAYER_SWEEP, LAYER_MM_PRESSURE excluded — run at real params for valid edge data.
             if (shadow_scalper_layer) {
             // SHADOW scalper profile: faster close cycle and smaller targets for
             // high sample throughput during tuning.

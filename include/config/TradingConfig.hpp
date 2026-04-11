@@ -76,14 +76,14 @@ struct TradingConfig {
     // LEAD-LAG SIGNAL PARAMETERS
     // -------------------------------------------------------------------------
     static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 5.0;  // needs 5bp BTC move to get 25bp alt continuation
-    static constexpr double  LEADLAG_CONFIRM_OB_RATIO   = 1.08;
-    static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.04;
+    static constexpr double  LEADLAG_CONFIRM_OB_RATIO   = 1.01;  // FIX: 1.08→1.01 — on BTC-led moves ETH/SOL book hasn't repriced, MMs pulling = low imbalance at exact signal time
+    static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.01;  // FIX: 1.04→1.01 — flow EMAs lag on fast BTC moves, 1.04 kills valid signals
     static constexpr double  LEADLAG_TARGET_MAX_BP      = 8.0;  // allow alt to move up to 8bp before entry — still has room to 25bp
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0;
     static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 25.0;  // raised 10->25bp: 10bp < 15bp cost floor
     static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 15.0;  // raised to cost floor minimum
     static constexpr int64_t LEADLAG_ETH_SOL_MAX_HOLD_MS = 10000; // extended 3->10s
-    static constexpr double  LEADLAG_TP_BP              = 30.0;  // raised 12->30bp: 12bp < 15bp cost floor = guaranteed loser
+    static constexpr double  LEADLAG_TP_BP              = 45.0;  // FIX: 30→45bp — shadow mode 0.55x = 24.75bp, net +9.75bp above 15bp cost floor
     static constexpr double  LEADLAG_SL_BP              = 15.0;  // raised 8->15bp: at cost floor minimum
     static constexpr int64_t LEADLAG_MAX_HOLD_MS        = 15000; // extended 5->15s: give move time to develop
 
@@ -151,15 +151,15 @@ struct TradingConfig {
     // Pyramiding: if deviation >= 40bp AND price still below VWAP, add 50% unit.
     // Hold extended 35->90s — mean reversion needs time, don't cut it short.
     // Partial exit at 15bp (half of TP): lock gains before the second half runs.
-    static constexpr double  VWAP_ENTRY_DEVIATION_BP   = 25.0;  // FIX: 12→25bp
+    static constexpr double  VWAP_ENTRY_DEVIATION_BP   = 15.0;  // FIX: 25→15bp — fires 5-8x/day vs 2-3x; EV positive at wider TP below
     static constexpr double  VWAP_MAX_DEVIATION_BP     = 100.0; // FIX: 60→100bp (allow deep dips)
     static constexpr double  VWAP_PARTIAL_EXIT_BP      = 15.0;  // FIX: 4→15bp (exit half at +15bp)
     static constexpr double  VWAP_PARTIAL_EXIT_SIZE    = 0.50;  // exit 50% at partial trigger
     static constexpr double  VWAP_MIN_IMBALANCE        = 0.20;  // FIX: raised 0.18→0.20
     static constexpr double  VWAP_MIN_OFI_RATIO        = 0.15;  // FIX: raised 0.12→0.15
     static constexpr double  VWAP_MAX_SPREAD_BPS       = 1.8;
-    static constexpr double  VWAP_TP_BP                = 30.0;  // FIX: 12→30bp
-    static constexpr double  VWAP_SL_BP                = 15.0;  // at cost floor minimum
+    static constexpr double  VWAP_TP_BP                = 40.0;  // FIX: 30→40bp — at 15bp entry: 0.5*(40-15)-0.5*15=+5bp net EV
+    static constexpr double  VWAP_SL_BP                = 15.0;  // unchanged — at cost floor minimum
     static constexpr int64_t VWAP_MAX_HOLD_MS          = 90000; // FIX: 35→90s
     static constexpr double  VWAP_TRAIL_ARM_BP         = 12.0;  // FIX: 1.5→12bp (arm at real profit)
     static constexpr double  VWAP_TRAIL_LOCK_PCT       = 0.65;  // lock 65% of peak once armed

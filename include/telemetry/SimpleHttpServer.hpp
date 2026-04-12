@@ -99,7 +99,7 @@ private:
         while (running_) {
             sockaddr_in client_addr;
             socklen_t client_len = sizeof(client_addr);
-            
+
             int client_fd = accept(server_fd_, (struct sockaddr*)&client_addr, &client_len);
             if (client_fd < 0) {
                 // EAGAIN/EWOULDBLOCK = timeout, loop and check running_ again
@@ -107,9 +107,14 @@ private:
                 if (running_) std::cerr << "[HTTP] Accept error: " << strerror(errno) << "\n";
                 continue;
             }
-            
-            handle_client(client_fd);
-            close(client_fd);
+
+            // Detach a thread per client so accept() is never blocked by a slow
+            // response (e.g. large state JSON during heavy trade activity).
+            // Each thread owns its fd and closes it on exit.
+            std::thread([this, client_fd]() {
+                handle_client(client_fd);
+                close(client_fd);
+            }).detach();
         }
     }
     

@@ -132,6 +132,18 @@ public:
         return (btc.back().price - ref) / ref * 10000.0;
     }
 
+    int btc_buffer_size() const { return (int)buffers_[0].size(); }
+
+    void btc_price_range(double& out_min, double& out_max) const {
+        const auto& btc = buffers_[0];
+        if (btc.empty()) { out_min = out_max = 0.0; return; }
+        out_min = out_max = btc.front().price;
+        for (const auto& p : btc) {
+            if (p.price < out_min) out_min = p.price;
+            if (p.price > out_max) out_max = p.price;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Tier 2: ETH (id=1) -> target_id  (SOL, BNB, AVAX, LINK, POL)
     // -----------------------------------------------------------------------

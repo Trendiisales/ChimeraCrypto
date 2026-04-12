@@ -644,12 +644,17 @@ public:
             if (ts - last_btc_diag_ts > 5000) {
                 double btc_bp = leadlag_.btc_move_bp();
                 const MarketTick& dt = symbols_[0].last_tick;
-                std::printf("[BTC-MOVE] move_1200ms=%.2fbp | threshold=%.1fbp | %s | depth=%s bid5=%.0f ask5=%.0f imbal5=%.3f\n",
+                // Also show raw buffer stats to confirm prices are arriving
+                double buf_min = 0.0, buf_max = 0.0;
+                int buf_size = leadlag_.btc_buffer_size();
+                leadlag_.btc_price_range(buf_min, buf_max);
+                std::printf("[BTC-MOVE] move_1200ms=%.2fbp | threshold=%.1fbp | %s | depth=%s bid5=%.0f ask5=%.0f imbal5=%.3f | buf_n=%d px_min=%.2f px_max=%.2f\n",
                     btc_bp,
                     TradingConfig::LEADLAG_BTC_THRESHOLD_BP,
                     std::fabs(btc_bp) >= TradingConfig::LEADLAG_BTC_THRESHOLD_BP ? "THRESHOLD_MET" : "below_threshold",
                     dt.depth_ready ? "READY" : "PENDING",
-                    dt.total_bid_depth, dt.total_ask_depth, dt.depth_imbalance);
+                    dt.total_bid_depth, dt.total_ask_depth, dt.depth_imbalance,
+                    buf_size, buf_min, buf_max);
                 std::fflush(stdout);
                 last_btc_diag_ts = ts;
             }

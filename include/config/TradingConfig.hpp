@@ -31,12 +31,13 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // LATENCY LIMITS
     // -------------------------------------------------------------------------
-    // Latency gates calibrated for Osaka VPS → Binance Tokyo: TCP RTT ~4ms, tick age p95 ~20ms
-    // Hard limit = 50ms (matches main.cpp ceiling). Signals beyond this are stale.
-    static constexpr double LATENCY_HARD_LIMIT_MS     = 50.0;   // was 100ms — halved for 4ms pipe
-    static constexpr double LATENCY_NET_CLEAN_MS      = 25.0;   // was 60ms — p95 tick age is ~20ms
-    static constexpr double LATENCY_LEADLAG_MAX_MS    = 35.0;   // was 80ms — leadlag edge window ~50-200ms, 35ms still leaves plenty
-    static constexpr double LATENCY_IMBALANCE_MAX_MS  = 30.0;   // was 60ms — book data must be fresh
+    // Latency gates. tick_age_ms for bookTicker = 0 (no trade_time field).
+    // tick_age_ms for aggTrade = now_ms - exchange_event_ts, includes NTP drift (~20-80ms).
+    // Gates must be above NTP drift floor or they permanently block aggTrade-based signals.
+    static constexpr double LATENCY_HARD_LIMIT_MS     = 150.0;  // matches main.cpp ceiling
+    static constexpr double LATENCY_NET_CLEAN_MS      = 60.0;   // restored — NTP drift ~20-80ms
+    static constexpr double LATENCY_LEADLAG_MAX_MS    = 80.0;   // restored — bookTicker age=0, safe
+    static constexpr double LATENCY_IMBALANCE_MAX_MS  = 60.0;   // restored
 
     // -------------------------------------------------------------------------
     // COST FLOORS

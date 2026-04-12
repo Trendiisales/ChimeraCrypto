@@ -418,10 +418,13 @@ int main() {
             g_exchange_latency.record(now_ms, tick.trade_time); // p95 for GUI only
         }
 
-        // Hard ceiling: skip truly stale ticks. With 4ms RTT to Binance Tokyo,
-        // anything >50ms indicates either a burst/backlog or clock drift.
-        // 200ms was too loose — a 50ms-stale tick is already useless for microstructure.
-        if (tick_age_ms > 50.0) return;
+        // Hard ceiling: skip truly stale ticks.
+        // tick_age_ms = now_ms - tick.trade_time (exchange event timestamp from aggTrade).
+        // Even with 4ms RTT, NTP clock drift between VPS and Binance exchange adds 20-80ms.
+        // 50ms was too tight — was dropping all aggTrade ticks. 150ms safely catches
+        // genuine feed staleness (burst/backlog) without false-dropping normal ticks.
+        // bookTicker ticks have trade_time=0, so tick_age_ms=0 and always pass.
+        if (tick_age_ms > 150.0) return;
 
         controller.on_tick(id, tick, now_ms, tick_age_ms);
 

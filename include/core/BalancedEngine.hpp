@@ -1728,6 +1728,16 @@ private:
         evaluate_edge_gate(key, ts);
         if (g.enabled) return true;
         const std::string rkey = std::string(sym_short(id)) + " " + edge_name(key);
+        // DIAGNOSTIC: log when VWAP gate blocks
+        if (key == EDGE_VWAP) {
+            static int64_t last_vwap_gate_log = 0;
+            if (ts - last_vwap_gate_log > 5000) {
+                std::printf("[VWAP-GATE] %s BLOCKED | enabled=%d | disabled_until=%lld | ts=%lld | samples=%d\n",
+                    sym_short(id), (int)g.enabled, (long long)g.disabled_until, (long long)ts, (int)g.samples.size());
+                std::fflush(stdout);
+                last_vwap_gate_log = ts;
+            }
+        }
         if (ts < g.disabled_until) {
             rejection_throttle_.record(rkey, "edge_cooldown");
         } else {

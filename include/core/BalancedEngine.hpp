@@ -486,16 +486,6 @@ public:
     }
 
     inline void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
-        // TICK-ENTRY diagnostic - log what bid/ask we receive
-        {
-            static int64_t _te_log_[MAX_SYMBOLS]={};
-            if (ts-_te_log_[id]>5000){
-                std::printf("[TICK-ENTRY] %s | bid=%.4f ask=%.4f mid=%.4f last=%.4f\n",
-                    sym_short(id),tick.bid,tick.ask,tick.mid_price,tick.last_price);
-                std::fflush(stdout);
-                _te_log_[id]=ts;
-            }
-        }
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         stall_detector_.on_ws_receive();
         stall_detector_.on_eval_start();
@@ -879,16 +869,6 @@ public:
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
         const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
-        // DIAGNOSTIC: log has_book status every 5s
-        {
-            static int64_t _hb_log_[MAX_SYMBOLS]={};
-            if (ts-_hb_log_[id]>5000){
-                std::printf("[HAS-BOOK-DIAG] %s | has_book=%d | bid=%.4f | ask=%.4f\n",
-                    sym_short(id),(int)has_book,s.last_tick.bid,s.last_tick.ask);
-                std::fflush(stdout);
-                _hb_log_[id]=ts;
-            }
-        }
         if (has_book) {
             // OFI: 24 trades 0% WR -95.66bp -- HARD DISABLED (all timeouts, no edge)
             // VACUUM: 17 trades 0% WR -53.67bp -- HARD DISABLED (threshold too loose)
@@ -897,15 +877,6 @@ public:
             // IMBAL: re-enabled as shadow layer (AUDIT 2026-03-21). Starts parked (enabled=false),
             // auto-promotes after 30 trades proving edge. Gate: imbal>0.42, spread<1.5bp, GRIND only.
             if (edge_gate_allows(id, EDGE_IMBAL, ts) && check_imbalance(id, price, ts, s, latency_ms)) return;
-            // DIRECT DIAGNOSTIC — confirm this line is reached
-            {
-                static int64_t _vwap_reach_[MAX_SYMBOLS]={};
-                if (ts-_vwap_reach_[id]>5000){
-                    std::printf("[VWAP-REACH] %s ts=%lld enabled=%d\n",sym_short(id),(long long)ts,(int)edge_gate_[EDGE_VWAP].enabled);
-                    std::fflush(stdout);
-                    _vwap_reach_[id]=ts;
-                }
-            }
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
@@ -3159,19 +3130,6 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " VWAP";
 
-        // DIAGNOSTIC: log every evaluation so we can confirm this function is reached
-        {
-            static int64_t last_vwap_diag_[MAX_SYMBOLS] = {};
-            if (ts - last_vwap_diag_[id] > 10000) {
-                std::printf("[VWAP-DIAG] %s | price=%.2f | vwap=%.2f | lat=%.1fms | regime=%s | pos=%d | dev=%.2fbp\n",
-                    sym, price, s.session_vwap,
-                    latency_ms, regime_name(s.regime),
-                    (int)s.pos.state,
-                    s.session_vwap > 0 ? (s.session_vwap - price) / s.session_vwap * 10000.0 : 0.0);
-                std::fflush(stdout);
-                last_vwap_diag_[id] = ts;
-            }
-        }
 
         // Per-symbol guard
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
@@ -4432,3 +4390,4 @@ private:
 };
 
 }
+

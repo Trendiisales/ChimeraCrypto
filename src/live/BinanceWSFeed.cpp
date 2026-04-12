@@ -305,19 +305,25 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
                     // sends snapshots with NO "e" field. If somehow a depthUpdate
                     // arrives, ignore it — we don't subscribe to @depth.
                 } else {
-                    // No "e" field — this is a @depth5@100ms snapshot.
-                    // Format: {"lastUpdateId":N,"bids":[["price","qty"],...],"asks":[...]}
-                    // Detect by checking stream name for "@depth5"
+                    // No "e" field — could be @bookTicker or @depth5@100ms snapshot.
+                    // Binance combined stream bookTicker does NOT include "e" field.
+                    // depth5 snapshot also has no "e" field.
+                    // Distinguish by stream name.
                     size_t stream_pos = msg.find("\"stream\":\"");
                     if (stream_pos != std::string::npos) {
-                        size_t depth_pos = msg.find("@depth5", stream_pos);
+                        size_t depth_pos  = msg.find("@depth5",      stream_pos);
+                        size_t bticker_pos = msg.find("@bookTicker",  stream_pos);
                         if (depth_pos != std::string::npos) {
+                            // @depth5@100ms snapshot
                             stream_pos += 10; // skip past "stream":"
                             size_t stream_end = msg.find('@', stream_pos);
                             if (stream_end != std::string::npos) {
                                 std::string depth_sym = msg.substr(stream_pos, stream_end - stream_pos);
                                 g_feed->handle_depth5(depth_sym + "|" + data, recv_ms);
                             }
+                        } else if (bticker_pos != std::string::npos) {
+                            // @bookTicker — no "e" field in combined stream format
+                            g_feed->handle_book_ticker(data, recv_ms);
                         }
                     }
                 }

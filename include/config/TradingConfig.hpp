@@ -190,7 +190,7 @@ struct TradingConfig {
     static constexpr double REGIME_BUILDUP_TO_BREAKOUT     = 1.65;
     static constexpr double REGIME_BREAKOUT_ENTER          = 1.65;
     static constexpr double REGIME_BREAKOUT_EXIT           = 1.35;
-    static constexpr int    MIN_REGIME_TICKS               = 50;
+    static constexpr int    MIN_REGIME_TICKS               = 10;  // FIX: 50→10 — 50 ticks locks all symbols in DEAD at startup; 10 ticks (~1s) is enough hysteresis
     static constexpr int    EXPAND_POST_COMPRESS_LOCKOUT   = 3;
     static constexpr double REGIME_MIN_LONG_AVG            = 0.004;
     static constexpr double REGIME_DEAD_THRESHOLD          = REGIME_DEAD_EXIT;

@@ -636,6 +636,21 @@ public:
         
         latency_gov_.update(latency_ms, ts);
         leadlag_.update_price(id, price, ts);
+
+        // BTC MOVE DIAGNOSTIC: print every 5s on BTC ticks so we can see exactly
+        // what the leadlag engine measures vs the threshold. Helps tune threshold.
+        if (id == 0) {
+            static int64_t last_btc_diag_ts = 0;
+            if (ts - last_btc_diag_ts > 5000) {
+                double btc_bp = leadlag_.btc_move_bp();
+                std::printf("[BTC-MOVE] move_600ms=%.2fbp | threshold=%.1fbp | %s\n",
+                    btc_bp,
+                    TradingConfig::LEADLAG_BTC_THRESHOLD_BP,
+                    std::fabs(btc_bp) >= TradingConfig::LEADLAG_BTC_THRESHOLD_BP ? "THRESHOLD_MET" : "below_threshold");
+                std::fflush(stdout);
+                last_btc_diag_ts = ts;
+            }
+        }
         vol_scoring_[id].update(price, ts);
         // StatArb needs BTC and ETH prices every tick
         statarb_.update_price(id, price);
@@ -3084,10 +3099,12 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        // Only fires in GRIND  VWAP reversion fails in trending regimes
-        const bool regime_ok = (s.regime == REGIME_GRIND);
+        // Only fires in GRIND or DEAD (low-vol ranging) — VWAP reversion works best in non-trending
+        // DEAD is included: in shadow mode DEAD just means low-vol, not a trading risk.
+        // BUILDUP/BREAKOUT excluded: trending regimes mean VWAP deviation is directional, not a reversion.
+        const bool regime_ok = (s.regime == REGIME_GRIND || s.regime == REGIME_DEAD);
         if (!regime_ok) {
-            rejection_throttle_.record(key, "not_grind");
+            rejection_throttle_.record(key, "not_grind_or_dead");
             return false;
         }
         // Need established VWAP

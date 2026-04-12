@@ -418,9 +418,10 @@ int main() {
             g_exchange_latency.record(now_ms, tick.trade_time); // p95 for GUI only
         }
 
-        // Don't gate on calibration — fire from tick 1.
-        // Hard ceiling: skip only truly stale ticks (>200ms = feed issue).
-        if (tick_age_ms > 200.0) return;
+        // Hard ceiling: skip truly stale ticks. With 4ms RTT to Binance Tokyo,
+        // anything >50ms indicates either a burst/backlog or clock drift.
+        // 200ms was too loose — a 50ms-stale tick is already useless for microstructure.
+        if (tick_age_ms > 50.0) return;
 
         controller.on_tick(id, tick, now_ms, tick_age_ms);
 

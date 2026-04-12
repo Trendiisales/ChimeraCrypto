@@ -291,6 +291,22 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
                             g_feed->handle_depth5(depth_sym + "|" + data, recv_ms);
                         }
                     }
+                } else {
+                    // depth5@100ms snapshot format has NO "e" field — it arrives as
+                    // {"lastUpdateId":...,"bids":[...],"asks":[...]} with event_type=""
+                    // Detect by checking stream name for "@depth5"
+                    size_t stream_pos = msg.find("\"stream\":\"");
+                    if (stream_pos != std::string::npos) {
+                        size_t depth_pos = msg.find("@depth5", stream_pos);
+                        if (depth_pos != std::string::npos) {
+                            stream_pos += 10;
+                            size_t stream_end = msg.find('@', stream_pos);
+                            if (stream_end != std::string::npos) {
+                                std::string depth_sym = msg.substr(stream_pos, stream_end - stream_pos);
+                                g_feed->handle_depth5(depth_sym + "|" + data, recv_ms);
+                            }
+                        }
+                    }
                 }
                 break;
             }
@@ -451,10 +467,10 @@ void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
         : 0.0;
     t.depth_ready = (t.total_bid_depth > 0.0 || t.total_ask_depth > 0.0);
 
-    // Fire callback with updated depth data
-    if (st.book_ready && callback_) {
-        callback_(t);
-    }
+    // DO NOT fire callback_ here. depth5 has no price — firing callback_ would
+    // call on_tick with mid_price=0, last_price=0, poisoning leadlag buffers
+    // with zero prices and making btc_move_bp() return 0 forever.
+    // Depth fields are read from symbols_[id].last_tick on the next bookTicker/aggTrade tick.
 }
 
 }  // namespace chimera

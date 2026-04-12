@@ -608,6 +608,11 @@ public:
                 json << "\"vwap_ready\":" << (_sv > 0 ? "true" : "false") << ",";
             }
             json << "\"mm_imbal_ema\":" << balanced_.get_mm_imbal_ema(i);
+            // Daily high/low — BTC(0), ETH(1), SOL(2) only
+            if (i <= 2) {
+                json << ",\"day_high\":" << balanced_.get_day_high(i);
+                json << ",\"day_low\":"  << balanced_.get_day_low(i);
+            }
             
             json << "}";
             if (i < MAX_SYMBOLS - 1) json << ",";

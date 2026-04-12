@@ -869,6 +869,16 @@ public:
         // Book-dependent engines require a valid top-of-book snapshot.
         // During warm-up, aggTrade ticks can arrive before first bookTicker.
         const bool has_book = (s.last_tick.bid > 0.0 && s.last_tick.ask > 0.0);
+        // DIAGNOSTIC: log has_book status every 5s
+        {
+            static int64_t _hb_log_[MAX_SYMBOLS]={};
+            if (ts-_hb_log_[id]>5000){
+                std::printf("[HAS-BOOK-DIAG] %s | has_book=%d | bid=%.4f | ask=%.4f\n",
+                    sym_short(id),(int)has_book,s.last_tick.bid,s.last_tick.ask);
+                std::fflush(stdout);
+                _hb_log_[id]=ts;
+            }
+        }
         if (has_book) {
             // OFI: 24 trades 0% WR -95.66bp -- HARD DISABLED (all timeouts, no edge)
             // VACUUM: 17 trades 0% WR -53.67bp -- HARD DISABLED (threshold too loose)

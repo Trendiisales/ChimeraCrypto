@@ -3127,12 +3127,13 @@ private:
             rejection_throttle_.record(key, "latency_too_high");
             return false;
         }
-        // Only fires in GRIND or DEAD (low-vol ranging) — VWAP reversion works best in non-trending
-        // DEAD is included: in shadow mode DEAD just means low-vol, not a trading risk.
-        // BUILDUP/BREAKOUT excluded: trending regimes mean VWAP deviation is directional, not a reversion.
-        const bool regime_ok = (s.regime == REGIME_GRIND || s.regime == REGIME_DEAD);
+        // VWAP reversion fires in GRIND, DEAD, or BUILDUP.
+        // GRIND/DEAD: classic ranging mean-reversion setup.
+        // BUILDUP: slow accumulation — price below VWAP with building vol is a valid long dip.
+        // BREAKOUT excluded: trending hard means VWAP deviation is directional momentum, not a dip.
+        const bool regime_ok = (s.regime == REGIME_GRIND || s.regime == REGIME_DEAD || s.regime == REGIME_BUILDUP);
         if (!regime_ok) {
-            rejection_throttle_.record(key, "not_grind_or_dead");
+            rejection_throttle_.record(key, "regime_breakout_excluded");
             return false;
         }
         // Need established VWAP
@@ -3165,10 +3166,13 @@ private:
             rejection_throttle_.record(key, "too_far_below_vwap");
             return false;
         }
-        // Book must show bid pressure  buyers are stepping in
-        const double min_imbal = TradingConfig::VWAP_MIN_IMBALANCE;
-        if (t.book_imbalance < min_imbal) {
-            rejection_throttle_.record(key, "no_bid_confirmation");
+        // Book confirmation: use 5-level depth imbalance if available, else single-level.
+        // Threshold 0.0: we require non-negative imbalance (bid >= ask depth).
+        // In downtrend the book leans ask-heavy — we use depth5 which captures full book pressure.
+        // A deeply negative imbalance means active selling — skip. Neutral or positive = ok to fade.
+        const double imbal_to_use = t.depth_ready ? t.depth_imbalance : t.book_imbalance;
+        if (imbal_to_use < -0.50) {  // only reject if strongly ask-heavy (>75% asks vs bids)
+            rejection_throttle_.record(key, "book_strongly_ask_heavy");
             return false;
         }
         // OFI confirmation: buy flow must exceed sell flow

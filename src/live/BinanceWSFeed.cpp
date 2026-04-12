@@ -267,39 +267,35 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
                 if (data_pos == std::string::npos) break;
                 std::string data = msg.substr(data_pos + 7); // skip "data":
 
-                // Identify event type from "e" field
+                // Check for "e" field to identify event type.
+                // NOTE: @depth5@100ms snapshot frames have NO "e" field —
+                // they arrive as {"lastUpdateId":...,"bids":[...],"asks":[...]}
+                // These are handled via stream name detection below.
                 size_t e_pos = data.find("\"e\":\"");
-                if (e_pos == std::string::npos) break;
-                e_pos += 5;
-                size_t e_end = data.find('"', e_pos);
-                if (e_end == std::string::npos) break;
-                std::string event_type = data.substr(e_pos, e_end - e_pos);
+                if (e_pos != std::string::npos) {
+                    e_pos += 5;
+                    size_t e_end = data.find('"', e_pos);
+                    if (e_end == std::string::npos) break;
+                    std::string event_type = data.substr(e_pos, e_end - e_pos);
 
-                if (event_type == "bookTicker") {
-                    g_feed->handle_book_ticker(data, recv_ms);
-                } else if (event_type == "aggTrade") {
-                    g_feed->handle_agg_trade(data, recv_ms);
-                } else if (event_type == "depthUpdate") {
-                    // depth5@100ms sends partial book snapshots with event type "depthUpdate"
-                    // Extract symbol from stream name instead of event data
-                    size_t stream_pos = msg.find("\"stream\":\"");
-                    if (stream_pos != std::string::npos) {
-                        stream_pos += 10;
-                        size_t stream_end = msg.find('@', stream_pos);
-                        if (stream_end != std::string::npos) {
-                            std::string depth_sym = msg.substr(stream_pos, stream_end - stream_pos);
-                            g_feed->handle_depth5(depth_sym + "|" + data, recv_ms);
-                        }
+                    if (event_type == "bookTicker") {
+                        g_feed->handle_book_ticker(data, recv_ms);
+                    } else if (event_type == "aggTrade") {
+                        g_feed->handle_agg_trade(data, recv_ms);
                     }
+                    // depthUpdate is the DIFF stream (@depth), not the snapshot
+                    // stream (@depth5@100ms). We subscribe to @depth5@100ms which
+                    // sends snapshots with NO "e" field. If somehow a depthUpdate
+                    // arrives, ignore it — we don't subscribe to @depth.
                 } else {
-                    // depth5@100ms snapshot format has NO "e" field — it arrives as
-                    // {"lastUpdateId":...,"bids":[...],"asks":[...]} with event_type=""
+                    // No "e" field — this is a @depth5@100ms snapshot.
+                    // Format: {"lastUpdateId":N,"bids":[["price","qty"],...],"asks":[...]}
                     // Detect by checking stream name for "@depth5"
                     size_t stream_pos = msg.find("\"stream\":\"");
                     if (stream_pos != std::string::npos) {
                         size_t depth_pos = msg.find("@depth5", stream_pos);
                         if (depth_pos != std::string::npos) {
-                            stream_pos += 10;
+                            stream_pos += 10; // skip past "stream":"
                             size_t stream_end = msg.find('@', stream_pos);
                             if (stream_end != std::string::npos) {
                                 std::string depth_sym = msg.substr(stream_pos, stream_end - stream_pos);
@@ -404,8 +400,12 @@ void BinanceWSFeed::run() {
 // ============================================================================
 // handle_depth5 — parses @depth5@100ms partial book snapshot
 //
-// Binance depth5 format (inside "data" wrapper):
-//   {"e":"depthUpdate","s":"BTCUSDT","bids":[["67000.00","0.5"],...],"asks":[...]}
+// Binance @depth5@100ms snapshot format (inside "data" wrapper):
+//   {"lastUpdateId":N,"bids":[["67000.00","0.5"],...],"asks":[["67001.00","0.3"],...]}
+//
+// IMPORTANT: Uses "bids"/"asks" (full words) NOT "b"/"a".
+// "b"/"a" is used by the @depth DIFF stream which we do NOT subscribe to.
+// @depth5@100ms is a SNAPSHOT stream — different format entirely.
 //
 // msg format passed in: "symbolname|{json_data}"
 // Populates tick.bid_prices[0..4], ask_prices[0..4], sizes, depth_imbalance
@@ -420,26 +420,30 @@ void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
     auto& st = get_or_create(sym);
     MarketTick& t = st.tick;
 
-    // Binance depthUpdate uses "b" for bids, "a" for asks (single-char keys)
+    // @depth5@100ms snapshot uses "bids" and "asks" (full field names)
+    // Each entry: ["price_string", "qty_string"]
     auto parse_levels = [&](const std::string& key, double* prices, double* sizes) {
-        std::string needle = "\"" + key + "\":["; 
+        std::string needle = "\"" + key + "\":[";
         size_t pos = data.find(needle);
         if (pos == std::string::npos) return;
-        pos += needle.size();  // skip past "b":[ or "a":[
+        pos += needle.size();  // skip past "bids":[ or "asks":[
         int level = 0;
         while (level < 5) {
             size_t bracket = data.find('[', pos);
             if (bracket == std::string::npos) break;
+            // Check we haven't walked past the closing ] of the outer array
+            size_t outer_close = data.find(']', pos);
+            if (outer_close < bracket) break; // hit end of outer array before next inner [
             size_t comma = data.find(',', bracket);
             if (comma == std::string::npos) break;
             size_t close = data.find(']', comma);
             if (close == std::string::npos) break;
-            // price is between bracket+2 and comma-1 (strip quotes)
+            // price is between bracket+1 and comma, strip quotes and spaces
             size_t p_start = bracket + 1;
             while (p_start < data.size() && (data[p_start] == '"' || data[p_start] == ' ')) p_start++;
             size_t p_end = comma;
             while (p_end > p_start && (data[p_end-1] == '"' || data[p_end-1] == ' ')) p_end--;
-            // qty is between comma+1 and close-1 (strip quotes)
+            // qty is between comma+1 and close, strip quotes and spaces
             size_t q_start = comma + 1;
             while (q_start < data.size() && (data[q_start] == '"' || data[q_start] == ' ')) q_start++;
             size_t q_end = close;
@@ -452,8 +456,8 @@ void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
         }
     };
 
-    parse_levels("b", t.bid_prices, t.bid_sizes);
-    parse_levels("a", t.ask_prices, t.ask_sizes);
+    parse_levels("bids", t.bid_prices, t.bid_sizes);
+    parse_levels("asks", t.ask_prices, t.ask_sizes);
 
     // Compute 5-level totals and imbalance
     t.total_bid_depth = 0.0;
@@ -467,6 +471,26 @@ void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
         ? (t.total_bid_depth - t.total_ask_depth) / total
         : 0.0;
     t.depth_ready = (t.total_bid_depth > 0.0 || t.total_ask_depth > 0.0);
+
+    // Log first successful parse per symbol for confirmation
+    static bool depth_logged[16] = {};
+    int sym_idx = -1;
+    if (sym == "btcusdt") sym_idx = 0;
+    else if (sym == "ethusdt") sym_idx = 1;
+    else if (sym == "solusdt") sym_idx = 2;
+    else if (sym == "bnbusdt") sym_idx = 3;
+    else if (sym == "avaxusdt") sym_idx = 4;
+    else if (sym == "linkusdt") sym_idx = 5;
+    else if (sym == "xrpusdt") sym_idx = 6;
+    if (sym_idx >= 0 && sym_idx < 16 && !depth_logged[sym_idx] && t.depth_ready) {
+        std::printf("[DEPTH5-READY] %s | bid[0]=%.2f sz=%.4f | ask[0]=%.2f sz=%.4f | imbal=%.3f\n",
+            sym.c_str(),
+            t.bid_prices[0], t.bid_sizes[0],
+            t.ask_prices[0], t.ask_sizes[0],
+            t.depth_imbalance);
+        std::fflush(stdout);
+        depth_logged[sym_idx] = true;
+    }
 
     // DO NOT fire callback_ here. depth5 has no price — firing callback_ would
     // call on_tick with mid_price=0, last_price=0, poisoning leadlag buffers

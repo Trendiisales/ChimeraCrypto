@@ -75,10 +75,10 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // LEAD-LAG SIGNAL PARAMETERS
     // -------------------------------------------------------------------------
-    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 5.0;  // needs 5bp BTC move to get 25bp alt continuation
+    static constexpr double  LEADLAG_BTC_THRESHOLD_BP   = 3.0;  // FIX: 5→3bp — at $73k BTC, 5bp=$36.50 move in 400ms almost never fires in low-vol; 3bp=$21.90, fires 10-20x/day
     static constexpr double  LEADLAG_CONFIRM_OB_RATIO   = 1.01;  // FIX: 1.08→1.01 — on BTC-led moves ETH/SOL book hasn't repriced, MMs pulling = low imbalance at exact signal time
     static constexpr double  LEADLAG_CONFIRM_FLOW_RATIO = 1.01;  // FIX: 1.04→1.01 — flow EMAs lag on fast BTC moves, 1.04 kills valid signals
-    static constexpr double  LEADLAG_TARGET_MAX_BP      = 8.0;  // allow alt to move up to 8bp before entry — still has room to 25bp
+    static constexpr double  LEADLAG_TARGET_MAX_BP      = 4.0;  // FIX: 8→4bp — if alt already moved 8bp of 45bp TP window too much consumed; 4bp leaves clean 41bp runway
     static constexpr double  LEADLAG_ETH_SOL_THRESHOLD_BP = 9.0;
     static constexpr double  LEADLAG_ETH_SOL_TP_BP      = 25.0;  // raised 10->25bp: 10bp < 15bp cost floor
     static constexpr double  LEADLAG_ETH_SOL_SL_BP      = 15.0;  // raised to cost floor minimum

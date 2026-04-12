@@ -3147,6 +3147,14 @@ private:
             rejection_throttle_.record(key, "regime_breakout_excluded");
             return false;
         }
+        // TREND FILTER: only fire VWAP longs when fast EMA >= slow EMA (uptrend or flat).
+        // Fast EMA below slow by >= 8bp = genuine downtrend — VWAP longs are fading into
+        // selling pressure and will not follow (confirmed by first live trade: -14.36bp NO_FOLLOW).
+        // < 8bp gap = noise/lag — allow entry.
+        if (!trend_allows_long(id)) {
+            rejection_throttle_.record(key, "trend_filter_downtrend");
+            return false;
+        }
         // Need established VWAP
         if (s.session_vwap <= 0.0 || s.vwap_cum_vol < 10.0) {
             rejection_throttle_.record(key, "vwap_not_ready");

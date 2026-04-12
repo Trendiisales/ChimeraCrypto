@@ -486,6 +486,16 @@ public:
     }
 
     inline void on_tick(int id, const MarketTick& tick, int64_t ts, double latency_ms) {
+        // TICK-ENTRY diagnostic - log what bid/ask we receive
+        {
+            static int64_t _te_log_[MAX_SYMBOLS]={};
+            if (ts-_te_log_[id]>5000){
+                std::printf("[TICK-ENTRY] %s | bid=%.4f ask=%.4f mid=%.4f last=%.4f\n",
+                    sym_short(id),tick.bid,tick.ask,tick.mid_price,tick.last_price);
+                std::fflush(stdout);
+                _te_log_[id]=ts;
+            }
+        }
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         stall_detector_.on_ws_receive();
         stall_detector_.on_eval_start();

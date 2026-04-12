@@ -48,7 +48,7 @@ public:
     // Tier 1: BTC -> alts — read thresholds from TradingConfig (single source of truth)
     static constexpr double  BTC_MOVE_THRESHOLD_BP = TradingConfig::LEADLAG_BTC_THRESHOLD_BP; // 7.0bp
     static constexpr double  TARGET_MOVED_MAX_BP   = TradingConfig::LEADLAG_TARGET_MAX_BP;    // 3.0bp
-    static constexpr int64_t LOOKBACK_MS           = 600;  // FIX: 400→600ms — wider window lets sustained 3bp moves accumulate; still well inside 50-200ms propagation window
+    static constexpr int64_t LOOKBACK_MS           = 1200;  // FIX: 600→1200ms — 5bp BTC move over 1.2s is real directional impulse; alts lag 50-200ms so still exploitable; wider window fires in low-vol markets
     static constexpr int     MIN_BTC_SAMPLES       = 3;
 
     // Tier 2: ETH -> alts
@@ -69,7 +69,7 @@ public:
         if (symbol_id < 0 || symbol_id >= MAX_SYMBOLS) return;
         auto& buf = buffers_[symbol_id];
         buf.push_back({price, now_ms});
-        while (!buf.empty() && now_ms - buf.front().ts_ms > 1000)  // extended to cover 300ms lookback
+        while (!buf.empty() && now_ms - buf.front().ts_ms > 2000)  // retain 2s of history to cover 1200ms lookback
             buf.pop_front();
     }
 

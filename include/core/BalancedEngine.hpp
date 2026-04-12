@@ -4217,7 +4217,9 @@ private:
             sym_consecutive_sl_[id] = 0;  // win resets the SL streak for this symbol
         }
         
-        if (loss_streak_ >= 3) kill_until_ = ts + 5000;
+        // Only set short streak pause if daily kill is not already active.
+        // Previously this line overwrote the 24hr daily kill with 5s on every loss.
+        if (loss_streak_ >= 3 && kill_until_ < ts + 5000) kill_until_ = ts + 5000;
         
         // Scale cooldown with consecutive losses  back off faster after streak
         // 0 losses: 500ms | 1 loss: 1000ms | 2: 2000ms | 3+: 5000ms

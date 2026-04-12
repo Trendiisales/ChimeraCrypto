@@ -138,6 +138,23 @@ void BinanceWSFeed::handle_book_ticker(const std::string& msg, int64_t recv_ms) 
     double ask_sz   = extract_dbl(msg, "A");
     int64_t trade_t = extract_i64(msg, "T");
 
+    // DIAGNOSTIC: log first bookTicker per symbol to confirm parsing
+    {
+        static bool _bt_logged_[16] = {};
+        static int _bt_idx_ = 0;
+        // simple index lookup
+        int _sym_idx_ = -1;
+        const char* syms[] = {"btcusdt","ethusdt","solusdt","bnbusdt","avaxusdt","linkusdt","xrpusdt"};
+        for(int _i_=0;_i_<7;_i_++) if(sym==syms[_i_]){_sym_idx_=_i_;break;}
+        if(_sym_idx_>=0 && !_bt_logged_[_sym_idx_]){
+            std::printf("[BT-DIAG] %s | bid=%.4f ask=%.4f bid_sz=%.4f ask_sz=%.4f guard=%s\n",
+                sym.c_str(),bid,ask,bid_sz,ask_sz,
+                (bid<=0.0||ask<=0.0||ask<bid)?"BLOCKED":"PASS");
+            std::fflush(stdout);
+            _bt_logged_[_sym_idx_]=true;
+        }
+    }
+
     if (bid <= 0.0 || ask <= 0.0 || ask < bid) return;  // allow ask==bid (tight symbols like XRP at low price)
 
     auto& st = get_or_create(sym);

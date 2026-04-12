@@ -2089,7 +2089,7 @@ private:
         }
 
         const MarketTick& t = s.last_tick;
-        if (t.bid <= 0.0 || t.ask <= 0.0 || t.spread_bps <= 0.0) {
+        if (t.bid <= 0.0 || t.ask <= 0.0) {  // spread_bps<=0 removed: tight symbols (XRP) have ask==bid at low price, spread gate below handles wide spread
             rejection_throttle_.record(key, "no_book_data");
             return false;
         }

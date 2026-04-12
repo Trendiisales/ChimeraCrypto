@@ -93,16 +93,16 @@ struct TradingConfig {
     // EV: TP=150bp trail, SL=20bp. At 40% WR: 0.4*(150-15) - 0.6*20 = +42bp net.
     // Kill window enforced in QuadEngineBalancedEngine::on_tick() — no dead tape.
     // Pyramiding: arm at +30bp, add 50% unit at that level, trail unit 2 tightly.
-    static constexpr double  LIQ_MIN_NOTIONAL_USD      = 1000000.0;
-    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD  = 1500000.0;
-    static constexpr double  LIQ_SPOT_MOVED_MAX_BP     = 2.5;
-    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS      = 250;
+    static constexpr double  LIQ_MIN_NOTIONAL_USD      = 200000.0;   // FIX: $1M→$200k — $1M liquidations are rare, $200k fires dozens/day
+    static constexpr double  LIQ_MIN_NOTIONAL_ALT_USD  = 300000.0;   // FIX: $1.5M→$300k — same reason for alts
+    static constexpr double  LIQ_SPOT_MOVED_MAX_BP     = 8.0;        // FIX: 2.5→8bp — spot moves immediately on liq; 2.5bp expired before next bookTicker
+    static constexpr int64_t LIQ_SIGNAL_WINDOW_MS      = 800;        // FIX: 250→800ms — 250ms expires before main loop can act; 800ms still early enough
     static constexpr int64_t LIQ_COOLDOWN_MS           = 10000;
-    static constexpr double  LIQ_MAX_SPREAD_BPS        = 2.0;
-    static constexpr double  LIQ_MIN_FLOW_RATIO        = 0.56;
-    static constexpr double  LIQ_MIN_BOOK_IMBALANCE    = 0.08;
-    static constexpr double  LIQ_MIN_VOL_RATIO         = 0.90;
-    static constexpr double  LIQ_MAX_VOL_RATIO         = 2.40;
+    static constexpr double  LIQ_MAX_SPREAD_BPS        = 4.0;        // FIX: 2.0→4.0bp — spread widens immediately post-liq as MMs pull; 2bp blocked every entry
+    static constexpr double  LIQ_MIN_FLOW_RATIO        = 0.50;       // FIX: 0.56→0.50 — near-neutral is fine post-liq, direction comes from liq event itself
+    static constexpr double  LIQ_MIN_BOOK_IMBALANCE    = 0.00;       // FIX: 0.08→0.00 — book imbalance at single level is meaningless post-liq; MMs pull book
+    static constexpr double  LIQ_MIN_VOL_RATIO         = 0.70;       // FIX: 0.90→0.70 — vol regime gate too tight; liq can happen in any vol environment
+    static constexpr double  LIQ_MAX_VOL_RATIO         = 3.00;       // FIX: 2.40→3.00 — allow higher vol; liq cascade = vol spike by definition
     static constexpr double  LIQ_TP_BP                 = 150.0;  // trail exit, not fixed TP
     static constexpr double  LIQ_SL_BP                 = 20.0;
     static constexpr int64_t LIQ_MAX_HOLD_MS           = 30000;

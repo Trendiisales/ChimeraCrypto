@@ -643,10 +643,13 @@ public:
             static int64_t last_btc_diag_ts = 0;
             if (ts - last_btc_diag_ts > 5000) {
                 double btc_bp = leadlag_.btc_move_bp();
-                std::printf("[BTC-MOVE] move_600ms=%.2fbp | threshold=%.1fbp | %s\n",
+                const MarketTick& dt = symbols_[0].last_tick;
+                std::printf("[BTC-MOVE] move_1200ms=%.2fbp | threshold=%.1fbp | %s | depth=%s bid5=%.0f ask5=%.0f imbal5=%.3f\n",
                     btc_bp,
                     TradingConfig::LEADLAG_BTC_THRESHOLD_BP,
-                    std::fabs(btc_bp) >= TradingConfig::LEADLAG_BTC_THRESHOLD_BP ? "THRESHOLD_MET" : "below_threshold");
+                    std::fabs(btc_bp) >= TradingConfig::LEADLAG_BTC_THRESHOLD_BP ? "THRESHOLD_MET" : "below_threshold",
+                    dt.depth_ready ? "READY" : "PENDING",
+                    dt.total_bid_depth, dt.total_ask_depth, dt.depth_imbalance);
                 std::fflush(stdout);
                 last_btc_diag_ts = ts;
             }
@@ -1356,12 +1359,14 @@ private:
             constexpr double MM_ALPHA = 0.02;
             auto& ss = symbols_[id];
             double mid = (tick.bid + tick.ask) * 0.5;
+            // Use 5-level depth_imbalance when available — more stable signal for slow MM drift
+            double imbal_src = tick.depth_ready ? tick.depth_imbalance : tick.book_imbalance;
             if (!ss.mm_imbal_init) {
-                ss.mm_imbal_ema  = tick.book_imbalance;
+                ss.mm_imbal_ema  = imbal_src;
                 ss.mm_prev_mid   = mid;
                 ss.mm_imbal_init = true;
             } else {
-                ss.mm_imbal_ema  = MM_ALPHA * tick.book_imbalance
+                ss.mm_imbal_ema  = MM_ALPHA * imbal_src
                                    + (1.0 - MM_ALPHA) * ss.mm_imbal_ema;
                 // Accumulate drift: signed mid-price change
                 ss.mm_drift_sum   += (mid - ss.mm_prev_mid);
@@ -2062,7 +2067,8 @@ private:
     // Called from on_tick when liq_engine_ has a pending valid signal
     // -----------------------------------------------------------------------
     bool try_liquidation_entry(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        if (id == 0) return false; // BTC too fast  liquidation already in price by the time we enter
+        // FIX: BTC re-enabled — was blocked "too fast" but with 800ms signal window there is
+        // time to enter. BTC has highest liquidation volume and strongest post-liq continuation.
         if (s.pos.state == POS_OPEN) return false;
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " LIQ";
@@ -2101,13 +2107,16 @@ private:
             rejection_throttle_.record(key, "flow_weak");
             return false;
         }
-        if (t.book_imbalance < TradingConfig::LIQ_MIN_BOOK_IMBALANCE) {
+        // Use 5-level depth_imbalance if available (more reliable than single-level book_imbalance)
+        // LIQ_MIN_BOOK_IMBALANCE is 0.0 so this gate is effectively disabled — correct post-liq behaviour
+        double imbal_to_use = t.depth_ready ? t.depth_imbalance : t.book_imbalance;
+        if (imbal_to_use < TradingConfig::LIQ_MIN_BOOK_IMBALANCE) {
             rejection_throttle_.record(key, "book_weak");
             return false;
         }
 
-        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | flow=%.2f | imbal=%.2f | spread=%.2fbp | vr=%.2f | latency=%.1fms | ENTERING LONG\n",
-            sym, notional, flow, t.book_imbalance, t.spread_bps, s.vol_ratio_ema, latency_ms);
+        std::printf("[LIQ-ENTRY] %s | notional=$%.0f | flow=%.2f | imbal=%.2f (depth=%s) | spread=%.2fbp | vr=%.2f | latency=%.1fms | ENTERING LONG\n",
+            sym, notional, flow, imbal_to_use, t.depth_ready ? "5L" : "1L", t.spread_bps, s.vol_ratio_ema, latency_ms);
         std::fflush(stdout);
 
         liq_engine_.consume_signal(id, ts);

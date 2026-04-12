@@ -27,6 +27,18 @@ struct MarketTick {
     double bid_size  = 0.0;   // Best bid quantity
     double ask_size  = 0.0;   // Best ask quantity
 
+    // From @depth5@100ms - 5 levels of order book depth
+    // bid_prices[0]/ask_prices[0] = best bid/ask (same as above, confirmed)
+    // bid_prices[1..4]/ask_prices[1..4] = next 4 levels
+    double bid_prices[5] = {};
+    double ask_prices[5] = {};
+    double bid_sizes[5]  = {};
+    double ask_sizes[5]  = {};
+    double total_bid_depth = 0.0;  // sum of bid_sizes[0..4]
+    double total_ask_depth = 0.0;  // sum of ask_sizes[0..4]
+    double depth_imbalance = 0.0;  // (total_bid - total_ask) / (total_bid + total_ask) — 5-level version
+    bool   depth_ready     = false; // true once first depth5 snapshot received
+
     // Derived from bid/ask (computed each time bookTicker arrives)
     double mid_price      = 0.0;   // (bid + ask) / 2
     double spread_bps     = 0.0;   // ((ask - bid) / mid) * 10000
@@ -98,6 +110,7 @@ private:
 
     void handle_book_ticker(const std::string& msg, int64_t recv_ms);
     void handle_agg_trade(const std::string& msg, int64_t recv_ms);
+    void handle_depth5(const std::string& msg, int64_t recv_ms);
 
     std::vector<std::string>                     symbols_;
     std::unordered_map<std::string, SymbolState> states_;

@@ -279,6 +279,18 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
                     g_feed->handle_book_ticker(data, recv_ms);
                 } else if (event_type == "aggTrade") {
                     g_feed->handle_agg_trade(data, recv_ms);
+                } else if (event_type == "depthUpdate") {
+                    // depth5@100ms sends partial book snapshots with event type "depthUpdate"
+                    // Extract symbol from stream name instead of event data
+                    size_t stream_pos = msg.find("\"stream\":\"");
+                    if (stream_pos != std::string::npos) {
+                        stream_pos += 10;
+                        size_t stream_end = msg.find('@', stream_pos);
+                        if (stream_end != std::string::npos) {
+                            std::string depth_sym = msg.substr(stream_pos, stream_end - stream_pos);
+                            g_feed->handle_depth5(depth_sym + "|" + data, recv_ms);
+                        }
+                    }
                 }
                 break;
             }
@@ -300,8 +312,9 @@ int BinanceWSFeed::ws_callback(struct lws *wsi,
 // ============================================================================
 // run - connect and service the websocket loop
 //
-// Stream path combines bookTicker + aggTrade for all symbols:
-//   /stream?streams=btcusdt@bookTicker/btcusdt@aggTrade/ethusdt@bookTicker/...
+// Stream path combines bookTicker + aggTrade + depth5 for all symbols:
+//   /stream?streams=btcusdt@bookTicker/btcusdt@aggTrade/btcusdt@depth5@100ms/...
+// depth5@100ms gives 5 levels of bid/ask every 100ms — real order book depth
 // ============================================================================
 void BinanceWSFeed::run() {
     // Pre-populate all symbol states before connecting — ensures the map
@@ -318,7 +331,7 @@ void BinanceWSFeed::run() {
     stream_path_ = "/stream?streams=";
     for (size_t i = 0; i < symbols_.size(); ++i) {
         if (i > 0) stream_path_ += "/";
-        stream_path_ += symbols_[i] + "@bookTicker/" + symbols_[i] + "@aggTrade";
+        stream_path_ += symbols_[i] + "@bookTicker/" + symbols_[i] + "@aggTrade/" + symbols_[i] + "@depth5@100ms";
     }
 
     std::printf("[WS] Subscribing: %s\n", stream_path_.c_str());
@@ -370,6 +383,78 @@ void BinanceWSFeed::run() {
 
     lws_context_destroy(context_);
     context_ = nullptr;
+}
+
+// ============================================================================
+// handle_depth5 — parses @depth5@100ms partial book snapshot
+//
+// Binance depth5 format (inside "data" wrapper):
+//   {"e":"depthUpdate","s":"BTCUSDT","bids":[["67000.00","0.5"],...],"asks":[...]}
+//
+// msg format passed in: "symbolname|{json_data}"
+// Populates tick.bid_prices[0..4], ask_prices[0..4], sizes, depth_imbalance
+// ============================================================================
+void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
+    // Extract symbol prefix (before '|')
+    size_t sep = msg.find('|');
+    if (sep == std::string::npos) return;
+    std::string sym = msg.substr(0, sep);
+    std::string data = msg.substr(sep + 1);
+
+    auto& st = get_or_create(sym);
+    MarketTick& t = st.tick;
+
+    // Parse bids array: "bids":[ ["price","qty"], ... ]
+    auto parse_levels = [&](const std::string& key, double* prices, double* sizes) {
+        size_t pos = data.find("\"" + key + "\":[");
+        if (pos == std::string::npos) return;
+        pos += key.size() + 4;  // skip "key":[
+        int level = 0;
+        while (level < 5) {
+            size_t bracket = data.find('[', pos);
+            if (bracket == std::string::npos) break;
+            size_t comma = data.find(',', bracket);
+            if (comma == std::string::npos) break;
+            size_t close = data.find(']', comma);
+            if (close == std::string::npos) break;
+            // price is between bracket+2 and comma-1 (strip quotes)
+            size_t p_start = bracket + 1;
+            while (p_start < data.size() && (data[p_start] == '"' || data[p_start] == ' ')) p_start++;
+            size_t p_end = comma;
+            while (p_end > p_start && (data[p_end-1] == '"' || data[p_end-1] == ' ')) p_end--;
+            // qty is between comma+1 and close-1 (strip quotes)
+            size_t q_start = comma + 1;
+            while (q_start < data.size() && (data[q_start] == '"' || data[q_start] == ' ')) q_start++;
+            size_t q_end = close;
+            while (q_end > q_start && (data[q_end-1] == '"' || data[q_end-1] == ' ')) q_end--;
+
+            prices[level] = std::atof(data.substr(p_start, p_end - p_start).c_str());
+            sizes[level]  = std::atof(data.substr(q_start, q_end - q_start).c_str());
+            level++;
+            pos = close + 1;
+        }
+    };
+
+    parse_levels("bids", t.bid_prices, t.bid_sizes);
+    parse_levels("asks", t.ask_prices, t.ask_sizes);
+
+    // Compute 5-level totals and imbalance
+    t.total_bid_depth = 0.0;
+    t.total_ask_depth = 0.0;
+    for (int i = 0; i < 5; ++i) {
+        t.total_bid_depth += t.bid_sizes[i];
+        t.total_ask_depth += t.ask_sizes[i];
+    }
+    double total = t.total_bid_depth + t.total_ask_depth;
+    t.depth_imbalance = (total > 1e-9)
+        ? (t.total_bid_depth - t.total_ask_depth) / total
+        : 0.0;
+    t.depth_ready = (t.total_bid_depth > 0.0 || t.total_ask_depth > 0.0);
+
+    // Fire callback with updated depth data
+    if (st.book_ready && callback_) {
+        callback_(t);
+    }
 }
 
 }  // namespace chimera

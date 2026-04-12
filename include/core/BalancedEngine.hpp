@@ -210,6 +210,10 @@ struct SymbolState {
     double session_vwap  = 0.0;   // current VWAP value
     int64_t vwap_session_start = 0; // timestamp of session start
 
+    // Daily high/low tracking (UTC midnight reset) — BTC/ETH/SOL only, for GUI
+    double day_high = 0.0;
+    double day_low  = 0.0;
+
     // Liquidity Vacuum: rolling ask depth baseline
     double ask_depth_ema = 0.0;   // EMA of ask_size (baseline)
     bool ask_depth_init  = false;
@@ -705,6 +709,14 @@ public:
             s.vwap_cum_pv  = 0.0;
             s.vwap_cum_vol = 0.0;
             s.vwap_session_start = ts;
+            // Reset daily high/low at UTC midnight
+            s.day_high = price;
+            s.day_low  = price;
+        }
+        // Update daily high/low on every tick
+        if (price > 0.0) {
+            if (s.day_high == 0.0 || price > s.day_high) s.day_high = price;
+            if (s.day_low  == 0.0 || price < s.day_low)  s.day_low  = price;
         }
         double vol_tick = (tick.trade_qty > 0.0) ? tick.trade_qty : 1.0;
         s.vwap_cum_pv  += price * vol_tick;
@@ -928,7 +940,9 @@ public:
     double get_total_pnl()      const { return total_pnl_; }
     double get_realized_pnl()   const { return realized_pnl_; }
     // Readiness signal accessors — used by QuadEngine for GUI imminent-trade display
-    double get_session_vwap(int id)  const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].session_vwap  : 0.0; }
+    double get_day_high(int id)       const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].day_high       : 0.0; }
+    double get_day_low(int id)        const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].day_low        : 0.0; }
+    double get_session_vwap(int id)   const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].session_vwap   : 0.0; }
     double get_mm_imbal_ema(int id)  const { return (id>=0&&id<MAX_SYMBOLS) ? symbols_[id].mm_imbal_ema  : 0.0; }
     double get_btc_move_bp()         const { return leadlag_.btc_move_bp(); }
     double get_win_boost_for(const std::string& engine) const {

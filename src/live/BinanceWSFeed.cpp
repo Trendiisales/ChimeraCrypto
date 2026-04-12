@@ -420,11 +420,12 @@ void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
     auto& st = get_or_create(sym);
     MarketTick& t = st.tick;
 
-    // Parse bids array: "bids":[ ["price","qty"], ... ]
+    // Binance depthUpdate uses "b" for bids, "a" for asks (single-char keys)
     auto parse_levels = [&](const std::string& key, double* prices, double* sizes) {
-        size_t pos = data.find("\"" + key + "\":[");
+        std::string needle = "\"" + key + "\":["; 
+        size_t pos = data.find(needle);
         if (pos == std::string::npos) return;
-        pos += key.size() + 4;  // skip "key":[
+        pos += needle.size();  // skip past "b":[ or "a":[
         int level = 0;
         while (level < 5) {
             size_t bracket = data.find('[', pos);
@@ -451,8 +452,8 @@ void BinanceWSFeed::handle_depth5(const std::string& msg, int64_t /*recv_ms*/) {
         }
     };
 
-    parse_levels("bids", t.bid_prices, t.bid_sizes);
-    parse_levels("asks", t.ask_prices, t.ask_sizes);
+    parse_levels("b", t.bid_prices, t.bid_sizes);
+    parse_levels("a", t.ask_prices, t.ask_sizes);
 
     // Compute 5-level totals and imbalance
     t.total_bid_depth = 0.0;

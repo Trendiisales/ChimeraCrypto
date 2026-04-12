@@ -877,6 +877,15 @@ public:
             // IMBAL: re-enabled as shadow layer (AUDIT 2026-03-21). Starts parked (enabled=false),
             // auto-promotes after 30 trades proving edge. Gate: imbal>0.42, spread<1.5bp, GRIND only.
             if (edge_gate_allows(id, EDGE_IMBAL, ts) && check_imbalance(id, price, ts, s, latency_ms)) return;
+            // DIRECT DIAGNOSTIC — confirm this line is reached
+            {
+                static int64_t _vwap_reach_[MAX_SYMBOLS]={};
+                if (ts-_vwap_reach_[id]>5000){
+                    std::printf("[VWAP-REACH] %s ts=%lld enabled=%d\n",sym_short(id),(long long)ts,(int)edge_gate_[EDGE_VWAP].enabled);
+                    std::fflush(stdout);
+                    _vwap_reach_[id]=ts;
+                }
+            }
             if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;

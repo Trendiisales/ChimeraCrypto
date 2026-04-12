@@ -446,6 +446,18 @@ function updateAll(data) {
     const reg = $('reg-'+sym);
     if (reg) { reg.textContent = state; reg.className = 'sym-regime-pill ' + regimePillClass(state); }
 
+    // Daily H/L — BTC/ETH/SOL only (i<=2)
+    if (['btc','eth','sol'].includes(sym)) {
+      const hlEl = $('hl-'+sym);
+      if (hlEl) {
+        const hi = d.day_high, lo = d.day_low;
+        const hiEl = hlEl.querySelector('.hl-high');
+        const loEl = hlEl.querySelector('.hl-low');
+        if (hiEl) hiEl.textContent = hi > 0 ? 'H: ' + fmtPrice(hi, short) : 'H: --';
+        if (loEl) loEl.textContent = lo > 0 ? 'L: ' + fmtPrice(lo, short) : 'L: --';
+      }
+    }
+
     // Metrics
     set('vr-'+sym,  d.vol_ratio != null ? d.vol_ratio.toFixed(2) : '--');
     set('dp-'+sym,  d.displacement_bp != null ? d.displacement_bp.toFixed(1)+'bp' : '--');

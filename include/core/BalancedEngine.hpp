@@ -877,7 +877,8 @@ public:
             // IMBAL: re-enabled as shadow layer (AUDIT 2026-03-21). Starts parked (enabled=false),
             // auto-promotes after 30 trades proving edge. Gate: imbal>0.42, spread<1.5bp, GRIND only.
             if (edge_gate_allows(id, EDGE_IMBAL, ts) && check_imbalance(id, price, ts, s, latency_ms)) return;
-            if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
+            // VWAP DISABLED: no backtested edge on crypto spot — 20+ consecutive NO_FOLLOW losses 2026-04-12
+            // if (edge_gate_allows(id, EDGE_VWAP, ts) && check_vwap_reversion(id, price, ts, s, latency_ms)) return;
             // SWEEP: unproven, 0 trades yet -- PARKED until 20+ shadow samples show edge
             // if (edge_gate_allows(id, EDGE_SWEEP, ts) && check_sweep(id, price, ts, s, latency_ms)) return;
             // MM-PRESSURE: re-enabled — SL=20bp exceeds 15bp cost floor (was 10bp = loss on every SL hit)

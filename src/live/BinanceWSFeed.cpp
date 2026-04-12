@@ -138,7 +138,7 @@ void BinanceWSFeed::handle_book_ticker(const std::string& msg, int64_t recv_ms) 
     double ask_sz   = extract_dbl(msg, "A");
     int64_t trade_t = extract_i64(msg, "T");
 
-    if (bid <= 0.0 || ask <= 0.0 || ask <= bid) return;
+    if (bid <= 0.0 || ask <= 0.0 || ask < bid) return;  // allow ask==bid (tight symbols like XRP at low price)
 
     auto& st = get_or_create(sym);
     MarketTick& t = st.tick;

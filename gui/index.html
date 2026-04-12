@@ -76,6 +76,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .sym-name{font-family:var(--fh);font-size:13px;font-weight:900;letter-spacing:2px;color:var(--muted)}
 .sym-price{font-size:28px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:4px 0}
 .sym-price.up{color:var(--green)}.sym-price.down{color:var(--red)}
+.sym-hl{display:flex;gap:8px;margin:1px 0 3px;font-size:10px;font-family:var(--fm);letter-spacing:.3px}
+.hl-high{color:var(--green);opacity:.8}.hl-low{color:var(--red);opacity:.8}
 .sym-regime-pill{
   display:inline-block;font-family:var(--fh);font-size:9px;font-weight:700;
   padding:2px 7px;border-radius:2px;letter-spacing:1px;margin-bottom:6px;
@@ -307,6 +309,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <span class="sym-pnl zero" id="mini-pnl-btc">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-btc">--</div>
+        <div class="sym-hl" id="hl-btc"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
         <span class="sym-regime-pill rp-neutral" id="reg-btc">NEUTRAL</span>
         <div class="sym-metrics">
           <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-btc">--</span></div>
@@ -352,6 +355,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <span class="sym-pnl zero" id="mini-pnl-eth">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-eth">--</div>
+        <div class="sym-hl" id="hl-eth"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
         <span class="sym-regime-pill rp-neutral" id="reg-eth">NEUTRAL</span>
         <div class="sym-metrics">
           <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-eth">--</span></div>
@@ -397,6 +401,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <span class="sym-pnl zero" id="mini-pnl-sol">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-sol">--</div>
+        <div class="sym-hl" id="hl-sol"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
         <span class="sym-regime-pill rp-neutral" id="reg-sol">NEUTRAL</span>
         <div class="sym-metrics">
           <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-sol">--</span></div>

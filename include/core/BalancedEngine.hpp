@@ -3120,6 +3120,20 @@ private:
         const char* sym = sym_short(id);
         std::string key = std::string(sym) + " VWAP";
 
+        // DIAGNOSTIC: log every evaluation so we can confirm this function is reached
+        {
+            static int64_t last_vwap_diag_[MAX_SYMBOLS] = {};
+            if (ts - last_vwap_diag_[id] > 10000) {
+                std::printf("[VWAP-DIAG] %s | price=%.2f | vwap=%.2f | lat=%.1fms | regime=%s | pos=%d | dev=%.2fbp\n",
+                    sym, price, s.session_vwap,
+                    latency_ms, regime_name(s.regime),
+                    (int)s.pos.state,
+                    s.session_vwap > 0 ? (s.session_vwap - price) / s.session_vwap * 10000.0 : 0.0);
+                std::fflush(stdout);
+                last_vwap_diag_[id] = ts;
+            }
+        }
+
         // Per-symbol guard
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 

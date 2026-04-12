@@ -2383,6 +2383,12 @@ private:
                                                 cancel_reason);
             }
             clear_expand_pending();
+            // Set per-symbol VWAP cooldown so we don't immediately re-fire on
+            // the next tick. Without this, shadow mode (no fill confirmation)
+            // cycles PENDING->CANCEL->PENDING at tick speed = hundreds of entries.
+            if (s.pos.pending_layer == LAYER_VWAP) {
+                vwap_cancel_until_[id] = ts + VWAP_CANCEL_COOLDOWN_MS;
+            }
             s.pos.state = POS_FLAT;
             s.pos.reset();
             limit_orders_[id].reset();
@@ -3147,10 +3153,15 @@ private:
             rejection_throttle_.record(key, "regime_breakout_excluded");
             return false;
         }
+        // Post-cancel cooldown: if a VWAP limit order was just cancelled on this symbol,
+        // wait 30s before re-entering. Prevents tick-speed re-entry loop in shadow mode.
+        if (ts < vwap_cancel_until_[id]) {
+            rejection_throttle_.record(key, "vwap_cancel_cooldown");
+            return false;
+        }
         // TREND FILTER: only fire VWAP longs when fast EMA >= slow EMA (uptrend or flat).
-        // Fast EMA below slow by >= 8bp = genuine downtrend — VWAP longs are fading into
-        // selling pressure and will not follow (confirmed by first live trade: -14.36bp NO_FOLLOW).
-        // < 8bp gap = noise/lag — allow entry.
+        // Threshold lowered 8->3bp: live data showed slow grind downtrends with only 2-3bp
+        // EMA gap were firing longs that hit NO_FOLLOW every time (BNB session 2026-04-12).
         if (!trend_allows_long(id)) {
             rejection_throttle_.record(key, "trend_filter_downtrend");
             return false;
@@ -4299,6 +4310,11 @@ private:
     bool   trend_ema_init_[MAX_SYMBOLS]   = {};   // seeded flag
     int    trend_tick_count_[MAX_SYMBOLS] = {};   // ticks since init
 
+    // VWAP post-cancel cooldown — prevents re-entering same symbol immediately
+    // after a limit order cancels without fill (no-executor shadow mode fires at tick speed)
+    static constexpr int64_t VWAP_CANCEL_COOLDOWN_MS = 30000LL; // 30s
+    int64_t vwap_cancel_until_[MAX_SYMBOLS] = {};
+
     // Returns true if macro trend permits a LONG entry on this symbol
     // Suppresses longs when fast EMA is below slow EMA by >= 5bp (genuine downtrend)
     // Gaps < 5bp are tick noise and do not block entries.
@@ -4307,10 +4323,10 @@ private:
         if (trend_tick_count_[id] < 100) return true;  // need 100 ticks minimum
         if (trend_ema_fast_[id] <= 0.0) return true;
         double gap_bp = (trend_ema_slow_[id] - trend_ema_fast_[id]) / trend_ema_fast_[id] * 10000.0;
-        // AUDIT 2026-03-21: raised 5->8bp. At 5bp the filter was permanently blocking
-        // BTC/ETH/SOL during normal choppy sessions (slow EMA lags fast in any ranging market).
-        // 8bp = genuine downtrend, not tick noise or lag artifact.
-        return gap_bp < 8.0;
+        // Lowered 8->3bp: live data showed BNB grinding down with only 2-3bp EMA gap
+        // while VWAP longs were firing into the trend and hitting NO_FOLLOW every time.
+        // 3bp = still above tick noise (~0.5bp) but catches slow grind downtrends.
+        return gap_bp < 3.0;
     }
 
     void update_trend_ema(int id, double price) {

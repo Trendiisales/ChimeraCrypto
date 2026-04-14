@@ -100,6 +100,9 @@ static void http_server_thread(int port) {
     while (true) {
         int client = accept(server_fd, nullptr, nullptr);
         if (client < 0) break;
+        // Set receive timeout so read() doesn't block if client sends nothing
+        struct timeval tv{2, 0};  // 2 second timeout
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         char req[512] = {}; (void)read(client, req, sizeof(req)-1);
 
         std::string body;

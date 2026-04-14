@@ -9,21 +9,18 @@ namespace chimera {
 //
 // BTC is always id=0 (the lead-lag leader).
 // All others are followers. Adding a new symbol = add entry here + main.cpp.
-//
-// LEADLAG followers: ETH, SOL, BNB, AVAX, LINK, XRP
-// ETH→SOL secondary lead-lag still uses ids 1 and 2.
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 7;
+static constexpr int MAX_SYMBOLS = 8;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
-    "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP"
+    "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE"
 };
 
 // Full Binance stream names (lowercase)
 static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
-    "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt"
+    "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -44,13 +41,14 @@ inline int sym_id(const std::string& full_name) {
 
 // Legacy enum kept for any code that uses it
 enum SymbolId : uint8_t {
-    SYM_BTC = 0,
-    SYM_ETH = 1,
-    SYM_SOL = 2,
-    SYM_BNB = 3,
+    SYM_BTC  = 0,
+    SYM_ETH  = 1,
+    SYM_SOL  = 2,
+    SYM_BNB  = 3,
     SYM_AVAX = 4,
     SYM_LINK = 5,
     SYM_XRP  = 6,
+    SYM_DOGE = 7,
     SYM_COUNT = MAX_SYMBOLS
 };
 

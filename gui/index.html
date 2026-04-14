@@ -322,6 +322,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-btc">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-btc">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-btc">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-btc" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-btc" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-btc-liq" title="Liquidation cascade engine">
@@ -368,6 +370,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-eth">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-eth">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-eth">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-eth" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-eth" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-eth-liq" title="Liquidation cascade engine">
@@ -414,6 +418,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-sol">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-sol">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-sol">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-sol" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-sol" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-sol-liq" title="Liquidation cascade engine">
@@ -455,6 +461,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-bnb">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-bnb">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-bnb">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-bnb" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-bnb" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-bnb-liq" title="Liquidation cascade engine">
@@ -496,6 +504,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-avax">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-avax">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-avax">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-avax" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-avax" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-avax-liq" title="Liquidation cascade engine">
@@ -537,6 +547,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-link">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-link">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-link">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-link" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-link" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-link-liq" title="Liquidation cascade engine">
@@ -578,6 +590,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-xrp">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-xrp">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-xrp">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-xrp" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-xrp" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-xrp-liq" title="Liquidation cascade engine">
@@ -619,6 +633,8 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
           <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-doge">--</span></div>
           <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-doge">--</span></div>
           <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-doge">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-doge" style="color:var(--green)">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-doge" style="color:var(--red)">--</span></div>
         </div>
         <div class="sym-engines">
           <div class="eng-badge" id="badge-doge-liq" title="Liquidation cascade engine">
@@ -695,3 +711,4 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 <script src="/app.js"></script>
 </body>
 </html>
+

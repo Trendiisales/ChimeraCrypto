@@ -229,6 +229,9 @@ int main() {
         }
     });
 
+    // Seed indicators from Binance H1 history — runs synchronously before feed starts
+    engine.seed_from_history();
+
     feed.start();
     std::printf("[STARTUP] Feed live. Waiting for H1 bars to warm up (~50 bars = ~50 hours)...\n");
     std::printf("[STARTUP] GUI: http://localhost:8080\n");

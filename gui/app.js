@@ -18,8 +18,15 @@ const SYMBOLS = [
 let localTrades = [];
 let audioCtx = null;
 let audioUnlocked = false;
-let lastPrices = {};
-SYMBOLS.forEach(s => lastPrices[s.short.toLowerCase()] = 0);
+let lastPrices  = {};
+let sessionHi   = {};
+let sessionLo   = {};
+SYMBOLS.forEach(s => {
+  const k = s.short.toLowerCase();
+  lastPrices[k] = 0;
+  sessionHi[k]  = 0;
+  sessionLo[k]  = Infinity;
+});
 let wins = 0, losses = 0;
 let uptimeStart = null;
 
@@ -431,6 +438,7 @@ function updateAll(data) {
   if (lastKnownUptimeHours !== null && serverUptime < lastKnownUptimeHours - 0.01) {
     localTrades = [];
     _suppressedKeys.clear();
+    SYMBOLS.forEach(s => { const k = s.short.toLowerCase(); sessionHi[k] = 0; sessionLo[k] = Infinity; });
     try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SUPPRESS_KEY); localStorage.removeItem(CLEAR_KEY); } catch(e) {}
     uptimeStart = Date.now();
     firstPoll = true;
@@ -466,6 +474,10 @@ function updateAll(data) {
       pxEl.className = 'sym-price' + (px > lastPrices[sym] ? ' up' : px < lastPrices[sym] ? ' down' : '');
     }
     lastPrices[sym] = px;
+    if (px > 0) {
+      if (px > sessionHi[sym]) sessionHi[sym] = px;
+      if (px < sessionLo[sym]) sessionLo[sym] = px;
+    }
 
     if (!d) return;
 
@@ -617,6 +629,12 @@ function updateAll(data) {
     const miniPnl = $('mini-pnl-'+sym);
     if (miniPnl) { miniPnl.textContent = (symPnl>=0?'+':'')+symPnl.toFixed(2)+'bp'; miniPnl.className = 'sym-pnl '+(symPnl>0?'pos':symPnl<0?'neg':'zero'); }
     set('mini-t-'+sym, symTrades.length || 0);
+
+    // Session hi/lo
+    const hiEl = $('sh-'+sym);
+    const loEl = $('sl-'+sym);
+    if (hiEl) hiEl.textContent = sessionHi[sym] > 0 ? fmtPrice(sessionHi[sym], short) : '--';
+    if (loEl) loEl.textContent = (sessionLo[sym] < Infinity && sessionLo[sym] > 0) ? fmtPrice(sessionLo[sym], short) : '--';
   });
 
   // Session by-layer
@@ -755,5 +773,6 @@ async function executeKill() {
   }
 }
 // ── END EMERGENCY KILL ──────────────────────────────────────────────────────
+
 
 

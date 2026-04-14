@@ -10,6 +10,7 @@ const SYMBOLS = [
   { short: 'AVAX', full: 'avaxusdt' },
   { short: 'LINK', full: 'linkusdt' },
   { short: 'XRP',  full: 'xrpusdt'  },
+  { short: 'DOGE', full: 'dogeusdt' },
 ];
 
 let localTrades = [];
@@ -163,7 +164,7 @@ function fmtHold(ms) {
 function fmtPrice(p, sym) {
   if (!p || p <= 0) return '--';
   const s = (sym || '').toUpperCase();
-  if (s === 'SOL' || s === 'LINK' || s === 'XRP') return '$' + (+p).toFixed(3);
+  if (s === 'SOL' || s === 'LINK' || s === 'XRP' || s === 'DOGE') return '$' + (+p).toFixed(4);
   if (s === 'AVAX') return '$' + (+p).toFixed(2);
   return '$' + (+p).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
 }
@@ -353,7 +354,7 @@ function updateLivePositions(data) {
   const list = document.getElementById("live-positions-list");
   if (!list) return;
   const positions = [];
-  const syms = ["btcusdt","ethusdt","solusdt","bnbusdt","avaxusdt","linkusdt","xrpusdt"];
+  const syms = ["btcusdt","ethusdt","solusdt","bnbusdt","avaxusdt","linkusdt","xrpusdt","dogeusdt"];
   syms.forEach(sym => {
     const d = data[sym]; if (!d) return;
     const short = sym.replace("usdt","").toUpperCase();
@@ -724,3 +725,4 @@ async function executeKill() {
   }
 }
 // ── END EMERGENCY KILL ──────────────────────────────────────────────────────
+

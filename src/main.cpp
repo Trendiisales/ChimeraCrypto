@@ -1,6 +1,6 @@
 // ============================================================================
-// Chimera — Trend Following Engine
-// Strategy: H1 EMA9/EMA50 crossover on BTC/ETH/SOL spot
+// Chimera — H4/D1 Swing Engine
+// Strategy: Multi-strategy spot swing (EMA Pullback, RSI Divergence, Breakout Retest)
 // Feed: Binance WebSocket (bookTicker + aggTrade)
 // Execution: SpotExecutor (shadow mode default)
 // GUI: HTTP :8080
@@ -29,7 +29,7 @@
 #include "live/CoinbaseWSFeed.hpp"
 #include "live/PerpFeed.hpp"
 #include "live/SpotExecutor.hpp"
-#include "core/TrendEngine.hpp"
+#include "core/SwingEngine.hpp"
 #include "core/SymbolIndex.hpp"
 
 #include "version_generated.hpp"
@@ -65,9 +65,9 @@ void release_instance_lock() {
 }
 
 // ── Minimal HTTP server for GUI ───────────────────────────────────────────────
-static chimera::TrendEngine* g_engine_ptr      = nullptr;
+static chimera::SwingEngine* g_engine_ptr      = nullptr;
 static std::mutex             g_engine_mtx;
-static chimera::TrendEngine* g_engine_ptr_kill = nullptr;
+static chimera::SwingEngine* g_engine_ptr_kill = nullptr;
 
 static std::string read_file(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");
@@ -100,8 +100,7 @@ static void http_server_thread(int port) {
     while (true) {
         int client = accept(server_fd, nullptr, nullptr);
         if (client < 0) break;
-        // Set receive timeout so read() doesn't block if client sends nothing
-        struct timeval tv{2, 0};  // 2 second timeout
+        struct timeval tv{2, 0};
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         char req[512] = {}; (void)read(client, req, sizeof(req)-1);
 
@@ -155,7 +154,7 @@ void signal_handler(int) { g_running = false; }
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera Trend Engine | build=%s\n", BUILD_VERSION);
+    std::printf("[STARTUP] Chimera Swing Engine | build=%s\n", BUILD_VERSION);
     std::fflush(stdout);
 
     acquire_instance_lock();
@@ -169,11 +168,12 @@ int main() {
         std::fprintf(stderr, "[STARTUP] WARNING: executor init failed — shadow mode only\n");
     }
 
-    // Trend engine
-    chimera::TrendEngine engine;
+    // Swing engine
+    chimera::SwingEngine engine;
     engine.shadow_mode = true;  // always shadow until explicitly authorized
     if (exec_ok) engine.set_executor(&executor);
-    g_engine_ptr = &engine;
+    g_engine_ptr      = &engine;
+    g_engine_ptr_kill = &engine;
 
     // Set GUI root directory
     {
@@ -186,7 +186,6 @@ int main() {
             gui_root = dir + "/../gui";
         } else { gui_root = "../gui"; }
     }
-    g_engine_ptr_kill = &engine;
 
     // HTTP GUI thread
     std::thread http_thread(http_server_thread, 8080);
@@ -207,33 +206,35 @@ int main() {
         auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
 
+        // Swing trades don't need sub-ms freshness but still drop very stale ticks
         double tick_age_ms = 0.0;
         if (tick.trade_time > 0) {
             tick_age_ms = static_cast<double>(now_ms - tick.trade_time);
             if (tick_age_ms < 0.0) tick_age_ms = 0.0;
         }
-        if (tick_age_ms > 150.0) return;
+        if (tick_age_ms > 5000.0) return;  // 5s stale gate (relaxed vs HFT)
 
         {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
             engine.update_price(id, mid);
-        engine.on_tick(id, tick, now_ms);
+            engine.on_tick(id, tick, now_ms);
         }
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (n % 5000 == 0) {
-            std::printf("[TICK] n=%d | %s px=%.2f | age=%.1fms | trades=%d\n",
+        if (n % 10000 == 0) {
+            std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | trades=%d\n",
                 n, tick.symbol.c_str(), mid, tick_age_ms, engine.total_trades());
             std::fflush(stdout);
         }
     });
 
-    // Seed indicators from Binance H1 history — runs synchronously before feed starts
+    // Seed H4 + D1 indicators from Binance REST history
     engine.seed_from_history();
 
     feed.start();
-    std::printf("[STARTUP] Feed live. Waiting for H1 bars to warm up (~50 bars = ~50 hours)...\n");
+    std::printf("[STARTUP] Feed live. H4/D1 swing engine running on 8 symbols.\n");
+    std::printf("[STARTUP] Strategies: S1=EMA-Pullback S2=RSI-Divergence S3=Breakout-Retest\n");
     std::printf("[STARTUP] GUI: http://localhost:8080\n");
     std::fflush(stdout);
 

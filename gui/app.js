@@ -7,6 +7,7 @@
 
 const SYMS = ['btc','eth','sol','bnb','avax','link','xrp','doge'];
 let g_poll_err = 0;
+const g_prev_prices = {};  // track previous price per symbol for direction
 
 const $ = id => document.getElementById(id);
 
@@ -33,14 +34,19 @@ function updateCard(sym, pos, price) {
     }
     setTxt('rdy-'+s, pos.ready ? 'READY' : Math.floor(pct)+'%');
 
-    // Price
+    // Price with direction colouring
     const pxEl = $('px-'+s);
     if (pxEl) {
         const p = price || pos.entry || 0;
         pxEl.textContent = p > 0
             ? p.toLocaleString('en',{maximumFractionDigits: p<10?5:2})
             : '--';
-        pxEl.className = 'sym-price' + (pos.active ? (pos.side==='LONG' ? ' up' : ' down') : '');
+        const prev = g_prev_prices[s] || 0;
+        let dir = '';
+        if (pos.active) { dir = pos.side==='LONG' ? ' up' : ' down'; }
+        else if (p > 0 && prev > 0) { dir = p > prev ? ' up' : p < prev ? ' down' : ''; }
+        pxEl.className = 'sym-price' + dir;
+        g_prev_prices[s] = p;
     }
 
     // Regime pill — repurposed for EMA trend bias

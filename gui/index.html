@@ -597,6 +597,47 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
       </div>
     </div>
 
+    <!-- DOGE -->
+    <div class="sym-card" id="sb-doge">
+      <div class="sym-card-bar" id="bar-doge"><div class="sym-card-bar-fill" id="bar-fill-doge"></div></div>
+      <div class="sym-card-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <span class="sym-name">DOGE</span>
+          <span class="sym-ready-pct" id="rdy-doge" style="color:var(--muted)">0%</span>
+          <span class="sym-pnl zero" id="mini-pnl-doge">+0.00bp</span>
+        </div>
+        <div class="sym-price" id="px-doge">--</div>
+        <span class="sym-regime-pill rp-neutral" id="reg-doge">NEUTRAL</span>
+        <div class="sym-metrics">
+          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-doge">--</span></div>
+          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-doge">--</span></div>
+          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-doge">--</span></div>
+          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-doge">0</span></div>
+        </div>
+        <div class="sym-metrics2">
+          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-doge">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-doge">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-doge">--</span></div>
+          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-doge">--</span></div>
+        </div>
+        <div class="sym-engines">
+          <div class="eng-badge" id="badge-doge-liq" title="Liquidation cascade engine">
+            <span class="eng-badge-name">LIQ</span>
+            <span class="eng-badge-val" id="badge-val-doge-liq">WAIT</span>
+          </div>
+          <div class="eng-badge" id="badge-doge-bracket" title="Compression bracket engine">
+            <span class="eng-badge-name">BRACKET</span>
+            <span class="eng-badge-val" id="badge-val-doge-bracket">IDLE</span>
+            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-doge" style="width:0%"></div></div>
+          </div>
+          <div class="eng-badge" id="badge-doge-basis" title="Perp basis momentum engine">
+            <span class="eng-badge-name">BASIS</span>
+            <span class="eng-badge-val" id="badge-val-doge-basis">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /sym-grid -->
 
   <!-- BOTTOM SECTION -->

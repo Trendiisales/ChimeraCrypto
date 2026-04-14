@@ -1,6 +1,8 @@
 // CHIMERA app.js — Omega-style rebuild
 const STORAGE_KEY = 'chimera_trades_v3';
+const CLEAR_KEY   = 'chimera_cleared_at';
 const BOOT_TS = Date.now();
+let sessionClearedAt = 0;  // epoch ms — trades with server-side index <= this are suppressed
 
 const SYMBOLS = [
   { short: 'BTC',  full: 'btcusdt'  },
@@ -96,12 +98,23 @@ function flashWin(sym, pnl) {
 function loadTrades() {
   try { const raw = localStorage.getItem(STORAGE_KEY); localTrades = raw ? JSON.parse(raw) : []; }
   catch(e) { localTrades = []; }
+  try { const c = localStorage.getItem(CLEAR_KEY); if (c) sessionClearedAt = parseInt(c, 10); } catch(e) {}
 }
 function saveTrades() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localTrades.slice(0, 200))); } catch(e) {}
 }
 window.clearTrades = function() {
+  // Suppress all trades currently known to the server so they don't re-appear after clear
+  const last = window._lastApiData;
+  if (last && last.trade_log) {
+    last.trade_log.forEach(tr => {
+      _suppressedKeys.add(tr.t+'|'+tr.s+'|'+tr.e+'|'+tr.p);
+    });
+    _saveSuppressed();
+  }
   localTrades = []; wins = 0; losses = 0;
+  sessionClearedAt = Date.now();
+  try { localStorage.setItem(CLEAR_KEY, String(sessionClearedAt)); } catch(e) {}
   localStorage.removeItem(STORAGE_KEY);
   renderTradeLog(); updateWinRate();
 };
@@ -115,13 +128,29 @@ function currentSessionTrades() {
   return all;
 }
 
+// Keys of server trades that existed when user last hit CLEAR — always skip these
+const _suppressedKeys = new Set();
+let   _suppressLoaded = false;
+const SUPPRESS_KEY = 'chimera_suppressed_v1';
+
+function _loadSuppressed() {
+  if (_suppressLoaded) return;
+  _suppressLoaded = true;
+  try { const r = localStorage.getItem(SUPPRESS_KEY); if (r) JSON.parse(r).forEach(k => _suppressedKeys.add(k)); } catch(e) {}
+}
+function _saveSuppressed() {
+  try { localStorage.setItem(SUPPRESS_KEY, JSON.stringify([..._suppressedKeys].slice(0,500))); } catch(e) {}
+}
+
 function mergeTrades(serverLog, isBootLoad) {
+  _loadSuppressed();
   if (!serverLog || !serverLog.length) return;
   const before = localTrades.length;
   const existing = new Set(localTrades.map(t => t.t+'|'+t.s+'|'+t.e+'|'+t.p));
   let newCount = 0;
   serverLog.forEach(tr => {
     const key = tr.t+'|'+tr.s+'|'+tr.e+'|'+tr.p;
+    if (_suppressedKeys.has(key)) return;  // user cleared these
     if (!existing.has(key)) {
       localTrades.unshift(tr); existing.add(key); newCount++;
       if (!isBootLoad) {
@@ -401,7 +430,8 @@ function updateAll(data) {
   const serverUptime = data.uptime_hours || 0;
   if (lastKnownUptimeHours !== null && serverUptime < lastKnownUptimeHours - 0.01) {
     localTrades = [];
-    try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
+    _suppressedKeys.clear();
+    try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SUPPRESS_KEY); localStorage.removeItem(CLEAR_KEY); } catch(e) {}
     uptimeStart = Date.now();
     firstPoll = true;
   }
@@ -725,4 +755,5 @@ async function executeKill() {
   }
 }
 // ── END EMERGENCY KILL ──────────────────────────────────────────────────────
+
 

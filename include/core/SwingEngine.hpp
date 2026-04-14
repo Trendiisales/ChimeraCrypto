@@ -26,6 +26,15 @@
 //       SL: Below retest low
 //       TP: Entry + 2× breakout range, max hold 5 days
 //
+//  S4 — H4 Compression Bracket (direction-neutral breakout)
+//       H4: ATR compression: current 5-bar ATR < 40% of 20-bar ATR baseline
+//       Bracket: high and low of the 5-bar compressed range
+//       Entry: H4 bar closes outside bracket with OBV confirming direction
+//       SL: Opposite bracket boundary
+//       TP: Entry + 2× bracket width projected in breakout direction
+//       Conflict: automatically closes any opposing position before entry
+//       Max hold: 5 days
+//
 // Architecture:
 //   - Builds both H4 and D1 bars from the tick stream
 //   - Seeds both timeframes from Binance REST klines at startup
@@ -243,7 +252,8 @@ enum class SwingStrategy : uint8_t {
     NONE = 0,
     S1_PULLBACK   = 1,
     S2_DIVERGENCE = 2,
-    S3_BREAKOUT   = 3
+    S3_BREAKOUT   = 3,
+    S4_BRACKET    = 4
 };
 
 struct SwingPosition {
@@ -301,6 +311,15 @@ public:
     static constexpr double  S3_RETEST_ATR   = 0.4;    // retest within 0.4×ATR4h of level
     static constexpr double  S3_ATR_SL_MULT  = 1.2;
     static constexpr int64_t S3_MAX_HOLD_MS  = 432000000LL;  // 5 days
+
+    // S4 — Compression Bracket
+    static constexpr int     S4_COMPRESS_BARS  = 5;      // bars defining the compressed range
+    static constexpr int     S4_BASELINE_BARS  = 20;     // bars for ATR baseline
+    static constexpr double  S4_COMPRESS_RATIO = 0.45;   // current ATR must be < 45% of baseline
+    static constexpr double  S4_OBV_CONFIRM    = 0.0;    // OBV must be above EMA (>0 diff)
+    static constexpr double  S4_ATR_SL_MULT    = 1.0;    // SL at opposite bracket boundary (fallback: 1×ATR)
+    static constexpr int64_t S4_MAX_HOLD_MS    = 432000000LL;  // 5 days
+    static constexpr int64_t S4_FLIP_EXEMPT_MS = 0LL;    // S4 is exempt from flip cooldown (high-conviction)
 
     // Cooldowns
     static constexpr int64_t COOLDOWN_MS      = 21600000LL;  // 6h between entries
@@ -374,6 +393,7 @@ public:
         if (_try_s1(id, price, now_ms)) return;
         if (_try_s2(id, price, now_ms)) return;
         if (_try_s3(id, price, now_ms)) return;
+        if (_try_s4(id, price, now_ms)) return;
     }
 
     void kill_all() {
@@ -722,6 +742,112 @@ private:
         return true;
     }
 
+    // ── Strategy S4: H4 Compression Bracket ─────────────────────────────────────
+    bool _try_s4(int id, double price, int64_t now_ms) {
+        const auto& h4  = h4_ind_[id];
+        const auto& bb  = h4_builders_[id];
+
+        if (!h4.ready) return false;
+        if (h4.atr14 <= 0.0) return false;
+        if (bb.count < S4_BASELINE_BARS) return false;
+
+        // ── Compute ATR over last S4_COMPRESS_BARS H4 bars (current ATR proxy) ──
+        // Use the rolling ATR already in h4_ind_ as the current value.
+        // For baseline, compute average true range over S4_BASELINE_BARS manually.
+        double baseline_atr = 0.0;
+        int baseline_count  = 0;
+        for (int k = 0; k < S4_BASELINE_BARS; ++k) {
+            const OHLCBar* b  = bb.get(k);
+            const OHLCBar* bp = bb.get(k + 1);
+            if (!b || !bp) break;
+            double tr = b->high - b->low;
+            double t2 = std::fabs(b->high - bp->close);
+            double t3 = std::fabs(b->low  - bp->close);
+            if (t2 > tr) tr = t2;
+            if (t3 > tr) tr = t3;
+            baseline_atr += tr;
+            ++baseline_count;
+        }
+        if (baseline_count < S4_BASELINE_BARS / 2) return false;
+        baseline_atr /= baseline_count;
+        if (baseline_atr <= 0.0) return false;
+
+        // Current ATR = average TR of last S4_COMPRESS_BARS bars
+        double current_atr = 0.0;
+        int    cur_count   = 0;
+        for (int k = 0; k < S4_COMPRESS_BARS; ++k) {
+            const OHLCBar* b  = bb.get(k);
+            const OHLCBar* bp = bb.get(k + 1);
+            if (!b || !bp) break;
+            double tr = b->high - b->low;
+            double t2 = std::fabs(b->high - bp->close);
+            double t3 = std::fabs(b->low  - bp->close);
+            if (t2 > tr) tr = t2;
+            if (t3 > tr) tr = t3;
+            current_atr += tr;
+            ++cur_count;
+        }
+        if (cur_count < S4_COMPRESS_BARS - 1) return false;
+        current_atr /= cur_count;
+
+        // Compression confirmed?
+        if (current_atr >= S4_COMPRESS_RATIO * baseline_atr) return false;
+
+        // ── Define bracket: high/low of last S4_COMPRESS_BARS bars ───────────────
+        double bracket_hi = 0.0;
+        double bracket_lo = 1e18;
+        for (int k = 0; k < S4_COMPRESS_BARS; ++k) {
+            const OHLCBar* b = bb.get(k);
+            if (!b) break;
+            if (b->high > bracket_hi) bracket_hi = b->high;
+            if (b->low  < bracket_lo) bracket_lo = b->low;
+        }
+        if (bracket_hi <= bracket_lo) return false;
+        const double bracket_width = bracket_hi - bracket_lo;
+
+        // ── Price must have just closed outside the bracket ───────────────────────
+        const OHLCBar* b0 = bb.get(0);  // most recent closed H4 bar
+        if (!b0) return false;
+
+        const bool broke_up   = (b0->close > bracket_hi);
+        const bool broke_down = (b0->close < bracket_lo);
+        if (!broke_up && !broke_down) return false;
+
+        // ── OBV confirmation ─────────────────────────────────────────────────────
+        // For longs: OBV must be above its EMA (accumulation on break)
+        // For shorts: OBV must be below its EMA (distribution on break)
+        const bool obv_confirms_up   = (h4.obv >= h4.obv_ema);
+        const bool obv_confirms_down = (h4.obv <= h4.obv_ema);
+        if (broke_up   && !obv_confirms_up)   return false;
+        if (broke_down && !obv_confirms_down) return false;
+
+        // ── No flip cooldown for S4 (compression breakout is high-conviction) ────
+        // But still skip if SAME direction position just closed < 2h ago
+        // (avoid re-entering immediately after a failed bracket break)
+        const int64_t S4_SAME_COOLDOWN = 7200000LL;  // 2h
+        if (last_exit_dir_[id] != 0 && now_ms - last_exit_ms_[id] < S4_SAME_COOLDOWN) {
+            const bool same_dir = (broke_up && last_exit_dir_[id] == 1) ||
+                                  (broke_down && last_exit_dir_[id] == -1);
+            if (same_dir) return false;
+            // Opposing direction: allow (this is the conflict-flip case — _open_position_raw handles close)
+        }
+
+        const bool is_long = broke_up;
+
+        // SL: opposite bracket boundary; TP: entry + 2× bracket width
+        const double sl = is_long  ? bracket_lo : bracket_hi;
+        const double tp = is_long  ? (price + 2.0 * bracket_width)
+                                   : (price - 2.0 * bracket_width);
+
+        printf("[SWING-S4] %s %s BRACKET compression=%.3f/%.3f hi=%.4f lo=%.4f width=%.4f\n",
+               sym_short(id), is_long ? "LONG" : "SHORT",
+               current_atr, baseline_atr, bracket_hi, bracket_lo, bracket_width);
+        fflush(stdout);
+
+        _open_position_raw(id, is_long, price, sl, tp, now_ms, SwingStrategy::S4_BRACKET, S4_MAX_HOLD_MS);
+        return true;
+    }
+
     // ── Open position helpers ─────────────────────────────────────────────────
 
     // For S1 (trail-based TP)
@@ -736,6 +862,21 @@ private:
 
     void _open_position_raw(int id, bool is_long, double entry, double sl, double tp,
                              int64_t now_ms, SwingStrategy strat, int64_t max_hold_ms) {
+        // Conflict check: if an opposing position is open, close it first
+        auto& existing = positions_[id];
+        if (existing.active && existing.is_long != is_long) {
+            printf("[SWING-CONFLICT] %s closing %s %s S%d to enter %s S%d\n",
+                   sym_short(id),
+                   existing.is_long ? "LONG" : "SHORT", existing.symbol,
+                   (int)existing.strategy,
+                   is_long ? "LONG" : "SHORT",
+                   (int)strat);
+            fflush(stdout);
+            _close(id, entry, now_ms, "CONFLICT_FLIP");
+        }
+        // If same direction already open, skip (don't pyramid)
+        if (existing.active) return;
+
         double qty = MAX_QTY_USD / entry;
         qty = std::floor(qty * 100000.0) / 100000.0;
         if (qty * entry < MIN_QTY_USD) return;
@@ -974,3 +1115,4 @@ private:
 };
 
 } // namespace chimera
+

@@ -30,6 +30,7 @@
 #include "live/BinanceWSFeed.hpp"
 #include "live/SpotExecutor.hpp"
 #include "version_generated.hpp"
+#include <curl/curl.h>
 #ifndef BUILD_VERSION
 #  define BUILD_VERSION "dev"
 #endif
@@ -166,6 +167,27 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()).count();
             pos = TrendPosition{};
         }
+    }
+
+    // ── Seed indicators from Binance H1 klines history ───────────────────────
+    // Fetches last 100 H1 candles per symbol via public REST API (no auth).
+    // Called once at startup so engine is ready immediately, not after 50h.
+    void seed_from_history() {
+        printf("[TREND-SEED] Fetching H1 history for %d symbols...\n", MAX_SYMBOLS);
+        fflush(stdout);
+        for (int id = 0; id < MAX_SYMBOLS; ++id) {
+            _seed_symbol(id);
+        }
+        printf("[TREND-SEED] Done. Ready symbols: ");
+        int ready_count = 0;
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            if (indicators_[i].ready) {
+                printf("%s ", sym_short(i));
+                ++ready_count;
+            }
+        }
+        printf("(%d/%d)\n", ready_count, MAX_SYMBOLS);
+        fflush(stdout);
     }
 
     // Called every tick from main.cpp feed callback
@@ -327,6 +349,110 @@ public:
     double total_pnl_pct() const { return total_pnl_pct_; }
 
 private:
+
+    // ── CURL write callback ───────────────────────────────────────────────────
+    static size_t _curl_write(void* ptr, size_t size, size_t nmemb, std::string* out) {
+        out->append(static_cast<char*>(ptr), size * nmemb);
+        return size * nmemb;
+    }
+
+    // ── Seed one symbol from Binance H1 klines ───────────────────────────────
+    // Klines response: [[open_time, open, high, low, close, volume, ...], ...]
+    // We process oldest→newest to build EMA/ATR correctly.
+    void _seed_symbol(int id) {
+        const char* sym_up = sym_full(id);
+        // Convert to uppercase for REST API
+        char sym_upper[16] = {};
+        for (int i = 0; sym_up[i] && i < 15; ++i)
+            sym_upper[i] = (char)toupper((unsigned char)sym_up[i]);
+
+        std::string url = std::string("https://api.binance.com/api/v3/klines?symbol=")
+                        + sym_upper + "&interval=1h&limit=100";
+
+        CURL* curl = curl_easy_init();
+        if (!curl) { printf("[TREND-SEED] curl_easy_init failed for %s\n", sym_upper); return; }
+
+        std::string body;
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _curl_write);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+
+        if (res != CURLE_OK) {
+            printf("[TREND-SEED] curl failed for %s: %s\n", sym_upper, curl_easy_strerror(res));
+            return;
+        }
+
+        // Parse JSON array of arrays manually — no JSON lib dependency
+        // Each element: [open_time_ms, "open", "high", "low", "close", "volume", ...]
+        // We need: high (idx 2), low (idx 3), close (idx 4)
+        auto& ind = indicators_[id];
+        auto& bb  = builders_[id];
+
+        int bars_loaded = 0;
+        double prev_close = 0.0;
+        size_t pos = 0;
+
+        while (pos < body.size()) {
+            // Find next '[' that starts an inner array
+            size_t arr_start = body.find('[', pos);
+            if (arr_start == std::string::npos) break;
+            size_t arr_end = body.find(']', arr_start);
+            if (arr_end == std::string::npos) break;
+
+            std::string arr = body.substr(arr_start + 1, arr_end - arr_start - 1);
+            pos = arr_end + 1;
+
+            // Split by comma, extract fields 1(open),2(high),3(low),4(close)
+            std::vector<std::string> fields;
+            size_t p2 = 0;
+            while (p2 < arr.size()) {
+                size_t comma = arr.find(',', p2);
+                if (comma == std::string::npos) comma = arr.size();
+                std::string field = arr.substr(p2, comma - p2);
+                // Strip quotes and whitespace
+                size_t s1 = field.find_first_not_of(" \"");
+                size_t s2 = field.find_last_not_of(" \"");
+                if (s1 != std::string::npos) field = field.substr(s1, s2 - s1 + 1);
+                fields.push_back(field);
+                p2 = comma + 1;
+            }
+            if (fields.size() < 5) continue;
+
+            // field[0]=open_time, [1]=open, [2]=high, [3]=low, [4]=close
+            double high  = 0.0, low = 0.0, close = 0.0;
+            try {
+                high  = std::stod(fields[2]);
+                low   = std::stod(fields[3]);
+                close = std::stod(fields[4]);
+            } catch (...) { continue; }
+
+            if (high <= 0.0 || low <= 0.0 || close <= 0.0) continue;
+
+            // Feed into indicators
+            ind.update_ema(close);
+            ind.update_atr(high, low, prev_close);
+            prev_close = close;
+
+            // Seed bar builder with last known close
+            bb.current.close = close;
+            bb.prev.close    = close;
+            bb.has_prev      = true;
+
+            ++bars_loaded;
+        }
+
+        prices_[id] = prev_close;  // seed price cache with last close
+        printf("[TREND-SEED] %s: %d bars loaded | ema9=%.4f ema50=%.4f atr=%.4f ready=%s\n",
+               sym_upper, bars_loaded,
+               ind.ema9, ind.ema50, ind.atr14,
+               ind.ready ? "YES" : "NO");
+        fflush(stdout);
+    }
+
     // Price cache (latest tick price per symbol)
     double          prices_[MAX_SYMBOLS] = {};
 

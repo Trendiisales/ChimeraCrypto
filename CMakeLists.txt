@@ -11,20 +11,16 @@ find_package(OpenSSL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LWS REQUIRED libwebsockets)
 
-# CURL — headers at arch-specific location on Ubuntu 24
+# CURL
 find_path(CURL_INCLUDE_DIR curl/curl.h
     PATHS /usr/include/x86_64-linux-gnu /usr/include
 )
 find_library(CURL_LIBRARY NAMES curl
     PATHS /usr/lib/x86_64-linux-gnu /usr/lib
 )
-
 if(NOT CURL_INCLUDE_DIR OR NOT CURL_LIBRARY)
     message(FATAL_ERROR "libcurl not found")
 endif()
-
-message(STATUS "CURL headers: ${CURL_INCLUDE_DIR}")
-message(STATUS "CURL library: ${CURL_LIBRARY}")
 
 include_directories(
     include
@@ -39,16 +35,10 @@ set(CHIMERA_SOURCES
     src/live/CoinbaseWSFeed.cpp
     src/live/PerpFeed.cpp
     src/live/SpotExecutor.cpp
-    src/core/Portfolio.cpp
-    src/core/StatefulGovernor.cpp
 )
 
-# ── Build version: re-stamped on EVERY make, not just cmake configure ────────
-# Strategy: a Python script writes include/version_generated.hpp with the
-# current git hash on every make. main.cpp and QuadEngine include it directly.
-# Python is used (not bash) to avoid CMake shell-escaping hell with nested quotes.
+# Build version
 set(VERSION_HEADER "${CMAKE_SOURCE_DIR}/include/version_generated.hpp")
-
 add_custom_target(gen_version ALL
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/GenVersion.cmake
     BYPRODUCTS ${VERSION_HEADER}
@@ -59,7 +49,6 @@ add_custom_target(gen_version ALL
 add_executable(chimera ${CHIMERA_SOURCES})
 add_dependencies(chimera gen_version)
 
-# Force main.cpp to recompile whenever the version header changes
 set_property(SOURCE ${CMAKE_SOURCE_DIR}/src/main.cpp
     APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
 
@@ -84,7 +73,6 @@ set_target_properties(chimera PROPERTIES
     LINK_FLAGS "-flto"
 )
 
-# LTO strips execute permission on the output binary — restore it after every build
 add_custom_command(TARGET chimera POST_BUILD
     COMMAND chmod +x $<TARGET_FILE:chimera>
     COMMENT "Restoring execute permission after LTO link"

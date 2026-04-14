@@ -33,6 +33,10 @@
 #include "core/SymbolIndex.hpp"
 
 #include "version_generated.hpp"
+#include "execution/ExchangeLatencyEngine.hpp"
+
+// Required by BinanceWSFeed.cpp (extern declaration)
+chimera::ExchangeLatencyEngine g_exchange_latency;
 #ifndef BUILD_VERSION
 #  define BUILD_VERSION "dev"
 #endif

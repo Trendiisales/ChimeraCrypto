@@ -47,7 +47,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 /* SYMBOL GRID — centre stage */
 .sym-grid{
   display:grid;
-  grid-template-columns:repeat(8,1fr);
+  grid-template-columns:repeat(7,1fr);
   gap:6px;
   padding:8px;
   flex:none;
@@ -278,7 +278,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   </div>
   <div class="tb-stats">
     <div class="tb-stat"><span class="tb-label">Equity</span><span id="tb-equity" class="tb-val">$10,000</span></div>
-    <div class="tb-stat"><span class="tb-label">Session P&L</span><span id="tb-pnl" class="tb-val">+0.000%</span></div>
+    <div class="tb-stat"><span class="tb-label">Day P&amp;L</span><span id="tb-pnl" class="tb-val">+0.00bp</span></div>
     <div class="tb-stat"><span class="tb-label">Trades</span><span id="tb-trades" class="tb-val accent">0</span></div>
     <div class="tb-stat"><span class="tb-label">Positions</span><span id="tb-positions" class="tb-val">0</span></div>
     <div class="tb-stat"><span class="tb-label">WS Delay</span><span id="tb-latency" class="tb-val accent">--ms</span></div>
@@ -306,7 +306,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">BTC</span>
           <span class="sym-ready-pct" id="rdy-btc" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-btc">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-btc">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-btc">--</div>
         <div class="sym-hl" id="hl-btc"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
@@ -352,7 +352,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">ETH</span>
           <span class="sym-ready-pct" id="rdy-eth" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-eth">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-eth">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-eth">--</div>
         <div class="sym-hl" id="hl-eth"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
@@ -398,7 +398,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">SOL</span>
           <span class="sym-ready-pct" id="rdy-sol" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-sol">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-sol">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-sol">--</div>
         <div class="sym-hl" id="hl-sol"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
@@ -440,7 +440,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">BNB</span>
           <span class="sym-ready-pct" id="rdy-bnb" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-bnb">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-bnb">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-bnb">--</div>
         <span class="sym-regime-pill rp-neutral" id="reg-bnb">NEUTRAL</span>
@@ -481,7 +481,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">AVAX</span>
           <span class="sym-ready-pct" id="rdy-avax" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-avax">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-avax">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-avax">--</div>
         <span class="sym-regime-pill rp-neutral" id="reg-avax">NEUTRAL</span>
@@ -522,7 +522,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">LINK</span>
           <span class="sym-ready-pct" id="rdy-link" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-link">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-link">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-link">--</div>
         <span class="sym-regime-pill rp-neutral" id="reg-link">NEUTRAL</span>
@@ -563,7 +563,7 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <span class="sym-name">XRP</span>
           <span class="sym-ready-pct" id="rdy-xrp" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-xrp">+0.000%</span>
+          <span class="sym-pnl zero" id="mini-pnl-xrp">+0.00bp</span>
         </div>
         <div class="sym-price" id="px-xrp">--</div>
         <span class="sym-regime-pill rp-neutral" id="reg-xrp">NEUTRAL</span>
@@ -597,53 +597,6 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
       </div>
     </div>
 
-
-    <!-- DOGE -->
-    <div class="sym-card" id="sb-doge">
-      <div class="sym-card-bar" id="bar-doge"><div class="sym-card-bar-fill" id="bar-fill-doge"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">DOGE</span>
-          <span class="sym-ready-pct" id="rdy-doge" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-doge">+0.000%</span>
-        </div>
-        <div class="sym-price" id="px-doge">--</div>
-        <div class="sym-hl" id="hl-doge"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
-        <span class="sym-regime-pill rp-neutral" id="reg-doge">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">EMA9</span><span class="sm-val" id="vr-doge">--</span></div>
-          <div class="sym-metric"><span class="sm-label">EMA50</span><span class="sm-val" id="dp-doge">--</span></div>
-          <div class="sym-metric"><span class="sm-label">ATR</span><span class="sm-val accent" id="cap-doge">--</span></div>
-          <div class="sym-metric"><span class="sm-label">BARS</span><span class="sm-val" id="mini-t-doge">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">ENTRY</span><span class="sm2-val zero" id="fn-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SL</span><span class="sm2-val zero" id="bs-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">MFE</span><span class="sm2-val zero" id="lq-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">STATUS</span><span class="sm2-val zero" id="sp-doge">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-doge-liq">
-            <span class="eng-badge-name">TREND</span>
-            <span class="eng-badge-val" id="badge-val-doge-liq">WARMUP</span>
-          </div>
-          <div class="eng-badge" id="badge-doge-bracket">
-            <span class="eng-badge-name">SEP</span>
-            <span class="eng-badge-val" id="badge-val-doge-bracket">0.00%</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-doge" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-doge-basis">
-            <span class="eng-badge-name">ATR</span>
-            <span class="eng-badge-val" id="badge-val-doge-basis">--</span>
-          </div>
-          <div class="eng-badge" id="badge-doge-fundwin">
-            <span class="eng-badge-name">BARS</span>
-            <span class="eng-badge-val" id="badge-val-doge-fundwin">0/50</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
   </div><!-- /sym-grid -->
 
   <!-- BOTTOM SECTION -->
@@ -659,13 +612,14 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
     <div class="left-panel">
       <div class="panel-hd">SESSION</div>
       <div class="session-stats">
-          <div class="ss-item"><span class="ss-label">TRADES</span><span class="ss-val" id="ss-trades">0</span></div>
-          <div class="ss-item"><span class="ss-label">WIN RATE</span><span class="ss-val" id="ss-winrate">--</span></div>
-          <div class="ss-item"><span class="ss-label">SESSION P&L</span><span class="ss-val" id="ss-pnl">+0.000%</span></div>
-          <div class="ss-item"><span class="ss-label">ACTIVE POS</span><span class="ss-val" id="ss-active">0</span></div>
-          <div class="ss-item"><span class="ss-label">SYMS READY</span><span class="ss-val" id="ss-ready">0/8</span></div>
-          <div class="ss-item"><span class="ss-label">WARMUP</span><span class="ss-val" id="ss-warmup">0%</span></div>
-        </div>
+        <div class="ss-item"><span class="ss-label">P&amp;L</span><span class="ss-val" id="ts-pnl">+0.00bp</span></div>
+        <div class="ss-item"><span class="ss-label">Trades</span><span class="ss-val accent" id="ts-count">0</span></div>
+        <div class="ss-item"><span class="ss-label">Win Rate</span><span class="ss-val" id="ts-wr">--%</span></div>
+        <div class="ss-item"><span class="ss-label">W / L</span><span class="ss-val"><span id="ts-wins" style="color:var(--green)">0</span> / <span id="ts-losses" style="color:var(--red)">0</span></span></div>
+        <div class="ss-item"><span class="ss-label">Avg Win</span><span class="ss-val pos" id="ts-avgwin">--</span></div>
+        <div class="ss-item"><span class="ss-label">Avg Loss</span><span class="ss-val neg" id="ts-avgloss">--</span></div>
+        <div class="ss-item"><span class="ss-label">TP / SL</span><span class="ss-val"><span id="st-tp" style="color:var(--green)">0</span> / <span id="st-sl" style="color:var(--red)">0</span></span></div>
+        <div class="ss-item"><span class="ss-label">Expectancy</span><span class="ss-val" id="ts-exp">--</span></div>
       </div>
       <div class="panel-hd" style="border-top:1px solid var(--border2)">BY LAYER</div>
       <div class="eng-tbl-wrap">
@@ -681,15 +635,13 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <span class="tl-stat">W:<strong class="pos" id="tp-wins">0</strong></span>
         <span class="tl-stat">L:<strong class="neg" id="tp-losses">0</strong></span>
         <span class="tl-stat">WR:<strong id="tp-wr">--%</strong></span>
-        <span class="tl-stat">PnL:<strong id="tp-pnl">+0.000%</strong></span>
+        <span class="tl-stat">PnL:<strong id="tp-pnl">+0.00bp</strong></span>
         <span class="tl-stat">TR:<strong class="accent" id="st-trail">0</strong></span>
         <span class="tl-stat">TO:<strong style="color:var(--yellow)" id="st-timeout">0</strong></span>
         <button class="tl-clear" onclick="clearTrades()">CLEAR</button>
       </div>
       <div class="trade-log-cols">
-        <div class="tlc">TIME</div><div class="tlc">SYM</div><div class="tlc">SIDE</div>
-        <div class="tlc">ENTRY</div><div class="tlc">EXIT</div><div class="tlc">P&L%</div>
-        <div class="tlc">REASON</div><div class="tlc">BARS</div>
+        <span>TIME</span><span>SYM</span><span>ENGINE</span><span>EXIT</span><span>P&amp;L</span><span>MFE</span><span>MAE</span><span>HOLD</span>
       </div>
       <div class="trade-log-body" id="btm-trade-rows">
         <div class="tl-empty">Waiting for first trade...</div>

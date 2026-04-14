@@ -65,8 +65,21 @@ void release_instance_lock() {
 }
 
 // ── Minimal HTTP server for GUI ───────────────────────────────────────────────
-static chimera::TrendEngine* g_engine_ptr = nullptr;
-static std::mutex             g_engine_mtx;
+static chimera::TrendEngine* g_engine_ptr_kill = nullptr;
+
+static std::string read_file(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return "";
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::string buf(sz, '\0');
+    fread(&buf[0], 1, sz, f);
+    fclose(f);
+    return buf;
+}
+
+static std::string gui_root;
 
 static void http_server_thread(int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -79,61 +92,53 @@ static void http_server_thread(int port) {
     addr.sin_port        = htons(port);
     if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return; }
     listen(server_fd, 16);
-    std::printf("[HTTP] GUI server on port %d\n", port);
+    std::printf("[HTTP] GUI on port %d | root: %s\n", port, gui_root.c_str());
     std::fflush(stdout);
 
     while (true) {
         int client = accept(server_fd, nullptr, nullptr);
         if (client < 0) break;
-        char req[512] = {}; read(client, req, sizeof(req)-1);
+        char req[512] = {}; (void)read(client, req, sizeof(req)-1);
 
         std::string body;
         const char* ct = "application/json";
+        int status = 200;
 
-        if (strstr(req, "GET /api/state")) {
+        if (strstr(req, "POST /api/kill")) {
+            std::lock_guard<std::mutex> lk(g_engine_mtx);
+            if (g_engine_ptr_kill) g_engine_ptr_kill->kill_all();
+            body = "{\"ok\":true}";
+        } else if (strstr(req, "GET /api/state")) {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
             body = g_engine_ptr ? g_engine_ptr->state_json() : "{}";
-        } else if (strstr(req, "GET /")) {
-            ct = "text/html";
-            body = R"(<!DOCTYPE html><html><head><title>Chimera Trend</title>
-<meta http-equiv="refresh" content="5">
-<style>body{background:#0d1117;color:#e6edf3;font-family:monospace;padding:20px;}
-table{border-collapse:collapse;width:100%;}
-td,th{border:1px solid #30363d;padding:8px 12px;text-align:left;}
-th{background:#161b22;}.pos{color:#3fb950;}.neg{color:#f85149;}
-h1{color:#58a6ff;}</style></head><body>
-<h1>Chimera Trend Engine</h1>
-<div id="data">Loading...</div>
-<script>
-function load(){fetch('/api/state').then(r=>r.json()).then(d=>{
-  let h='<p>Trades: '+d.trades+' | Shadow: '+d.shadow+'</p>';
-  h+='<table><tr><th>Symbol</th><th>Status</th><th>Entry</th><th>SL</th><th>MFE</th><th>EMA9</th><th>EMA50</th><th>ATR</th><th>Bars</th></tr>';
-  (d.positions||[]).forEach(p=>{
-    h+='<tr><td>'+p.sym+'</td><td>'+(p.active?'<span class="pos">'+p.side+'</span>':p.side)+'</td>';
-    h+='<td>'+(p.entry>0?p.entry.toFixed(2):'--')+'</td>';
-    h+='<td>'+(p.sl>0?p.sl.toFixed(2):'--')+'</td>';
-    h+='<td>'+(p.mfe>0?p.mfe.toFixed(4):'--')+'</td>';
-    h+='<td>'+p.ema9.toFixed(2)+'</td><td>'+p.ema50.toFixed(2)+'</td>';
-    h+='<td>'+p.atr.toFixed(2)+'</td><td>'+p.bars+'</td></tr>';
-  });
-  h+='</table>';
-  document.getElementById('data').innerHTML=h;
-}).catch(e=>console.error(e));}
-load();setInterval(load,5000);
-</script></body></html>)";
+        } else if (strstr(req, "GET /app.js")) {
+            ct = "application/javascript";
+            body = read_file(gui_root + "/app.js");
+            if (body.empty()) { status = 404; body = "not found"; }
+        } else if (strstr(req, "GET /style.css")) {
+            ct = "text/css";
+            body = read_file(gui_root + "/style.css");
+            if (body.empty()) { status = 404; body = "not found"; }
+        } else if (strstr(req, "GET /favicon.svg")) {
+            ct = "image/svg+xml";
+            body = read_file(gui_root + "/favicon.svg");
+            if (body.empty()) { status = 404; body = "not found"; }
         } else {
-            body = "{}";
+            ct = "text/html";
+            body = read_file(gui_root + "/index.html");
+            if (body.empty()) { status = 404; body = "index.html not found"; }
         }
 
         std::ostringstream resp;
-        resp << "HTTP/1.1 200 OK\r\n"
+        resp << "HTTP/1.1 " << status << " OK\r\n"
              << "Content-Type: " << ct << "\r\n"
              << "Content-Length: " << body.size() << "\r\n"
              << "Access-Control-Allow-Origin: *\r\n"
+             << "Cache-Control: no-cache\r\n"
              << "Connection: close\r\n\r\n"
              << body;
         auto s = resp.str();
-        write(client, s.c_str(), s.size());
+        (void)write(client, s.c_str(), s.size());
         close(client);
     }
     close(server_fd);
@@ -165,6 +170,19 @@ int main() {
     if (exec_ok) engine.set_executor(&executor);
     g_engine_ptr = &engine;
 
+    // Set GUI root directory
+    {
+        char exe[4096] = {};
+        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe)-1);
+        if (len > 0) {
+            std::string dir(exe, len);
+            auto sl = dir.rfind('/');
+            if (sl != std::string::npos) dir = dir.substr(0, sl);
+            gui_root = dir + "/../gui";
+        } else { gui_root = "../gui"; }
+    }
+    g_engine_ptr_kill = &engine;
+
     // HTTP GUI thread
     std::thread http_thread(http_server_thread, 8080);
     http_thread.detach();
@@ -193,7 +211,8 @@ int main() {
 
         {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
-            engine.on_tick(id, tick, now_ms);
+            engine.update_price(id, mid);
+        engine.on_tick(id, tick, now_ms);
         }
 
         static std::atomic<int> tc{0};

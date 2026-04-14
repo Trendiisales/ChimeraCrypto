@@ -65,6 +65,8 @@ void release_instance_lock() {
 }
 
 // ── Minimal HTTP server for GUI ───────────────────────────────────────────────
+static chimera::TrendEngine* g_engine_ptr      = nullptr;
+static std::mutex             g_engine_mtx;
 static chimera::TrendEngine* g_engine_ptr_kill = nullptr;
 
 static std::string read_file(const std::string& path) {

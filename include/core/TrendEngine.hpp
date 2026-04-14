@@ -1,4 +1,7 @@
 #pragma once
+#include <vector>
+#include <sstream>
+#include <iomanip>
 // ============================================================================
 // TrendEngine — H1 EMA crossover trend following for BTC/ETH/SOL
 //
@@ -26,6 +29,10 @@
 #include "core/SymbolIndex.hpp"
 #include "live/BinanceWSFeed.hpp"
 #include "live/SpotExecutor.hpp"
+#include "version_generated.hpp"
+#ifndef BUILD_VERSION
+#  define BUILD_VERSION "dev"
+#endif
 
 namespace chimera {
 
@@ -142,12 +149,32 @@ public:
 
     void set_executor(SpotExecutor* ex) { executor_ = ex; }
 
+    void update_price(int id, double price) {
+        if (id >= 0 && id < MAX_SYMBOLS) prices_[id] = price;
+    }
+
+    void kill_all() {
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            auto& pos = positions_[i];
+            if (!pos.active) continue;
+            printf("[TREND-KILL] %s %s entry=%.4f\n",
+                   sym_short(i), pos.is_long ? "LONG" : "SHORT", pos.entry_px);
+            fflush(stdout);
+            if (executor_) executor_->execute(pos.symbol, !pos.is_long, pos.qty, prices_[i]);
+            last_exit_dir_[i] = pos.is_long ? 1 : -1;
+            last_exit_ms_[i]  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            pos = TrendPosition{};
+        }
+    }
+
     // Called every tick from main.cpp feed callback
     void on_tick(int id, const MarketTick& tick, int64_t now_ms) {
         if (id < 0 || id >= MAX_SYMBOLS) return;
 
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         if (price <= 0.0) return;
+        prices_[id] = price;
 
         auto& bb  = builders_[id];
         auto& ind = indicators_[id];
@@ -238,33 +265,80 @@ public:
 
     // JSON state for GUI
     std::string state_json() const {
-        char buf[2048];
-        int n = 0;
-        n += snprintf(buf + n, sizeof(buf) - n, "{\"trades\":%d,\"shadow\":%s,\"positions\":[",
-                      trade_counter_, shadow_mode ? "true" : "false");
+        std::ostringstream js;
+        js << std::fixed << std::setprecision(6);
+        js << "{";
+        js << "\"trades\":" << trade_counter_ << ",";
+        js << "\"shadow\":" << (shadow_mode ? "true" : "false") << ",";
+        js << "\"total_pnl_pct\":" << total_pnl_pct_ << ",";
+        const double wr = trade_counter_ > 0 ? (double)wins_ / trade_counter_ : 0.0;
+        js << "\"win_rate\":" << wr << ",";
+        js << "\"build\":\"" << BUILD_VERSION << "\",";
+        // Prices
+        js << "\"prices\":{";
         for (int i = 0; i < MAX_SYMBOLS; ++i) {
-            if (i > 0) n += snprintf(buf + n, sizeof(buf) - n, ",");
+            if (i > 0) js << ",";
+            js << "\"" << sym_short(i) << "\":" << prices_[i];
+        }
+        js << "},";
+        // Positions
+        js << "\"positions\":[";
+        for (int i = 0; i < MAX_SYMBOLS; ++i) {
+            if (i > 0) js << ",";
             const auto& pos = positions_[i];
             const auto& ind = indicators_[i];
-            n += snprintf(buf + n, sizeof(buf) - n,
-                "{\"sym\":\"%s\",\"active\":%s,\"side\":\"%s\",\"entry\":%.4f,"
-                "\"sl\":%.4f,\"mfe\":%.4f,\"ema9\":%.4f,\"ema50\":%.4f,"
-                "\"atr\":%.4f,\"bars\":%d,\"ready\":%s}",
-                sym_short(i),
-                pos.active ? "true" : "false",
-                pos.active ? (pos.is_long ? "LONG" : "SHORT") : "FLAT",
-                pos.entry_px, pos.sl_px, pos.mfe,
-                ind.ema9, ind.ema50, ind.atr14, ind.bar_count,
-                ind.ready ? "true" : "false");
+            js << "{\"sym\":\"" << sym_short(i) << "\","
+               << "\"active\":" << (pos.active?"true":"false") << ","
+               << "\"side\":\"" << (pos.active?(pos.is_long?"LONG":"SHORT"):"FLAT") << "\","
+               << "\"entry\":" << pos.entry_px << ","
+               << "\"sl\":" << pos.sl_px << ","
+               << "\"mfe\":" << pos.mfe << ","
+               << "\"trail_armed\":" << (pos.trail_armed?"true":"false") << ","
+               << "\"qty\":" << pos.qty << ","
+               << "\"ema9\":" << ind.ema9 << ","
+               << "\"ema50\":" << ind.ema50 << ","
+               << "\"atr\":" << ind.atr14 << ","
+               << "\"bars\":" << ind.bar_count << ","
+               << "\"ready\":" << (ind.ready?"true":"false") << ","
+               << "\"pnl_pct\":0.0}";
         }
-        snprintf(buf + n, sizeof(buf) - n, "]}");
-        return std::string(buf);
+        js << "],";
+        // Trade log
+        js << "\"trade_log\":[";
+        bool first = true;
+        for (const auto& t : trade_log_) {
+            if (!first) js << ",";
+            first = false;
+            js << "{\"time\":\"" << t.time << "\","
+               << "\"sym\":\"" << t.sym << "\","
+               << "\"side\":\"" << t.side << "\","
+               << "\"entry\":" << t.entry << ","
+               << "\"exit\":" << t.exit << ","
+               << "\"pnl_pct\":" << t.pnl_pct << ","
+               << "\"mfe\":" << t.mfe << ","
+               << "\"why\":\"" << t.why << "\","
+               << "\"bars_held\":" << t.bars_held << "}";
+        }
+        js << "]}";
+        return js.str();
     }
 
     int total_trades()    const { return trade_counter_; }
     double total_pnl_pct() const { return total_pnl_pct_; }
 
 private:
+    // Price cache (latest tick price per symbol)
+    double          prices_[MAX_SYMBOLS] = {};
+
+    // Trade log (last 100 trades)
+    struct TradeLog {
+        std::string sym, side, time, why;
+        double entry=0, exit=0, pnl_pct=0, mfe=0;
+        int bars_held=0;
+    };
+    std::vector<TradeLog> trade_log_;
+    int wins_ = 0;
+
     BarBuilder      builders_[MAX_SYMBOLS];
     TrendIndicators indicators_[MAX_SYMBOLS];
     TrendPosition   positions_[MAX_SYMBOLS];
@@ -321,6 +395,28 @@ private:
         const double pnl_pct = pos.is_long ? ((exit_px - pos.entry_px) / pos.entry_px * 100.0)
                                            : ((pos.entry_px - exit_px) / pos.entry_px * 100.0);
         total_pnl_pct_ += pnl_pct;
+        if (pnl_pct > 0) ++wins_;
+        // Record to trade log
+        {
+            TradeLog tl;
+            tl.sym  = sym_short(id);
+            tl.side = pos.is_long ? "LONG" : "SHORT";
+            tl.entry = pos.entry_px;
+            tl.exit  = exit_px;
+            tl.pnl_pct = pnl_pct;
+            tl.mfe = pos.mfe;
+            tl.why = sl_hit ? "SL_HIT" : "TIMEOUT";
+            tl.bars_held = builders_[id].has_prev ? builders_[id].prev.bar_ms > 0 ? 1 : 0 : 0;
+            // UTC time string
+            time_t t = (time_t)(now_ms/1000);
+            struct tm ti{}; gmtime_r(&t, &ti);
+            char tbuf[20];
+            snprintf(tbuf, sizeof(tbuf), "%02d:%02d:%02d",
+                     ti.tm_hour, ti.tm_min, ti.tm_sec);
+            tl.time = tbuf;
+            trade_log_.push_back(tl);
+            if (trade_log_.size() > 100) trade_log_.erase(trade_log_.begin());
+        }
 
         const char* pfx = shadow_mode ? "[TREND-SHADOW]" : "[TREND]";
         printf("%s %s CLOSE %s entry=%.4f exit=%.4f pnl=%.3f%% mfe=%.4f why=%s\n",

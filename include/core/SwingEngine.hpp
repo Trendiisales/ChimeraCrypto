@@ -692,6 +692,16 @@ private:
         if (h4.atr14 <= 0.0) return false;
         if (d1_bb.count < S3_RESIST_BARS) return false;
 
+        // S3 is LONG-only (breakout retest buy).
+        // Gate: only fire in D1 bull regime (EMA21 > EMA50 with separation).
+        // Firing longs into D1 bear = trading against trend = losses confirmed in shadow.
+        {
+            const auto& d1_s3 = d1_ind_[id];
+            if (d1_s3.ema21 <= d1_s3.ema50) return false;  // bear regime
+            const double d1_sep_s3 = std::fabs(d1_s3.ema21 - d1_s3.ema50) / d1_s3.ema50;
+            if (d1_sep_s3 < S1_EMA_SEP_PCT) return false;  // no clear trend
+        }
+
         // Resistance = highest close in last S3_RESIST_BARS D1 bars
         double resistance = 0.0;
         for (int k = 0; k < S3_RESIST_BARS; ++k) {

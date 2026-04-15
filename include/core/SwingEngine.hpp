@@ -274,6 +274,10 @@ struct SwingPosition {
     int64_t        max_hold_ms   = 0;
     char           symbol[16]    = {};
     int            trade_id      = 0;
+    // Pyramid add-on (fires once at stage 2, 25% of original qty)
+    bool           pyramid_done  = false;
+    double         pyramid_qty   = 0.0;    // qty added at pyramid
+    double         blended_entry = 0.0;    // blended entry after pyramid
 };
 
 // ============================================================================
@@ -912,6 +916,9 @@ private:
         pos.partial_done   = false;
         pos.qty            = qty;
         pos.qty_full       = qty;
+        pos.pyramid_done   = false;
+        pos.pyramid_qty    = 0.0;
+        pos.blended_entry  = entry;
         pos.entry_ms       = now_ms;
         pos.max_hold_ms    = max_hold_ms;
         pos.trade_id       = ++trade_counter_;
@@ -993,6 +1000,35 @@ private:
                            sym_short(id), pos.is_long ? "LONG" : "SHORT",
                            pos.mfe, pos.trail_sl);
                     fflush(stdout);
+                    // ── Pyramid: add 25% at stage 2 (trend confirmed) ─────────
+                    // Only for S1. Only once. D1 regime still valid (entry was
+                    // gated on regime -- if we reached 5× ATR, trend is intact).
+                    // Cap: pyramid qty limited so total <= MAX_QTY_USD / entry.
+                    if (!pos.pyramid_done) {
+                        const double add_qty_raw = pos.qty_full * 0.25;
+                        // Ensure total does not exceed MAX_QTY_USD
+                        const double max_total = MAX_QTY_USD / price;
+                        const double current_total = pos.qty + add_qty_raw;
+                        const double add_qty = (current_total > max_total)
+                            ? std::max(0.0, max_total - pos.qty)
+                            : add_qty_raw;
+                        if (add_qty * price >= MIN_QTY_USD) {
+                            // Blended entry price
+                            const double new_total = pos.qty + add_qty;
+                            pos.blended_entry = (pos.blended_entry * pos.qty
+                                                + price * add_qty) / new_total;
+                            pos.qty          += add_qty;
+                            pos.pyramid_qty   = add_qty;
+                            pos.pyramid_done  = true;
+                            printf("[SWING-PYRAMID] %s %s +25pct @ %.4f qty=%.5f"
+                                   " blended=%.4f total_qty=%.5f\n",
+                                   sym_short(id), pos.is_long ? "LONG" : "SHORT",
+                                   price, add_qty, pos.blended_entry, pos.qty);
+                            fflush(stdout);
+                            if (executor_) executor_->execute(
+                                pos.symbol, pos.is_long, add_qty, price);
+                        }
+                    }
                 }
                 // ── Stage 3: lock-in at 0.5× ATR at 8× ATR MFE ──────────────
                 if (pos.trail_stage == 2 && move >= S1_TRAIL_STAGE3_ATR * h4.atr14) {
@@ -1071,6 +1107,7 @@ private:
         last_exit_dir_[id] = pos.is_long ? 1 : -1;
         last_exit_ms_[id]  = now_ms;
 
+        // Close full qty (includes pyramid add-on if present)
         if (executor_) executor_->execute(pos.symbol, !pos.is_long, pos.qty, exit_px);
 
         pos = SwingPosition{};

@@ -266,7 +266,10 @@ struct SwingPosition {
     double         trail_sl      = 0.0;
     double         mfe           = 0.0;
     bool           trail_armed   = false;
-    double         qty           = 0.0;
+    int            trail_stage   = 0;      // 0=unarmed 1=1.5xATR 2=1.0xATR 3=0.5xATR
+    bool           partial_done  = false;  // true after 50% partial exit at stage 1
+    double         qty           = 0.0;    // current active qty (halved after partial)
+    double         qty_full      = 0.0;    // original qty at entry
     int64_t        entry_ms      = 0;
     int64_t        max_hold_ms   = 0;
     char           symbol[16]    = {};
@@ -295,8 +298,12 @@ public:
     static constexpr double S1_RSI_SHORT_HI  = 60.0;
     static constexpr double S1_RSI_SHORT_LO  = 45.0;
     static constexpr double S1_ATR_SL_MULT   = 1.5;
-    static constexpr double S1_TRAIL_ARM_ATR = 3.0;
-    static constexpr double S1_TRAIL_ATR     = 1.5;
+    static constexpr double S1_TRAIL_ARM_ATR = 3.0;   // stage 1 arm: 3× ATR MFE
+    static constexpr double S1_TRAIL_ATR     = 1.5;   // stage 1 dist: 1.5× ATR
+    static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;  // tighten at 5× ATR MFE
+    static constexpr double S1_TRAIL_DIST2   = 1.0;   // stage 2 dist: 1.0× ATR
+    static constexpr double S1_TRAIL_STAGE3_ATR = 8.0;  // lock-in at 8× ATR MFE
+    static constexpr double S1_TRAIL_DIST3   = 0.5;   // stage 3 dist: 0.5× ATR
     static constexpr int64_t S1_MAX_HOLD_MS  = 604800000LL;  // 7 days
 
     // S2 — RSI Divergence
@@ -901,7 +908,10 @@ private:
         pos.trail_sl       = sl;
         pos.mfe            = 0.0;
         pos.trail_armed    = false;
+        pos.trail_stage    = 0;
+        pos.partial_done   = false;
         pos.qty            = qty;
+        pos.qty_full       = qty;
         pos.entry_ms       = now_ms;
         pos.max_hold_ms    = max_hold_ms;
         pos.trade_id       = ++trade_counter_;
@@ -937,25 +947,95 @@ private:
             if (tp_hit) { _close(id, pos.tp_px, now_ms, "TP_HIT"); return; }
         }
 
-        // Trail logic (S1 and as fallback for all strategies)
+        // ── Staged trail + partial exit ──────────────────────────────────────
+        // S1: 3-stage trail tightens as MFE grows, 50% partial at stage 1 arm.
+        // Other strategies: single trail at 2× ATR dist 1.2× ATR (unchanged).
         if (h4.atr14 > 0.0) {
-            // Arm trail at 3×ATR for S1, 2×ATR for S2/S3
-            const double arm_mult  = (pos.strategy == SwingStrategy::S1_PULLBACK) ? S1_TRAIL_ARM_ATR : 2.0;
-            const double trail_dist = (pos.strategy == SwingStrategy::S1_PULLBACK) ? S1_TRAIL_ATR * h4.atr14
-                                                                                    : 1.2 * h4.atr14;
-
-            if (!pos.trail_armed && move >= arm_mult * h4.atr14) {
-                pos.trail_armed = true;
-                printf("[SWING-TRAIL-ARM] %s %s S%d mfe=%.4f\n",
-                       sym_short(id), pos.is_long ? "LONG" : "SHORT", (int)pos.strategy, move);
-                fflush(stdout);
-            }
-
-            if (pos.trail_armed) {
-                const double new_sl = pos.is_long ? (pos.entry_px + pos.mfe - trail_dist)
-                                                  : (pos.entry_px - pos.mfe + trail_dist);
-                if (pos.is_long  && new_sl > pos.trail_sl) pos.trail_sl = new_sl;
-                if (!pos.is_long && new_sl < pos.trail_sl) pos.trail_sl = new_sl;
+            if (pos.strategy == SwingStrategy::S1_PULLBACK) {
+                // ── Stage 1: arm at 3× ATR, trail dist 1.5× ATR ─────────────
+                if (pos.trail_stage == 0 && move >= S1_TRAIL_ARM_ATR * h4.atr14) {
+                    pos.trail_stage  = 1;
+                    pos.trail_armed  = true;
+                    const double new_sl = pos.is_long
+                        ? (pos.entry_px + pos.mfe - S1_TRAIL_ATR * h4.atr14)
+                        : (pos.entry_px - pos.mfe + S1_TRAIL_ATR * h4.atr14);
+                    if (pos.is_long ? (new_sl > pos.trail_sl) : (new_sl < pos.trail_sl))
+                        pos.trail_sl = new_sl;
+                    printf("[SWING-TRAIL-STAGE1] %s %s mfe=%.4f trail_sl=%.4f\n",
+                           sym_short(id), pos.is_long ? "LONG" : "SHORT",
+                           pos.mfe, pos.trail_sl);
+                    fflush(stdout);
+                    // ── Partial exit: close 50% at stage 1 arm ───────────────
+                    if (!pos.partial_done && pos.qty_full > 0.0) {
+                        const double partial_qty = pos.qty_full * 0.5;
+                        const double partial_pnl_pct = pos.is_long
+                            ? ((price - pos.entry_px) / pos.entry_px * 100.0)
+                            : ((pos.entry_px - price) / pos.entry_px * 100.0);
+                        printf("[SWING-PARTIAL] %s %s 50pct exit @ %.4f pnl=%.3f%% qty=%.5f\n",
+                               sym_short(id), pos.is_long ? "LONG" : "SHORT",
+                               price, partial_pnl_pct, partial_qty);
+                        fflush(stdout);
+                        if (executor_) executor_->execute(pos.symbol, !pos.is_long, partial_qty, price);
+                        pos.qty          = pos.qty_full - partial_qty;  // remaining 50%
+                        pos.partial_done = true;
+                        total_pnl_pct_  += partial_pnl_pct * 0.5;  // half weight
+                    }
+                }
+                // ── Stage 2: tighten to 1.0× ATR at 5× ATR MFE ──────────────
+                if (pos.trail_stage == 1 && move >= S1_TRAIL_STAGE2_ATR * h4.atr14) {
+                    pos.trail_stage = 2;
+                    const double new_sl = pos.is_long
+                        ? (pos.entry_px + pos.mfe - S1_TRAIL_DIST2 * h4.atr14)
+                        : (pos.entry_px - pos.mfe + S1_TRAIL_DIST2 * h4.atr14);
+                    if (pos.is_long ? (new_sl > pos.trail_sl) : (new_sl < pos.trail_sl))
+                        pos.trail_sl = new_sl;
+                    printf("[SWING-TRAIL-STAGE2] %s %s mfe=%.4f trail_sl=%.4f\n",
+                           sym_short(id), pos.is_long ? "LONG" : "SHORT",
+                           pos.mfe, pos.trail_sl);
+                    fflush(stdout);
+                }
+                // ── Stage 3: lock-in at 0.5× ATR at 8× ATR MFE ──────────────
+                if (pos.trail_stage == 2 && move >= S1_TRAIL_STAGE3_ATR * h4.atr14) {
+                    pos.trail_stage = 3;
+                    const double new_sl = pos.is_long
+                        ? (pos.entry_px + pos.mfe - S1_TRAIL_DIST3 * h4.atr14)
+                        : (pos.entry_px - pos.mfe + S1_TRAIL_DIST3 * h4.atr14);
+                    if (pos.is_long ? (new_sl > pos.trail_sl) : (new_sl < pos.trail_sl))
+                        pos.trail_sl = new_sl;
+                    printf("[SWING-TRAIL-STAGE3] %s %s mfe=%.4f trail_sl=%.4f (LOCKED)\n",
+                           sym_short(id), pos.is_long ? "LONG" : "SHORT",
+                           pos.mfe, pos.trail_sl);
+                    fflush(stdout);
+                }
+                // ── Ratchet trail SL using current stage distance ─────────────
+                if (pos.trail_armed) {
+                    const double dist = (pos.trail_stage >= 3) ? S1_TRAIL_DIST3 * h4.atr14
+                                      : (pos.trail_stage == 2) ? S1_TRAIL_DIST2 * h4.atr14
+                                                                : S1_TRAIL_ATR   * h4.atr14;
+                    const double new_sl = pos.is_long
+                        ? (pos.entry_px + pos.mfe - dist)
+                        : (pos.entry_px - pos.mfe + dist);
+                    if (pos.is_long ? (new_sl > pos.trail_sl) : (new_sl < pos.trail_sl))
+                        pos.trail_sl = new_sl;
+                }
+            } else {
+                // S2/S3/S4: original single trail (2× ATR arm, 1.2× ATR dist)
+                const double arm_mult   = 2.0;
+                const double trail_dist = 1.2 * h4.atr14;
+                if (!pos.trail_armed && move >= arm_mult * h4.atr14) {
+                    pos.trail_armed = true;
+                    printf("[SWING-TRAIL-ARM] %s %s S%d mfe=%.4f\n",
+                           sym_short(id), pos.is_long ? "LONG" : "SHORT",
+                           (int)pos.strategy, move);
+                    fflush(stdout);
+                }
+                if (pos.trail_armed) {
+                    const double new_sl = pos.is_long
+                        ? (pos.entry_px + pos.mfe - trail_dist)
+                        : (pos.entry_px - pos.mfe + trail_dist);
+                    if (pos.is_long  && new_sl > pos.trail_sl) pos.trail_sl = new_sl;
+                    if (!pos.is_long && new_sl < pos.trail_sl) pos.trail_sl = new_sl;
+                }
             }
         }
 

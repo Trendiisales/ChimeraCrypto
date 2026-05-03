@@ -122,3 +122,42 @@ add_custom_command(TARGET chimera_backtest POST_BUILD
     COMMAND chmod +x $<TARGET_FILE:chimera_backtest>
     COMMENT "Restoring execute permission after LTO link"
 )
+
+# ── Paper-engines backtest binary ──────────────────────────────────────────
+# Replays FundingWindow + BasisMomentum over Binance 1m spot/perp klines
+# plus historical funding rates. Independent of the SwingEngine harness so
+# we can iterate on paper-engine validation without touching what works.
+# OBI is NOT included — it needs Binance Vision bookTicker dump support
+# (separate follow-up binary).
+add_executable(chimera_backtest_paper
+    tools/backtest/replay_paper.cpp
+)
+add_dependencies(chimera_backtest_paper gen_version)
+
+set_property(SOURCE ${CMAKE_SOURCE_DIR}/tools/backtest/replay_paper.cpp
+    APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
+
+target_link_libraries(chimera_backtest_paper
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ${CURL_LIBRARY}
+    pthread
+)
+
+target_compile_options(chimera_backtest_paper PRIVATE
+    -O3
+    -march=native
+    -flto
+    -Wall
+    -Wextra
+    -Wno-unused-parameter
+)
+
+set_target_properties(chimera_backtest_paper PROPERTIES
+    LINK_FLAGS "-flto"
+)
+
+add_custom_command(TARGET chimera_backtest_paper POST_BUILD
+    COMMAND chmod +x $<TARGET_FILE:chimera_backtest_paper>
+    COMMENT "Restoring execute permission after LTO link"
+)

@@ -248,6 +248,14 @@ public:
 
     bool is_halted() const { return halted_; }
 
+    // ── MOVE 2 backtest hook: inject a virtual wall clock ─────────────────
+    // Backtest harness calls this before each evaluate() to set the simulated
+    // current time. Live code never calls this, so backtest_time_override_seconds_
+    // stays 0 and seconds_to_funding() uses std::time(nullptr) as before.
+    void set_backtest_time(int64_t epoch_seconds) {
+        backtest_time_override_seconds_ = epoch_seconds;
+    }
+
     struct Stats {
         bool   active;
         double entry_price;
@@ -332,10 +340,15 @@ private:
     int    total_trades_  = 0;
     double total_pnl_bp_  = 0.0;
 
-    // Returns seconds until next funding payment (00:00, 08:00, 16:00 UTC)
-    // Returns negative if we just passed one
-    static int seconds_to_funding() {
-        std::time_t now = std::time(nullptr);
+    // Returns seconds until next funding payment (00:00, 08:00, 16:00 UTC).
+    // Live: reads std::time(nullptr). Backtest: reads backtest_time_override_seconds_
+    // when set via set_backtest_time(). The override is the ONLY behavioural
+    // difference vs the original — when override is 0 (default), this method is
+    // bit-for-bit identical to the live path.
+    int seconds_to_funding() const {
+        std::time_t now = (backtest_time_override_seconds_ > 0)
+            ? (std::time_t)backtest_time_override_seconds_
+            : std::time(nullptr);
         std::tm* g = std::gmtime(&now);
         int now_s = g->tm_hour * 3600 + g->tm_min * 60 + g->tm_sec;
 
@@ -347,6 +360,8 @@ private:
 
         return next_boundary - now_s;
     }
+
+    int64_t backtest_time_override_seconds_ = 0;  // 0 = use real wall clock
 };
 
 } // namespace chimera

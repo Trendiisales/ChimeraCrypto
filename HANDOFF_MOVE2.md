@@ -27,10 +27,73 @@ Five files modified, no new files in `src/` or `include/`:
 
 ---
 
+## Backtest harness for the paper engines (NEW: chimera_backtest_paper)
+
+`tools/backtest/replay_paper.cpp` is a separate binary (target `chimera_backtest_paper`) that drives `FundingWindowEngine` and `BasisMomentumEngine` over historical data fetched from Binance REST. SwingEngine has its own existing `chimera_backtest` — left untouched.
+
+**Data sources (all free, all from Binance public REST):**
+
+- Spot 1m klines: `https://api.binance.com/api/v3/klines`
+- Perp 1m klines: `https://fapi.binance.com/fapi/v1/klines` (provides `takerBuyQuoteVolume` so we can derive a flow_ratio proxy)
+- Funding rates: `https://fapi.binance.com/fapi/v1/fundingRate`
+
+**Required additive change** to `FundingWindowEngine.hpp`: a `set_backtest_time(int64_t epoch_seconds)` setter so `seconds_to_funding()` reads a simulated wall clock during replay. Live behaviour unchanged when the override is 0 (the default).
+
+**CLI:**
+
+```bash
+# Default: 30 days of 1m history on btcusdt + ethusdt, both engines
+./chimera_backtest_paper
+
+# Just FundingWindow on BTC, 60 days
+./chimera_backtest_paper --engine funding --symbols btcusdt --days 60
+
+# Just BasisMomentum on ETH
+./chimera_backtest_paper --engine basis --symbols ethusdt --days 30
+
+# Quiet mode (suppress per-trade engine printf chatter)
+./chimera_backtest_paper --quiet
+```
+
+**Output:** `backtest_paper_out/summary.txt` plus per-engine `[*-ENTRY]` / `[*-EXIT]` lines on stdout (suppressible via `--quiet`).
+
+```
+=== chimera_backtest_paper summary ===
+Window: <ms> -> <ms>  (30 days requested)
+Symbols: btcusdt ethusdt
+Engines: all
+Total ticks replayed: 86340
+
+=== Per-engine results ===
+  FundingWindow BTC      trades=  4  wr= 50.0%  total=   +35.2bp  avg=  +8.80bp
+  FundingWindow ETH      trades=  6  wr= 66.7%  total=   +98.4bp  avg= +16.40bp
+  FundingWindow [all]    trades= 10  wr= 60.0%  total=  +133.6bp  avg= +13.36bp
+  BasisMomentum BTC      trades= 27  wr= 55.6%  total=  +186.4bp  avg=  +6.90bp
+  BasisMomentum ETH      trades= 41  wr= 51.2%  total=  +124.7bp  avg=  +3.04bp
+  BasisMomentum [all]    trades= 68  wr= 53.0%  total=  +311.1bp  avg=  +4.57bp
+```
+
+(Numbers above are illustrative — your real run will differ.)
+
+**Resolution caveat:** the harness uses 1-minute kline closes — one synthesised tick per minute per symbol. That's enough to validate the engines' edge thesis (basis spikes that move <1 minute are below your latency floor anyway), but it understates BasisMomentum's tick-by-tick behaviour somewhat. If the 1-minute results suggest edge, a higher-resolution harness (perp aggTrade replay) is the next refinement.
+
+### OBI is NOT in this harness — and why
+
+OrderbookImbalanceEngine reads `tick.book_imbalance` and `tick.spread_bps`, both derived from Binance's `bookTicker` stream (best bid/ask quantity at every update). Binance's REST endpoint has *no* historical bookTicker — but **Binance Vision** does, as daily zip dumps:
+
+```
+https://data.binance.vision/data/spot/daily/bookTicker/BTCUSDT/BTCUSDT-bookTicker-2026-04-01.zip
+```
+
+Each zip is roughly 50–500 MB depending on the symbol's tick rate, contains a CSV with one row per bookTicker update (millions of rows per day per symbol). Building OBI's backtest needs a separate downloader/unzipper/CSV-replay binary (`chimera_backtest_obi`, ~300 lines including HTTPS download + minizip + per-tick replay). **That's the next session's first task** if shadow-mode OBI logs look promising.
+
+In the meantime, OBI runs in shadow on the live VPS — every entry/exit lands in the journal as an `[OBI-ENTRY]` / `[OBI-EXIT]` line. A few weeks of those is a real (if slow) validation signal.
+
 ## Deferred to follow-up sessions
 
+- **OBI backtest** — needs Binance Vision bookTicker zip downloader + replay binary. Detailed above.
 - **SessionMomentumEngine.** Needs a small `PositionTracker` helper because — unlike the other Tier 2 engines — it only emits entry signals via `check_signal()` and doesn't manage its own positions. Wiring it would require more `main.cpp` surgery than we want in the same batch as 3 other engines.
-- **chimera_backtest extension for the new engines.** Currently `tools/backtest/replay.cpp` only drives SwingEngine. To validate the 3 new engines on history we need: (a) inject a virtual time source into `FundingWindowEngine::seconds_to_funding()` so it can replay historical funding boundaries; (b) fetch historical funding rates via `fapi/v1/fundingRate?symbol=...&limit=1000` paginated; (c) fetch historical perp markPrice / aggTrade for BasisMomentum's basis + flow inputs; (d) generate / replay depth5 snapshots for OBI's `book_imbalance` + `spread_bps`. Each is a multi-hour task. **Interim verification path: shadow-mode paper logs for 1-2 weeks** — same approach used to validate v9 SwingEngine before its harness existed.
+- **Higher-resolution paper backtest** (perp aggTrade replay instead of 1m kline closes) if the 1m results justify it.
 - **Real per-symbol regime classifier + vol_ratio.** Replace the OBI / BasisMomentum hardcodes once we decide the right place to compute them (probably a `RegimeClassifier` helper in `main.cpp` that reads spot price history).
 - **Dashboard wiring of `/api/state2`.** The endpoint exists and returns structured JSON, but `gui/app.js` doesn't fetch it yet. For now: `curl http://154.45.251.118:8080/api/state2 | jq`.
 - **Tier 1 risk wrapper** (daily loss circuit, correlation-aware sizing, per-engine kill, state persistence, reconciliation). Required before any of these engines move from `shadow_mode = true` to live execution.
@@ -78,7 +141,7 @@ ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
 sudo systemctl stop chimera.service
 while pgrep -x chimera >/dev/null; do sleep 0.5; done
 cd /home/jo/ChimeraCrypto && git pull --ff-only origin main
-cd build && make -j"$(nproc)" chimera chimera_backtest
+cd build && cmake .. && make -j"$(nproc)" chimera chimera_backtest chimera_backtest_paper
 sudo systemctl start chimera.service
 
 # Verify the new wiring (look for these 4 lines under STARTUP)

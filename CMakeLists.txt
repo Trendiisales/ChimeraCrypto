@@ -29,12 +29,17 @@ include_directories(
     ${LWS_INCLUDE_DIRS}
 )
 
-set(CHIMERA_SOURCES
-    src/main.cpp
+# ── Sources shared between the live binary and the backtest binary ──────────
+set(CHIMERA_LIVE_SOURCES
     src/live/BinanceWSFeed.cpp
     src/live/CoinbaseWSFeed.cpp
     src/live/PerpFeed.cpp
     src/live/SpotExecutor.cpp
+)
+
+set(CHIMERA_SOURCES
+    src/main.cpp
+    ${CHIMERA_LIVE_SOURCES}
 )
 
 # Build version
@@ -46,6 +51,7 @@ add_custom_target(gen_version ALL
     COMMENT "Stamping git hash into include/version_generated.hpp"
 )
 
+# ── Live binary ─────────────────────────────────────────────────────────────
 add_executable(chimera ${CHIMERA_SOURCES})
 add_dependencies(chimera gen_version)
 
@@ -75,5 +81,44 @@ set_target_properties(chimera PROPERTIES
 
 add_custom_command(TARGET chimera POST_BUILD
     COMMAND chmod +x $<TARGET_FILE:chimera>
+    COMMENT "Restoring execute permission after LTO link"
+)
+
+# ── Backtest / replay binary ────────────────────────────────────────────────
+# Replays Binance H4 klines through SwingEngine offline. Reuses the same live
+# .cpp translation units so that linkage matches the production build (and any
+# extern symbols expected by BinanceWSFeed.cpp resolve cleanly).
+add_executable(chimera_backtest
+    tools/backtest/replay.cpp
+    ${CHIMERA_LIVE_SOURCES}
+)
+add_dependencies(chimera_backtest gen_version)
+
+set_property(SOURCE ${CMAKE_SOURCE_DIR}/tools/backtest/replay.cpp
+    APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
+
+target_link_libraries(chimera_backtest
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ${CURL_LIBRARY}
+    ${LWS_LIBRARIES}
+    pthread
+)
+
+target_compile_options(chimera_backtest PRIVATE
+    -O3
+    -march=native
+    -flto
+    -Wall
+    -Wextra
+    -Wno-unused-parameter
+)
+
+set_target_properties(chimera_backtest PROPERTIES
+    LINK_FLAGS "-flto"
+)
+
+add_custom_command(TARGET chimera_backtest POST_BUILD
+    COMMAND chmod +x $<TARGET_FILE:chimera_backtest>
     COMMENT "Restoring execute permission after LTO link"
 )

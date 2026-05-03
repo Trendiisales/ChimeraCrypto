@@ -1,51 +1,26 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v2 — longer-TF tune)
 //
-// Replaces TrendEngine (H1 EMA crossover) with three proven swing strategies:
+// CHANGE LOG (v2):
+//   * Entries now fire ONLY on H4 bar close. Previously _try_s1..s4 ran on
+//     every tick, which caused the engine to fire as soon as a tick brushed a
+//     pullback / retest zone mid-bar. That produced fast micro-fills that hit
+//     ATR-tight stops on noise. Bar-close gating is the single biggest fix.
+//   * Tighter trend filter: D1 EMA21/EMA50 must be ≥1.0% apart (was 0.5%).
+//   * Wider stops: S1 2.5×ATR (was 1.5×), S2 2.0×ATR (was 1.2×),
+//                  S3 2.0×ATR (was 1.2×).
+//   * True RSI cross confirmation: tracks the previous closed-bar RSI so the
+//     long entry requires "prev RSI was ≤45 AND current RSI ≥55" (and the
+//     mirrored window for shorts). The earlier "RSI is between 42 and 65"
+//     proxy let entries fire while RSI was actually FALLING through 50.
+//   * Stricter momentum: MACD histogram must be both ≥ prior and rising.
+//   * Structural exit: if D1 regime flips against an open S1/S3 position, the
+//     position closes immediately rather than waiting 5–7 days to time out.
+//   * Cooldowns extended (6h→12h same-symbol, 12h→24h flip).
+//   * Public TradeLog + set_max_trade_log_size + get_trade_log accessors so
+//     the chimera_backtest harness can pull every closed trade.
 //
-//  S1 — EMA Trend + H4 Pullback (primary)
-//       D1: EMA21 > EMA50 = LONG regime / EMA21 < EMA50 = SHORT regime
-//       H4: Price pulls back to EMA21 zone (within 0.5×ATR4h)
-//       H4: RSI14 recovering (crosses >45 from below for longs, <55 for shorts)
-//       Entry: H4 bar close confirming pullback bounce
-//       SL: 1.5×H4 ATR below nearest swing low (min 3 H4 bars lookback)
-//       TP: Trail armed at 3×ATR, trail distance 1.5×ATR | max hold 7 days
-//
-//  S2 — RSI Divergence Reversal (H4)
-//       H4: Bullish divergence: price lower low + RSI higher low, RSI < 40
-//       H4: MACD histogram turning positive as confirmation
-//       Entry: close of the H4 bar that confirms divergence
-//       SL: Below the divergence swing low
-//       TP: Prior swing high or 3×R fixed, max hold 5 days
-//
-//  S3 — Breakout Retest (D1 level, H4 entry)
-//       D1: Resistance = highest close in last 20 D1 bars
-//       H4: Price closes above resistance with OBV rising
-//       H4: Price retests resistance (comes back within 0.4×ATR4h of level)
-//       Entry: bounce from retest zone
-//       SL: Below retest low
-//       TP: Entry + 2× breakout range, max hold 5 days
-//
-//  S4 — H4 Compression Bracket (direction-neutral breakout)
-//       H4: ATR compression: current 5-bar ATR < 40% of 20-bar ATR baseline
-//       Bracket: high and low of the 5-bar compressed range
-//       Entry: H4 bar closes outside bracket with OBV confirming direction
-//       SL: Opposite bracket boundary
-//       TP: Entry + 2× bracket width projected in breakout direction
-//       Conflict: automatically closes any opposing position before entry
-//       Max hold: 5 days
-//
-// Architecture:
-//   - Builds both H4 and D1 bars from the tick stream
-//   - Seeds both timeframes from Binance REST klines at startup
-//   - One position max per symbol (first strategy to fire wins)
-//   - Shadow mode by default — no live orders until explicitly enabled
-//   - Session: 24/7 (crypto never closes, no session gate)
-//   - Cooldown: 6h between entries on same symbol
-//   - Direction flip cooldown: 12h
-//
-// Feed: Binance WebSocket (bookTicker + aggTrade) via BinanceWSFeed
-// Execution: SpotExecutor (shadow mode default)
+// Public API unchanged from v1 — main.cpp / gui_server.py do not need changes.
 // ============================================================================
 #pragma once
 
@@ -74,35 +49,27 @@
 
 namespace chimera {
 
-// ============================================================================
-// OHLC Bar — generic, used for both H4 and D1
-// ============================================================================
 struct OHLCBar {
     double open  = 0.0;
     double high  = 0.0;
     double low   = 0.0;
     double close = 0.0;
     double volume = 0.0;
-    int64_t bar_ms = 0;   // epoch ms of bar open
+    int64_t bar_ms = 0;
 };
 
-// ============================================================================
-// BarBuilder — builds OHLC bars from tick stream for any period
-// ============================================================================
 struct BarBuilder {
-    static constexpr int HISTORY = 32;  // keep last N closed bars
+    static constexpr int HISTORY = 32;
 
     OHLCBar  current;
-    OHLCBar  closed[HISTORY];  // ring buffer, newest at [head-1]
-    int      head     = 0;     // next write index
-    int      count    = 0;     // how many closed bars stored
+    OHLCBar  closed[HISTORY];
+    int      head     = 0;
+    int      count    = 0;
     int64_t  bar_boundary_ms = 0;
     int64_t  period_ms;
 
     explicit BarBuilder(int64_t period_ms_) : period_ms(period_ms_) {}
 
-    // Returns true when a bar closes.
-    // volume_increment: raw trade qty received this tick (for OBV)
     bool on_tick(double price, int64_t now_ms, double volume_increment = 0.0) {
         const int64_t boundary = (now_ms / period_ms) * period_ms;
 
@@ -113,7 +80,6 @@ struct BarBuilder {
         }
 
         if (boundary != bar_boundary_ms) {
-            // Close the current bar
             closed[head] = current;
             head         = (head + 1) % HISTORY;
             if (count < HISTORY) ++count;
@@ -123,7 +89,6 @@ struct BarBuilder {
             return true;
         }
 
-        // Update in-progress bar
         if (price > current.high) current.high = price;
         if (price < current.low)  current.low  = price;
         current.close  = price;
@@ -131,7 +96,6 @@ struct BarBuilder {
         return false;
     }
 
-    // Get closed bar at offset from newest. offset=0 = most recent closed bar.
     const OHLCBar* get(int offset) const {
         if (offset < 0 || offset >= count) return nullptr;
         int idx = (head - 1 - offset + HISTORY) % HISTORY;
@@ -141,37 +105,25 @@ struct BarBuilder {
     bool ready(int min_bars = 1) const { return count >= min_bars; }
 };
 
-// ============================================================================
-// Indicator state per symbol per timeframe
-// ============================================================================
 struct SwingIndicators {
-    // EMAs (on close)
     double ema9   = 0.0;
     double ema21  = 0.0;
     double ema50  = 0.0;
-
-    // ATR (Wilder, 14 periods)
     double atr14  = 0.0;
-
-    // RSI (14 periods)
-    double rsi14  = 50.0;
-    double avg_gain = 0.0;
-    double avg_loss = 0.0;
-
-    // MACD (12/26/9)
+    double rsi14       = 50.0;
+    double prev_rsi14  = 50.0;
+    double avg_gain    = 0.0;
+    double avg_loss    = 0.0;
     double ema12   = 0.0;
     double ema26   = 0.0;
     double macd    = 0.0;
-    double signal  = 0.0;  // 9-period EMA of macd
-    double hist    = 0.0;  // macd - signal
+    double signal  = 0.0;
+    double hist    = 0.0;
     double prev_hist = 0.0;
-
-    // OBV (on-balance volume)
     double obv     = 0.0;
-    double obv_ema = 0.0;  // 14-period EMA of OBV
-
+    double obv_ema = 0.0;
     int  bar_count = 0;
-    bool ready     = false;  // true after 50+ bars
+    bool ready     = false;
 
     void update(double h, double l, double close, double prev_close, double volume) {
         const double alpha9  = 2.0 / 10.0;
@@ -179,20 +131,20 @@ struct SwingIndicators {
         const double alpha50 = 2.0 / 51.0;
         const double alpha12 = 2.0 / 13.0;
         const double alpha26 = 2.0 / 27.0;
-        const double alpha9s = 2.0 / 10.0;   // signal line
-        const double alpha14 = 1.0 / 14.0;   // Wilder for ATR & RSI
+        const double alpha9s = 2.0 / 10.0;
+        const double alpha14 = 1.0 / 14.0;
+
+        prev_rsi14 = rsi14;
 
         if (bar_count == 0) {
             ema9 = ema21 = ema50 = ema12 = ema26 = close;
             avg_gain = avg_loss = 0.0;
             obv = obv_ema = 0.0;
         } else {
-            // EMAs
             ema9  += alpha9  * (close - ema9);
             ema21 += alpha21 * (close - ema21);
             ema50 += alpha50 * (close - ema50);
 
-            // ATR
             double tr = h - l;
             if (prev_close > 0.0) {
                 double tr2 = std::fabs(h - prev_close);
@@ -203,7 +155,6 @@ struct SwingIndicators {
             if (atr14 == 0.0) atr14 = tr;
             else               atr14 += alpha14 * (tr - atr14);
 
-            // RSI (Wilder smoothed)
             if (prev_close > 0.0) {
                 double chg = close - prev_close;
                 double gain = chg > 0.0 ? chg : 0.0;
@@ -222,7 +173,6 @@ struct SwingIndicators {
                 }
             }
 
-            // MACD
             ema12 += alpha12 * (close - ema12);
             ema26 += alpha26 * (close - ema26);
             prev_hist = hist;
@@ -231,11 +181,9 @@ struct SwingIndicators {
             else                signal += alpha9s * (macd - signal);
             hist = macd - signal;
 
-            // OBV
             if (prev_close > 0.0) {
                 if (close > prev_close)      obv += volume;
                 else if (close < prev_close) obv -= volume;
-                // flat: obv unchanged
             }
             obv_ema += alpha14 * (obv - obv_ema);
         }
@@ -245,9 +193,6 @@ struct SwingIndicators {
     }
 };
 
-// ============================================================================
-// Open position
-// ============================================================================
 enum class SwingStrategy : uint8_t {
     NONE = 0,
     S1_PULLBACK   = 1,
@@ -262,85 +207,73 @@ struct SwingPosition {
     SwingStrategy  strategy      = SwingStrategy::NONE;
     double         entry_px      = 0.0;
     double         sl_px         = 0.0;
-    double         tp_px         = 0.0;     // fixed TP (S2/S3); 0 = trail only
+    double         tp_px         = 0.0;
     double         trail_sl      = 0.0;
     double         mfe           = 0.0;
     bool           trail_armed   = false;
-    int            trail_stage   = 0;      // 0=unarmed 1=1.5xATR 2=1.0xATR 3=0.5xATR
-    bool           partial_done  = false;  // true after 50% partial exit at stage 1
-    double         qty           = 0.0;    // current active qty (halved after partial)
-    double         qty_full      = 0.0;    // original qty at entry
+    int            trail_stage   = 0;
+    bool           partial_done  = false;
+    double         qty           = 0.0;
+    double         qty_full      = 0.0;
     int64_t        entry_ms      = 0;
     int64_t        max_hold_ms   = 0;
     char           symbol[16]    = {};
     int            trade_id      = 0;
-    // Pyramid add-on (fires once at stage 2, 25% of original qty)
+    int            entry_d1_dir  = 0;
     bool           pyramid_done  = false;
-    double         pyramid_qty   = 0.0;    // qty added at pyramid
-    double         blended_entry = 0.0;    // blended entry after pyramid
+    double         pyramid_qty   = 0.0;
+    double         blended_entry = 0.0;
 };
 
-// ============================================================================
-// SwingEngine
-// ============================================================================
 class SwingEngine {
 public:
-    // ── Config ─────────────────────────────────────────────────────────────
-    // Timeframes
-    static constexpr int64_t H4_MS  = 14400000LL;   // 4 hours
-    static constexpr int64_t D1_MS  = 86400000LL;   // 24 hours
+    static constexpr int64_t H4_MS  = 14400000LL;
+    static constexpr int64_t D1_MS  = 86400000LL;
 
-    // Position sizing
     static constexpr double MIN_QTY_USD = 50.0;
     static constexpr double MAX_QTY_USD = 500.0;
 
-    // S1 — EMA Pullback
-    static constexpr double S1_EMA_SEP_PCT   = 0.005;  // D1 EMA21 vs EMA50 must be >0.5% apart
-    static constexpr double S1_PULLBACK_ATR  = 0.6;    // H4: price within 0.6×ATR4h of EMA21
-    static constexpr double S1_RSI_LONG_LO   = 40.0;   // H4 RSI was below this (oversold dip)
-    static constexpr double S1_RSI_LONG_HI   = 55.0;   // H4 RSI recovers above this = entry
-    static constexpr double S1_RSI_SHORT_HI  = 60.0;
+    static constexpr double S1_EMA_SEP_PCT   = 0.010;
+    static constexpr double S1_PULLBACK_ATR  = 0.6;
+    static constexpr double S1_RSI_LONG_LO   = 45.0;
+    static constexpr double S1_RSI_LONG_HI   = 55.0;
+    static constexpr double S1_RSI_SHORT_HI  = 55.0;
     static constexpr double S1_RSI_SHORT_LO  = 45.0;
-    static constexpr double S1_ATR_SL_MULT   = 1.5;
-    static constexpr double S1_TRAIL_ARM_ATR = 3.0;   // stage 1 arm: 3× ATR MFE
-    static constexpr double S1_TRAIL_ATR     = 1.5;   // stage 1 dist: 1.5× ATR
-    static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;  // tighten at 5× ATR MFE
-    static constexpr double S1_TRAIL_DIST2   = 1.0;   // stage 2 dist: 1.0× ATR
-    static constexpr double S1_TRAIL_STAGE3_ATR = 8.0;  // lock-in at 8× ATR MFE
-    static constexpr double S1_TRAIL_DIST3   = 0.5;   // stage 3 dist: 0.5× ATR
-    static constexpr int64_t S1_MAX_HOLD_MS  = 604800000LL;  // 7 days
+    static constexpr double S1_ATR_SL_MULT   = 2.5;
+    static constexpr double S1_TRAIL_ARM_ATR = 3.0;
+    static constexpr double S1_TRAIL_ATR     = 1.5;
+    static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;
+    static constexpr double S1_TRAIL_DIST2   = 1.0;
+    static constexpr double S1_TRAIL_STAGE3_ATR = 8.0;
+    static constexpr double S1_TRAIL_DIST3   = 0.5;
+    static constexpr int64_t S1_MAX_HOLD_MS  = 604800000LL;
 
-    // S2 — RSI Divergence
-    static constexpr double S2_RSI_OVERSOLD  = 40.0;   // RSI must be below this at divergence low
-    static constexpr double S2_DIV_LOOKBACK  = 5;      // bars to look back for prior low
-    static constexpr double S2_ATR_SL_MULT   = 1.2;
-    static constexpr double S2_R_MULT        = 3.0;    // TP = entry ± 3×risk
-    static constexpr int64_t S2_MAX_HOLD_MS  = 432000000LL;  // 5 days
+    static constexpr double S2_RSI_OVERSOLD  = 40.0;
+    static constexpr int    S2_DIV_LOOKBACK  = 5;
+    static constexpr double S2_ATR_SL_MULT   = 2.0;
+    static constexpr double S2_R_MULT        = 3.0;
+    static constexpr int64_t S2_MAX_HOLD_MS  = 432000000LL;
 
-    // S3 — Breakout Retest
-    static constexpr int     S3_RESIST_BARS  = 20;     // D1 bars for resistance calculation
-    static constexpr double  S3_RETEST_ATR   = 0.4;    // retest within 0.4×ATR4h of level
-    static constexpr double  S3_ATR_SL_MULT  = 1.2;
-    static constexpr int64_t S3_MAX_HOLD_MS  = 432000000LL;  // 5 days
+    static constexpr int     S3_RESIST_BARS  = 20;
+    static constexpr double  S3_RETEST_ATR   = 0.4;
+    static constexpr double  S3_ATR_SL_MULT  = 2.0;
+    static constexpr int64_t S3_MAX_HOLD_MS  = 432000000LL;
 
-    // S4 — Compression Bracket
-    static constexpr int     S4_COMPRESS_BARS  = 5;      // bars defining the compressed range
-    static constexpr int     S4_BASELINE_BARS  = 20;     // bars for ATR baseline
-    static constexpr double  S4_COMPRESS_RATIO = 0.45;   // current ATR must be < 45% of baseline
-    static constexpr double  S4_OBV_CONFIRM    = 0.0;    // OBV must be above EMA (>0 diff)
-    static constexpr double  S4_ATR_SL_MULT    = 1.0;    // SL at opposite bracket boundary (fallback: 1×ATR)
-    static constexpr int64_t S4_MAX_HOLD_MS    = 432000000LL;  // 5 days
-    static constexpr int64_t S4_FLIP_EXEMPT_MS = 0LL;    // S4 is exempt from flip cooldown (high-conviction)
+    static constexpr int     S4_COMPRESS_BARS  = 5;
+    static constexpr int     S4_BASELINE_BARS  = 20;
+    static constexpr double  S4_COMPRESS_RATIO = 0.45;
+    static constexpr double  S4_OBV_CONFIRM    = 0.0;
+    static constexpr double  S4_ATR_SL_MULT    = 1.0;
+    static constexpr int64_t S4_MAX_HOLD_MS    = 432000000LL;
+    static constexpr int64_t S4_FLIP_EXEMPT_MS = 0LL;
 
-    // Cooldowns
-    static constexpr int64_t COOLDOWN_MS      = 21600000LL;  // 6h between entries
-    static constexpr int64_t FLIP_COOLDOWN_MS = 43200000LL;  // 12h direction flip
+    static constexpr int64_t COOLDOWN_MS      = 43200000LL;
+    static constexpr int64_t FLIP_COOLDOWN_MS = 86400000LL;
 
-    bool shadow_mode = true;  // NEVER set false without explicit authorization
+    bool shadow_mode = true;
 
     void set_executor(SpotExecutor* ex) { executor_ = ex; }
 
-    // ── Seed from Binance REST at startup ────────────────────────────────────
     void seed_from_history() {
         printf("[SWING-SEED] Fetching H4 + D1 history for %d symbols...\n", MAX_SYMBOLS);
         fflush(stdout);
@@ -358,23 +291,21 @@ public:
         fflush(stdout);
     }
 
-    // ── Called every tick from feed callback ─────────────────────────────────
     void on_tick(int id, const MarketTick& tick, int64_t now_ms) {
         if (id < 0 || id >= MAX_SYMBOLS) return;
 
         double price = tick.mid_price > 0.0 ? tick.mid_price : tick.last_price;
         if (price <= 0.0) return;
         prices_[id] = price;
+        now_ms_last_[id] = now_ms;
 
-        double vol_inc = tick.trade_qty;  // 0 on bookTicker ticks, filled on aggTrade
+        double vol_inc = tick.trade_qty;
 
-        // Build bars
-        bool h4_closed = h4_builders_[id].on_tick(price, now_ms, vol_inc);
-        bool d1_closed = d1_builders_[id].on_tick(price, now_ms, vol_inc);
+        const bool h4_closed = h4_builders_[id].on_tick(price, now_ms, vol_inc);
+        const bool d1_closed = d1_builders_[id].on_tick(price, now_ms, vol_inc);
 
-        // Update indicators on bar close
         if (h4_closed && h4_builders_[id].count >= 2) {
-            const OHLCBar* b   = h4_builders_[id].get(0);   // just closed
+            const OHLCBar* b   = h4_builders_[id].get(0);
             const OHLCBar* bprev = h4_builders_[id].get(1);
             if (b && bprev) {
                 h4_ind_[id].update(b->high, b->low, b->close, bprev->close, b->volume);
@@ -388,23 +319,25 @@ public:
             }
         }
 
-        // Manage open position on every tick
         auto& pos = positions_[id];
         if (pos.active) {
             _manage(id, price, now_ms);
             return;
         }
 
-        // Gate: wait for enough history
+        if (!h4_closed) return;
         if (!h4_ind_[id].ready) return;
         if (!d1_ind_[id].ready) return;
         if (now_ms < cooldown_until_ms_[id]) return;
 
-        // Try strategies in priority order
-        if (_try_s1(id, price, now_ms)) return;
-        if (_try_s2(id, price, now_ms)) return;
-        if (_try_s3(id, price, now_ms)) return;
-        if (_try_s4(id, price, now_ms)) return;
+        const OHLCBar* b0 = h4_builders_[id].get(0);
+        if (!b0) return;
+        const double signal_px = b0->close;
+
+        if (_try_s1(id, signal_px, now_ms)) return;
+        if (_try_s2(id, signal_px, now_ms)) return;
+        if (_try_s3(id, signal_px, now_ms)) return;
+        if (_try_s4(id, signal_px, now_ms)) return;
     }
 
     void kill_all() {
@@ -434,7 +367,6 @@ public:
         return n;
     }
 
-    // ── JSON state for GUI (same schema as TrendEngine for compatibility) ─────
     std::string state_json() const {
         std::ostringstream js;
         js << std::fixed << std::setprecision(4);
@@ -463,7 +395,6 @@ public:
             const auto& d1   = d1_ind_[i];
             const double px  = prices_[i];
 
-            // Map to old GUI fields
             const char* regime = "DEAD";
             if (h4.ready && d1.ready) {
                 regime = (d1.ema21 > d1.ema50) ? "BUILDUP" : "GRIND";
@@ -566,9 +497,18 @@ public:
         return js.str();
     }
 
+    struct TradeLog {
+        std::string sym, side, time, why;
+        SwingStrategy strategy = SwingStrategy::NONE;
+        double entry=0, exit=0, pnl_pct=0, mfe=0;
+        int64_t exit_ms = 0;
+    };
+
+    void set_max_trade_log_size(int n) { max_trade_log_size_ = n; }
+    const std::vector<TradeLog>& get_trade_log() const { return trade_log_; }
+
 private:
 
-    // ── Per-symbol state ──────────────────────────────────────────────────────
     double         prices_[MAX_SYMBOLS]          = {};
     int64_t        now_ms_last_[MAX_SYMBOLS]     = {};
     BarBuilder     h4_builders_[MAX_SYMBOLS]     { BarBuilder(H4_MS), BarBuilder(H4_MS), BarBuilder(H4_MS), BarBuilder(H4_MS), BarBuilder(H4_MS), BarBuilder(H4_MS), BarBuilder(H4_MS), BarBuilder(H4_MS) };
@@ -584,14 +524,9 @@ private:
     double          total_pnl_pct_ = 0.0;
     int             wins_          = 0;
 
-    struct TradeLog {
-        std::string sym, side, time, why;
-        SwingStrategy strategy = SwingStrategy::NONE;
-        double entry=0, exit=0, pnl_pct=0, mfe=0;
-    };
     std::vector<TradeLog> trade_log_;
+    int                   max_trade_log_size_ = 100;
 
-    // ── Strategy S1: EMA Pullback ─────────────────────────────────────────────
     bool _try_s1(int id, double price, int64_t now_ms) {
         const auto& d1  = d1_ind_[id];
         const auto& h4  = h4_ind_[id];
@@ -599,102 +534,86 @@ private:
         if (!d1.ready || !h4.ready) return false;
         if (h4.atr14 <= 0.0) return false;
 
-        // D1 regime: EMA21 vs EMA50 separation
         const double d1_sep = std::fabs(d1.ema21 - d1.ema50) / d1.ema50;
         if (d1_sep < S1_EMA_SEP_PCT) return false;
 
         const bool d1_bull = d1.ema21 > d1.ema50;
         const bool d1_bear = d1.ema21 < d1.ema50;
 
-        // Flip cooldown
         if (last_exit_dir_[id] != 0 && now_ms - last_exit_ms_[id] < FLIP_COOLDOWN_MS) {
             if (d1_bull && last_exit_dir_[id] == -1) return false;
             if (d1_bear && last_exit_dir_[id] == +1) return false;
         }
 
+        const OHLCBar* d1_b0 = d1_builders_[id].get(0);
+        const double d1_close = d1_b0 ? d1_b0->close : 0.0;
+
         if (d1_bull) {
-            // LONG: price pulled back to within 0.6×ATR4h of H4 EMA21
             const double zone_lo = h4.ema21 - S1_PULLBACK_ATR * h4.atr14;
             const double zone_hi = h4.ema21 + S1_PULLBACK_ATR * h4.atr14;
             if (price < zone_lo || price > zone_hi) return false;
-            // RSI recovery: was below S1_RSI_LONG_LO, now above S1_RSI_LONG_HI
-            // Use previous bar RSI as proxy (h4_prev_rsi not tracked, use current < threshold)
-            // Sufficient: current RSI crossed up through 45-55 zone (is between 45 and 65)
-            if (h4.rsi14 < 42.0 || h4.rsi14 > 65.0) return false;
-            // MACD hist: must be rising (hist > prev_hist) or already positive
-            if (h4.hist < h4.prev_hist && h4.hist < 0.0) return false;
+            if (h4.prev_rsi14 > S1_RSI_LONG_LO) return false;
+            if (h4.rsi14      < S1_RSI_LONG_HI) return false;
+            if (h4.hist < h4.prev_hist) return false;
+            if (h4.hist < -h4.atr14)    return false;
+            if (d1_close > 0.0 && d1_close < d1.ema21) return false;
             _open_position(id, true, price, now_ms, SwingStrategy::S1_PULLBACK,
-                           S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS);
+                           S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS, +1);
             return true;
         }
 
         if (d1_bear) {
-            // SHORT: price bounced up to within 0.6×ATR4h of H4 EMA21
             const double zone_lo = h4.ema21 - S1_PULLBACK_ATR * h4.atr14;
             const double zone_hi = h4.ema21 + S1_PULLBACK_ATR * h4.atr14;
             if (price < zone_lo || price > zone_hi) return false;
-            if (h4.rsi14 > 58.0 || h4.rsi14 < 35.0) return false;
-            if (h4.hist > h4.prev_hist && h4.hist > 0.0) return false;
+            if (h4.prev_rsi14 < S1_RSI_SHORT_HI) return false;
+            if (h4.rsi14      > S1_RSI_SHORT_LO) return false;
+            if (h4.hist > h4.prev_hist) return false;
+            if (h4.hist > h4.atr14)     return false;
+            if (d1_close > 0.0 && d1_close > d1.ema21) return false;
             _open_position(id, false, price, now_ms, SwingStrategy::S1_PULLBACK,
-                           S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS);
+                           S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS, -1);
             return true;
         }
 
         return false;
     }
 
-    // ── Strategy S2: RSI Divergence ───────────────────────────────────────────
     bool _try_s2(int id, double price, int64_t now_ms) {
         const auto& h4  = h4_ind_[id];
         const auto& bb  = h4_builders_[id];
 
         if (!h4.ready) return false;
         if (h4.atr14 <= 0.0) return false;
-        if (bb.count < (int)S2_DIV_LOOKBACK + 1) return false;
+        if (bb.count < S2_DIV_LOOKBACK + 1) return false;
 
-        // Bullish divergence: last bar low < prior low N bars ago, but RSI higher
-        const OHLCBar* b0 = bb.get(0);   // most recent closed H4 bar
+        const OHLCBar* b0 = bb.get(0);
         if (!b0) return false;
 
-        // Find the lowest low in the lookback window (bars 1..S2_DIV_LOOKBACK)
         double prior_low = b0->low;
-        int    prior_rsi_bar = 0;
-        for (int k = 1; k <= (int)S2_DIV_LOOKBACK; ++k) {
+        for (int k = 1; k <= S2_DIV_LOOKBACK; ++k) {
             const OHLCBar* bk = bb.get(k);
             if (!bk) break;
-            if (bk->low < prior_low) {
-                prior_low = bk->low;
-                prior_rsi_bar = k;
-            }
+            if (bk->low < prior_low) prior_low = bk->low;
         }
 
-        // We approximate RSI at prior bar using the saved rsi14 value shifted back.
-        // Since we don't store per-bar RSI history, we use the indicator EMA as proxy:
-        // divergence condition: current low < prior_low AND current RSI > prior RSI estimate
-        // Simplified: current low is a NEW low, RSI is NOT at new low (RSI > S2_RSI_OVERSOLD)
-        const bool new_price_low = (b0->low < prior_low);
+        const bool new_price_low  = (b0->low < prior_low);
         const bool rsi_not_at_low = (h4.rsi14 > S2_RSI_OVERSOLD);
         const bool rsi_in_zone    = (h4.rsi14 < 55.0);
 
         if (!new_price_low || !rsi_not_at_low || !rsi_in_zone) return false;
-
-        // MACD histogram must be turning positive
-        if (h4.hist <= 0.0 || h4.hist < h4.prev_hist) return false;
-
-        // Only take longs on bullish divergence (spot = no short selling)
-        // Flip cooldown
+        if (h4.hist <= 0.0 || h4.hist <= h4.prev_hist) return false;
         if (last_exit_dir_[id] == -1 && now_ms - last_exit_ms_[id] < FLIP_COOLDOWN_MS) return false;
 
-        // Fixed TP = entry + 3×risk
         const double sl_dist = S2_ATR_SL_MULT * h4.atr14;
         const double sl      = price - sl_dist;
         const double tp      = price + S2_R_MULT * sl_dist;
 
-        _open_position_raw(id, true, price, sl, tp, now_ms, SwingStrategy::S2_DIVERGENCE, S2_MAX_HOLD_MS);
+        _open_position_raw(id, true, price, sl, tp, now_ms, SwingStrategy::S2_DIVERGENCE,
+                           S2_MAX_HOLD_MS, 0);
         return true;
     }
 
-    // ── Strategy S3: Breakout Retest ──────────────────────────────────────────
     bool _try_s3(int id, double price, int64_t now_ms) {
         const auto& h4  = h4_ind_[id];
         const auto& d1_bb = d1_builders_[id];
@@ -703,17 +622,13 @@ private:
         if (h4.atr14 <= 0.0) return false;
         if (d1_bb.count < S3_RESIST_BARS) return false;
 
-        // S3 is LONG-only (breakout retest buy).
-        // Gate: only fire in D1 bull regime (EMA21 > EMA50 with separation).
-        // Firing longs into D1 bear = trading against trend = losses confirmed in shadow.
         {
             const auto& d1_s3 = d1_ind_[id];
-            if (d1_s3.ema21 <= d1_s3.ema50) return false;  // bear regime
+            if (d1_s3.ema21 <= d1_s3.ema50) return false;
             const double d1_sep_s3 = std::fabs(d1_s3.ema21 - d1_s3.ema50) / d1_s3.ema50;
-            if (d1_sep_s3 < S1_EMA_SEP_PCT) return false;  // no clear trend
+            if (d1_sep_s3 < S1_EMA_SEP_PCT) return false;
         }
 
-        // Resistance = highest close in last S3_RESIST_BARS D1 bars
         double resistance = 0.0;
         for (int k = 0; k < S3_RESIST_BARS; ++k) {
             const OHLCBar* b = d1_bb.get(k);
@@ -722,8 +637,6 @@ private:
         }
         if (resistance <= 0.0) return false;
 
-        // Check: has price recently broken above resistance?
-        // Use H4 bars: need a H4 close above resistance in last 4 bars (16h)
         bool broke_out = false;
         for (int k = 0; k < 4; ++k) {
             const OHLCBar* b = h4_builders_[id].get(k);
@@ -735,21 +648,15 @@ private:
         }
         if (!broke_out) return false;
 
-        // OBV must be above its EMA (rising volume on breakout)
         if (h4_ind_[id].obv < h4_ind_[id].obv_ema) return false;
+        if (h4_ind_[id].hist <= 0.0) return false;
 
-        // Retest: price has returned within S3_RETEST_ATR of resistance
         const double retest_lo = resistance - S3_RETEST_ATR * h4.atr14;
         const double retest_hi = resistance + S3_RETEST_ATR * h4.atr14;
         if (price < retest_lo || price > retest_hi) return false;
-
-        // Price must be above resistance (we're buying the retest from above)
         if (price < resistance * 0.998) return false;
-
-        // Flip cooldown
         if (last_exit_dir_[id] == -1 && now_ms - last_exit_ms_[id] < FLIP_COOLDOWN_MS) return false;
 
-        // SL below retest zone, TP = 2× the breakout range above entry
         const OHLCBar* b_break = nullptr;
         for (int k = 0; k < 8; ++k) {
             const OHLCBar* b = h4_builders_[id].get(k);
@@ -759,11 +666,11 @@ private:
         const double sl = price - S3_ATR_SL_MULT * h4.atr14;
         const double tp = price + 2.0 * std::max(breakout_range, h4.atr14);
 
-        _open_position_raw(id, true, price, sl, tp, now_ms, SwingStrategy::S3_BREAKOUT, S3_MAX_HOLD_MS);
+        _open_position_raw(id, true, price, sl, tp, now_ms, SwingStrategy::S3_BREAKOUT,
+                           S3_MAX_HOLD_MS, +1);
         return true;
     }
 
-    // ── Strategy S4: H4 Compression Bracket ─────────────────────────────────────
     bool _try_s4(int id, double price, int64_t now_ms) {
         const auto& h4  = h4_ind_[id];
         const auto& bb  = h4_builders_[id];
@@ -772,9 +679,6 @@ private:
         if (h4.atr14 <= 0.0) return false;
         if (bb.count < S4_BASELINE_BARS) return false;
 
-        // ── Compute ATR over last S4_COMPRESS_BARS H4 bars (current ATR proxy) ──
-        // Use the rolling ATR already in h4_ind_ as the current value.
-        // For baseline, compute average true range over S4_BASELINE_BARS manually.
         double baseline_atr = 0.0;
         int baseline_count  = 0;
         for (int k = 0; k < S4_BASELINE_BARS; ++k) {
@@ -793,7 +697,6 @@ private:
         baseline_atr /= baseline_count;
         if (baseline_atr <= 0.0) return false;
 
-        // Current ATR = average TR of last S4_COMPRESS_BARS bars
         double current_atr = 0.0;
         int    cur_count   = 0;
         for (int k = 0; k < S4_COMPRESS_BARS; ++k) {
@@ -811,10 +714,8 @@ private:
         if (cur_count < S4_COMPRESS_BARS - 1) return false;
         current_atr /= cur_count;
 
-        // Compression confirmed?
         if (current_atr >= S4_COMPRESS_RATIO * baseline_atr) return false;
 
-        // ── Define bracket: high/low of last S4_COMPRESS_BARS bars ───────────────
         double bracket_hi = 0.0;
         double bracket_lo = 1e18;
         for (int k = 0; k < S4_COMPRESS_BARS; ++k) {
@@ -826,36 +727,27 @@ private:
         if (bracket_hi <= bracket_lo) return false;
         const double bracket_width = bracket_hi - bracket_lo;
 
-        // ── Price must have just closed outside the bracket ───────────────────────
-        const OHLCBar* b0 = bb.get(0);  // most recent closed H4 bar
+        const OHLCBar* b0 = bb.get(0);
         if (!b0) return false;
 
         const bool broke_up   = (b0->close > bracket_hi);
         const bool broke_down = (b0->close < bracket_lo);
         if (!broke_up && !broke_down) return false;
 
-        // ── OBV confirmation ─────────────────────────────────────────────────────
-        // For longs: OBV must be above its EMA (accumulation on break)
-        // For shorts: OBV must be below its EMA (distribution on break)
         const bool obv_confirms_up   = (h4.obv >= h4.obv_ema);
         const bool obv_confirms_down = (h4.obv <= h4.obv_ema);
         if (broke_up   && !obv_confirms_up)   return false;
         if (broke_down && !obv_confirms_down) return false;
 
-        // ── No flip cooldown for S4 (compression breakout is high-conviction) ────
-        // But still skip if SAME direction position just closed < 2h ago
-        // (avoid re-entering immediately after a failed bracket break)
-        const int64_t S4_SAME_COOLDOWN = 7200000LL;  // 2h
+        const int64_t S4_SAME_COOLDOWN = 7200000LL;
         if (last_exit_dir_[id] != 0 && now_ms - last_exit_ms_[id] < S4_SAME_COOLDOWN) {
             const bool same_dir = (broke_up && last_exit_dir_[id] == 1) ||
                                   (broke_down && last_exit_dir_[id] == -1);
             if (same_dir) return false;
-            // Opposing direction: allow (this is the conflict-flip case — _open_position_raw handles close)
         }
 
         const bool is_long = broke_up;
 
-        // SL: opposite bracket boundary; TP: entry + 2× bracket width
         const double sl = is_long  ? bracket_lo : bracket_hi;
         const double tp = is_long  ? (price + 2.0 * bracket_width)
                                    : (price - 2.0 * bracket_width);
@@ -865,25 +757,23 @@ private:
                current_atr, baseline_atr, bracket_hi, bracket_lo, bracket_width);
         fflush(stdout);
 
-        _open_position_raw(id, is_long, price, sl, tp, now_ms, SwingStrategy::S4_BRACKET, S4_MAX_HOLD_MS);
+        _open_position_raw(id, is_long, price, sl, tp, now_ms,
+                           SwingStrategy::S4_BRACKET, S4_MAX_HOLD_MS, 0);
         return true;
     }
 
-    // ── Open position helpers ─────────────────────────────────────────────────
-
-    // For S1 (trail-based TP)
     void _open_position(int id, bool is_long, double price, int64_t now_ms,
                         SwingStrategy strat, double sl_atr_mult,
-                        double fixed_tp, int64_t max_hold_ms) {
+                        double fixed_tp, int64_t max_hold_ms, int d1_dir) {
         const auto& h4 = h4_ind_[id];
         const double sl = is_long ? (price - sl_atr_mult * h4.atr14)
                                   : (price + sl_atr_mult * h4.atr14);
-        _open_position_raw(id, is_long, price, sl, fixed_tp, now_ms, strat, max_hold_ms);
+        _open_position_raw(id, is_long, price, sl, fixed_tp, now_ms, strat, max_hold_ms, d1_dir);
     }
 
     void _open_position_raw(int id, bool is_long, double entry, double sl, double tp,
-                             int64_t now_ms, SwingStrategy strat, int64_t max_hold_ms) {
-        // Conflict check: if an opposing position is open, close it first
+                             int64_t now_ms, SwingStrategy strat, int64_t max_hold_ms,
+                             int d1_dir) {
         auto& existing = positions_[id];
         if (existing.active && existing.is_long != is_long) {
             printf("[SWING-CONFLICT] %s closing %s %s S%d to enter %s S%d\n",
@@ -895,7 +785,6 @@ private:
             fflush(stdout);
             _close(id, entry, now_ms, "CONFLICT_FLIP");
         }
-        // If same direction already open, skip (don't pyramid)
         if (existing.active) return;
 
         double qty = MAX_QTY_USD / entry;
@@ -921,6 +810,7 @@ private:
         pos.blended_entry  = entry;
         pos.entry_ms       = now_ms;
         pos.max_hold_ms    = max_hold_ms;
+        pos.entry_d1_dir   = d1_dir;
         pos.trade_id       = ++trade_counter_;
         strncpy(pos.symbol, sym_full(id), 15);
         pos.symbol[15] = '\0';
@@ -937,29 +827,38 @@ private:
         if (executor_) executor_->execute(pos.symbol, is_long, qty, entry);
     }
 
-    // ── Manage open position ──────────────────────────────────────────────────
     void _manage(int id, double price, int64_t now_ms) {
         auto& pos      = positions_[id];
         const auto& h4 = h4_ind_[id];
+        const auto& d1 = d1_ind_[id];
         now_ms_last_[id] = now_ms;
 
         const double move = pos.is_long ? (price - pos.entry_px)
                                         : (pos.entry_px - price);
         if (move > pos.mfe) pos.mfe = move;
 
-        // Fixed TP hit (S2 / S3)
         if (pos.tp_px > 0.0) {
             const bool tp_hit = pos.is_long ? (price >= pos.tp_px)
                                             : (price <= pos.tp_px);
             if (tp_hit) { _close(id, pos.tp_px, now_ms, "TP_HIT"); return; }
         }
 
-        // ── Staged trail + partial exit ──────────────────────────────────────
-        // S1: 3-stage trail tightens as MFE grows, 50% partial at stage 1 arm.
-        // Other strategies: single trail at 2× ATR dist 1.2× ATR (unchanged).
+        if (pos.entry_d1_dir != 0 && d1.ema50 > 0.0) {
+            const double d1_sep = std::fabs(d1.ema21 - d1.ema50) / d1.ema50;
+            if (d1_sep >= S1_EMA_SEP_PCT * 0.5) {
+                const bool now_bull = (d1.ema21 > d1.ema50);
+                const bool flipped  =
+                    (pos.entry_d1_dir == +1 && !now_bull) ||
+                    (pos.entry_d1_dir == -1 &&  now_bull);
+                if (flipped) {
+                    _close(id, price, now_ms, "REGIME_FLIP");
+                    return;
+                }
+            }
+        }
+
         if (h4.atr14 > 0.0) {
             if (pos.strategy == SwingStrategy::S1_PULLBACK) {
-                // ── Stage 1: arm at 3× ATR, trail dist 1.5× ATR ─────────────
                 if (pos.trail_stage == 0 && move >= S1_TRAIL_ARM_ATR * h4.atr14) {
                     pos.trail_stage  = 1;
                     pos.trail_armed  = true;
@@ -972,7 +871,6 @@ private:
                            sym_short(id), pos.is_long ? "LONG" : "SHORT",
                            pos.mfe, pos.trail_sl);
                     fflush(stdout);
-                    // ── Partial exit: close 50% at stage 1 arm ───────────────
                     if (!pos.partial_done && pos.qty_full > 0.0) {
                         const double partial_qty = pos.qty_full * 0.5;
                         const double partial_pnl_pct = pos.is_long
@@ -983,12 +881,11 @@ private:
                                price, partial_pnl_pct, partial_qty);
                         fflush(stdout);
                         if (executor_) executor_->execute(pos.symbol, !pos.is_long, partial_qty, price);
-                        pos.qty          = pos.qty_full - partial_qty;  // remaining 50%
+                        pos.qty          = pos.qty_full - partial_qty;
                         pos.partial_done = true;
-                        total_pnl_pct_  += partial_pnl_pct * 0.5;  // half weight
+                        total_pnl_pct_  += partial_pnl_pct * 0.5;
                     }
                 }
-                // ── Stage 2: tighten to 1.0× ATR at 5× ATR MFE ──────────────
                 if (pos.trail_stage == 1 && move >= S1_TRAIL_STAGE2_ATR * h4.atr14) {
                     pos.trail_stage = 2;
                     const double new_sl = pos.is_long
@@ -1000,20 +897,14 @@ private:
                            sym_short(id), pos.is_long ? "LONG" : "SHORT",
                            pos.mfe, pos.trail_sl);
                     fflush(stdout);
-                    // ── Pyramid: add 25% at stage 2 (trend confirmed) ─────────
-                    // Only for S1. Only once. D1 regime still valid (entry was
-                    // gated on regime -- if we reached 5× ATR, trend is intact).
-                    // Cap: pyramid qty limited so total <= MAX_QTY_USD / entry.
                     if (!pos.pyramid_done) {
                         const double add_qty_raw = pos.qty_full * 0.25;
-                        // Ensure total does not exceed MAX_QTY_USD
                         const double max_total = MAX_QTY_USD / price;
                         const double current_total = pos.qty + add_qty_raw;
                         const double add_qty = (current_total > max_total)
                             ? std::max(0.0, max_total - pos.qty)
                             : add_qty_raw;
                         if (add_qty * price >= MIN_QTY_USD) {
-                            // Blended entry price
                             const double new_total = pos.qty + add_qty;
                             pos.blended_entry = (pos.blended_entry * pos.qty
                                                 + price * add_qty) / new_total;
@@ -1030,7 +921,6 @@ private:
                         }
                     }
                 }
-                // ── Stage 3: lock-in at 0.5× ATR at 8× ATR MFE ──────────────
                 if (pos.trail_stage == 2 && move >= S1_TRAIL_STAGE3_ATR * h4.atr14) {
                     pos.trail_stage = 3;
                     const double new_sl = pos.is_long
@@ -1043,7 +933,6 @@ private:
                            pos.mfe, pos.trail_sl);
                     fflush(stdout);
                 }
-                // ── Ratchet trail SL using current stage distance ─────────────
                 if (pos.trail_armed) {
                     const double dist = (pos.trail_stage >= 3) ? S1_TRAIL_DIST3 * h4.atr14
                                       : (pos.trail_stage == 2) ? S1_TRAIL_DIST2 * h4.atr14
@@ -1055,7 +944,6 @@ private:
                         pos.trail_sl = new_sl;
                 }
             } else {
-                // S2/S3/S4: original single trail (2× ATR arm, 1.2× ATR dist)
                 const double arm_mult   = 2.0;
                 const double trail_dist = 1.2 * h4.atr14;
                 if (!pos.trail_armed && move >= arm_mult * h4.atr14) {
@@ -1075,11 +963,8 @@ private:
             }
         }
 
-        // SL hit (use trail_sl which starts at sl_px and tightens over time)
         const bool sl_hit = pos.is_long ? (price <= pos.trail_sl)
                                         : (price >= pos.trail_sl);
-
-        // Max hold timeout
         const bool timeout = (now_ms - pos.entry_ms >= pos.max_hold_ms);
 
         if (sl_hit)  { _close(id, pos.trail_sl, now_ms, "SL_HIT");  return; }
@@ -1107,7 +992,6 @@ private:
         last_exit_dir_[id] = pos.is_long ? 1 : -1;
         last_exit_ms_[id]  = now_ms;
 
-        // Close full qty (includes pyramid add-on if present)
         if (executor_) executor_->execute(pos.symbol, !pos.is_long, pos.qty, exit_px);
 
         pos = SwingPosition{};
@@ -1136,17 +1020,17 @@ private:
         snprintf(tbuf, sizeof(tbuf), "%02d:%02d:%02d", ti.tm_hour, ti.tm_min, ti.tm_sec);
         tl.time = tbuf;
 
+        tl.exit_ms = now_ms;
         trade_log_.push_back(tl);
-        if (trade_log_.size() > 100) trade_log_.erase(trade_log_.begin());
+        if (max_trade_log_size_ > 0 && (int)trade_log_.size() > max_trade_log_size_)
+            trade_log_.erase(trade_log_.begin());
     }
 
-    // ── CURL helpers ──────────────────────────────────────────────────────────
     static size_t _curl_write(void* ptr, size_t size, size_t nmemb, std::string* out) {
         out->append(static_cast<char*>(ptr), size * nmemb);
         return size * nmemb;
     }
 
-    // ── Seed one symbol + timeframe from Binance klines REST ─────────────────
     void _seed_symbol(int id, const char* interval,
                       BarBuilder& bb, SwingIndicators& ind) {
         const char* sym_up = sym_full(id);
@@ -1154,7 +1038,6 @@ private:
         for (int i = 0; sym_up[i] && i < 15; ++i)
             sym_upper[i] = (char)toupper((unsigned char)sym_up[i]);
 
-        // Fetch 200 bars (enough to warm both EMA50 and have history)
         std::string url = std::string("https://api.binance.com/api/v3/klines?symbol=")
                         + sym_upper + "&interval=" + interval + "&limit=200";
 
@@ -1193,7 +1076,6 @@ private:
             std::string arr = body.substr(arr_start + 1, arr_end - arr_start - 1);
             pos = arr_end + 1;
 
-            // Parse fields: [0]=open_time, [1]=open, [2]=high, [3]=low, [4]=close, [5]=volume
             std::vector<std::string> fields;
             size_t p2 = 0;
             while (p2 < arr.size()) {
@@ -1221,7 +1103,6 @@ private:
 
             ind.update(high, low, close, prev_close, volume);
 
-            // Inject closed bar into the ring buffer directly
             OHLCBar bar{open, high, low, close, volume, 0};
             bb.closed[bb.head] = bar;
             bb.head = (bb.head + 1) % BarBuilder::HISTORY;
@@ -1242,4 +1123,3 @@ private:
 };
 
 } // namespace chimera
-

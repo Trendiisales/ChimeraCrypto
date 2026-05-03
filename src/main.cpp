@@ -75,12 +75,15 @@ void acquire_instance_lock() {
     g_lock_fd = ::open(PID_LOCK_FILE, O_CREAT | O_RDWR, 0644);
     if (g_lock_fd < 0) { std::fprintf(stderr, "[FATAL] Cannot open lock file\n"); std::exit(1); }
     if (::flock(g_lock_fd, LOCK_EX | LOCK_NB) != 0) {
-        char buf[32] = {}; (void)::read(g_lock_fd, buf, sizeof(buf)-1); ::close(g_lock_fd);
+        char buf[32] = {};
+        if (::read(g_lock_fd, buf, sizeof(buf)-1) < 0) { /* ignore — best-effort PID read */ }
+        ::close(g_lock_fd);
         std::fprintf(stderr, "[FATAL] Chimera already running (PID %s)\n", buf); std::exit(1);
     }
-    (void)::ftruncate(g_lock_fd, 0);
+    if (::ftruncate(g_lock_fd, 0) != 0) { /* ignore — best-effort truncate */ }
     char pidbuf[32]; int len = std::snprintf(pidbuf, sizeof(pidbuf), "%d\n", (int)::getpid());
-    (void)::write(g_lock_fd, pidbuf, len); ::fsync(g_lock_fd);
+    if (::write(g_lock_fd, pidbuf, len) < 0) { /* ignore — best-effort PID write */ }
+    ::fsync(g_lock_fd);
     std::printf("[STARTUP] Instance lock acquired PID=%d\n", (int)::getpid());
 }
 
@@ -120,7 +123,8 @@ static std::string read_file(const std::string& path) {
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
     std::string buf(sz, '\0');
-    fread(&buf[0], 1, sz, f);
+    size_t got = fread(&buf[0], 1, sz, f);
+    if (got != (size_t)sz) buf.resize(got);  // partial read — keep what we got
     fclose(f);
     return buf;
 }
@@ -211,7 +215,8 @@ static void http_server_thread(int port) {
         if (client < 0) break;
         struct timeval tv{2, 0};
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        char req[512] = {}; (void)read(client, req, sizeof(req)-1);
+        char req[512] = {};
+        if (read(client, req, sizeof(req)-1) < 0) { /* ignore — req stays zero-initialised */ }
 
         std::string body;
         const char* ct = "application/json";
@@ -264,7 +269,7 @@ static void http_server_thread(int port) {
              << "Connection: close\r\n\r\n"
              << body;
         auto s = resp.str();
-        (void)write(client, s.c_str(), s.size());
+        if (write(client, s.c_str(), s.size()) < 0) { /* ignore — client may have disconnected */ }
         close(client);
     }
     close(server_fd);

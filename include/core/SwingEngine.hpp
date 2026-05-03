@@ -1329,7 +1329,7 @@ private:
 
         int    bars_loaded  = 0;
         double prev_close   = 0.0;
-        double prev_volume  = 0.0;
+        [[maybe_unused]] double prev_volume = 0.0;  // reserved for future volume-tracking
         size_t pos          = 0;
 
         while (pos < body.size()) {

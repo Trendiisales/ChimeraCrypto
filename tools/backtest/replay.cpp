@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
     engine.set_max_trade_log_size(0);
 
     if (cfg.quiet) {
-        std::freopen("/dev/null", "w", stdout);
+        if (!std::freopen("/dev/null", "w", stdout)) { /* ignore — quiet mode best-effort */ }
     }
 
     chimera::MarketTick tick{};
@@ -422,7 +422,7 @@ int main(int argc, char** argv) {
                  elapsed_ms / 1000.0, ticks.size());
 
     if (cfg.quiet) {
-        std::freopen("/dev/tty", "w", stdout);
+        if (!std::freopen("/dev/tty", "w", stdout)) { /* ignore — stdout restore best-effort */ }
     }
 
     const auto& trades = engine.get_trade_log();

@@ -1,5 +1,18 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v5 — exit fix)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v6 — ablations)
+//
+// CHANGE LOG (v6 — ablation after v5 backtest revealed two clear signals):
+//   * DON_REVERSE was destroying value: 49 trades at PF 0.03 (-7193 bp).
+//     Reverse-Donchian on 10-bar lookback triggered on normal pullbacks
+//     inside intact trends — 86% of reverse-exits were losers because price
+//     would have recovered. The call site in on_tick is removed; the
+//     _check_donchian_reverse helper stays in the file for future use.
+//   * Without DON_REVERSE, SL_HIT alone produced PF 1.00 over 173 trades —
+//     i.e. the 1.8x ATR stop change from v5 was correct, the reverse exit
+//     was the problem.
+//   * Tradable list further restricted: BTC, ETH, XRP only. Dropped SOL and
+//     BNB — together they accounted for ~96% of losses (-6937 bp). SOL is
+//     too volatile for a 20-bar Donchian on H4 (false breakouts dominate).
 //
 // CHANGE LOG (v5 — exit-side fixes after v4 backtest showed PF=0.76 with
 // 57.7% WR but losses 1.79x bigger than wins, i.e. entries are roughly right
@@ -386,16 +399,11 @@ public:
 
         auto& pos = positions_[id];
         if (pos.active) {
-            // v5: Reverse-Donchian early exit on H4 close — if the trend has
-            // clearly broken before our ATR stop is hit, get out at the bar
-            // close rather than riding to -1.8x ATR.
-            if (h4_closed && pos.strategy == SwingStrategy::S1_PULLBACK
-                && _check_donchian_reverse(id, pos.is_long)) {
-                const OHLCBar* b0 = h4_builders_[id].get(0);
-                const double exit_px = b0 ? b0->close : price;
-                _close(id, exit_px, now_ms, "DON_REVERSE");
-                return;
-            }
+            // v6: DON_REVERSE call removed — the 10-bar reverse exit fired
+            // on normal in-trend pullbacks (86% of reverse-exits were
+            // losers in v5 backtest) and destroyed -7193 bp of value.
+            // The _check_donchian_reverse helper is preserved below for
+            // possible future re-enable with a different lookback.
             _manage(id, price, now_ms);
             return;
         }
@@ -604,11 +612,13 @@ private:
     std::vector<TradeLog> trade_log_;
     int                   max_trade_log_size_ = 100;
 
-    // ── v4: Tradable-symbol whitelist ──────────────────────────────────────
+    // ── v6: Tradable-symbol whitelist (refined from v4) ────────────────────
     // Indices match SymbolIndex.hpp: BTC=0, ETH=1, SOL=2, BNB=3, AVAX=4,
-    // LINK=5, XRP=6, DOGE=7. AVAX/LINK/DOGE dropped per v3 backtest.
+    // LINK=5, XRP=6, DOGE=7. v4 dropped AVAX/LINK/DOGE; v6 also drops SOL
+    // and BNB after they accounted for ~96% of v5 losses (PF 0.59 each).
+    // Active set: BTC, ETH, XRP.
     static constexpr bool _is_tradable(int id) {
-        return id == 0 || id == 1 || id == 2 || id == 3 || id == 6;
+        return id == 0 || id == 1 || id == 6;
     }
 
     // ── v5: Reverse-Donchian exit check ────────────────────────────────────

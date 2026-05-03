@@ -1,5 +1,21 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v4 — Donchian)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v5 — exit fix)
+//
+// CHANGE LOG (v5 — exit-side fixes after v4 backtest showed PF=0.76 with
+// 57.7% WR but losses 1.79x bigger than wins, i.e. entries are roughly right
+// but stops bleed too much on false breakouts):
+//   * S1_ATR_SL_MULT: 2.5 -> 1.8. Donchian breakouts fire when ATR is
+//     elevated (end of momentum bursts), so a 2.5x ATR stop produced losses
+//     averaging ~5% per failed entry. 1.8x cuts that by ~28% before WR
+//     trade-off. Net effect on expectancy: positive even at lower WR.
+//   * Added reverse-Donchian (Turtle "S2 exit") at DON_EXIT_BARS=10. While a
+//     long position is open and an H4 bar closes below the lowest close of
+//     the prior 10 H4 bars, exit immediately at that close. Mirror for
+//     shorts. This catches losing trades earlier than the ATR stop in cases
+//     where the trend has clearly reversed, without giving back the full
+//     1.8x ATR every time. Recorded as why="DON_REVERSE".
+//   * Entries unchanged from v4 — BTC/ETH at 63%/62% WR show the breakout
+//     signal itself is sound; only the exit side needs work.
 //
 // CHANGE LOG (v4 — strategy pivot after v3 backtest showed PF=0.67 on 219
 // trades, i.e. EMA-pullback has no edge in 2025-2026 crypto):
@@ -278,15 +294,16 @@ public:
     static constexpr double MIN_QTY_USD = 50.0;
     static constexpr double MAX_QTY_USD = 500.0;
 
-    // v4 Donchian breakout (S1)
-    static constexpr int    DON_BREAKOUT_BARS = 20;     // H4 lookback for breakout extreme
+    // v4 Donchian breakout (S1) + v5 reverse-Donchian exit
+    static constexpr int    DON_BREAKOUT_BARS = 20;     // H4 lookback for breakout extreme (entry)
+    static constexpr int    DON_EXIT_BARS     = 10;     // v5: H4 lookback for reverse-Donchian exit
     static constexpr double S1_EMA_SEP_PCT   = 0.006;   // D1 EMA21/EMA50 trend strength gate
     static constexpr double S1_PULLBACK_ATR  = 0.6;     // (legacy v3, unused in Donchian)
     static constexpr double S1_RSI_LONG_LO   = 50.0;    // (legacy v3, unused in Donchian)
     static constexpr double S1_RSI_LONG_HI   = 50.0;    // (legacy v3, unused in Donchian)
     static constexpr double S1_RSI_SHORT_HI  = 50.0;    // (legacy v3, unused in Donchian)
     static constexpr double S1_RSI_SHORT_LO  = 50.0;    // (legacy v3, unused in Donchian)
-    static constexpr double S1_ATR_SL_MULT   = 2.5;     // wider stop for trend trades that need room
+    static constexpr double S1_ATR_SL_MULT   = 1.8;     // v4:2.5 -> v5:1.8 (cut avg loss ~28%)
     static constexpr double S1_TRAIL_ARM_ATR = 2.0;     // trail arms at 2xATR favourable move
     static constexpr double S1_TRAIL_ATR     = 1.5;
     static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;
@@ -369,6 +386,16 @@ public:
 
         auto& pos = positions_[id];
         if (pos.active) {
+            // v5: Reverse-Donchian early exit on H4 close — if the trend has
+            // clearly broken before our ATR stop is hit, get out at the bar
+            // close rather than riding to -1.8x ATR.
+            if (h4_closed && pos.strategy == SwingStrategy::S1_PULLBACK
+                && _check_donchian_reverse(id, pos.is_long)) {
+                const OHLCBar* b0 = h4_builders_[id].get(0);
+                const double exit_px = b0 ? b0->close : price;
+                _close(id, exit_px, now_ms, "DON_REVERSE");
+                return;
+            }
             _manage(id, price, now_ms);
             return;
         }
@@ -582,6 +609,28 @@ private:
     // LINK=5, XRP=6, DOGE=7. AVAX/LINK/DOGE dropped per v3 backtest.
     static constexpr bool _is_tradable(int id) {
         return id == 0 || id == 1 || id == 2 || id == 3 || id == 6;
+    }
+
+    // ── v5: Reverse-Donchian exit check ────────────────────────────────────
+    // Called on H4 close while a Donchian (S1) position is active.
+    // For longs: returns true if the most recent closed H4 bar's close is
+    // below the lowest close of the prior DON_EXIT_BARS bars.
+    // For shorts: returns true if it's above the highest close of those
+    // prior DON_EXIT_BARS bars.
+    bool _check_donchian_reverse(int id, bool is_long) const {
+        const auto& bb = h4_builders_[id];
+        if (bb.count < DON_EXIT_BARS + 1) return false;
+        const OHLCBar* b0 = bb.get(0);
+        if (!b0) return false;
+        double opp = is_long ? 1e18 : 0.0;
+        for (int k = 1; k <= DON_EXIT_BARS; ++k) {
+            const OHLCBar* bk = bb.get(k);
+            if (!bk) break;
+            if (is_long) { if (bk->close < opp) opp = bk->close; }
+            else         { if (bk->close > opp) opp = bk->close; }
+        }
+        if (opp <= 0.0 || opp >= 1e17) return false;
+        return is_long ? (b0->close < opp) : (b0->close > opp);
     }
 
     // ── Strategy S1: Donchian Breakout (v4) ─────────────────────────────────

@@ -1,5 +1,20 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v8 — accounting)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v9 — ETH-only)
+//
+// CHANGE LOG (v9 — symbol restriction after v8 backtest revealed ETH was
+// carrying the entire system):
+//   * 16-month v8 result: total +5939 bp, of which ETH = +5863 bp, BTC =
+//     +333 bp, XRP = -258 bp. ETH PF 1.39 stable across 8mo (1.68) and 16mo
+//     (1.39); BTC and XRP near breakeven and inconsistent across windows.
+//   * Tradable whitelist narrowed to ETH (id=1) only. BTC and XRP positions
+//     no longer fire. The engine still seeds + tracks H4/D1 indicators for
+//     all 8 symbols (so the GUI keeps showing them) but does not trade them.
+//   * No other changes — entries, vol filter, stops, trail, partial,
+//     pyramid, accounting all preserved from v8.
+//   * This is a clean isolation test: if ETH-only confirms PF 1.39+ on the
+//     same 16-month window (it should — that's just the ETH-only subset of
+//     v8's data) and 3-4 weeks of live shadow mode tracks the backtest,
+//     we'll have a single-thesis system ready for risk-wrapped live trading.
 //
 // CHANGE LOG (v8 — bookkeeping fix after v7 hit PF 1.02 / +279 bp but the
 // trade-log was systematically under-counting wins):
@@ -654,13 +669,18 @@ private:
     std::vector<TradeLog> trade_log_;
     int                   max_trade_log_size_ = 100;
 
-    // ── v6: Tradable-symbol whitelist (refined from v4) ────────────────────
+    // ── v9: Tradable-symbol whitelist (further refined from v6) ─────────────
     // Indices match SymbolIndex.hpp: BTC=0, ETH=1, SOL=2, BNB=3, AVAX=4,
-    // LINK=5, XRP=6, DOGE=7. v4 dropped AVAX/LINK/DOGE; v6 also drops SOL
-    // and BNB after they accounted for ~96% of v5 losses (PF 0.59 each).
-    // Active set: BTC, ETH, XRP.
+    // LINK=5, XRP=6, DOGE=7.
+    //   v4 dropped AVAX/LINK/DOGE (PF 0.51-0.59).
+    //   v6 dropped SOL/BNB (also PF ~0.59 once DON_REVERSE was removed).
+    //   v9 drops BTC and XRP. Per the v8 16-month backtest, ETH carried
+    //     +5863 bp of the +5939 bp total (~99%), with BTC at +333 bp
+    //     (essentially fee noise) and XRP at -258 bp. ETH PF stayed
+    //     consistent across both 8mo (1.68) and 16mo (1.39) windows.
+    // Active set: ETH only.
     static constexpr bool _is_tradable(int id) {
-        return id == 0 || id == 1 || id == 6;
+        return id == 1;   // ETH
     }
 
     // ── v8: True economic pnl_pct for a trade ──────────────────────────────

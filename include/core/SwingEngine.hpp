@@ -1,5 +1,25 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v3 — calibrated)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v4 — Donchian)
+//
+// CHANGE LOG (v4 — strategy pivot after v3 backtest showed PF=0.67 on 219
+// trades, i.e. EMA-pullback has no edge in 2025-2026 crypto):
+//   * S1 entry rewritten as a 20-bar H4 Donchian breakout in confirmed D1
+//     trend regime. We now BUY strength (close at 20-bar high in D1 bull) and
+//     SELL weakness (close at 20-bar low in D1 bear) instead of fading
+//     pullbacks. Trend-following captures the fat tail that drives crypto
+//     returns; pullback systems lose to it.
+//   * Tradable symbol whitelist: BTC, ETH, SOL, BNB, XRP only. AVAX, LINK,
+//     DOGE dropped — they were the bottom three in the v3 backtest with PF
+//     0.51 / 0.52 / 0.59 and accounted for ~66% of total losses. The engine
+//     still seeds and tracks indicators for all 8 (so the GUI shows them) but
+//     does not enter positions on the dropped three.
+//   * S2 / S3 / S4 disabled (calls commented out in on_tick). The code is
+//     left in place for later reactivation once Donchian S1's edge is
+//     verified in isolation.
+//   * S1 enum value kept as S1_PULLBACK to preserve GUI compatibility (the
+//     dashboard shows "SWING-S1" regardless of underlying logic).
+//   * Trail / partial-exit / pyramid logic in _manage unchanged — sound
+//     for trend-following too.
 //
 // CHANGE LOG (v3 — calibration after backtest showed only 3 trades in 8 mo):
 //   * S1: RSI gate is now a simple cross through 50 (prev<50 AND current>50)
@@ -258,14 +278,16 @@ public:
     static constexpr double MIN_QTY_USD = 50.0;
     static constexpr double MAX_QTY_USD = 500.0;
 
-    static constexpr double S1_EMA_SEP_PCT   = 0.006;   // v2:0.010 -> v3:0.006
-    static constexpr double S1_PULLBACK_ATR  = 0.6;
-    static constexpr double S1_RSI_LONG_LO   = 50.0;    // v2:45 -> v3:50 (simple cross)
-    static constexpr double S1_RSI_LONG_HI   = 50.0;    // v2:55 -> v3:50 (simple cross)
-    static constexpr double S1_RSI_SHORT_HI  = 50.0;    // v2:55 -> v3:50 (simple cross)
-    static constexpr double S1_RSI_SHORT_LO  = 50.0;    // v2:45 -> v3:50 (simple cross)
-    static constexpr double S1_ATR_SL_MULT   = 2.0;     // v2:2.5 -> v3:2.0
-    static constexpr double S1_TRAIL_ARM_ATR = 2.0;     // v2:3.0 -> v3:2.0
+    // v4 Donchian breakout (S1)
+    static constexpr int    DON_BREAKOUT_BARS = 20;     // H4 lookback for breakout extreme
+    static constexpr double S1_EMA_SEP_PCT   = 0.006;   // D1 EMA21/EMA50 trend strength gate
+    static constexpr double S1_PULLBACK_ATR  = 0.6;     // (legacy v3, unused in Donchian)
+    static constexpr double S1_RSI_LONG_LO   = 50.0;    // (legacy v3, unused in Donchian)
+    static constexpr double S1_RSI_LONG_HI   = 50.0;    // (legacy v3, unused in Donchian)
+    static constexpr double S1_RSI_SHORT_HI  = 50.0;    // (legacy v3, unused in Donchian)
+    static constexpr double S1_RSI_SHORT_LO  = 50.0;    // (legacy v3, unused in Donchian)
+    static constexpr double S1_ATR_SL_MULT   = 2.5;     // wider stop for trend trades that need room
+    static constexpr double S1_TRAIL_ARM_ATR = 2.0;     // trail arms at 2xATR favourable move
     static constexpr double S1_TRAIL_ATR     = 1.5;
     static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;
     static constexpr double S1_TRAIL_DIST2   = 1.0;
@@ -361,9 +383,11 @@ public:
         const double signal_px = b0->close;
 
         if (_try_s1(id, signal_px, now_ms)) return;
-        if (_try_s2(id, signal_px, now_ms)) return;
-        if (_try_s3(id, signal_px, now_ms)) return;
-        if (_try_s4(id, signal_px, now_ms)) return;
+        // v4: S2/S3/S4 disabled while we evaluate Donchian S1 in isolation.
+        // Re-enable individually after S1 backtest confirms positive edge.
+        // if (_try_s2(id, signal_px, now_ms)) return;
+        // if (_try_s3(id, signal_px, now_ms)) return;
+        // if (_try_s4(id, signal_px, now_ms)) return;
     }
 
     void kill_all() {
@@ -553,50 +577,67 @@ private:
     std::vector<TradeLog> trade_log_;
     int                   max_trade_log_size_ = 100;
 
+    // ── v4: Tradable-symbol whitelist ──────────────────────────────────────
+    // Indices match SymbolIndex.hpp: BTC=0, ETH=1, SOL=2, BNB=3, AVAX=4,
+    // LINK=5, XRP=6, DOGE=7. AVAX/LINK/DOGE dropped per v3 backtest.
+    static constexpr bool _is_tradable(int id) {
+        return id == 0 || id == 1 || id == 2 || id == 3 || id == 6;
+    }
+
+    // ── Strategy S1: Donchian Breakout (v4) ─────────────────────────────────
+    // Buy when H4 close exceeds the highest H4 close of the prior 20 bars in
+    // a confirmed D1 bull regime. Mirror for shorts in D1 bear regime. The
+    // entry rides the actual driver of crypto returns (long-term trend), not
+    // the v3 "pullback in trend" approach which was net-negative empirically.
     bool _try_s1(int id, double price, int64_t now_ms) {
+        if (!_is_tradable(id)) return false;
+
         const auto& d1  = d1_ind_[id];
         const auto& h4  = h4_ind_[id];
+        const auto& bb  = h4_builders_[id];
 
         if (!d1.ready || !h4.ready) return false;
         if (h4.atr14 <= 0.0) return false;
+        if (bb.count < DON_BREAKOUT_BARS + 1) return false;
 
+        // D1 trend regime gate
         const double d1_sep = std::fabs(d1.ema21 - d1.ema50) / d1.ema50;
         if (d1_sep < S1_EMA_SEP_PCT) return false;
-
         const bool d1_bull = d1.ema21 > d1.ema50;
         const bool d1_bear = d1.ema21 < d1.ema50;
 
+        // Flip cooldown — don't reverse our last exit's direction within FLIP_COOLDOWN_MS
         if (last_exit_dir_[id] != 0 && now_ms - last_exit_ms_[id] < FLIP_COOLDOWN_MS) {
             if (d1_bull && last_exit_dir_[id] == -1) return false;
             if (d1_bear && last_exit_dir_[id] == +1) return false;
         }
 
-        if (d1_bull) {
-            // LONG: H4 close pulled back into EMA21 zone
-            const double zone_lo = h4.ema21 - S1_PULLBACK_ATR * h4.atr14;
-            const double zone_hi = h4.ema21 + S1_PULLBACK_ATR * h4.atr14;
-            if (price < zone_lo || price > zone_hi) return false;
-            // Simple RSI cross up through 50 between previous and current bar
-            if (h4.prev_rsi14 >= S1_RSI_LONG_LO) return false;
-            if (h4.rsi14      <= S1_RSI_LONG_HI) return false;
-            // MACD histogram must be rising (don't catch falling momentum)
-            if (h4.hist < h4.prev_hist) return false;
-            _open_position(id, true, price, now_ms, SwingStrategy::S1_PULLBACK,
+        // Most recent closed H4 bar (the breakout candidate) is bar 0;
+        // the "prior" range we compare against is bars 1..DON_BREAKOUT_BARS.
+        const OHLCBar* b0 = bb.get(0);
+        if (!b0) return false;
+        const double current_close = b0->close;
+
+        double don_high = 0.0;
+        double don_low  = 1e18;
+        for (int k = 1; k <= DON_BREAKOUT_BARS; ++k) {
+            const OHLCBar* bk = bb.get(k);
+            if (!bk) break;
+            if (bk->close > don_high) don_high = bk->close;
+            if (bk->close < don_low)  don_low  = bk->close;
+        }
+        if (don_high <= 0.0 || don_low >= 1e17) return false;
+
+        if (d1_bull && current_close > don_high) {
+            _open_position(id, true, current_close, now_ms,
+                           SwingStrategy::S1_PULLBACK,   // enum kept for GUI compat
                            S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS, +1);
             return true;
         }
 
-        if (d1_bear) {
-            // SHORT: H4 close bounced up to EMA21 zone
-            const double zone_lo = h4.ema21 - S1_PULLBACK_ATR * h4.atr14;
-            const double zone_hi = h4.ema21 + S1_PULLBACK_ATR * h4.atr14;
-            if (price < zone_lo || price > zone_hi) return false;
-            // Simple RSI cross down through 50
-            if (h4.prev_rsi14 <= S1_RSI_SHORT_HI) return false;
-            if (h4.rsi14      >= S1_RSI_SHORT_LO) return false;
-            // MACD histogram must be falling
-            if (h4.hist > h4.prev_hist) return false;
-            _open_position(id, false, price, now_ms, SwingStrategy::S1_PULLBACK,
+        if (d1_bear && current_close < don_low) {
+            _open_position(id, false, current_close, now_ms,
+                           SwingStrategy::S1_PULLBACK,
                            S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS, -1);
             return true;
         }

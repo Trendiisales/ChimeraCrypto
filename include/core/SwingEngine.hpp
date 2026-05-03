@@ -1,5 +1,30 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v2 — longer-TF tune)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v3 — calibrated)
+//
+// CHANGE LOG (v3 — calibration after backtest showed only 3 trades in 8 mo):
+//   * S1: RSI gate is now a simple cross through 50 (prev<50 AND current>50)
+//     instead of v2's "prev<=45 AND current>=55" (which required a 10+ point
+//     single-bar swing — empirically almost never triggers).
+//   * S1: dropped redundant "D1 close on right side of EMA21" gate (already
+//     covered by EMA21 vs EMA50 separation check).
+//   * S1: dropped redundant "MACD not deeply negative" gate (already covered
+//     by the rising-histogram check).
+//   * S1: D1 EMA21/EMA50 separation 1.0% -> 0.6% (1.0% locked out healthy
+//     swing trends; 0.6% is tighter than v1's 0.5% but actually achievable).
+//   * S1: SL 2.5xATR -> 2.0xATR. v2 was over-correcting v1's 1.5x.
+//   * S1: trail arm 3xATR MFE -> 2xATR MFE. v2's 3x meant winners that
+//     reached +1.3xATR (like the BTC trade in the backtest) timed out before
+//     the trail ever armed.
+//   * S2: RSI window widened 40-55 -> 30-60. Drop "MACD must be positive";
+//     only require "MACD rising".
+//   * S3: SL 2.0xATR -> 1.8xATR.
+//   * S4: compression ratio 0.45 -> 0.60 (0.45 is essentially never reached
+//     on H4 in crypto; 0.60 lets compression actually trigger).
+//
+// Kept from v2:
+//   * Entries fire ONLY on H4 bar close (this fixed v1's 17-trades-in-82s).
+//   * Structural exit on D1 regime flip.
+//   * 12h same-symbol cooldown, 24h flip cooldown.
 //
 // CHANGE LOG (v2):
 //   * Entries now fire ONLY on H4 bar close. Previously _try_s1..s4 ran on
@@ -233,14 +258,14 @@ public:
     static constexpr double MIN_QTY_USD = 50.0;
     static constexpr double MAX_QTY_USD = 500.0;
 
-    static constexpr double S1_EMA_SEP_PCT   = 0.010;
+    static constexpr double S1_EMA_SEP_PCT   = 0.006;   // v2:0.010 -> v3:0.006
     static constexpr double S1_PULLBACK_ATR  = 0.6;
-    static constexpr double S1_RSI_LONG_LO   = 45.0;
-    static constexpr double S1_RSI_LONG_HI   = 55.0;
-    static constexpr double S1_RSI_SHORT_HI  = 55.0;
-    static constexpr double S1_RSI_SHORT_LO  = 45.0;
-    static constexpr double S1_ATR_SL_MULT   = 2.5;
-    static constexpr double S1_TRAIL_ARM_ATR = 3.0;
+    static constexpr double S1_RSI_LONG_LO   = 50.0;    // v2:45 -> v3:50 (simple cross)
+    static constexpr double S1_RSI_LONG_HI   = 50.0;    // v2:55 -> v3:50 (simple cross)
+    static constexpr double S1_RSI_SHORT_HI  = 50.0;    // v2:55 -> v3:50 (simple cross)
+    static constexpr double S1_RSI_SHORT_LO  = 50.0;    // v2:45 -> v3:50 (simple cross)
+    static constexpr double S1_ATR_SL_MULT   = 2.0;     // v2:2.5 -> v3:2.0
+    static constexpr double S1_TRAIL_ARM_ATR = 2.0;     // v2:3.0 -> v3:2.0
     static constexpr double S1_TRAIL_ATR     = 1.5;
     static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;
     static constexpr double S1_TRAIL_DIST2   = 1.0;
@@ -248,20 +273,21 @@ public:
     static constexpr double S1_TRAIL_DIST3   = 0.5;
     static constexpr int64_t S1_MAX_HOLD_MS  = 604800000LL;
 
-    static constexpr double S2_RSI_OVERSOLD  = 40.0;
+    static constexpr double S2_RSI_OVERSOLD  = 30.0;    // v2:40 -> v3:30 (widened)
+    static constexpr double S2_RSI_CEILING   = 60.0;    // v3 (was hardcoded 55 in body)
     static constexpr int    S2_DIV_LOOKBACK  = 5;
-    static constexpr double S2_ATR_SL_MULT   = 2.0;
+    static constexpr double S2_ATR_SL_MULT   = 1.8;     // v2:2.0 -> v3:1.8
     static constexpr double S2_R_MULT        = 3.0;
     static constexpr int64_t S2_MAX_HOLD_MS  = 432000000LL;
 
     static constexpr int     S3_RESIST_BARS  = 20;
     static constexpr double  S3_RETEST_ATR   = 0.4;
-    static constexpr double  S3_ATR_SL_MULT  = 2.0;
+    static constexpr double  S3_ATR_SL_MULT  = 1.8;     // v2:2.0 -> v3:1.8
     static constexpr int64_t S3_MAX_HOLD_MS  = 432000000LL;
 
     static constexpr int     S4_COMPRESS_BARS  = 5;
     static constexpr int     S4_BASELINE_BARS  = 20;
-    static constexpr double  S4_COMPRESS_RATIO = 0.45;
+    static constexpr double  S4_COMPRESS_RATIO = 0.60;  // v2:0.45 -> v3:0.60
     static constexpr double  S4_OBV_CONFIRM    = 0.0;
     static constexpr double  S4_ATR_SL_MULT    = 1.0;
     static constexpr int64_t S4_MAX_HOLD_MS    = 432000000LL;
@@ -545,32 +571,31 @@ private:
             if (d1_bear && last_exit_dir_[id] == +1) return false;
         }
 
-        const OHLCBar* d1_b0 = d1_builders_[id].get(0);
-        const double d1_close = d1_b0 ? d1_b0->close : 0.0;
-
         if (d1_bull) {
+            // LONG: H4 close pulled back into EMA21 zone
             const double zone_lo = h4.ema21 - S1_PULLBACK_ATR * h4.atr14;
             const double zone_hi = h4.ema21 + S1_PULLBACK_ATR * h4.atr14;
             if (price < zone_lo || price > zone_hi) return false;
-            if (h4.prev_rsi14 > S1_RSI_LONG_LO) return false;
-            if (h4.rsi14      < S1_RSI_LONG_HI) return false;
+            // Simple RSI cross up through 50 between previous and current bar
+            if (h4.prev_rsi14 >= S1_RSI_LONG_LO) return false;
+            if (h4.rsi14      <= S1_RSI_LONG_HI) return false;
+            // MACD histogram must be rising (don't catch falling momentum)
             if (h4.hist < h4.prev_hist) return false;
-            if (h4.hist < -h4.atr14)    return false;
-            if (d1_close > 0.0 && d1_close < d1.ema21) return false;
             _open_position(id, true, price, now_ms, SwingStrategy::S1_PULLBACK,
                            S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS, +1);
             return true;
         }
 
         if (d1_bear) {
+            // SHORT: H4 close bounced up to EMA21 zone
             const double zone_lo = h4.ema21 - S1_PULLBACK_ATR * h4.atr14;
             const double zone_hi = h4.ema21 + S1_PULLBACK_ATR * h4.atr14;
             if (price < zone_lo || price > zone_hi) return false;
-            if (h4.prev_rsi14 < S1_RSI_SHORT_HI) return false;
-            if (h4.rsi14      > S1_RSI_SHORT_LO) return false;
+            // Simple RSI cross down through 50
+            if (h4.prev_rsi14 <= S1_RSI_SHORT_HI) return false;
+            if (h4.rsi14      >= S1_RSI_SHORT_LO) return false;
+            // MACD histogram must be falling
             if (h4.hist > h4.prev_hist) return false;
-            if (h4.hist > h4.atr14)     return false;
-            if (d1_close > 0.0 && d1_close > d1.ema21) return false;
             _open_position(id, false, price, now_ms, SwingStrategy::S1_PULLBACK,
                            S1_ATR_SL_MULT, 0.0, S1_MAX_HOLD_MS, -1);
             return true;
@@ -599,10 +624,11 @@ private:
 
         const bool new_price_low  = (b0->low < prior_low);
         const bool rsi_not_at_low = (h4.rsi14 > S2_RSI_OVERSOLD);
-        const bool rsi_in_zone    = (h4.rsi14 < 55.0);
+        const bool rsi_in_zone    = (h4.rsi14 < S2_RSI_CEILING);
 
         if (!new_price_low || !rsi_not_at_low || !rsi_in_zone) return false;
-        if (h4.hist <= 0.0 || h4.hist <= h4.prev_hist) return false;
+        // MACD histogram must be rising (don't require strictly positive — just turning)
+        if (h4.hist <= h4.prev_hist) return false;
         if (last_exit_dir_[id] == -1 && now_ms - last_exit_ms_[id] < FLIP_COOLDOWN_MS) return false;
 
         const double sl_dist = S2_ATR_SL_MULT * h4.atr14;

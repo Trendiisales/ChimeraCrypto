@@ -1,5 +1,27 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v7 — vol filter)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v8 — accounting)
+//
+// CHANGE LOG (v8 — bookkeeping fix after v7 hit PF 1.02 / +279 bp but the
+// trade-log was systematically under-counting wins):
+//   * Each position now stores partial_exit_px (the price at which the
+//     50% partial-exit fired). Previously this price was logged but not
+//     persisted on the position, so the trade-log's pnl_pct only captured
+//     entry -> final-exit, missing the partial leg entirely.
+//   * Added _compute_trade_pnl_pct() helper. Returns the trade's true
+//     economic % return on deployed capital, computed as:
+//       partial_qty x (partial_exit_px - entry_px)
+//         + remaining_qty x (exit_px - blended_entry)
+//       all divided by qty_full * entry_px.
+//     Pyramid-add positions are handled correctly via blended_entry, which
+//     is already the weighted-avg cost basis of the remaining position.
+//   * total_pnl_pct_ now updated once per trade (at _close) using the true
+//     pnl_pct, instead of the previous broken split that added partial-half
+//     in _manage and the full final-leg pct in _close (which double-counted
+//     the post-partial portion).
+//   * trade_log entries now record true pnl_pct, so backtest summary
+//     reflects real economic outcomes including partial profits.
+//   * No strategy logic changes — entries, stops, trail, vol filter, symbol
+//     whitelist all preserved from v7.
 //
 // CHANGE LOG (v7 — single change after v6 backtest landed at PF 0.98 / WR
 // 55.3% / -468 bp, i.e. right at the breakeven threshold pre-fees):
@@ -308,6 +330,8 @@ struct SwingPosition {
     bool           pyramid_done  = false;
     double         pyramid_qty   = 0.0;
     double         blended_entry = 0.0;
+    // v8: track partial-exit price so trade pnl_pct includes the partial leg
+    double         partial_exit_px = 0.0;
 };
 
 class SwingEngine {
@@ -447,7 +471,11 @@ public:
                    sym_short(i), pos.is_long ? "LONG" : "SHORT", pos.entry_px);
             fflush(stdout);
             if (executor_) executor_->execute(pos.symbol, !pos.is_long, pos.qty, prices_[i]);
-            _record_exit(i, prices_[i], now_ms_last_[i], "KILL");
+            // v8: compute true economic pnl including any partial leg
+            const double kill_pnl = _compute_trade_pnl_pct(pos, prices_[i]);
+            total_pnl_pct_ += kill_pnl;
+            if (kill_pnl > 0) ++wins_;
+            _record_exit(i, prices_[i], now_ms_last_[i], "KILL", kill_pnl);
             pos = SwingPosition{};
         }
     }
@@ -633,6 +661,41 @@ private:
     // Active set: BTC, ETH, XRP.
     static constexpr bool _is_tradable(int id) {
         return id == 0 || id == 1 || id == 6;
+    }
+
+    // ── v8: True economic pnl_pct for a trade ──────────────────────────────
+    // Returns the trade's % return on the original deployed capital
+    // (qty_full × entry_px), accounting correctly for:
+    //   - Partial exit at partial_exit_px (50% of qty_full closed early)
+    //   - Pyramid additions (folded into blended_entry, so the remaining-leg
+    //     formula handles them)
+    //   - Final close at exit_px of whatever qty remains active
+    // For trades with no partial / no pyramid this reduces to the simple
+    // (exit - entry) / entry expression, so behaviour for those is unchanged.
+    double _compute_trade_pnl_pct(const SwingPosition& pos, double exit_px) const {
+        if (pos.qty_full <= 0.0 || pos.entry_px <= 0.0) return 0.0;
+        const double original_notional = pos.qty_full * pos.entry_px;
+        if (original_notional <= 0.0) return 0.0;
+
+        double pnl_dollars = 0.0;
+
+        // Partial-exit leg (if it fired)
+        if (pos.partial_done && pos.partial_exit_px > 0.0) {
+            const double partial_qty = pos.qty_full * 0.5;
+            const double per_unit = pos.is_long
+                ? (pos.partial_exit_px - pos.entry_px)
+                : (pos.entry_px - pos.partial_exit_px);
+            pnl_dollars += partial_qty * per_unit;
+        }
+
+        // Remaining-leg close at exit_px (qty includes pyramid additions if any;
+        // blended_entry is the weighted-avg cost basis for that remaining qty).
+        const double per_unit_close = pos.is_long
+            ? (exit_px - pos.blended_entry)
+            : (pos.blended_entry - exit_px);
+        pnl_dollars += pos.qty * per_unit_close;
+
+        return (pnl_dollars / original_notional) * 100.0;
     }
 
     // ── v5: Reverse-Donchian exit check ────────────────────────────────────
@@ -1061,9 +1124,13 @@ private:
                                price, partial_pnl_pct, partial_qty);
                         fflush(stdout);
                         if (executor_) executor_->execute(pos.symbol, !pos.is_long, partial_qty, price);
-                        pos.qty          = pos.qty_full - partial_qty;
-                        pos.partial_done = true;
-                        total_pnl_pct_  += partial_pnl_pct * 0.5;
+                        pos.qty             = pos.qty_full - partial_qty;
+                        pos.partial_done    = true;
+                        pos.partial_exit_px = price;   // v8: persist for true pnl_pct calc
+                        // v8: total_pnl_pct_ no longer updated here. The full
+                        // trade pnl (partial leg + remaining leg) is added once
+                        // at _close via _compute_trade_pnl_pct, avoiding the
+                        // earlier double-count on the post-partial portion.
                     }
                 }
                 if (pos.trail_stage == 1 && move >= S1_TRAIL_STAGE2_ATR * h4.atr14) {
@@ -1154,9 +1221,8 @@ private:
     void _close(int id, double exit_px, int64_t now_ms, const char* why) {
         auto& pos = positions_[id];
 
-        const double pnl_pct = pos.is_long
-            ? ((exit_px - pos.entry_px) / pos.entry_px * 100.0)
-            : ((pos.entry_px - exit_px) / pos.entry_px * 100.0);
+        // v8: true economic pnl_pct (includes partial leg + remaining-leg)
+        const double pnl_pct = _compute_trade_pnl_pct(pos, exit_px);
 
         total_pnl_pct_ += pnl_pct;
         if (pnl_pct > 0) ++wins_;
@@ -1167,7 +1233,7 @@ private:
                (int)pos.strategy, pos.entry_px, exit_px, pnl_pct, pos.mfe, why);
         fflush(stdout);
 
-        _record_exit(id, exit_px, now_ms, why);
+        _record_exit(id, exit_px, now_ms, why, pnl_pct);
 
         last_exit_dir_[id] = pos.is_long ? 1 : -1;
         last_exit_ms_[id]  = now_ms;
@@ -1177,7 +1243,8 @@ private:
         pos = SwingPosition{};
     }
 
-    void _record_exit(int id, double exit_px, int64_t now_ms, const char* why) {
+    void _record_exit(int id, double exit_px, int64_t now_ms, const char* why,
+                      double pnl_pct) {
         const auto& pos = positions_[id];
         if (!pos.active && pos.entry_px == 0.0) return;
 
@@ -1186,9 +1253,7 @@ private:
         tl.side     = pos.is_long ? "LONG" : "SHORT";
         tl.entry    = pos.entry_px;
         tl.exit     = exit_px;
-        tl.pnl_pct  = pos.is_long
-            ? ((exit_px - pos.entry_px) / pos.entry_px * 100.0)
-            : ((pos.entry_px - exit_px) / pos.entry_px * 100.0);
+        tl.pnl_pct  = pnl_pct;   // v8: caller passes the true economic pnl_pct
         tl.mfe      = pos.mfe;
         tl.strategy = pos.strategy;
         tl.why      = why;

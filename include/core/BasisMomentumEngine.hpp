@@ -35,12 +35,27 @@
 //   exit immediately — the perp move was absorbed, spot won't follow.
 //
 // COOLDOWN: 90s per symbol after any exit — prevents chasing
+//
+// ── MOVE 2 WRAPPERS (additive, no logic changes) ───────────────────────────
+//   shadow_mode flag       : default true; gates any future executor wiring
+//   halted_ flag           : set by kill_all(); blocks new entries until reset
+//   on_tick(...)           : adapter so main.cpp can call uniformly per tick;
+//                            delegates to evaluate() unchanged
+//   kill_all()             : flattens any open paper position, books P&L,
+//                            sets halted_ = true
+//   state_json()           : returns JSON of internal Stats + flags for GUI
+//
+//   The original evaluate() entry point and its constants are preserved
+//   verbatim so the canonical entry/exit logic is the one that the future
+//   backtest harness will exercise.
 // ============================================================================
 
 #include <cmath>
 #include <cstdint>
 #include <string>
 #include <cstdio>
+#include <sstream>
+#include <iomanip>
 #include <algorithm>
 
 namespace chimera {
@@ -72,6 +87,9 @@ public:
     // Timing
     static constexpr int64_t MAX_HOLD_MS        = 15000; // 15s — trail will exit; basis collapse exits early
     static constexpr int64_t COOLDOWN_MS        = 90000;// 90s cooldown per symbol
+
+    // ── MOVE 2: shadow-mode gate (mirrors SwingEngine convention) ────────────
+    bool shadow_mode = true;
 
     struct Stats {
         bool   active;
@@ -180,6 +198,48 @@ public:
         }
     }
 
+    // ── MOVE 2: uniform per-tick adapter ────────────────────────────────────
+    void on_tick(double price,
+                 int64_t now_ms,
+                 double basis_bp,
+                 double flow_ratio,
+                 double vol_ratio,
+                 double available_R) {
+        if (halted_) return;
+        if (price <= 0.0) return;
+        evaluate(price, basis_bp, flow_ratio, vol_ratio, now_ms, available_R);
+    }
+
+    // ── MOVE 2: kill switch (mirrors SwingEngine::kill_all convention) ──────
+    void kill_all(double last_price = 0.0, int64_t now_ms = 0) {
+        if (pos_active_) {
+            double exit_px = (last_price > 0.0) ? last_price : entry_price_;
+            double move_bp = (exit_px - entry_price_) / entry_price_ * 10000.0;
+            double net_bp  = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
+            total_pnl_bp_ += net_bp;
+            total_trades_++;
+            if (net_bp > 0) wins_++;
+
+            std::printf("[BASIS-KILL] %s | net=%.2fbp (gross=%.2f cost=%.1f) | "
+                        "exit_px=%.4f entry=%.4f | mfe=%.1f mae=%.1f | total=%.1fbp\n",
+                symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP,
+                exit_px, entry_price_, pos_mfe_bp_, pos_mae_bp_, total_pnl_bp_);
+            std::fflush(stdout);
+
+            pos_active_       = false;
+            entry_price_      = 0.0;
+            trail_stop_bp_    = -9999.0;
+            cooldown_until_ms_ = (now_ms > 0 ? now_ms : cooldown_until_ms_) + COOLDOWN_MS;
+        }
+        halted_ = true;
+        std::printf("[BASIS-KILL] %s | engine halted; clear_halt() to resume\n",
+                    symbol_.c_str());
+        std::fflush(stdout);
+    }
+
+    void clear_halt() { halted_ = false; }
+    bool is_halted() const { return halted_; }
+
     Stats get_stats() const {
         return {
             pos_active_, entry_price_, pos_mfe_bp_, pos_mae_bp_,
@@ -189,12 +249,47 @@ public:
         };
     }
 
+    // ── MOVE 2: per-engine state JSON for GUI / API ─────────────────────────
+    std::string state_json(double basis_bp     = 0.0,
+                           double flow_ratio   = 0.0,
+                           double spot_price   = 0.0) const {
+        const Stats s = get_stats();
+        const double move_bp = (pos_active_ && entry_price_ > 0.0 && spot_price > 0.0)
+            ? (spot_price - entry_price_) / entry_price_ * 10000.0
+            : 0.0;
+
+        std::ostringstream js;
+        js << std::fixed << std::setprecision(4);
+        js << "{"
+           << "\"symbol\":\""        << symbol_              << "\","
+           << "\"shadow_mode\":"     << (shadow_mode ? "true" : "false") << ","
+           << "\"halted\":"          << (halted_     ? "true" : "false") << ","
+           << "\"active\":"          << (s.active    ? "true" : "false") << ","
+           << "\"entry_price\":"     << s.entry_price        << ","
+           << "\"spot_price\":"      << spot_price           << ","
+           << "\"move_bp\":"         << move_bp              << ","
+           << "\"mfe_bp\":"          << s.mfe_bp             << ","
+           << "\"mae_bp\":"          << s.mae_bp             << ","
+           << "\"trail_stop_bp\":"   << trail_stop_bp_       << ","
+           << "\"win_rate\":"        << s.win_rate           << ","
+           << "\"total_pnl_bp\":"    << s.total_pnl_bp       << ","
+           << "\"total_trades\":"    << s.total_trades       << ","
+           << "\"basis_now\":"       << basis_bp             << ","
+           << "\"flow_ratio\":"      << flow_ratio           << ","
+           << "\"size_R\":"          << pos_size_R_
+           << "}";
+        return js.str();
+    }
+
     bool   pos_active_   = false;
     double pos_size_R_   = 0.0;
     double entry_price_  = 0.0;
 
 private:
     std::string symbol_;
+
+    // ── MOVE 2: kill-switch state ────────────────────────────────────────────
+    bool    halted_           = false;
 
     double  prev_basis_bp_     = 0.0;
     double  entry_basis_       = 0.0;

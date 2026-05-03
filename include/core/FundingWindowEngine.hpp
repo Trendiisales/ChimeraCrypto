@@ -38,6 +38,19 @@
 //   Break-even WR: ~30% (edge is structural, not just momentum)
 //
 // SYMBOLS: BTC and ETH only — most reliable funding signals
+//
+// ── MOVE 2 WRAPPERS (additive, no logic changes) ───────────────────────────
+//   shadow_mode flag       : default true; gates any future executor wiring
+//   halted_ flag           : set by kill_all(); blocks new entries until reset
+//   on_tick(...)           : adapter so main.cpp can call uniformly per tick;
+//                            delegates to evaluate() unchanged
+//   kill_all()             : flattens any open paper position, books P&L,
+//                            sets halted_ = true
+//   state_json()           : returns JSON of internal Stats + flags for GUI
+//
+//   The original evaluate() entry point and its constants are preserved
+//   verbatim so that the canonical entry/exit logic remains the same one
+//   that will later be exercised by the backtest harness (Move 2 task C).
 // ============================================================================
 
 #include <cmath>
@@ -45,6 +58,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <sstream>
+#include <iomanip>
 #include <algorithm>
 
 namespace chimera {
@@ -61,6 +76,11 @@ public:
     static constexpr int64_t  COOLDOWN_MS         = 14400000;// 4h — one per funding session
 
     explicit FundingWindowEngine(const std::string& sym = "") : symbol_(sym) {}
+
+    // ── MOVE 2: shadow-mode gate (mirrors SwingEngine convention) ────────────
+    // Default true so the engine paper-trades. Real-execution wiring is
+    // intentionally deferred until a PerpExecutor exists (Move 2.5).
+    bool shadow_mode = true;
 
     // Called every tick from QuadEngine
     // funding_rate: from PerpFeed::funding_rate(id) — real-time, updates every 3s
@@ -174,6 +194,60 @@ public:
         }
     }
 
+    // ── MOVE 2: uniform per-tick adapter ────────────────────────────────────
+    // main.cpp resolves funding_rate / basis_bp / available_R from PerpFeed and
+    // a (placeholder) risk budget, then calls this. We keep evaluate() as the
+    // canonical implementation so the future backtest harness can replay it
+    // directly with synthetic times.
+    void on_tick(double price,
+                 int64_t now_ms,
+                 double funding_rate,
+                 double basis_bp,
+                 double available_R) {
+        if (halted_) return;
+        if (price <= 0.0) return;
+        // shadow_mode currently has no behavioural difference because there is
+        // no executor wired — every trade is paper. Once a PerpExecutor lands,
+        // shadow_mode = false will route entries/exits through it instead of
+        // (or in addition to) the printf paper log.
+        evaluate(price, funding_rate, basis_bp, now_ms, available_R);
+    }
+
+    // ── MOVE 2: kill switch (mirrors SwingEngine::kill_all convention) ──────
+    // Flattens any open paper position with proper P&L accounting using the
+    // last seen price (passed in by caller — the engine doesn't store it on
+    // its own outside an open position). Sets halted_ so no new entries fire
+    // until clear_halt() is called.
+    void kill_all(double last_price = 0.0, int64_t now_ms = 0) {
+        if (pos_active_) {
+            double exit_px = (last_price > 0.0) ? last_price : entry_price_;
+            double move_bp = (exit_px - entry_price_) / entry_price_ * 10000.0;
+            double net_bp  = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
+            total_pnl_bp_ += net_bp;
+            total_trades_++;
+            if (net_bp > 0) wins_++;
+
+            std::printf("[FUND-WIN-KILL] %s | net=%.2fbp (gross=%.2f cost=%.1f) | "
+                        "exit_px=%.4f entry=%.4f | mfe=%.1f | total=%.1fbp\n",
+                symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP,
+                exit_px, entry_price_, pos_mfe_bp_, total_pnl_bp_);
+            std::fflush(stdout);
+
+            pos_active_       = false;
+            entry_price_      = 0.0;
+            trail_floor_bp_   = -9999.0;
+            cooldown_until_ms_ = (now_ms > 0 ? now_ms : cooldown_until_ms_) + COOLDOWN_MS;
+        }
+        halted_ = true;
+        std::printf("[FUND-WIN-KILL] %s | engine halted; clear_halt() to resume\n",
+                    symbol_.c_str());
+        std::fflush(stdout);
+    }
+
+    void clear_halt() { halted_ = false; }
+
+    bool is_halted() const { return halted_; }
+
     struct Stats {
         bool   active;
         double entry_price;
@@ -200,12 +274,50 @@ public:
         };
     }
 
+    // ── MOVE 2: per-engine state JSON for GUI / API ─────────────────────────
+    // Caller passes the latest funding_rate / basis_bp / spot_price so the
+    // snapshot reflects current market context, not just internal counters.
+    std::string state_json(double funding_rate = 0.0,
+                           double basis_bp     = 0.0,
+                           double spot_price   = 0.0) const {
+        const Stats s = get_stats(funding_rate, basis_bp);
+        const double move_bp = (pos_active_ && entry_price_ > 0.0 && spot_price > 0.0)
+            ? (spot_price - entry_price_) / entry_price_ * 10000.0
+            : 0.0;
+
+        std::ostringstream js;
+        js << std::fixed << std::setprecision(4);
+        js << "{"
+           << "\"symbol\":\""        << symbol_              << "\","
+           << "\"shadow_mode\":"     << (shadow_mode ? "true" : "false") << ","
+           << "\"halted\":"          << (halted_     ? "true" : "false") << ","
+           << "\"active\":"          << (s.active    ? "true" : "false") << ","
+           << "\"entry_price\":"     << s.entry_price        << ","
+           << "\"spot_price\":"      << spot_price           << ","
+           << "\"move_bp\":"         << move_bp              << ","
+           << "\"mfe_bp\":"          << s.mfe_bp             << ","
+           << "\"trail_floor_bp\":"  << s.trail_floor_bp     << ","
+           << "\"trail_armed\":"     << (s.trail_armed ? "true" : "false") << ","
+           << "\"win_rate\":"        << s.win_rate           << ","
+           << "\"total_pnl_bp\":"    << s.total_pnl_bp       << ","
+           << "\"total_trades\":"    << s.total_trades       << ","
+           << "\"secs_to_next_funding\":" << s.secs_to_next_funding << ","
+           << "\"current_rate\":"    << s.current_rate       << ","
+           << "\"current_basis\":"   << s.current_basis      << ","
+           << "\"size_R\":"          << pos_size_R_
+           << "}";
+        return js.str();
+    }
+
     bool   pos_active_  = false;
     double pos_size_R_  = 0.0;
     double entry_price_ = 0.0;
 
 private:
     std::string symbol_;
+
+    // ── MOVE 2: kill-switch state ────────────────────────────────────────────
+    bool    halted_           = false;
 
     double  pos_mfe_bp_       = 0.0;
     double  pos_mae_bp_       = 0.0;

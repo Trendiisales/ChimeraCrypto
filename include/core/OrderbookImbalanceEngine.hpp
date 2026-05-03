@@ -1,19 +1,36 @@
 #pragma once
 // ============================================================================
 // OrderbookImbalanceEngine.hpp
-// Chimera -- Order Book Imbalance microstructure engine
+// Chimera -- Order Book Imbalance short-term mean-reversion engine
 //
-// SIGNAL: When book imbalance exceeds threshold in BUILDUP or BREAKOUT regime,
-//         fade the imbalance direction (contrarian — imbalance usually reverts).
+// SIGNAL: When book imbalance exceeds threshold in GRIND regime, fade the
+//         imbalance direction (contrarian — extreme imbalance usually reverts).
 //
-// DATA USED: tick.book_imbalance, vol_ratio, displacement_bp
-// HOLD: 2000ms max, TP=25bp gross(+17bp net), SL=7bp gross(-15bp net)
+// NOT HFT MICROSTRUCTURE: 25bp gross TP / 7bp SL / 2-second hold / 60s cooldown.
+//   Slow enough to survive Tokyo→Binance ~25ms latency. The signal source
+//   (book imbalance) is freshness-sensitive though, so this engine is the
+//   borderline case — backtest before going live.
+//
+// DATA USED: tick.book_imbalance, tick.spread_bps, vol_ratio, perp_basis_bp
+// HOLD: 2000ms max, TP=25bp gross(+10bp net), SL=7bp gross(-22bp net)
 // SIZE: 0.5-1.0R, limited by available_R
-// COST FLOOR: 12bp (taker round-trip) -- only enter if spread is tight
+// COST FLOOR: 15bp (taker round-trip) -- only enter if spread is tight
+//
+// ── MOVE 2 WRAPPERS (additive, no logic changes) ───────────────────────────
+//   shadow_mode flag       : default true; gates any future executor wiring
+//   halted_ flag           : set by kill_all(); blocks new entries until reset
+//   on_tick(...)           : adapter so main.cpp can call uniformly per tick
+//   kill_all()             : flattens any open paper position
+//   state_json()           : returns JSON of internal Stats + flags for GUI
+//
+//   The original evaluate() entry point and its constants are preserved
+//   verbatim.
 // ============================================================================
 
 #include <cmath>
 #include <string>
+#include <sstream>
+#include <iomanip>
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -23,6 +40,10 @@ namespace chimera {
 class OrderbookImbalanceEngine {
 public:
     static constexpr double ROUND_TRIP_COST_BP = 15.0; // 7.5bp/side with BNB discount (0.075% per side)
+
+    // ── MOVE 2: shadow-mode gate (mirrors SwingEngine convention) ────────────
+    bool shadow_mode = true;
+
     struct Stats {
         bool   active;
         double size_R;
@@ -118,6 +139,54 @@ public:
         }
     }
 
+    // ── MOVE 2: uniform per-tick adapter ────────────────────────────────────
+    // main.cpp computes regime + vol_ratio externally and passes them in.
+    // Until a real per-symbol regime classifier exists, regime is hardcoded
+    // to 1 (GRIND) at the call site so OBI's other gates do the work.
+    void on_tick(double price,
+                 int64_t now_ms,
+                 double book_imbalance,
+                 double spread_bps,
+                 double vol_ratio,
+                 double perp_basis_bp,
+                 int    regime,
+                 double available_R) {
+        if (halted_) return;
+        if (price <= 0.0) return;
+        evaluate(price, book_imbalance, spread_bps, vol_ratio, perp_basis_bp,
+                 regime, now_ms, available_R);
+    }
+
+    // ── MOVE 2: kill switch (mirrors SwingEngine::kill_all convention) ──────
+    void kill_all(double last_price = 0.0, int64_t now_ms = 0) {
+        if (pos_active_) {
+            double exit_px = (last_price > 0.0) ? last_price : entry_price_;
+            double move_bp = (exit_px - entry_price_) / entry_price_ * 10000.0;
+            if (pos_dir_ < 0) move_bp = -move_bp;
+            double net_bp = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
+            total_pnl_bp_ += net_bp;
+            total_trades_++;
+            if (net_bp > 0) wins_++;
+
+            std::printf("[OBI-KILL] %s | net=%.2fbp (gross=%.2f cost=%.1f) | "
+                        "exit_px=%.4f entry=%.4f | mfe=%.1f mae=%.1f | total=%.1fbp\n",
+                symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP,
+                exit_px, entry_price_, pos_mfe_bp_, pos_mae_bp_, total_pnl_bp_);
+            std::fflush(stdout);
+
+            pos_active_       = false;
+            entry_price_      = 0.0;
+            cooldown_until_ms_ = (now_ms > 0 ? now_ms : cooldown_until_ms_) + 60000;
+        }
+        halted_ = true;
+        std::printf("[OBI-KILL] %s | engine halted; clear_halt() to resume\n",
+                    symbol_.c_str());
+        std::fflush(stdout);
+    }
+
+    void clear_halt() { halted_ = false; }
+    bool is_halted() const { return halted_; }
+
     Stats get_stats() const {
         return {
             pos_active_, pos_size_R_, entry_price_, pos_mfe_bp_, pos_mae_bp_,
@@ -126,11 +195,47 @@ public:
         };
     }
 
+    // ── MOVE 2: per-engine state JSON for GUI / API ─────────────────────────
+    std::string state_json(double book_imbalance = 0.0,
+                           double spread_bps     = 0.0,
+                           double perp_basis_bp  = 0.0,
+                           double spot_price     = 0.0) const {
+        const Stats s = get_stats();
+        const double move_bp = (pos_active_ && entry_price_ > 0.0 && spot_price > 0.0)
+            ? ((spot_price - entry_price_) / entry_price_ * 10000.0) * (pos_dir_ < 0 ? -1.0 : 1.0)
+            : 0.0;
+
+        std::ostringstream js;
+        js << std::fixed << std::setprecision(4);
+        js << "{"
+           << "\"symbol\":\""        << symbol_              << "\","
+           << "\"shadow_mode\":"     << (shadow_mode ? "true" : "false") << ","
+           << "\"halted\":"          << (halted_     ? "true" : "false") << ","
+           << "\"active\":"          << (s.active    ? "true" : "false") << ","
+           << "\"entry_price\":"     << s.entry_price        << ","
+           << "\"spot_price\":"      << spot_price           << ","
+           << "\"move_bp\":"         << move_bp              << ","
+           << "\"mfe_bp\":"          << s.mfe_bp             << ","
+           << "\"mae_bp\":"          << s.mae_bp             << ","
+           << "\"win_rate\":"        << s.win_rate           << ","
+           << "\"total_pnl_bp\":"    << s.total_pnl_bp       << ","
+           << "\"total_trades\":"    << s.total_trades       << ","
+           << "\"book_imbalance\":"  << book_imbalance       << ","
+           << "\"spread_bps\":"      << spread_bps           << ","
+           << "\"perp_basis_bp\":"   << perp_basis_bp        << ","
+           << "\"size_R\":"          << pos_size_R_
+           << "}";
+        return js.str();
+    }
+
     bool   pos_active_  = false;
     double pos_size_R_  = 0.0;
     int64_t cooldown_until_ms_ = 0;  // time-based cooldown
 
 private:
+    // ── MOVE 2: kill-switch state ────────────────────────────────────────────
+    bool    halted_      = false;
+
     std::string symbol_;
     double  entry_price_ = 0.0;
     int     pos_dir_     = 0;

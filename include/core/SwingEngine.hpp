@@ -1,5 +1,16 @@
 // ============================================================================
-// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v6 — ablations)
+// SwingEngine — H4/D1 Multi-Strategy Spot Swing Engine  (v7 — vol filter)
+//
+// CHANGE LOG (v7 — single change after v6 backtest landed at PF 0.98 / WR
+// 55.3% / -468 bp, i.e. right at the breakeven threshold pre-fees):
+//   * Added a volatility regime filter on Donchian entries. Compute the
+//     average true range over the most recent 5 H4 bars (current_atr_5) and
+//     over the prior 20 H4 bars (baseline_atr_20). Skip the entry when
+//     current_atr_5 > 1.5 x baseline_atr_20. Theory: Donchian breakouts in
+//     normal vol tend to extend (start of a move); breakouts during a vol
+//     spike are usually exhaustion blowoffs (end of a move).
+//   * No other changes from v6 — entries, stops, trail, partial, pyramid,
+//     symbol whitelist (BTC/ETH/XRP) all preserved.
 //
 // CHANGE LOG (v6 — ablation after v5 backtest revealed two clear signals):
 //   * DON_REVERSE was destroying value: 49 trades at PF 0.03 (-7193 bp).
@@ -307,9 +318,12 @@ public:
     static constexpr double MIN_QTY_USD = 50.0;
     static constexpr double MAX_QTY_USD = 500.0;
 
-    // v4 Donchian breakout (S1) + v5 reverse-Donchian exit
+    // v4 Donchian breakout (S1) + v5 reverse-Donchian exit + v7 vol filter
     static constexpr int    DON_BREAKOUT_BARS = 20;     // H4 lookback for breakout extreme (entry)
-    static constexpr int    DON_EXIT_BARS     = 10;     // v5: H4 lookback for reverse-Donchian exit
+    static constexpr int    DON_EXIT_BARS     = 10;     // v5: H4 lookback for reverse-Donchian exit (disabled in v6)
+    static constexpr int    VOL_FILTER_FAST   = 5;      // v7: short-window ATR
+    static constexpr int    VOL_FILTER_SLOW   = 20;     // v7: baseline ATR
+    static constexpr double VOL_FILTER_RATIO  = 1.5;    // v7: skip entry if fast/slow > this
     static constexpr double S1_EMA_SEP_PCT   = 0.006;   // D1 EMA21/EMA50 trend strength gate
     static constexpr double S1_PULLBACK_ATR  = 0.6;     // (legacy v3, unused in Donchian)
     static constexpr double S1_RSI_LONG_LO   = 50.0;    // (legacy v3, unused in Donchian)
@@ -658,6 +672,46 @@ private:
         if (!d1.ready || !h4.ready) return false;
         if (h4.atr14 <= 0.0) return false;
         if (bb.count < DON_BREAKOUT_BARS + 1) return false;
+
+        // v7: Volatility regime filter. Compute average true range over the
+        // most-recent VOL_FILTER_FAST H4 bars (current vol) and the prior
+        // VOL_FILTER_SLOW bars (baseline vol). Skip the entry if current vol
+        // is more than VOL_FILTER_RATIO x baseline — these are vol-spike
+        // exhaustion breakouts, empirically the worst-performing subset.
+        if (bb.count < VOL_FILTER_SLOW + 1) return false;
+        double fast_atr = 0.0;
+        int    fast_n   = 0;
+        for (int k = 0; k < VOL_FILTER_FAST; ++k) {
+            const OHLCBar* b  = bb.get(k);
+            const OHLCBar* bp = bb.get(k + 1);
+            if (!b || !bp) break;
+            double tr = b->high - b->low;
+            const double t2 = std::fabs(b->high - bp->close);
+            const double t3 = std::fabs(b->low  - bp->close);
+            if (t2 > tr) tr = t2;
+            if (t3 > tr) tr = t3;
+            fast_atr += tr;
+            ++fast_n;
+        }
+        double slow_atr = 0.0;
+        int    slow_n   = 0;
+        for (int k = 0; k < VOL_FILTER_SLOW; ++k) {
+            const OHLCBar* b  = bb.get(k);
+            const OHLCBar* bp = bb.get(k + 1);
+            if (!b || !bp) break;
+            double tr = b->high - b->low;
+            const double t2 = std::fabs(b->high - bp->close);
+            const double t3 = std::fabs(b->low  - bp->close);
+            if (t2 > tr) tr = t2;
+            if (t3 > tr) tr = t3;
+            slow_atr += tr;
+            ++slow_n;
+        }
+        if (fast_n < VOL_FILTER_FAST || slow_n < VOL_FILTER_SLOW) return false;
+        fast_atr /= fast_n;
+        slow_atr /= slow_n;
+        if (slow_atr <= 0.0) return false;
+        if (fast_atr > VOL_FILTER_RATIO * slow_atr) return false;  // skip vol-spike entries
 
         // D1 trend regime gate
         const double d1_sep = std::fabs(d1.ema21 - d1.ema50) / d1.ema50;

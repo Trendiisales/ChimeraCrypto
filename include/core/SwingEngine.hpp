@@ -372,10 +372,27 @@ public:
     static constexpr double S1_ATR_SL_MULT   = 1.8;     // v4:2.5 -> v5:1.8 (cut avg loss ~28%)
     static constexpr double S1_TRAIL_ARM_ATR = 2.0;     // trail arms at 2xATR favourable move
     static constexpr double S1_TRAIL_ATR     = 1.5;
-    static constexpr double S1_TRAIL_STAGE2_ATR = 5.0;
+    // 2026-05-05 (chimera-fix-1): Stage 2 trigger lowered 5.0 -> 3.0 xATR.
+    //   Pre-fix: ETH SWING-S1 trade peaked MFE=271bp = 3.25xATR (atr~83bp), never
+    //   reached the 5.0xATR trigger, so trail stayed in Stage 1 (1.5xATR distance)
+    //   and gave back 1.5*83=125bp = 46% of MFE. With STAGE2 trigger at 3.0xATR,
+    //   the same trade transitions to Stage 2 (1.0xATR=83bp distance), capturing
+    //   271-83=188bp (69% of MFE) instead of 146bp (54%).
+    //   Conservative trade-off: tighter trail risks earlier exit on noise during
+    //   the 3-5xATR band. Mitigated by chimera-fix-2 below (MFE-fraction cap)
+    //   which also caps Stage 1 give-back at 40% of MFE.
+    static constexpr double S1_TRAIL_STAGE2_ATR = 3.0;
     static constexpr double S1_TRAIL_DIST2   = 1.0;
     static constexpr double S1_TRAIL_STAGE3_ATR = 8.0;
     static constexpr double S1_TRAIL_DIST3   = 0.5;
+    // 2026-05-05 (chimera-fix-2): MFE-based give-back cap.
+    //   Apply trail_dist = min(stage_atr_dist, MFE * MFE_TRAIL_FRAC) so the
+    //   trail can never give back more than 40% of MFE regardless of ATR
+    //   regime. Mirrors the gold engines' MFE_TRAIL_FRAC=0.55 pattern (Omega
+    //   S52/S53). 0.40 is a conservative starting value -- once we have
+    //   shadow data showing >=30 trades, sweep around 0.30-0.55 to find the
+    //   capture-vs-noise optimum for crypto.
+    static constexpr double S1_MFE_TRAIL_FRAC = 0.40;
     static constexpr int64_t S1_MAX_HOLD_MS  = 604800000LL;
 
     static constexpr double S2_RSI_OVERSOLD  = 30.0;    // v2:40 -> v3:30 (widened)
@@ -1201,9 +1218,19 @@ private:
                     fflush(stdout);
                 }
                 if (pos.trail_armed) {
-                    const double dist = (pos.trail_stage >= 3) ? S1_TRAIL_DIST3 * h4.atr14
-                                      : (pos.trail_stage == 2) ? S1_TRAIL_DIST2 * h4.atr14
-                                                                : S1_TRAIL_ATR   * h4.atr14;
+                    // 2026-05-05 (chimera-fix-2): cap trail distance at
+                    //   MFE * S1_MFE_TRAIL_FRAC. Whichever is smaller (tighter
+                    //   trail) wins. ATR-based stages set the floor for noise
+                    //   immunity; MFE-fraction cap sets the ceiling for
+                    //   give-back. ETH trade reconstruction: with MFE=271bp,
+                    //   ATR=83bp, Stage 1 atr_dist=125bp; cap=271*0.40=108bp;
+                    //   min=108bp -> trail_sl at MFE peak = 271-108 = 163bp
+                    //   (60% capture vs 54% pre-fix).
+                    const double atr_dist = (pos.trail_stage >= 3) ? S1_TRAIL_DIST3 * h4.atr14
+                                          : (pos.trail_stage == 2) ? S1_TRAIL_DIST2 * h4.atr14
+                                                                    : S1_TRAIL_ATR   * h4.atr14;
+                    const double mfe_cap_dist = pos.mfe * S1_MFE_TRAIL_FRAC;
+                    const double dist = std::min(atr_dist, mfe_cap_dist);
                     const double new_sl = pos.is_long
                         ? (pos.entry_px + pos.mfe - dist)
                         : (pos.entry_px - pos.mfe + dist);
@@ -1211,8 +1238,11 @@ private:
                         pos.trail_sl = new_sl;
                 }
             } else {
+                // 2026-05-05 (chimera-fix-2): same MFE-cap pattern as S1
+                //   ratchet above, applied to the non-S1 (S2/S3 fallback)
+                //   trail. Single-stage 1.2xATR trail with 40% MFE cap.
                 const double arm_mult   = 2.0;
-                const double trail_dist = 1.2 * h4.atr14;
+                const double atr_dist   = 1.2 * h4.atr14;
                 if (!pos.trail_armed && move >= arm_mult * h4.atr14) {
                     pos.trail_armed = true;
                     printf("[SWING-TRAIL-ARM] %s %s S%d mfe=%.4f\n",
@@ -1221,6 +1251,8 @@ private:
                     fflush(stdout);
                 }
                 if (pos.trail_armed) {
+                    const double mfe_cap_dist = pos.mfe * S1_MFE_TRAIL_FRAC;
+                    const double trail_dist   = std::min(atr_dist, mfe_cap_dist);
                     const double new_sl = pos.is_long
                         ? (pos.entry_px + pos.mfe - trail_dist)
                         : (pos.entry_px - pos.mfe + trail_dist);
@@ -1234,7 +1266,27 @@ private:
                                         : (price >= pos.trail_sl);
         const bool timeout = (now_ms - pos.entry_ms >= pos.max_hold_ms);
 
-        if (sl_hit)  { _close(id, pos.trail_sl, now_ms, "SL_HIT");  return; }
+        // 2026-05-05 (chimera-fix-3): exit-reason classifier. Pre-fix every
+        //   stop-out emitted "SL_HIT" regardless of whether trail_sl was
+        //   below entry (real loss), at entry (break-even), or above entry
+        //   (locked profit -- trail-stop). The 2026-05-05 ETH trade exited
+        //   at +146bp on a +271bp MFE -- a TRAIL_HIT mislabeled as SL_HIT.
+        //   This corrupts win-rate / SL-rate / TP-rate analytics.
+        //   1bp tolerance for BE detection (entry * 0.0001) is large enough
+        //   to absorb tick-precision noise on most crypto pairs and small
+        //   enough that genuine trail-into-profit exits resolve correctly.
+        if (sl_hit) {
+            const double be_tol = pos.entry_px * 0.0001;
+            const bool sl_at_be = std::fabs(pos.trail_sl - pos.entry_px) <= be_tol;
+            const bool trail_in_profit = pos.is_long
+                ? (pos.trail_sl > pos.entry_px + be_tol)
+                : (pos.trail_sl < pos.entry_px - be_tol);
+            const char* reason = sl_at_be        ? "BE_HIT"
+                               : trail_in_profit ? "TRAIL_HIT"
+                                                 : "SL_HIT";
+            _close(id, pos.trail_sl, now_ms, reason);
+            return;
+        }
         if (timeout) { _close(id, price,         now_ms, "TIMEOUT"); return; }
     }
 

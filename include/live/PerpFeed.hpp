@@ -96,6 +96,13 @@ private:
     struct lws*          wsi_{nullptr};
     std::string          stream_path_;
     std::string          recv_buf_;
+
+    // Liveness watchdog — last wall-clock millisecond we received any WS frame
+    // from fstream. Updated in handle_message(). Inspected in run()'s inner
+    // service loop; if no message for >60s we force-reconnect (fixes the
+    // 2026-05-03 silent-death incident where lws never delivered CLIENT_CLOSED
+    // after the perp socket was dropped).
+    std::atomic<int64_t> last_msg_ms_{0};
 };
 
 } // namespace chimera

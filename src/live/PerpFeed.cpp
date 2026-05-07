@@ -89,38 +89,62 @@ int PerpFeed::ws_callback(struct lws* wsi, enum lws_callback_reasons reason,
     if (!g_perp_feed) return 0;
     auto* self = g_perp_feed;
 
-    switch (reason) {
-    case LWS_CALLBACK_CLIENT_ESTABLISHED:
-        std::printf("[PERP-FEED] Connected to fstream.binance.com\n");
-        std::fflush(stdout);
-        break;
-
-    case LWS_CALLBACK_CLIENT_RECEIVE: {
-        auto recv_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        self->recv_buf_.append(static_cast<const char*>(in), len);
-        if (lws_is_final_fragment(wsi)) {
-            self->handle_message(self->recv_buf_, recv_ms);
-            self->recv_buf_.clear();
+    // Wrap the entire callback body in try/catch — symmetry with BinanceWSFeed
+    // (spot feed). Without this, an exception in handle_message would propagate
+    // through lws_service into run() and terminate the thread (and via std::
+    // thread destructor, the whole process). Defensive: not the cause of the
+    // 2026-05-03 incident but cheap insurance.
+    try {
+        switch (reason) {
+        case LWS_CALLBACK_CLIENT_ESTABLISHED: {
+            std::printf("[PERP-FEED] Connected to fstream.binance.com\n");
+            std::fflush(stdout);
+            // Reset the liveness clock so the watchdog doesn't fire spuriously
+            // immediately after a fresh reconnect.
+            int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            self->last_msg_ms_.store(now_ms, std::memory_order_relaxed);
+            break;
         }
-        break;
-    }
 
-    case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-    case LWS_CALLBACK_CLIENT_CLOSED:
-        std::printf("[PERP-FEED] Disconnected -- reconnecting\n");
+        case LWS_CALLBACK_CLIENT_RECEIVE: {
+            auto recv_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            self->recv_buf_.append(static_cast<const char*>(in), len);
+            if (lws_is_final_fragment(wsi)) {
+                self->handle_message(self->recv_buf_, recv_ms);
+                self->recv_buf_.clear();
+            }
+            break;
+        }
+
+        case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+        case LWS_CALLBACK_CLIENT_CLOSED:
+            std::printf("[PERP-FEED] Disconnected -- reconnecting\n");
+            std::fflush(stdout);
+            self->wsi_ = nullptr;
+            break;
+
+        default: break;
+        }
+    } catch (const std::exception& ex) {
+        std::printf("[PERP-FEED] Exception in callback: %s\n", ex.what());
         std::fflush(stdout);
-        self->wsi_ = nullptr;
-        break;
-
-    default: break;
+    } catch (...) {
+        std::printf("[PERP-FEED] Unknown exception in callback\n");
+        std::fflush(stdout);
     }
     return 0;
 }
 
 // ── Message dispatch ─────────────────────────────────────────────────────────
 
-void PerpFeed::handle_message(const std::string& msg, int64_t /*recv_ms*/) {
+void PerpFeed::handle_message(const std::string& msg, int64_t recv_ms) {
+    // Stamp the liveness clock on EVERY frame, before any parsing or early
+    // returns — even malformed/unrecognised frames count as "the WS is alive."
+    // The watchdog in run() reads this to detect a dead-but-not-closed socket.
+    last_msg_ms_.store(recv_ms, std::memory_order_relaxed);
+
     // Combined stream wraps: {"stream":"btcusdt@markPrice","data":{...}}
     auto stream_pos = msg.find("\"stream\":\"");
     if (stream_pos == std::string::npos) return;
@@ -189,13 +213,26 @@ void PerpFeed::run() {
         { nullptr, nullptr, 0, 0, 0, nullptr, 0 }
     };
 
+    // Staleness watchdog threshold. Binance perp markPrice fires once per
+    // second per symbol → ≥8 msgs/sec across our 8-symbol subscription. 60s
+    // of total silence is well past any normal pause; treat as a dead socket
+    // that lws missed and force a clean reconnect.
+    constexpr int64_t STALE_MS = 60'000;
+
     while (running_.load(std::memory_order_acquire)) {
         struct lws_context_creation_info ctx_info{};
-        ctx_info.port      = CONTEXT_PORT_NO_LISTEN;
-        ctx_info.protocols = protocols;
-        ctx_info.gid       = -1;
-        ctx_info.uid       = -1;
-        ctx_info.options   = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+        ctx_info.port        = CONTEXT_PORT_NO_LISTEN;
+        ctx_info.protocols   = protocols;
+        ctx_info.gid         = -1;
+        ctx_info.uid         = -1;
+        ctx_info.options     = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+        // TCP keepalive — kernel surfaces dead connections to lws via recv()
+        // errors instead of silently spinning on a half-closed socket. Tuned
+        // for Binance's typical ≤30s idle behaviour. The watchdog below is the
+        // safety net for cases the kernel keepalive misses.
+        ctx_info.ka_time     = 30;   // start probing after 30s of silence
+        ctx_info.ka_probes   = 3;    // 3 failed probes = dead
+        ctx_info.ka_interval = 10;   // 10s between probes
 
         context_ = lws_create_context(&ctx_info);
         if (!context_) {
@@ -226,8 +263,32 @@ void PerpFeed::run() {
             continue;
         }
 
+        // Initialise the liveness clock at connect-attempt time so the
+        // watchdog gives the handshake + first message at least STALE_MS
+        // grace. CLIENT_ESTABLISHED resets it again on success.
+        {
+            int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            last_msg_ms_.store(now_ms, std::memory_order_relaxed);
+        }
+
         while (running_.load(std::memory_order_acquire) && wsi_ != nullptr) {
             lws_service(context_, 50);
+
+            // Application-layer staleness watchdog. If we go STALE_MS without
+            // a single frame from fstream, assume the socket is dead-but-lws-
+            // doesn't-know-it and force a reconnect by breaking out of the
+            // inner loop. The outer loop will destroy the context (which
+            // closes the underlying fd) and rebuild from scratch.
+            int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            int64_t last = last_msg_ms_.load(std::memory_order_relaxed);
+            if (last > 0 && (now_ms - last) > STALE_MS) {
+                std::printf("[PERP-FEED] Stale (no msgs in %lldms) -- forcing reconnect\n",
+                    (long long)(now_ms - last));
+                std::fflush(stdout);
+                break;
+            }
         }
 
         lws_context_destroy(context_);

@@ -1,13 +1,16 @@
 // ============================================================================
-// Chimera — H4/D1 Swing Engine + 3 paper-trading parallel engines (Move 2)
+// Chimera — H4/D1 Swing Engine + 4 paper-trading parallel engines
+//          (Move 2 + Phase 1)
 //
 // Strategies running concurrently (all spot-LONG-only):
 //   1. SwingEngine  v9            — H4 Donchian breakout, ETH-only (live shadow)
 //   2. FundingWindowEngine        — pre-funding basis snap-back, BTC + ETH
 //   3. BasisMomentumEngine        — perp→spot lead-lag, BTC + ETH
 //   4. OrderbookImbalanceEngine   — short-term mean-reversion, BTC + ETH
+//   5. EthBtcLeadLagEngine        — Phase 1 ETH→BTC 1-3min lead-lag, BTC spot
+//                                    long (spot-only; perp-feed-independent)
 //
-// Engines 2-4 are paper-only via printf log lines. None have executors wired.
+// Engines 2-5 are paper-only via printf log lines. None have executors wired.
 // SwingEngine alone has SpotExecutor wiring (and is in shadow_mode = true).
 //
 // Feeds:
@@ -16,8 +19,9 @@
 //
 // HTTP GUI :8080
 //   GET  /api/state   → SwingEngine state_json (unchanged for legacy dashboard)
-//   GET  /api/state2  → {"funding_window":[...],"basis_momentum":[...],"obi":[...]}
-//   POST /api/kill    → kill_all on every engine (Swing + 3 paper)
+//   GET  /api/state2  → {"funding_window":[...],"basis_momentum":[...],
+//                         "obi":[...],"eth_btc_leadlag":{...}}
+//   POST /api/kill    → kill_all on every engine (Swing + 4 paper)
 // ============================================================================
 #include <thread>
 #include <chrono>
@@ -47,6 +51,7 @@
 #include "core/FundingWindowEngine.hpp"
 #include "core/BasisMomentumEngine.hpp"
 #include "core/OrderbookImbalanceEngine.hpp"
+#include "core/EthBtcLeadLagEngine.hpp"
 #include "core/SymbolIndex.hpp"
 
 #include "version_generated.hpp"
@@ -94,13 +99,15 @@ void release_instance_lock() {
 }
 
 // ── Shared engine pointers / mutex for HTTP server ───────────────────────────
-// g_engine_mtx now protects SwingEngine + every paper engine array.
+// g_engine_mtx now protects SwingEngine + every paper engine (arrays + the
+// singleton EthBtcLeadLagEngine).
 static chimera::SwingEngine*               g_engine_ptr      = nullptr;
 static std::mutex                          g_engine_mtx;
 static chimera::SwingEngine*               g_engine_ptr_kill = nullptr;
 static chimera::FundingWindowEngine*       g_fwes_ptr        = nullptr;
 static chimera::BasisMomentumEngine*       g_bmes_ptr        = nullptr;
 static chimera::OrderbookImbalanceEngine*  g_obes_ptr        = nullptr;
+static chimera::EthBtcLeadLagEngine*       g_ellaye_ptr      = nullptr;
 static chimera::PerpFeed*                  g_perp_feed_ptr   = nullptr;
 
 // Last-seen spot mid per symbol — used by kill_all to flatten paper positions
@@ -131,7 +138,8 @@ static std::string read_file(const std::string& path) {
 
 static std::string gui_root;
 
-// Build the structured JSON for /api/state2 — one array per paper engine.
+// Build the structured JSON for /api/state2 — one array per perp-aware paper
+// engine, plus a singleton object for the spot-only Phase 1 lead-lag engine.
 static std::string build_paper_state_json() {
     std::ostringstream js;
     js << "{";
@@ -190,7 +198,20 @@ static std::string build_paper_state_json() {
                                             /*spot_price=*/spot);
         }
     }
-    js << "]";
+    js << "],";
+
+    // ── eth_btc_leadlag (Phase 1 spot-only engine, singleton) ──
+    // Doesn't depend on the perp feed and is unaffected by the perp WS data
+    // block on the Tokyo VPS. The engine returns a single object (not an
+    // array) since it's BTC↔ETH specific by design.
+    js << "\"eth_btc_leadlag\":";
+    if (g_ellaye_ptr) {
+        double btc_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+        double eth_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_ETH]);
+        js << g_ellaye_ptr->state_json(btc_px, eth_px);
+    } else {
+        js << "{}";
+    }
 
     js << "}";
     return js.str();
@@ -233,6 +254,12 @@ static void http_server_thread(int port) {
                 if (g_fwes_ptr) g_fwes_ptr[i].kill_all(spot, now_ms);
                 if (g_bmes_ptr) g_bmes_ptr[i].kill_all(spot, now_ms);
                 if (g_obes_ptr) g_obes_ptr[i].kill_all(spot, now_ms);
+            }
+            // ETH→BTC lead-lag is a singleton (BTC-leg trades only). Kill with
+            // the latest BTC spot price for correct close-out P&L.
+            if (g_ellaye_ptr) {
+                double btc_spot = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+                g_ellaye_ptr->kill_all(btc_spot, now_ms);
             }
             body = "{\"ok\":true}";
         } else if (strstr(req, "GET /api/state2")) {
@@ -281,7 +308,7 @@ void signal_handler(int) { g_running = false; }
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Swing + FundingWindow + BasisMomentum + OBI | build=%s\n",
+    std::printf("[STARTUP] Chimera — Swing + FundingWindow + BasisMomentum + OBI + EthBtcLeadLag | build=%s\n",
                 BUILD_VERSION);
     std::fflush(stdout);
 
@@ -326,6 +353,15 @@ int main() {
     };
     for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) obes[i].shadow_mode = true;
     g_obes_ptr = obes;
+
+    // ── Engine #5: EthBtcLeadLag — Phase 1, spot-only singleton (paper) ─────
+    // Watches BTC and ETH spot ticks; opens half-size BTC LONG when ETH has
+    // led BTC by >= ETH_LEAD_BP_MIN over LEAD_WINDOW_MS and BTC has not yet
+    // followed. Independent of PerpFeed — runs fine through the Tokyo perp-WS
+    // data block.
+    chimera::EthBtcLeadLagEngine ellaye;
+    ellaye.shadow_mode = true;
+    g_ellaye_ptr = &ellaye;
 
     // ── Perp WebSocket feed (powers FundingWindow + BasisMomentum + OBI's basis input) ──
     chimera::PerpFeed perp_feed;
@@ -413,13 +449,23 @@ int main() {
                                           /*regime=*/1,
                                           avail_R);
             }
+
+            // ── Engine #5: ETH→BTC Lead-Lag (Phase 1, spot-only) ─────────────
+            // The engine self-routes: it updates internal price buffers for
+            // BTC and ETH ticks, and evaluates entry / manage on BTC ticks.
+            // Any other symbol_id is ignored inside the engine, so calling
+            // it on every tick is safe and simple. Does NOT depend on
+            // perp_feed.ready() — runs fine with the Tokyo perp-WS data block.
+            ellaye.on_tick(id, tick, now_ms, /*available_R=*/1.0);
         }
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n % 10000 == 0) {
-            std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | swing_trades=%d\n",
-                n, tick.symbol.c_str(), mid, tick_age_ms, engine.total_trades());
+            std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | swing_trades=%d | ell_trades=%d ell_pnl=%.1fbp\n",
+                n, tick.symbol.c_str(), mid, tick_age_ms,
+                engine.total_trades(),
+                ellaye.total_trades(), ellaye.total_pnl_bp());
             std::fflush(stdout);
         }
     });
@@ -434,6 +480,8 @@ int main() {
     std::printf("[STARTUP]   - FundingWindow (pre-funding basis snap-back)\n");
     std::printf("[STARTUP]   - BasisMomentum (perp→spot lead-lag)\n");
     std::printf("[STARTUP]   - OrderbookImbalance (short-term mean-reversion)\n");
+    std::printf("[STARTUP] Phase 1 paper engine (spot-only, perp-feed-independent):\n");
+    std::printf("[STARTUP]   - EthBtcLeadLag (1-3 min ETH leads -> BTC follower long)\n");
     std::printf("[STARTUP] All paper engines run in shadow_mode (printf log only, no executor).\n");
     std::printf("[STARTUP] GUI: http://localhost:8080  (state2 = paper engines JSON)\n");
     std::fflush(stdout);
@@ -459,8 +507,9 @@ int main() {
     shutdown_done = true;
     if (watchdog.joinable()) watchdog.join();
 
-    std::printf("[SHUTDOWN] swing trades=%d swing pnl=%.3f%%\n",
-                engine.total_trades(), engine.total_pnl_pct());
+    std::printf("[SHUTDOWN] swing trades=%d swing pnl=%.3f%% | ell trades=%d ell pnl=%.1fbp\n",
+                engine.total_trades(), engine.total_pnl_pct(),
+                ellaye.total_trades(), ellaye.total_pnl_bp());
     std::fflush(stdout);
     release_instance_lock();
     return 0;

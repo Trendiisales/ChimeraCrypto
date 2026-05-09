@@ -1,23 +1,37 @@
 // ============================================================================
-// Chimera — H4/D1 Swing Engine + 3 paper-trading parallel engines (Move 2)
+// Chimera — H4/D1 Swing Engine + 7 paper-trading parallel engines
+//          (Move 2 + Phase 1 + Multi-Day Trio)
 //
 // Strategies running concurrently (all spot-LONG-only):
-//   1. SwingEngine  v9            — H4 Donchian breakout, ETH-only (live shadow)
-//   2. FundingWindowEngine        — pre-funding basis snap-back, BTC + ETH
-//   3. BasisMomentumEngine        — perp→spot lead-lag, BTC + ETH
-//   4. OrderbookImbalanceEngine   — short-term mean-reversion, BTC + ETH
+//   1. SwingEngine  v9                     — H4 Donchian breakout, ETH-only (live shadow)
+//   2. FundingWindowEngine                 — pre-funding basis snap-back, BTC + ETH
+//   3. BasisMomentumEngine                 — perp→spot lead-lag, BTC + ETH
+//   4. OrderbookImbalanceEngine            — short-term mean-reversion, BTC + ETH
+//   5. EthBtcLeadLagEngine                 — Phase 1 ETH→BTC 1-3min lead-lag, BTC spot long
+//                                             (spot-only; perp-feed-independent)
+//   6. CoinbasePremiumMRevEngine           — Multi-day BTC mean reversion via
+//                                             Coinbase-Binance premium (3-10 day hold)
+//   7. FundingPersistenceFadeEngine        — Multi-day BTC mean reversion via sustained
+//                                             negative funding (3-7 day hold; needs perp data)
+//   8. VolCompressionBreakoutEngine        — 24h vol-squeeze + Donchian-24h breakout
+//                                             (8-72h hold, BTC spot long)
 //
-// Engines 2-4 are paper-only via printf log lines. None have executors wired.
+// Engines 2-8 are paper-only via printf log lines. None have executors wired.
 // SwingEngine alone has SpotExecutor wiring (and is in shadow_mode = true).
 //
 // Feeds:
-//   spot WS  (BinanceWSFeed)      — bookTicker + aggTrade + depth5
-//   perp WS  (PerpFeed)           — markPrice + aggTrade for funding/basis/flow
+//   spot WS   (BinanceWSFeed)              — bookTicker + aggTrade + depth5 (8 symbols)
+//   spot WS   (CoinbaseWSFeed, BTC-USD)    — single-leg cross-venue reference for engine #6
+//   perp WS   (PerpFeed)                   — markPrice + aggTrade for funding/basis/flow
 //
 // HTTP GUI :8080
 //   GET  /api/state   → SwingEngine state_json (unchanged for legacy dashboard)
-//   GET  /api/state2  → {"funding_window":[...],"basis_momentum":[...],"obi":[...]}
-//   POST /api/kill    → kill_all on every engine (Swing + 3 paper)
+//   GET  /api/state2  → {"funding_window":[...],"basis_momentum":[...],
+//                         "obi":[...],"eth_btc_leadlag":{...},
+//                         "coinbase_premium_mrev":{...},
+//                         "funding_persistence_fade":{...},
+//                         "vol_compression_breakout":{...}}
+//   POST /api/kill    → kill_all on every engine (Swing + 7 paper)
 // ============================================================================
 #include <thread>
 #include <chrono>
@@ -47,6 +61,10 @@
 #include "core/FundingWindowEngine.hpp"
 #include "core/BasisMomentumEngine.hpp"
 #include "core/OrderbookImbalanceEngine.hpp"
+#include "core/EthBtcLeadLagEngine.hpp"
+#include "core/CoinbasePremiumMRevEngine.hpp"
+#include "core/FundingPersistenceFadeEngine.hpp"
+#include "core/VolCompressionBreakoutEngine.hpp"
 #include "core/SymbolIndex.hpp"
 
 #include "version_generated.hpp"
@@ -94,14 +112,23 @@ void release_instance_lock() {
 }
 
 // ── Shared engine pointers / mutex for HTTP server ───────────────────────────
-// g_engine_mtx now protects SwingEngine + every paper engine array.
-static chimera::SwingEngine*               g_engine_ptr      = nullptr;
-static std::mutex                          g_engine_mtx;
-static chimera::SwingEngine*               g_engine_ptr_kill = nullptr;
-static chimera::FundingWindowEngine*       g_fwes_ptr        = nullptr;
-static chimera::BasisMomentumEngine*       g_bmes_ptr        = nullptr;
-static chimera::OrderbookImbalanceEngine*  g_obes_ptr        = nullptr;
-static chimera::PerpFeed*                  g_perp_feed_ptr   = nullptr;
+// g_engine_mtx now protects SwingEngine + every paper engine (arrays + each
+// singleton — Phase 1 EthBtcLeadLag, plus the multi-day trio).
+static chimera::SwingEngine*                    g_engine_ptr      = nullptr;
+static std::mutex                               g_engine_mtx;
+static chimera::SwingEngine*                    g_engine_ptr_kill = nullptr;
+static chimera::FundingWindowEngine*            g_fwes_ptr        = nullptr;
+static chimera::BasisMomentumEngine*            g_bmes_ptr        = nullptr;
+static chimera::OrderbookImbalanceEngine*       g_obes_ptr        = nullptr;
+static chimera::EthBtcLeadLagEngine*            g_ellaye_ptr      = nullptr;
+static chimera::CoinbasePremiumMRevEngine*      g_cbprem_ptr      = nullptr;
+static chimera::FundingPersistenceFadeEngine*   g_fpfe_ptr        = nullptr;
+static chimera::VolCompressionBreakoutEngine*   g_vcbe_ptr        = nullptr;
+static chimera::PerpFeed*                       g_perp_feed_ptr   = nullptr;
+
+// Last-seen Coinbase BTC-USD price (atomic so the GUI / state_json can read it
+// without taking g_engine_mtx). Updated from the Coinbase WS callback.
+static std::atomic<uint64_t> g_last_cb_btc_px_bits{0};
 
 // Last-seen spot mid per symbol — used by kill_all to flatten paper positions
 // at a current price (the paper engines don't store the latest price on their own).
@@ -131,7 +158,8 @@ static std::string read_file(const std::string& path) {
 
 static std::string gui_root;
 
-// Build the structured JSON for /api/state2 — one array per paper engine.
+// Build the structured JSON for /api/state2 — one array per perp-aware paper
+// engine, plus a singleton object for each singleton engine.
 static std::string build_paper_state_json() {
     std::ostringstream js;
     js << "{";
@@ -190,7 +218,52 @@ static std::string build_paper_state_json() {
                                             /*spot_price=*/spot);
         }
     }
-    js << "]";
+    js << "],";
+
+    // ── eth_btc_leadlag (Phase 1 spot-only engine, singleton) ──
+    js << "\"eth_btc_leadlag\":";
+    if (g_ellaye_ptr) {
+        double btc_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+        double eth_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_ETH]);
+        js << g_ellaye_ptr->state_json(btc_px, eth_px);
+    } else {
+        js << "{}";
+    }
+    js << ",";
+
+    // ── coinbase_premium_mrev (Strategy A — multi-day, BTC singleton) ──
+    js << "\"coinbase_premium_mrev\":";
+    if (g_cbprem_ptr) {
+        double btc_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+        double cb_px  = load_dbl_atomic(g_last_cb_btc_px_bits);
+        js << g_cbprem_ptr->state_json(btc_px, cb_px);
+    } else {
+        js << "{}";
+    }
+    js << ",";
+
+    // ── funding_persistence_fade (Strategy B — multi-day, BTC singleton) ──
+    js << "\"funding_persistence_fade\":";
+    if (g_fpfe_ptr) {
+        double btc_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+        double frate  = 0.0;
+        if (g_perp_feed_ptr && g_perp_feed_ptr->ready(chimera::SYM_BTC)) {
+            frate = g_perp_feed_ptr->funding_rate(chimera::SYM_BTC);
+        }
+        js << g_fpfe_ptr->state_json(btc_px, frate);
+    } else {
+        js << "{}";
+    }
+    js << ",";
+
+    // ── vol_compression_breakout (Strategy C — 8-72h, BTC singleton) ──
+    js << "\"vol_compression_breakout\":";
+    if (g_vcbe_ptr) {
+        double btc_px = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+        js << g_vcbe_ptr->state_json(btc_px);
+    } else {
+        js << "{}";
+    }
 
     js << "}";
     return js.str();
@@ -234,6 +307,12 @@ static void http_server_thread(int port) {
                 if (g_bmes_ptr) g_bmes_ptr[i].kill_all(spot, now_ms);
                 if (g_obes_ptr) g_obes_ptr[i].kill_all(spot, now_ms);
             }
+            // Singleton engines (BTC-leg trades only) — kill with current BTC spot.
+            const double btc_spot = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+            if (g_ellaye_ptr) g_ellaye_ptr->kill_all(btc_spot, now_ms);
+            if (g_cbprem_ptr) g_cbprem_ptr->kill_all(btc_spot, now_ms);
+            if (g_fpfe_ptr)   g_fpfe_ptr->kill_all(btc_spot, now_ms);
+            if (g_vcbe_ptr)   g_vcbe_ptr->kill_all(btc_spot, now_ms);
             body = "{\"ok\":true}";
         } else if (strstr(req, "GET /api/state2")) {
             // NOTE: must be checked BEFORE /api/state (substring match).
@@ -281,7 +360,7 @@ void signal_handler(int) { g_running = false; }
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Swing + FundingWindow + BasisMomentum + OBI | build=%s\n",
+    std::printf("[STARTUP] Chimera — Swing + 7 paper engines (Move 2 + Phase 1 + Multi-Day Trio) | build=%s\n",
                 BUILD_VERSION);
     std::fflush(stdout);
 
@@ -326,6 +405,35 @@ int main() {
     };
     for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) obes[i].shadow_mode = true;
     g_obes_ptr = obes;
+
+    // ── Engine #5: EthBtcLeadLag — Phase 1, spot-only singleton (paper) ─────
+    chimera::EthBtcLeadLagEngine ellaye;
+    ellaye.shadow_mode = true;
+    g_ellaye_ptr = &ellaye;
+
+    // ── Engine #6: CoinbasePremiumMRev — multi-day BTC mean reversion ───────
+    // Receives Binance BTC price from the spot tick callback and Coinbase
+    // BTC-USD price from a separate CoinbaseWSFeed callback below. Buffers
+    // ~24h of premium samples and trades on sustained discount.
+    chimera::CoinbasePremiumMRevEngine cbprem;
+    cbprem.shadow_mode = true;
+    g_cbprem_ptr = &cbprem;
+
+    // ── Engine #7: FundingPersistenceFade — multi-day BTC mean reversion ────
+    // Reads Binance BTC funding rate via PerpFeed::funding_rate(SYM_BTC).
+    // While the perp WS is silent (Tokyo IP block) funding_rate returns 0.0
+    // and this engine self-disables via its trigger logic. Re-enables
+    // automatically once perp data is restored.
+    chimera::FundingPersistenceFadeEngine fpfe;
+    fpfe.shadow_mode = true;
+    g_fpfe_ptr = &fpfe;
+
+    // ── Engine #8: VolCompressionBreakout — 24h vol-squeeze + Donchian ──────
+    // Self-contained: maintains its own 24h ring of 60s-sampled BTC mid
+    // prices. Cannot fire until ~23h after startup (warm-up period).
+    chimera::VolCompressionBreakoutEngine vcbe;
+    vcbe.shadow_mode = true;
+    g_vcbe_ptr = &vcbe;
 
     // ── Perp WebSocket feed (powers FundingWindow + BasisMomentum + OBI's basis input) ──
     chimera::PerpFeed perp_feed;
@@ -378,7 +486,7 @@ int main() {
             engine.update_price(id, mid);
             engine.on_tick(id, tick, now_ms);
 
-            // ── Route BTC/ETH ticks through the 3 paper engines ──────────────
+            // ── Route BTC/ETH ticks through the 3 perp-aware paper engines ───
             int paper_slot = -1;
             for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
                 if (PAPER_SYMBOL_IDS[i] == id) { paper_slot = i; break; }
@@ -413,15 +521,60 @@ int main() {
                                           /*regime=*/1,
                                           avail_R);
             }
+
+            // ── Engine #5: ETH→BTC Lead-Lag (Phase 1, spot-only) ─────────────
+            // The engine self-routes: BTC/ETH only, others ignored.
+            ellaye.on_tick(id, tick, now_ms, /*available_R=*/1.0);
+
+            // ── Engines #6-#8: BTC-singleton multi-day / vol-regime engines ─
+            // Each ignores any symbol_id != SYM_BTC internally, so calling on
+            // every tick is safe. Strategy A (Coinbase Premium) needs the
+            // BTC tick to update its Binance leg; the Coinbase leg comes via
+            // a separate WS callback below.
+            cbprem.update_binance_btc(id, tick, now_ms, /*available_R=*/1.0);
+
+            // Strategy B (Funding Persistence) reads funding via PerpFeed.
+            // While the perp WS is silent, frate is 0.0 here (no PerpFeed
+            // ready) — the engine no-ops gracefully.
+            const double frate_btc = (perp_feed.ready(chimera::SYM_BTC))
+                                       ? perp_feed.funding_rate(chimera::SYM_BTC)
+                                       : 0.0;
+            fpfe.on_tick(id, tick, now_ms, frate_btc, /*available_R=*/1.0);
+
+            // Strategy C (Vol Compression) is fully spot-only.
+            vcbe.on_tick(id, tick, now_ms, /*available_R=*/1.0);
         }
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n % 10000 == 0) {
-            std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | swing_trades=%d\n",
-                n, tick.symbol.c_str(), mid, tick_age_ms, engine.total_trades());
+            std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | "
+                        "swing_trades=%d | ell=%d/%.0fbp | cbprem=%d/%.0fbp | "
+                        "fpfe=%d/%.0fbp | vcbe=%d/%.0fbp\n",
+                n, tick.symbol.c_str(), mid, tick_age_ms,
+                engine.total_trades(),
+                ellaye.total_trades(),  ellaye.total_pnl_bp(),
+                cbprem.total_trades(),  cbprem.total_pnl_bp(),
+                fpfe.total_trades(),    fpfe.total_pnl_bp(),
+                vcbe.total_trades(),    vcbe.total_pnl_bp());
             std::fflush(stdout);
         }
+    });
+
+    // ── Coinbase BTC-USD feed (powers Strategy A, Coinbase Premium MRev) ────
+    chimera::CoinbaseWSFeed coinbase_feed;
+    coinbase_feed.set_callback([&](double cb_price, int64_t cb_ts) {
+        if (cb_price <= 0.0) return;
+        store_dbl_atomic(g_last_cb_btc_px_bits, cb_price);
+
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        // Use exchange ts if reasonable; else local now.
+        const int64_t use_ts = (cb_ts > 0 && cb_ts < now_ms + 5000 && cb_ts > now_ms - 30000)
+                                 ? cb_ts : now_ms;
+
+        std::lock_guard<std::mutex> lk(g_engine_mtx);
+        if (g_cbprem_ptr) g_cbprem_ptr->update_coinbase_btc(cb_price, use_ts);
     });
 
     // Seed H4 + D1 indicators from Binance REST history
@@ -429,11 +582,19 @@ int main() {
 
     feed.start();
     perp_feed.start();
+    coinbase_feed.start();
     std::printf("[STARTUP] Spot feed live. SwingEngine running on 8 symbols (ETH-only trades).\n");
     std::printf("[STARTUP] Perp feed live. Paper engines on BTC + ETH:\n");
     std::printf("[STARTUP]   - FundingWindow (pre-funding basis snap-back)\n");
     std::printf("[STARTUP]   - BasisMomentum (perp→spot lead-lag)\n");
     std::printf("[STARTUP]   - OrderbookImbalance (short-term mean-reversion)\n");
+    std::printf("[STARTUP] Phase 1 paper engine (spot-only, perp-feed-independent):\n");
+    std::printf("[STARTUP]   - EthBtcLeadLag (1-3 min ETH leads -> BTC follower long)\n");
+    std::printf("[STARTUP] Multi-day trio paper engines (BTC singleton):\n");
+    std::printf("[STARTUP]   - CoinbasePremiumMRev (3-10 day, sustained CB-discount -> long)\n");
+    std::printf("[STARTUP]   - FundingPersistenceFade (3-7 day, sustained -funding -> long; needs perp data)\n");
+    std::printf("[STARTUP]   - VolCompressionBreakout (8-72h, 24h vol-squeeze + Donchian breakout)\n");
+    std::printf("[STARTUP] Coinbase feed live (BTC-USD only) — powers CoinbasePremiumMRev.\n");
     std::printf("[STARTUP] All paper engines run in shadow_mode (printf log only, no executor).\n");
     std::printf("[STARTUP] GUI: http://localhost:8080  (state2 = paper engines JSON)\n");
     std::fflush(stdout);
@@ -456,11 +617,17 @@ int main() {
 
     feed.stop();
     perp_feed.stop();
+    coinbase_feed.stop();
     shutdown_done = true;
     if (watchdog.joinable()) watchdog.join();
 
-    std::printf("[SHUTDOWN] swing trades=%d swing pnl=%.3f%%\n",
-                engine.total_trades(), engine.total_pnl_pct());
+    std::printf("[SHUTDOWN] swing trades=%d swing pnl=%.3f%% | "
+                "ell=%d/%.1fbp | cbprem=%d/%.1fbp | fpfe=%d/%.1fbp | vcbe=%d/%.1fbp\n",
+                engine.total_trades(), engine.total_pnl_pct(),
+                ellaye.total_trades(),  ellaye.total_pnl_bp(),
+                cbprem.total_trades(),  cbprem.total_pnl_bp(),
+                fpfe.total_trades(),    fpfe.total_pnl_bp(),
+                vcbe.total_trades(),    vcbe.total_pnl_bp());
     std::fflush(stdout);
     release_instance_lock();
     return 0;

@@ -82,6 +82,8 @@ public:
     static constexpr int64_t RECENT_WINDOW_MS    =  4LL * 60 * 60 * 1000;   //  4h
     static constexpr int64_t MIN_BUFFER_SPAN_MS  = 23LL * 60 * 60 * 1000;   // need >=23h history before firing
     static constexpr int     MIN_SAMPLES         = 200;                     // ~one per ~7min over 24h
+    static constexpr int64_t SAMPLE_INTERVAL_MS  = 60000;                   // throttle premium samples to 1/min
+                                                                            // (caps 24h buffer at ~1440 samples)
 
     // ── Entry thresholds (premium = (cb - bn) / bn * 10000, bp) ────────────
     static constexpr double  PREMIUM_TRIGGER_BP    = -25.0;  // 24h-avg <= -25 bp
@@ -227,6 +229,10 @@ private:
     double  last_cb_price_      = 0.0;
     int64_t last_cb_ts_         = 0;
 
+    // Throttle: don't push more than one premium sample per SAMPLE_INTERVAL_MS.
+    // Caps the 24h buffer at ~1440 entries instead of 100k+ at tick rate.
+    int64_t last_sample_ts_     = 0;
+
     std::deque<Sample> buffer_;
 
     // ── position state ─────────────────────────────────────────────────────
@@ -252,6 +258,12 @@ private:
         const int64_t MAX_LEG_AGE_MS = 60000;
         if (now_ms - last_bn_ts_ > MAX_LEG_AGE_MS) return;
         if (now_ms - last_cb_ts_ > MAX_LEG_AGE_MS) return;
+
+        // Throttle to one sample per SAMPLE_INTERVAL_MS. The 24h-avg signal
+        // is unaffected by sampling rate above 1/min; this caps memory at
+        // ~1440 samples per 24h instead of ballooning to 100k+ at tick rate.
+        if (now_ms - last_sample_ts_ < SAMPLE_INTERVAL_MS) return;
+        last_sample_ts_ = now_ms;
 
         const double premium_bp =
             (last_cb_price_ - last_bn_price_) / last_bn_price_ * 10000.0;

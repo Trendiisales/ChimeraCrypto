@@ -380,8 +380,39 @@ These slippage numbers are educated estimates, not measured from your live tape.
 
 ```
 #11 [DONE] Wire per-symbol realistic costs into TradingConfig + FundingWindow
+#12 [DONE] Fix cmake/GenVersion.cmake silent-fail bug
 ```
 
 ---
 
-**End of session 8 handoff (with addendum).**
+## ADDENDUM #2 — session 8 late edit: cmake GenVersion silent-fail fix
+
+After the cost-model deploy on `josgp1` came up with `build_ver: unknown` instead of the expected `7de62045`, root-caused to two compounding bugs in `cmake/GenVersion.cmake`:
+
+1. **`ERROR_QUIET` swallowed git's stderr.** When `git rev-parse` failed for any reason, the script silently fell back to `GIT_HASH = "unknown"` with no indication in the build output. Operator had no signal that anything was wrong until they queried `/api/state.build_ver` post-restart.
+2. **No `safe.directory` bypass.** The repo on `josgp1` is owned by `jo` but the build was running as root (via `sudo` for systemd restart). Modern git (≥ 2.35.2) refuses to operate on a repo owned by someone other than the running user without an explicit `safe.directory` config, but the silent-fail above made this look like a mystery problem.
+
+**Fix in commit `71a93467`** — single file (`cmake/GenVersion.cmake`):
+
+* Replace `ERROR_QUIET` with `ERROR_VARIABLE GIT_ERR` and a `message(WARNING ...)` block that surfaces git's actual error message as a CMake build warning. Future build_ver=unknown cases will scream loudly.
+* Pass `-c safe.directory=*` and `-c safe.directory=${CMAKE_SOURCE_DIR}` to the git invocation so it works regardless of repo ownership vs who runs cmake. No more per-machine `git config --global --add safe.directory ...` workaround needed.
+
+The diagnostic warning text also includes the recommended global-config command in case the user wants to fix it system-wide rather than relying on the per-invocation flags.
+
+**Deploy of this fix** (after pull):
+```bash
+cd /home/jo/ChimeraCrypto
+git fetch --all --prune
+git pull --ff-only                        # gets to 71a93467
+cmake -S . -B build                       # re-resolve git hash via fixed script
+cmake --build build --target chimera -j2
+sudo systemctl restart chimera
+sleep 2
+curl -sk https://localhost:9443/api/state | python3 -c 'import sys,json; print("build_ver:", json.load(sys.stdin).get("build_ver"))'
+```
+
+Expected: `build_ver: 71a93467` (the cmake fix doesn't change runtime behaviour, only the version label and the cmake error reporting).
+
+---
+
+**End of session 8 handoff (with addenda).**

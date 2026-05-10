@@ -1,6 +1,6 @@
 // ============================================================================
-// Chimera — H4/D1 Swing Engine + 7 paper-trading parallel engines
-//          (Move 2 + Phase 1 + Multi-Day Trio)
+// Chimera — H4/D1 Swing Engine + 8 paper-trading parallel engines
+//          (Move 2 + Phase 1 + Multi-Day Trio + High-Freq Range MR)
 //
 // Strategies running concurrently (all spot-LONG-only):
 //   1. SwingEngine  v9                     — H4 Donchian breakout, ETH-only (live shadow)
@@ -15,8 +15,10 @@
 //                                             negative funding (3-7 day hold; needs perp data)
 //   8. VolCompressionBreakoutEngine        — 24h vol-squeeze + Donchian-24h breakout
 //                                             (8-72h hold, BTC spot long)
+//   9. RangeMeanReversionEngine            — 30-min Bollinger + RSI(14) high-freq mean
+//                                             reversion, BTC + ETH (5-20 fires/sym/day)
 //
-// Engines 2-8 are paper-only via printf log lines. None have executors wired.
+// Engines 2-9 are paper-only via printf log lines. None have executors wired.
 // SwingEngine alone has SpotExecutor wiring (and is in shadow_mode = true).
 //
 // Feeds:
@@ -30,8 +32,9 @@
 //                         "obi":[...],"eth_btc_leadlag":{...},
 //                         "coinbase_premium_mrev":{...},
 //                         "funding_persistence_fade":{...},
-//                         "vol_compression_breakout":{...}}
-//   POST /api/kill    → kill_all on every engine (Swing + 7 paper)
+//                         "vol_compression_breakout":{...},
+//                         "range_mean_reversion":[...]}
+//   POST /api/kill    → kill_all on every engine (Swing + 8 paper)
 // ============================================================================
 #include <thread>
 #include <chrono>
@@ -65,6 +68,7 @@
 #include "core/CoinbasePremiumMRevEngine.hpp"
 #include "core/FundingPersistenceFadeEngine.hpp"
 #include "core/VolCompressionBreakoutEngine.hpp"
+#include "core/RangeMeanReversionEngine.hpp"
 #include "core/SymbolIndex.hpp"
 
 #include "version_generated.hpp"
@@ -77,8 +81,9 @@ chimera::ExchangeLatencyEngine g_exchange_latency;
 #endif
 
 // ── Tradable symbol set for the perp-aware paper engines ─────────────────────
-// FundingWindow / BasisMomentum / OBI all run on BTC + ETH per their headers.
-// Easy to expand later (need PerpFeed coverage on the new symbol).
+// FundingWindow / BasisMomentum / OBI / RangeMeanReversion all run on BTC + ETH
+// per their headers. Easy to expand later (need PerpFeed coverage for FW/BM and
+// just spot for RMR on the new symbol).
 static constexpr int PAPER_NUM_SYMBOLS = 2;
 static constexpr int PAPER_SYMBOL_IDS[PAPER_NUM_SYMBOLS] = {
     chimera::SYM_BTC,   // 0
@@ -113,7 +118,8 @@ void release_instance_lock() {
 
 // ── Shared engine pointers / mutex for HTTP server ───────────────────────────
 // g_engine_mtx now protects SwingEngine + every paper engine (arrays + each
-// singleton — Phase 1 EthBtcLeadLag, plus the multi-day trio).
+// singleton — Phase 1 EthBtcLeadLag, plus the multi-day trio, plus the new
+// per-symbol high-frequency Range Mean Reversion array).
 static chimera::SwingEngine*                    g_engine_ptr      = nullptr;
 static std::mutex                               g_engine_mtx;
 static chimera::SwingEngine*                    g_engine_ptr_kill = nullptr;
@@ -124,6 +130,7 @@ static chimera::EthBtcLeadLagEngine*            g_ellaye_ptr      = nullptr;
 static chimera::CoinbasePremiumMRevEngine*      g_cbprem_ptr      = nullptr;
 static chimera::FundingPersistenceFadeEngine*   g_fpfe_ptr        = nullptr;
 static chimera::VolCompressionBreakoutEngine*   g_vcbe_ptr        = nullptr;
+static chimera::RangeMeanReversionEngine*       g_rmre_ptr        = nullptr;
 static chimera::PerpFeed*                       g_perp_feed_ptr   = nullptr;
 
 // Last-seen Coinbase BTC-USD price (atomic so the GUI / state_json can read it
@@ -159,7 +166,8 @@ static std::string read_file(const std::string& path) {
 static std::string gui_root;
 
 // Build the structured JSON for /api/state2 — one array per perp-aware paper
-// engine, plus a singleton object for each singleton engine.
+// engine, plus a singleton object for each singleton engine, plus the new
+// per-symbol range_mean_reversion array.
 static std::string build_paper_state_json() {
     std::ostringstream js;
     js << "{";
@@ -264,6 +272,19 @@ static std::string build_paper_state_json() {
     } else {
         js << "{}";
     }
+    js << ",";
+
+    // ── range_mean_reversion (NEW — high-frequency, BTC + ETH per-symbol) ──
+    js << "\"range_mean_reversion\":[";
+    if (g_rmre_ptr) {
+        for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+            if (i > 0) js << ",";
+            const int id = PAPER_SYMBOL_IDS[i];
+            double spot  = load_dbl_atomic(g_last_spot_px_bits[id]);
+            js << g_rmre_ptr[i].state_json(spot);
+        }
+    }
+    js << "]";
 
     js << "}";
     return js.str();
@@ -306,6 +327,7 @@ static void http_server_thread(int port) {
                 if (g_fwes_ptr) g_fwes_ptr[i].kill_all(spot, now_ms);
                 if (g_bmes_ptr) g_bmes_ptr[i].kill_all(spot, now_ms);
                 if (g_obes_ptr) g_obes_ptr[i].kill_all(spot, now_ms);
+                if (g_rmre_ptr) g_rmre_ptr[i].kill_all(spot, now_ms);
             }
             // Singleton engines (BTC-leg trades only) — kill with current BTC spot.
             const double btc_spot = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
@@ -360,7 +382,7 @@ void signal_handler(int) { g_running = false; }
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Swing + 7 paper engines (Move 2 + Phase 1 + Multi-Day Trio) | build=%s\n",
+    std::printf("[STARTUP] Chimera — Swing + 8 paper engines (Move 2 + Phase 1 + Multi-Day Trio + Range MR) | build=%s\n",
                 BUILD_VERSION);
     std::fflush(stdout);
 
@@ -435,6 +457,17 @@ int main() {
     vcbe.shadow_mode = true;
     g_vcbe_ptr = &vcbe;
 
+    // ── Engine #9: RangeMeanReversion on BTC + ETH (paper, high-frequency) ──
+    // 30-bar 1-minute Bollinger + RSI(14). Fades lower-band touches when
+    // RSI is oversold and the range vol-fraction is in the
+    // mean-reversion-favourable band. Long-only spot. Warm-up ≈ 30 min.
+    chimera::RangeMeanReversionEngine rmre[PAPER_NUM_SYMBOLS] = {
+        chimera::RangeMeanReversionEngine(chimera::sym_full(chimera::SYM_BTC)),
+        chimera::RangeMeanReversionEngine(chimera::sym_full(chimera::SYM_ETH))
+    };
+    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) rmre[i].shadow_mode = true;
+    g_rmre_ptr = rmre;
+
     // ── Perp WebSocket feed (powers FundingWindow + BasisMomentum + OBI's basis input) ──
     chimera::PerpFeed perp_feed;
     g_perp_feed_ptr = &perp_feed;
@@ -486,7 +519,7 @@ int main() {
             engine.update_price(id, mid);
             engine.on_tick(id, tick, now_ms);
 
-            // ── Route BTC/ETH ticks through the 3 perp-aware paper engines ───
+            // ── Route BTC/ETH ticks through the perp-aware paper engines ─────
             int paper_slot = -1;
             for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
                 if (PAPER_SYMBOL_IDS[i] == id) { paper_slot = i; break; }
@@ -543,20 +576,38 @@ int main() {
 
             // Strategy C (Vol Compression) is fully spot-only.
             vcbe.on_tick(id, tick, now_ms, /*available_R=*/1.0);
+
+            // ── Engine #9: RangeMeanReversion (NEW, high-frequency) ──────────
+            // BTC + ETH only; route per-symbol like FW/BM/OBI. Perp data not
+            // required — pure spot mid-price + RSI on close-to-close deltas.
+            // Fires every tick AFTER its 30-min warm-up; trades clustering
+            // when the range-vol fraction is in [8 bp, 120 bp].
+            if (paper_slot >= 0) {
+                rmre[paper_slot].on_tick(tick, now_ms, /*available_R=*/1.0);
+            }
         }
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n % 10000 == 0) {
+            int rmre_total_trades = 0;
+            double rmre_total_pnl = 0.0;
+            if (g_rmre_ptr) {
+                for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+                    rmre_total_trades += g_rmre_ptr[i].total_trades();
+                    rmre_total_pnl    += g_rmre_ptr[i].total_pnl_bp();
+                }
+            }
             std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | "
                         "swing_trades=%d | ell=%d/%.0fbp | cbprem=%d/%.0fbp | "
-                        "fpfe=%d/%.0fbp | vcbe=%d/%.0fbp\n",
+                        "fpfe=%d/%.0fbp | vcbe=%d/%.0fbp | rmre=%d/%.0fbp\n",
                 n, tick.symbol.c_str(), mid, tick_age_ms,
                 engine.total_trades(),
                 ellaye.total_trades(),  ellaye.total_pnl_bp(),
                 cbprem.total_trades(),  cbprem.total_pnl_bp(),
                 fpfe.total_trades(),    fpfe.total_pnl_bp(),
-                vcbe.total_trades(),    vcbe.total_pnl_bp());
+                vcbe.total_trades(),    vcbe.total_pnl_bp(),
+                rmre_total_trades,      rmre_total_pnl);
             std::fflush(stdout);
         }
     });
@@ -594,6 +645,8 @@ int main() {
     std::printf("[STARTUP]   - CoinbasePremiumMRev (3-10 day, sustained CB-discount -> long)\n");
     std::printf("[STARTUP]   - FundingPersistenceFade (3-7 day, sustained -funding -> long; needs perp data)\n");
     std::printf("[STARTUP]   - VolCompressionBreakout (8-72h, 24h vol-squeeze + Donchian breakout)\n");
+    std::printf("[STARTUP] High-frequency paper engine (BTC + ETH, spot-only):\n");
+    std::printf("[STARTUP]   - RangeMeanReversion (30-min Bollinger + RSI(14), ~5-20 fires/sym/day)\n");
     std::printf("[STARTUP] Coinbase feed live (BTC-USD only) — powers CoinbasePremiumMRev.\n");
     std::printf("[STARTUP] All paper engines run in shadow_mode (printf log only, no executor).\n");
     std::printf("[STARTUP] GUI: http://localhost:8080  (state2 = paper engines JSON)\n");
@@ -621,13 +674,21 @@ int main() {
     shutdown_done = true;
     if (watchdog.joinable()) watchdog.join();
 
+    int rmre_total_trades_final = 0;
+    double rmre_total_pnl_final = 0.0;
+    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+        rmre_total_trades_final += rmre[i].total_trades();
+        rmre_total_pnl_final    += rmre[i].total_pnl_bp();
+    }
     std::printf("[SHUTDOWN] swing trades=%d swing pnl=%.3f%% | "
-                "ell=%d/%.1fbp | cbprem=%d/%.1fbp | fpfe=%d/%.1fbp | vcbe=%d/%.1fbp\n",
+                "ell=%d/%.1fbp | cbprem=%d/%.1fbp | fpfe=%d/%.1fbp | vcbe=%d/%.1fbp | "
+                "rmre=%d/%.1fbp\n",
                 engine.total_trades(), engine.total_pnl_pct(),
                 ellaye.total_trades(),  ellaye.total_pnl_bp(),
                 cbprem.total_trades(),  cbprem.total_pnl_bp(),
                 fpfe.total_trades(),    fpfe.total_pnl_bp(),
-                vcbe.total_trades(),    vcbe.total_pnl_bp());
+                vcbe.total_trades(),    vcbe.total_pnl_bp(),
+                rmre_total_trades_final, rmre_total_pnl_final);
     std::fflush(stdout);
     release_instance_lock();
     return 0;

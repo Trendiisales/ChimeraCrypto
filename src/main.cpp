@@ -480,8 +480,23 @@ int main() {
     // OBI entries portfolio-wide while keeping the engine running for
     // telemetry. Revert to 1.0 once the regime changes or the engine's
     // entry logic is re-evaluated.
+    //
+    // SESSION 8 (2026-05-10): FUNDING_PERSIST_FADE per-engine cap set to
+    // 0.0R following the pre-validation pass over 365d × 8 symbols of
+    // Binance funding history (see funding_prevalidation_report_2026-05-10.md).
+    // The engine's -10bp 24h-avg entry trigger is structurally inert in the
+    // current funding regime: the replay produced 1 candidate entry total
+    // (SOL, single -30bp event). BTC's most-negative single 8h funding event
+    // in the year was -1.52bp — 7× off trigger. Capping to 0R parks the
+    // engine while preserving its wiring + test coverage, so the trigger can
+    // be re-armed (cap → 1.0R) the moment funding regime shifts back toward
+    // 2022-style persistent negatives. Anti-overfitting policy: do NOT
+    // retune the threshold to -2/-3bp — at those levels the engine's
+    // structural premise (mean-reversion of *extreme* funding) no longer
+    // holds and the TP/cost ratio sized for -10bp scenarios collapses.
     chimera::risk::Tier1Risk::Config risk_cfg;
     risk_cfg.per_engine_r_cap[(int)chimera::risk::EngineType::OBI] = 0.0;
+    risk_cfg.per_engine_r_cap[(int)chimera::risk::EngineType::FUNDING_PERSIST_FADE] = 0.0;
     chimera::risk::Tier1Risk risk(risk_cfg);
     g_risk_ptr = &risk;
     if (risk.is_halted()) {
@@ -490,7 +505,8 @@ int main() {
         std::printf("[STARTUP] Engines will refuse new entries. POST /api/risk/resume to clear.\n");
         std::fflush(stdout);
     }
-    std::printf("[STARTUP] Tier1Risk OBI cap = 0.0R (session 7 — disabled pending review)\n");
+    std::printf("[STARTUP] Tier1Risk OBI cap                  = 0.0R (session 7 — disabled pending review)\n");
+    std::printf("[STARTUP] Tier1Risk FUNDING_PERSIST_FADE cap = 0.0R (session 8 — deferred, regime-inert)\n");
     std::fflush(stdout);
 
     // ── Engine #1: SwingEngine v9 (H4 Donchian, ETH-only, live shadow) ──────

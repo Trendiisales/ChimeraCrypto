@@ -498,7 +498,7 @@ private:
 
         char hex[EVP_MAX_MD_SIZE * 2 + 1];
         for (unsigned int i = 0; i < digest_len; ++i)
-            std::sprintf(hex + i * 2, "%02x", digest[i]);
+            std::snprintf(hex + i * 2, 3, "%02x", digest[i]);
         hex[digest_len * 2] = '\0';
         return std::string(hex);
     }

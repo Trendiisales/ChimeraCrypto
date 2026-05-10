@@ -279,4 +279,109 @@ User: Jo (kiwi18@gmail.com).
 
 ---
 
-**End of session 8 handoff.**
+---
+
+## ADDENDUM — session 8 late edit: realistic per-symbol cost model
+
+Authored after the main handoff above was written. User asked to recheck the cost issue and, given the analysis, instructed: *"set them as such... I want to trade properly and then have the correct costs."* This was the explicit-instruction trigger to modify core code per user pref #4.
+
+### What changed
+
+Two files modified, two new commits on `origin/tier1-risk-integration`:
+
+| SHA | Message |
+|---|---|
+| `dfa74c92` | session 8: realistic per-symbol cost model — bump MAKER_ROUND_TRIP_BP 15→17, add per-tier constants + helper |
+| `e2fd3798` | session 8: use TradingConfig::maker_rt_bp_for_symbol() for per-symbol round-trip cost |
+
+`include/config/TradingConfig.hpp`:
+- Added `MAKER_RT_BP_BTC_ETH = 17.0` (15 fee + 2 spread/slip)
+- Added `MAKER_RT_BP_MID_ALT = 20.0` (15 fee + 5 slip — BNB/SOL/XRP)
+- Added `MAKER_RT_BP_TAIL_ALT = 22.0` (15 fee + 7 slip — AVAX/LINK/DOGE)
+- Bumped flat `MAKER_ROUND_TRIP_BP` from 15 → 17 (every BTC/ETH-only engine that pulls from this constant now sees realistic cost; the 2 bp difference matches the audit comment that's been there since 2026-03-28)
+- Bumped `MAKER_COST_FLOOR_BP` from 15 → 17 to stay consistent
+- Added `static double maker_rt_bp_for_symbol(const std::string& sym)` helper that maps lowercase canonical symbols ("btcusdt", "solusdt", etc.) to the right tier; unknown symbols fall back to the most conservative tier (22 bp)
+- Updated header comment to document the new tier model
+
+`include/core/FundingWindowEngine.hpp`:
+- Replaced `static constexpr double ROUND_TRIP_COST_BP = TradingConfig::MAKER_ROUND_TRIP_BP` with a per-instance member `double round_trip_cost_bp_` initialised in the constructor from `TradingConfig::maker_rt_bp_for_symbol(sym)`
+- All 5 references in the file (`evaluate()`, `kill_all()`, two printfs) now use the per-symbol member
+- Default value is BTC/ETH tier (17 bp) for safety if ever default-constructed without a symbol
+
+### Compile verification
+
+Sandbox compiled a tiny TU including both modified headers + a `FundingWindowEngine` constructor for both `"btcusdt"` and `"avaxusdt"`. Output:
+
+```
+MAKER_ROUND_TRIP_BP        = 17.0
+MAKER_RT_BP_BTC_ETH        = 17.0
+MAKER_RT_BP_MID_ALT        = 20.0
+MAKER_RT_BP_TAIL_ALT       = 22.0
+for(btcusdt)               = 17.0
+for(ethusdt)               = 17.0
+for(solusdt)               = 20.0
+for(avaxusdt)              = 22.0
+for(unknownusdt)           = 22.0
+```
+
+This is a syntax-and-link sanity check, not a full project build. Do the actual build on the VPS.
+
+### What did NOT change
+
+- The 6 engines that hardcode a literal `15.0` (`PullbackContinuationEngine`, `StructuralEngine`, `AggressiveFlowEngine`, `CompressionBreakoutEngine`, `ConvexShockEngine`, `OrderbookImbalanceEngine`) — none of them are in the live trading set per session-7 §4 (OBI is live but capped to 0R), so their stale 15.0 doesn't affect production. Tech debt to clean up next time one of them is reactivated.
+- The 9 other live engines that pull from `TradingConfig::MAKER_ROUND_TRIP_BP` (`FundingPersistenceFade`, `BasisMomentum`, `CoinbasePremiumMRev`, `RangeMeanReversion`, `VolCompressionBreakout`, `EthBtcLeadLag`, `LiqBracket`, `MultiSymbolRotation`, `BalancedEngine`) — all BTC-only or BTC/ETH-only, so they automatically pick up the new flat 17 bp value with no per-engine edit.
+- The FundingWindow `RATE_THRESHOLD` header-comment bug (says 15 bp but value is 1.5 bp) — flagged in §3 above, still NOT fixed; that's a separate decision for session 9.
+
+### Production impact
+
+VPS daemon is still running build `06a14cc` (pre-cost-model). The new commits sit on origin but are not in the running binary. To deploy, run on `josgp1`:
+
+```bash
+cd /home/jo/ChimeraCrypto
+git fetch --all --prune
+git pull --ff-only
+
+# Rebuild — incremental should be ~30-60s
+cmake --build build --target chimera test_tier1_risk -j2
+
+# Re-run unit tests (should still be 32/32 — Tier1Risk doesn't depend on cost)
+./build/test_tier1_risk
+
+# Restart the daemon during a no-position window:
+sudo systemctl restart chimera
+
+# Verify new build is live
+curl -sk https://localhost:9443/api/state | python3 -c 'import sys,json; print("build_ver:", json.load(sys.stdin).get("build_ver"))'
+# expected: e2fd3798 (or whatever the post-rebuild HEAD is on the VPS clone)
+
+# Confirm cost values on a real exit-time printf when one fires
+sudo grep -E '\[FUND-WIN-EXIT\].*cost=' ~/ChimeraCrypto/logs/chimera.log | tail -5
+# (No FUND-WIN-EXIT events have ever fired in production at the existing
+# 1.5 bp threshold; this is just for when one eventually does.)
+```
+
+**Behavioural deltas to expect post-rebuild:**
+
+1. Every BTC/ETH engine's accounted net P&L drops by 2 bp/trade (15→17). This is honest accounting, not a regression. Engines with thin EV margins may eventually trip the `EDGE_DEMOTE_AVG_PNL_BP = -0.5` gate and auto-disable. The codebase doing its job.
+2. FundingWindow's *behaviour* on BTC/ETH stays effectively unchanged because its TPs (30 bp trail-arm, 80 bp gross target) dwarf the 2 bp cost increase.
+3. When Step 3a extends FundingWindow to the alts, those instances will see realistic alt costs (20 or 22 bp) rather than the flat 15. Net P&L per win on alts drops by 5–7 bp vs the old model — still comfortably above the cost floor for 30–80 bp targets.
+
+### Tier mapping (review and adjust if wrong)
+
+| Tier | Symbols | Cost (bp RT) | Why |
+|---|---|---:|---|
+| 1 | BTC, ETH | 17 | tight book, ~2 bp spread+slip |
+| 2 | BNB, SOL, XRP | 20 | very liquid alts, ~5 bp slip |
+| 3 | AVAX, LINK, DOGE | 22 | mid-cap, episodic wider spreads, ~7 bp slip |
+
+These slippage numbers are educated estimates, not measured from your live tape. If you have actual measured slippage from past sessions, the right move is to override the tier values in `TradingConfig.hpp` lines 60–62.
+
+### Updated task tracker at session 8 close
+
+```
+#11 [DONE] Wire per-symbol realistic costs into TradingConfig + FundingWindow
+```
+
+---
+
+**End of session 8 handoff (with addendum).**

@@ -1,6 +1,6 @@
 // ============================================================================
-// Chimera — H4/D1 Swing Engine + 8 paper-trading parallel engines
-//          (Move 2 + Phase 1 + Multi-Day Trio + High-Freq Range MR)
+// Chimera — H4/D1 Swing Engine + 9 paper-trading parallel engines
+//          (Move 2 + Phase 1 + Multi-Day Trio + Range MR + Multi-Sym Rot)
 //
 // Strategies running concurrently (all spot-LONG-only):
 //   1. SwingEngine  v9                     — H4 Donchian breakout, ETH-only (live shadow)
@@ -17,8 +17,10 @@
 //                                             (8-72h hold, BTC spot long)
 //   9. RangeMeanReversionEngine            — 30-min Bollinger + RSI(14) high-freq mean
 //                                             reversion, BTC + ETH (5-20 fires/sym/day)
+//  10. MultiSymbolRotationEngine           — 4h cross-sectional momentum rotation across
+//                                             SOL/BNB/AVAX/LINK/XRP/DOGE (4-24h hold)
 //
-// Engines 2-9 are paper-only via printf log lines. None have executors wired.
+// Engines 2-10 are paper-only via printf log lines. None have executors wired.
 // SwingEngine alone has SpotExecutor wiring (and is in shadow_mode = true).
 //
 // Feeds:
@@ -33,8 +35,9 @@
 //                         "coinbase_premium_mrev":{...},
 //                         "funding_persistence_fade":{...},
 //                         "vol_compression_breakout":{...},
-//                         "range_mean_reversion":[...]}
-//   POST /api/kill    → kill_all on every engine (Swing + 8 paper)
+//                         "range_mean_reversion":[...],
+//                         "multi_symbol_rotation":{...}}
+//   POST /api/kill    → kill_all on every engine (Swing + 9 paper)
 // ============================================================================
 #include <thread>
 #include <chrono>
@@ -69,6 +72,7 @@
 #include "core/FundingPersistenceFadeEngine.hpp"
 #include "core/VolCompressionBreakoutEngine.hpp"
 #include "core/RangeMeanReversionEngine.hpp"
+#include "core/MultiSymbolRotationEngine.hpp"
 #include "core/SymbolIndex.hpp"
 
 #include "version_generated.hpp"
@@ -131,6 +135,7 @@ static chimera::CoinbasePremiumMRevEngine*      g_cbprem_ptr      = nullptr;
 static chimera::FundingPersistenceFadeEngine*   g_fpfe_ptr        = nullptr;
 static chimera::VolCompressionBreakoutEngine*   g_vcbe_ptr        = nullptr;
 static chimera::RangeMeanReversionEngine*       g_rmre_ptr        = nullptr;
+static chimera::MultiSymbolRotationEngine*      g_msre_ptr        = nullptr;
 static chimera::PerpFeed*                       g_perp_feed_ptr   = nullptr;
 
 // Last-seen Coinbase BTC-USD price (atomic so the GUI / state_json can read it
@@ -274,7 +279,7 @@ static std::string build_paper_state_json() {
     }
     js << ",";
 
-    // ── range_mean_reversion (NEW — high-frequency, BTC + ETH per-symbol) ──
+    // ── range_mean_reversion (high-frequency, BTC + ETH per-symbol) ────────
     js << "\"range_mean_reversion\":[";
     if (g_rmre_ptr) {
         for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
@@ -284,7 +289,18 @@ static std::string build_paper_state_json() {
             js << g_rmre_ptr[i].state_json(spot);
         }
     }
-    js << "]";
+    js << "],";
+
+    // ── multi_symbol_rotation (NEW — 4h cross-sectional momentum, singleton) ──
+    // Trades the 6 currently-untouched basket symbols (SOL..DOGE). Engine
+    // self-iterates over the basket; main.cpp passes every spot tick and the
+    // engine ignores anything outside its symbol range.
+    js << "\"multi_symbol_rotation\":";
+    if (g_msre_ptr) {
+        js << g_msre_ptr->state_json();
+    } else {
+        js << "{}";
+    }
 
     js << "}";
     return js.str();
@@ -335,6 +351,9 @@ static void http_server_thread(int port) {
             if (g_cbprem_ptr) g_cbprem_ptr->kill_all(btc_spot, now_ms);
             if (g_fpfe_ptr)   g_fpfe_ptr->kill_all(btc_spot, now_ms);
             if (g_vcbe_ptr)   g_vcbe_ptr->kill_all(btc_spot, now_ms);
+            // Multi-symbol rotation: kill_all reads its own active_symbol_id_
+            // and uses last_known_price=0.0 to fall back to last_price_[slot].
+            if (g_msre_ptr)   g_msre_ptr->kill_all(0.0, now_ms);
             body = "{\"ok\":true}";
         } else if (strstr(req, "GET /api/state2")) {
             // NOTE: must be checked BEFORE /api/state (substring match).
@@ -382,7 +401,7 @@ void signal_handler(int) { g_running = false; }
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Swing + 8 paper engines (Move 2 + Phase 1 + Multi-Day Trio + Range MR) | build=%s\n",
+    std::printf("[STARTUP] Chimera — Swing + 9 paper engines (Move 2 + Phase 1 + Multi-Day Trio + Range MR + Multi-Sym Rot) | build=%s\n",
                 BUILD_VERSION);
     std::fflush(stdout);
 
@@ -467,6 +486,14 @@ int main() {
     };
     for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) rmre[i].shadow_mode = true;
     g_rmre_ptr = rmre;
+
+    // ── Engine #10: MultiSymbolRotation across SOL/BNB/AVAX/LINK/XRP/DOGE ──
+    // Cross-sectional 4h-momentum rotation engine; activates the 6 currently-
+    // untouched spot symbols. Singleton — engine self-iterates over its own
+    // basket. Warm-up = ~4h (needs full 4h lookback in EVERY slot).
+    chimera::MultiSymbolRotationEngine msre;
+    msre.shadow_mode = true;
+    g_msre_ptr = &msre;
 
     // ── Perp WebSocket feed (powers FundingWindow + BasisMomentum + OBI's basis input) ──
     chimera::PerpFeed perp_feed;
@@ -577,7 +604,7 @@ int main() {
             // Strategy C (Vol Compression) is fully spot-only.
             vcbe.on_tick(id, tick, now_ms, /*available_R=*/1.0);
 
-            // ── Engine #9: RangeMeanReversion (NEW, high-frequency) ──────────
+            // ── Engine #9: RangeMeanReversion (high-frequency) ───────────────
             // BTC + ETH only; route per-symbol like FW/BM/OBI. Perp data not
             // required — pure spot mid-price + RSI on close-to-close deltas.
             // Fires every tick AFTER its 30-min warm-up; trades clustering
@@ -585,6 +612,13 @@ int main() {
             if (paper_slot >= 0) {
                 rmre[paper_slot].on_tick(tick, now_ms, /*available_R=*/1.0);
             }
+
+            // ── Engine #10: MultiSymbolRotation (NEW, cross-sectional 4h) ────
+            // Engine self-routes: ignores any symbol_id outside [SYM_SOL,
+            // SYM_DOGE]. Routes to internal per-slot ring buffers, then
+            // throttled leaderboard recompute (every 60s) decides entry /
+            // rotation / exit. Active position management is per-tick.
+            msre.on_tick(id, tick, now_ms, /*available_R=*/1.0);
         }
 
         static std::atomic<int> tc{0};
@@ -600,14 +634,16 @@ int main() {
             }
             std::printf("[TICK] n=%d | %s px=%.4f | age=%.1fms | "
                         "swing_trades=%d | ell=%d/%.0fbp | cbprem=%d/%.0fbp | "
-                        "fpfe=%d/%.0fbp | vcbe=%d/%.0fbp | rmre=%d/%.0fbp\n",
+                        "fpfe=%d/%.0fbp | vcbe=%d/%.0fbp | rmre=%d/%.0fbp | "
+                        "msre=%d/%.0fbp/rot=%d\n",
                 n, tick.symbol.c_str(), mid, tick_age_ms,
                 engine.total_trades(),
                 ellaye.total_trades(),  ellaye.total_pnl_bp(),
                 cbprem.total_trades(),  cbprem.total_pnl_bp(),
                 fpfe.total_trades(),    fpfe.total_pnl_bp(),
                 vcbe.total_trades(),    vcbe.total_pnl_bp(),
-                rmre_total_trades,      rmre_total_pnl);
+                rmre_total_trades,      rmre_total_pnl,
+                msre.total_trades(),    msre.total_pnl_bp(), msre.rotations());
             std::fflush(stdout);
         }
     });
@@ -647,6 +683,8 @@ int main() {
     std::printf("[STARTUP]   - VolCompressionBreakout (8-72h, 24h vol-squeeze + Donchian breakout)\n");
     std::printf("[STARTUP] High-frequency paper engine (BTC + ETH, spot-only):\n");
     std::printf("[STARTUP]   - RangeMeanReversion (30-min Bollinger + RSI(14), ~5-20 fires/sym/day)\n");
+    std::printf("[STARTUP] Cross-sectional momentum paper engine (SOL/BNB/AVAX/LINK/XRP/DOGE):\n");
+    std::printf("[STARTUP]   - MultiSymbolRotation (4h relative-strength rotation, 4-24h hold)\n");
     std::printf("[STARTUP] Coinbase feed live (BTC-USD only) — powers CoinbasePremiumMRev.\n");
     std::printf("[STARTUP] All paper engines run in shadow_mode (printf log only, no executor).\n");
     std::printf("[STARTUP] GUI: http://localhost:8080  (state2 = paper engines JSON)\n");
@@ -682,13 +720,14 @@ int main() {
     }
     std::printf("[SHUTDOWN] swing trades=%d swing pnl=%.3f%% | "
                 "ell=%d/%.1fbp | cbprem=%d/%.1fbp | fpfe=%d/%.1fbp | vcbe=%d/%.1fbp | "
-                "rmre=%d/%.1fbp\n",
+                "rmre=%d/%.1fbp | msre=%d/%.1fbp/rot=%d\n",
                 engine.total_trades(), engine.total_pnl_pct(),
                 ellaye.total_trades(),  ellaye.total_pnl_bp(),
                 cbprem.total_trades(),  cbprem.total_pnl_bp(),
                 fpfe.total_trades(),    fpfe.total_pnl_bp(),
                 vcbe.total_trades(),    vcbe.total_pnl_bp(),
-                rmre_total_trades_final, rmre_total_pnl_final);
+                rmre_total_trades_final, rmre_total_pnl_final,
+                msre.total_trades(),    msre.total_pnl_bp(), msre.rotations());
     std::fflush(stdout);
     release_instance_lock();
     return 0;

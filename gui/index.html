@@ -250,6 +250,39 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
 .kill-cancel:hover{color:var(--text);border-color:var(--text)}
 .kill-status{margin-top:16px;font-size:11px;min-height:16px;letter-spacing:1px}
 .kill-status.ok{color:var(--green)}.kill-status.err{color:var(--red)}
+
+/* ── Engines panel — Phase 1 + Multi-Day Trio (paper, shadow_mode=true) ── */
+.eng-panel{margin:0 8px 6px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px}
+.eng-panel-title{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.eng-panel-title .eng-mode-tag{font-size:9px;color:var(--orange);letter-spacing:2px;border:1px solid var(--orange);padding:1px 6px;border-radius:2px;background:rgba(255,107,0,.08)}
+.eng-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.eng-card{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;font-family:var(--fm);font-size:11px;transition:border-color .4s,box-shadow .4s}
+.eng-card.active{border-color:var(--green);box-shadow:0 0 12px rgba(0,230,118,.18)}
+.eng-card.armed{border-color:rgba(0,212,255,.4)}
+.eng-card.warming{border-color:rgba(255,107,0,.35)}
+.eng-card.starved{border-color:rgba(255,61,87,.4);opacity:.72}
+.eng-card.halted{border-color:var(--red);opacity:.55}
+.eng-hd{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.eng-name{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:1.5px;color:var(--text)}
+.eng-status{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 6px;border-radius:2px;border:1px solid;white-space:nowrap}
+.eng-status.s-active{background:rgba(0,230,118,.12);color:var(--green);border-color:var(--green)}
+.eng-status.s-armed{background:rgba(0,212,255,.1);color:var(--accent);border-color:var(--accent)}
+.eng-status.s-warming{background:rgba(255,107,0,.12);color:var(--orange);border-color:var(--orange)}
+.eng-status.s-starved{background:rgba(255,61,87,.1);color:var(--red);border-color:var(--red)}
+.eng-status.s-halted{background:rgba(255,61,87,.15);color:var(--red);border-color:var(--red)}
+.eng-progress{height:4px;width:100%;background:var(--dim);border-radius:1px;overflow:hidden;position:relative}
+.eng-progress-fill{position:absolute;left:0;top:0;height:100%;width:0%;background:var(--accent);transition:width .5s ease,background .5s;border-radius:0 1px 1px 0}
+.eng-progress-fill.near{background:var(--yellow)}
+.eng-progress-fill.fired{background:var(--green)}
+.eng-row{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted)}
+.eng-row .v{color:var(--text);font-variant-numeric:tabular-nums}
+.eng-row .v.pos{color:var(--green)}
+.eng-row .v.neg{color:var(--red)}
+.eng-row .v.mute{color:var(--muted)}
+.eng-stats{display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;font-size:10px;margin-top:2px}
+.eng-stats span{color:var(--muted)}
+.eng-stats strong{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;margin-left:3px}
+
 </style>
 </head>
 <body>
@@ -661,6 +694,57 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
   <div class="live-panel" id="live-positions-panel">
     <div class="live-panel-title">◉ LIVE POSITIONS</div>
     <div id="live-positions-list"><div class="live-pos-empty">No open positions</div></div>
+  </div>
+
+  <!-- ENGINES PANEL — Phase 1 + Multi-Day Trio (paper, shadow_mode=true) -->
+  <div class="eng-panel" id="engines-panel">
+    <div class="eng-panel-title"><span>◉ ENGINES — PAPER</span><span class="eng-mode-tag">SHADOW</span></div>
+    <div class="eng-grid" id="engines-grid">
+
+      <!-- Engine #5: ETH→BTC Lead-Lag (1-3 min scalp) -->
+      <div class="eng-card" id="eng-ell">
+        <div class="eng-hd"><span class="eng-name">ETH→BTC LEAD-LAG</span><span class="eng-status s-armed" id="ell-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="ell-bar"></div></div>
+        <div class="eng-row"><span>ETH 90s</span><span class="v" id="ell-eth">--</span></div>
+        <div class="eng-row"><span>BTC 90s</span><span class="v" id="ell-btc">--</span></div>
+        <div class="eng-row" id="ell-pos-row" style="display:none"><span>Position</span><span class="v" id="ell-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="ell-trades">0</strong></span><span>P&amp;L<strong id="ell-pnl">+0bp</strong></span><span>WR<strong id="ell-wr">--%</strong></span></div>
+      </div>
+
+      <!-- Engine #6: Coinbase Premium Mean-Revert (3-10 day) -->
+      <div class="eng-card" id="eng-cbp">
+        <div class="eng-hd"><span class="eng-name">CB PREMIUM MR</span><span class="eng-status s-armed" id="cbp-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="cbp-bar"></div></div>
+        <div class="eng-row"><span>24h avg prem</span><span class="v" id="cbp-avg">--</span></div>
+        <div class="eng-row"><span>Live prem</span><span class="v" id="cbp-live">--</span></div>
+        <div class="eng-row"><span>Buffer</span><span class="v mute" id="cbp-buf">--</span></div>
+        <div class="eng-row" id="cbp-pos-row" style="display:none"><span>Position</span><span class="v" id="cbp-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="cbp-trades">0</strong></span><span>P&amp;L<strong id="cbp-pnl">+0bp</strong></span><span>WR<strong id="cbp-wr">--%</strong></span></div>
+      </div>
+
+      <!-- Engine #7: Funding Persistence Fade (3-7 day, dormant while perp blocked) -->
+      <div class="eng-card" id="eng-fpf">
+        <div class="eng-hd"><span class="eng-name">FUNDING PERSIST</span><span class="eng-status s-armed" id="fpf-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="fpf-bar"></div></div>
+        <div class="eng-row"><span>24h avg fund</span><span class="v" id="fpf-avg">--</span></div>
+        <div class="eng-row"><span>Now</span><span class="v" id="fpf-now">--</span></div>
+        <div class="eng-row"><span>Buffer</span><span class="v mute" id="fpf-buf">--</span></div>
+        <div class="eng-row" id="fpf-pos-row" style="display:none"><span>Position</span><span class="v" id="fpf-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="fpf-trades">0</strong></span><span>P&amp;L<strong id="fpf-pnl">+0bp</strong></span><span>WR<strong id="fpf-wr">--%</strong></span></div>
+      </div>
+
+      <!-- Engine #8: Vol Compression Breakout (8-72h) -->
+      <div class="eng-card" id="eng-vcb">
+        <div class="eng-hd"><span class="eng-name">VOL COMPRESS BO</span><span class="eng-status s-armed" id="vcb-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="vcb-bar"></div></div>
+        <div class="eng-row"><span>Vol ratio (6h/24h)</span><span class="v" id="vcb-ratio">--</span></div>
+        <div class="eng-row"><span>Donchian 24h hi</span><span class="v" id="vcb-don">--</span></div>
+        <div class="eng-row"><span>Buffer</span><span class="v mute" id="vcb-buf">--</span></div>
+        <div class="eng-row" id="vcb-pos-row" style="display:none"><span>Position</span><span class="v" id="vcb-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="vcb-trades">0</strong></span><span>P&amp;L<strong id="vcb-pnl">+0bp</strong></span><span>WR<strong id="vcb-wr">--%</strong></span></div>
+      </div>
+
+    </div>
   </div>
 
   <div class="bottom-section">

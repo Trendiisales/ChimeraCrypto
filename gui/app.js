@@ -774,5 +774,232 @@ async function executeKill() {
 }
 // ── END EMERGENCY KILL ──────────────────────────────────────────────────────
 
+/* ════════════════════════════════════════════════════════════════════
+   ENGINES PANEL — /api/state2 poller + renderer
+   ────────────────────────────────────────────────────────────────────
+   Renders Phase 1 (eth_btc_leadlag) + the Multi-Day Trio
+   (coinbase_premium_mrev, funding_persistence_fade, vol_compression_breakout).
 
+   Strictly additive:
+     - Does NOT touch the existing /api/state poller.
+     - Does NOT touch the trade log, win/loss accounting, or any
+       existing render path.
+     - Reads /api/state2 every ENG_POLL_MS and writes to its own DOM
+       subtree (#engines-panel) only.
 
+   Polling cadence: 3 s. These engines fire on minute-to-day timescales,
+   so 1 Hz polling buys nothing and adds load.
+   ════════════════════════════════════════════════════════════════════ */
+const ENG_POLL_MS = 3000;
+const ENG_BUFFER_HOURS_TARGET = 23;   // multi-day engines need ~24h ring
+
+function _engClampPct(x){ return Math.max(0, Math.min(100, x)); }
+
+function _engBarClass(pct){
+  if (pct >= 100) return 'eng-progress-fill fired';
+  if (pct >=  75) return 'eng-progress-fill near';
+  return 'eng-progress-fill';
+}
+
+function _engFmtBp(v, decimals){
+  if (v === null || v === undefined || Number.isNaN(+v)) return '--';
+  const n = +v;
+  const d = (decimals === undefined) ? 2 : decimals;
+  return (n >= 0 ? '+' : '') + n.toFixed(d) + 'bp';
+}
+
+function _engFmtBufferSpan(ms){
+  if (!ms || ms <= 0) return '0m';
+  const mins = ms / 60000;
+  if (mins < 60) return mins.toFixed(0) + 'm';
+  const hrs = mins / 60;
+  return hrs.toFixed(1) + 'h';
+}
+
+function _engPnlClass(v){
+  const n = +v;
+  if (Number.isNaN(n) || n === 0) return '';
+  return n > 0 ? 'pos' : 'neg';
+}
+
+function _engSetStatus(elId, klass, label){
+  const el = $(elId);
+  if (!el) return;
+  el.className = 'eng-status ' + klass;
+  el.textContent = label;
+}
+
+function _engSetCardClass(cardId, klass){
+  const el = $(cardId);
+  if (!el) return;
+  el.className = 'eng-card ' + klass;
+}
+
+function _engUpdatePos(rowId, valId, s){
+  const row = $(rowId);
+  if (!row) return;
+  if (!s.active){ row.style.display = 'none'; return; }
+  row.style.display = '';
+  const move  = (+s.move_bp || 0).toFixed(1);
+  const mfe   = (+s.mfe_bp  || 0).toFixed(1);
+  const mae   = (+s.mae_bp  || 0).toFixed(1);
+  const sizeR = (+s.size_R  || 0).toFixed(2);
+  set(valId, move + 'bp  (mfe ' + mfe + ' / mae ' + mae + ')  ' + sizeR + 'R');
+  const v = $(valId);
+  if (v) v.className = 'v ' + _engPnlClass(s.move_bp);
+}
+
+function _engUpdateStats(prefix, s){
+  set(prefix + '-trades', (+s.total_trades || 0));
+  const pnl = +s.total_pnl_bp || 0;
+  set(prefix + '-pnl', _engFmtBp(pnl, 1));
+  const pe = $(prefix + '-pnl');
+  if (pe) pe.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : '';
+  const trades = +s.total_trades || 0;
+  set(prefix + '-wr', trades > 0 ? ((+s.win_rate || 0) * 100).toFixed(0) + '%' : '--');
+}
+
+/* ── Engine #5: ETH→BTC Lead-Lag (1-3 min scalp) ── */
+function renderEthBtcLeadLag(s){
+  if (!s) return;
+  const eth    = +s.live_eth_window_bp || 0;
+  const btc    = +s.live_btc_window_bp || 0;
+  const ethThr = +s.eth_lead_threshold_bp || 25;
+  const btcThr = +s.btc_lag_threshold_bp  || 12;
+  // Progress = ETH lead as % of trigger threshold (positive direction only).
+  const ethPct = ethThr > 0 ? _engClampPct((eth / ethThr) * 100) : 0;
+  const bar = $('ell-bar');
+  if (bar){ bar.className = _engBarClass(ethPct); bar.style.width = ethPct + '%'; }
+
+  set('ell-eth', _engFmtBp(eth));
+  const ev = $('ell-eth'); if (ev) ev.className = 'v ' + _engPnlClass(eth);
+
+  const lagOk = Math.abs(btc) <= btcThr;
+  set('ell-btc', _engFmtBp(btc) + (lagOk ? '  ✓' : '  ✗'));
+  const bv = $('ell-btc'); if (bv) bv.className = 'v ' + (lagOk ? 'mute' : 'neg');
+
+  if      (s.halted) { _engSetStatus('ell-status', 's-halted', 'HALTED'); _engSetCardClass('eng-ell', 'halted'); }
+  else if (s.active) { _engSetStatus('ell-status', 's-active', 'IN POS'); _engSetCardClass('eng-ell', 'active'); }
+  else               { _engSetStatus('ell-status', 's-armed',  'ARMED');  _engSetCardClass('eng-ell', 'armed');  }
+
+  _engUpdatePos('ell-pos-row', 'ell-pos', s);
+  _engUpdateStats('ell', s);
+}
+
+/* ── Engine #6: Coinbase Premium Mean-Revert (3-10 day) ── */
+function renderCoinbasePremiumMRev(s){
+  if (!s) return;
+  const live = +s.live_premium_bp || 0;
+  const avg  = +s.avg_24h_premium_bp || 0;
+  const trig = +s.premium_trigger_bp || -25;
+  // Premium is negative when CB < BN. Bar fills as 24h-avg drops toward trigger.
+  const denom = Math.abs(trig);
+  const num   = Math.max(0, -avg);
+  const pct   = denom > 0 ? _engClampPct((num / denom) * 100) : 0;
+  const bar = $('cbp-bar');
+  if (bar){ bar.className = _engBarClass(pct); bar.style.width = pct + '%'; }
+
+  set('cbp-avg',  _engFmtBp(avg));
+  const av = $('cbp-avg'); if (av) av.className = 'v ' + _engPnlClass(-avg);
+  set('cbp-live', _engFmtBp(live));
+  const lv = $('cbp-live'); if (lv) lv.className = 'v ' + _engPnlClass(-live);
+
+  const samples = +s.buffer_samples || 0;
+  const span    = +s.buffer_span_ms || 0;
+  set('cbp-buf', samples + ' samples / ' + _engFmtBufferSpan(span));
+
+  const warming = (span / 3.6e6) < ENG_BUFFER_HOURS_TARGET;
+  if      (s.halted) { _engSetStatus('cbp-status', 's-halted',  'HALTED');  _engSetCardClass('eng-cbp', 'halted');  }
+  else if (s.active) { _engSetStatus('cbp-status', 's-active',  'IN POS');  _engSetCardClass('eng-cbp', 'active');  }
+  else if (warming)  { _engSetStatus('cbp-status', 's-warming', 'WARMING'); _engSetCardClass('eng-cbp', 'warming'); }
+  else               { _engSetStatus('cbp-status', 's-armed',   'ARMED');   _engSetCardClass('eng-cbp', 'armed');   }
+
+  _engUpdatePos('cbp-pos-row', 'cbp-pos', s);
+  _engUpdateStats('cbp', s);
+}
+
+/* ── Engine #7: Funding Persistence Fade (3-7 day, perp-data dependent) ── */
+function renderFundingPersistenceFade(s){
+  if (!s) return;
+  const now  = +s.funding_rate_now_bp || 0;
+  const avg  = +s.avg_24h_funding_bp || 0;
+  const trig = +s.funding_trigger_bp || -10;
+  const denom = Math.abs(trig);
+  const num   = Math.max(0, -avg);
+  const pct   = denom > 0 ? _engClampPct((num / denom) * 100) : 0;
+  const bar = $('fpf-bar');
+  if (bar){ bar.className = _engBarClass(pct); bar.style.width = pct + '%'; }
+
+  set('fpf-avg', _engFmtBp(avg));
+  const av = $('fpf-avg'); if (av) av.className = 'v ' + _engPnlClass(-avg);
+  set('fpf-now', _engFmtBp(now));
+  const nv = $('fpf-now'); if (nv) nv.className = 'v ' + _engPnlClass(-now);
+
+  const samples = +s.buffer_samples || 0;
+  const span    = +s.buffer_span_ms || 0;
+  set('fpf-buf', samples + ' samples / ' + _engFmtBufferSpan(span));
+
+  // Starved = perp data dead (PerpFeed reports funding_rate(SYM_BTC)==0 forever).
+  // After ~5 samples with strict 0.0 we're confident the WS data plane is blocked.
+  const starved = (now === 0 && avg === 0 && samples > 5);
+  if      (s.halted)  { _engSetStatus('fpf-status', 's-halted',  'HALTED');  _engSetCardClass('eng-fpf', 'halted');  }
+  else if (s.active)  { _engSetStatus('fpf-status', 's-active',  'IN POS');  _engSetCardClass('eng-fpf', 'active');  }
+  else if (starved)   { _engSetStatus('fpf-status', 's-starved', 'NO DATA'); _engSetCardClass('eng-fpf', 'starved'); }
+  else if ((span / 3.6e6) < ENG_BUFFER_HOURS_TARGET) {
+                        _engSetStatus('fpf-status', 's-warming', 'WARMING'); _engSetCardClass('eng-fpf', 'warming'); }
+  else                { _engSetStatus('fpf-status', 's-armed',   'ARMED');   _engSetCardClass('eng-fpf', 'armed');   }
+
+  _engUpdatePos('fpf-pos-row', 'fpf-pos', s);
+  _engUpdateStats('fpf', s);
+}
+
+/* ── Engine #8: Vol Compression Breakout (8-72h) ── */
+function renderVolCompressionBreakout(s){
+  if (!s) return;
+  const ratio = +s.vol_ratio || 0;
+  const thr   = +s.compression_ratio_threshold || 0.5;
+  // Lower ratio = more compressed. Bar fills as we approach the threshold.
+  let pct = 0;
+  if (ratio > 0 && thr > 0 && thr < 1){
+    pct = _engClampPct(((1 - ratio) / (1 - thr)) * 100);
+  }
+  const bar = $('vcb-bar');
+  if (bar){ bar.className = _engBarClass(pct); bar.style.width = pct + '%'; }
+
+  set('vcb-ratio', ratio > 0 ? ratio.toFixed(3) : '--');
+  const rv = $('vcb-ratio');
+  if (rv) rv.className = 'v ' + (ratio > 0 && ratio <= thr ? 'pos' : '');
+
+  const don = +s.donchian_24h_high || 0;
+  set('vcb-don', don > 0 ? '$' + don.toFixed(2) : '--');
+
+  const samples = +s.buffer_samples || 0;
+  const span    = +s.buffer_span_ms || 0;
+  set('vcb-buf', samples + ' samples / ' + _engFmtBufferSpan(span));
+
+  if      (s.halted) { _engSetStatus('vcb-status', 's-halted',  'HALTED');  _engSetCardClass('eng-vcb', 'halted');  }
+  else if (s.active) { _engSetStatus('vcb-status', 's-active',  'IN POS');  _engSetCardClass('eng-vcb', 'active');  }
+  else if ((span / 3.6e6) < ENG_BUFFER_HOURS_TARGET) {
+                       _engSetStatus('vcb-status', 's-warming', 'WARMING'); _engSetCardClass('eng-vcb', 'warming'); }
+  else               { _engSetStatus('vcb-status', 's-armed',   'ARMED');   _engSetCardClass('eng-vcb', 'armed');   }
+
+  _engUpdatePos('vcb-pos-row', 'vcb-pos', s);
+  _engUpdateStats('vcb', s);
+}
+
+async function pollEngines(){
+  let res;
+  try {
+    res = await fetch('/api/state2', { cache:'no-store', signal:AbortSignal.timeout(4000) });
+  } catch(e){ return; }
+  if (!res.ok) return;
+  let data;
+  try { data = await res.json(); } catch(e){ return; }
+  renderEthBtcLeadLag         (data.eth_btc_leadlag);
+  renderCoinbasePremiumMRev   (data.coinbase_premium_mrev);
+  renderFundingPersistenceFade(data.funding_persistence_fade);
+  renderVolCompressionBreakout(data.vol_compression_breakout);
+}
+
+pollEngines();
+setInterval(pollEngines, ENG_POLL_MS);

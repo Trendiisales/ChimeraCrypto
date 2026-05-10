@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string>
 
 namespace chimera {
 
@@ -19,11 +20,23 @@ namespace chimera {
 //            FUNDING + NGAS re-enabled (viable TP at slow-burn hold)
 //            SESSION_MOM re-enabled for EU/US opens only
 //
-// COST STRUCTURE (Binance spot with BNB discount):
-//   Fee per side:       0.075% = 7.5bp (25% BNB discount on 0.10%)
-//   Round trip fees:    15bp
-//   Spread + slip:      ~2bp
-//   TOTAL COST FLOOR:   17bp minimum gross target (use 15bp maker floor conservatively)
+// COST STRUCTURE (Binance spot with BNB maker; updated 2026-05-10 session 8):
+//   Fee per side:       0.075% = 7.5 bp (25% BNB discount on 0.10%)
+//   Round-trip fees:    15 bp (both sides; same on every symbol)
+//   Spread + slip:      varies by symbol-tier liquidity:
+//                         BTC/ETH       ~ 2 bp  (tight book)
+//                         Mid alts      ~ 5 bp  (BNB / SOL / XRP)
+//                         Tail alts     ~ 7 bp  (AVAX / LINK / DOGE)
+//   TOTAL COST FLOOR (per tier):
+//     Tier 1 (BTC/ETH)        17 bp
+//     Tier 2 (BNB/SOL/XRP)    20 bp
+//     Tier 3 (AVAX/LINK/DOGE) 22 bp
+//
+//   Engines that subtract a flat round-trip cost should call
+//   TradingConfig::maker_rt_bp_for_symbol(sym) to pick up the right tier.
+//   The legacy MAKER_ROUND_TRIP_BP constant has been bumped from 15 to 17
+//   so BTC/ETH-only engines that still pull from it get realistic accounting
+//   automatically (was a deliberately-conservative floor — now honest).
 // ============================================================================
 
 struct TradingConfig {
@@ -42,11 +55,43 @@ struct TradingConfig {
     // -------------------------------------------------------------------------
     // COST FLOORS
     // -------------------------------------------------------------------------
+    // Per-symbol-tier maker round-trip cost (Binance spot + BNB discount).
+    // Wired into engines via maker_rt_bp_for_symbol() helper below.
+    static constexpr double MAKER_RT_BP_BTC_ETH       = 17.0;   // 15 fee + 2 spread/slip
+    static constexpr double MAKER_RT_BP_MID_ALT       = 20.0;   // 15 fee + 5 slip — BNB/SOL/XRP
+    static constexpr double MAKER_RT_BP_TAIL_ALT      = 22.0;   // 15 fee + 7 slip — AVAX/LINK/DOGE
+
     static constexpr double COST_FLOOR_BP             = 22.0;   // taker round-trip floor
     static constexpr double EXPANSION_COST_FLOOR_BP   = 22.0;
-    static constexpr double MAKER_COST_FLOOR_BP       = 15.0;   // maker round-trip with BNB
+    static constexpr double MAKER_COST_FLOOR_BP       = 17.0;   // maker round-trip BTC/ETH (was 15, bumped session 8)
     static constexpr double TAKER_ROUND_TRIP_BP       = 20.0;   // 10bp/side VIP0 taker
-    static constexpr double MAKER_ROUND_TRIP_BP       = 15.0;   // 7.5bp/side with BNB
+    // MAKER_ROUND_TRIP_BP is the legacy flat-cost constant used by all
+    // BTC/ETH-only engines. Bumped 15 -> 17 in session 8 to include the
+    // ~2 bp spread+slip the audit comment already documented but the
+    // numeric never reflected. Engines that go multi-symbol (FundingWindow
+    // for the alt extension) should call maker_rt_bp_for_symbol() instead.
+    static constexpr double MAKER_ROUND_TRIP_BP       = 17.0;   // BTC/ETH realistic; was 15 (conservative)
+
+    // Per-symbol cost lookup. Symbols are lowercase canonical forms produced
+    // by sym_full(SYM_*) — e.g. "btcusdt", "ethusdt", "solusdt". Unknown
+    // symbols return the most conservative tier (better to overestimate
+    // cost than to underestimate edge).
+    static double maker_rt_bp_for_symbol(const std::string& sym) {
+        // Tier 1: BTC, ETH — tight books, ~2 bp spread+slip
+        if (sym == "btcusdt" || sym == "ethusdt") {
+            return MAKER_RT_BP_BTC_ETH;
+        }
+        // Tier 2: BNB, SOL, XRP — very liquid alts, ~5 bp slip
+        if (sym == "bnbusdt" || sym == "solusdt" || sym == "xrpusdt") {
+            return MAKER_RT_BP_MID_ALT;
+        }
+        // Tier 3: AVAX, LINK, DOGE — mid-cap, ~7 bp slip during quiet
+        if (sym == "avaxusdt" || sym == "linkusdt" || sym == "dogeusdt") {
+            return MAKER_RT_BP_TAIL_ALT;
+        }
+        // Default: most conservative tier for any unrecognised symbol.
+        return MAKER_RT_BP_TAIL_ALT;
+    }
 
     // -------------------------------------------------------------------------
     // PYRAMIDING (scale-in on winning trades)

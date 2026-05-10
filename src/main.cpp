@@ -469,7 +469,20 @@ int main() {
     //
     // Tighten or relax via Config before construction once forward-shadow
     // results inform per-engine sizing (Step 5 of the 5-point plan).
-    chimera::risk::Tier1Risk risk;
+    //
+    // SESSION 7 (2026-05-10): OBI per-engine cap set to 0.0R after the
+    // session-6 daily-loss circuit tripped at -213.56bp, dominated by 12
+    // OBI trades that all exited via TIMEOUT at near-zero gross P&L
+    // (mean ≈ 0bp gross) being eaten by the 15bp round-trip cost model.
+    // OBI's mean-reversion signal showed zero observable predictive
+    // power in the prevailing -3 to -5bp persistent-backwardation
+    // regime — every trade round-tripped at cost. Cap to 0R disables
+    // OBI entries portfolio-wide while keeping the engine running for
+    // telemetry. Revert to 1.0 once the regime changes or the engine's
+    // entry logic is re-evaluated.
+    chimera::risk::Tier1Risk::Config risk_cfg;
+    risk_cfg.per_engine_r_cap[(int)chimera::risk::EngineType::OBI] = 0.0;
+    chimera::risk::Tier1Risk risk(risk_cfg);
     g_risk_ptr = &risk;
     if (risk.is_halted()) {
         std::printf("[STARTUP] Tier1Risk loaded HALTED — reason: %s\n",
@@ -477,6 +490,8 @@ int main() {
         std::printf("[STARTUP] Engines will refuse new entries. POST /api/risk/resume to clear.\n");
         std::fflush(stdout);
     }
+    std::printf("[STARTUP] Tier1Risk OBI cap = 0.0R (session 7 — disabled pending review)\n");
+    std::fflush(stdout);
 
     // ── Engine #1: SwingEngine v9 (H4 Donchian, ETH-only, live shadow) ──────
     chimera::SwingEngine engine;

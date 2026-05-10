@@ -987,6 +987,139 @@ function renderVolCompressionBreakout(s){
   _engUpdateStats('vcb', s);
 }
 
+/* ── Engine #9: Range Mean Reversion (BTC + ETH, 30-min BB + RSI(14)) ──
+   Per-symbol cards. data.range_mean_reversion is an array (BTC, ETH).
+   Bar fills as RSI drops toward RSI_ENTRY_MAX (30) — the closer to
+   oversold extreme, the closer to firing. */
+function renderRangeMeanReversionOne(s, prefix, cardId){
+  if (!s) return;
+  const rsi    = +s.rsi || 50;
+  const rsiMax = +s.rsi_entry_max || 30;
+  // Progress = how close RSI is to oversold extreme. 0% at RSI=100, 100% at RSI<=rsiMax.
+  let pct = 0;
+  if (rsi < 100) pct = _engClampPct(((100 - rsi) / (100 - rsiMax)) * 100);
+  const bar = $(prefix + '-bar');
+  if (bar){ bar.className = _engBarClass(pct); bar.style.width = pct + '%'; }
+
+  // "Price vs band" — show position as band-relative ratio when ready.
+  const px    = +s.price || 0;
+  const lower = +s.bb_lower || 0;
+  const upper = +s.bb_upper || 0;
+  const bandEl = $(prefix + '-band');
+  if (bandEl){
+    if (s.bb_ready && upper > lower){
+      // Position 0..100: 0=at lower, 50=at mean, 100=at upper.
+      const rel = ((px - lower) / (upper - lower)) * 100;
+      const relTxt = isFinite(rel) ? rel.toFixed(0) + '%' : '--';
+      bandEl.textContent = '$' + px.toFixed(2) + ' (band ' + relTxt + ')';
+      bandEl.className = 'v ' + (rel <= 5 ? 'pos' : rel >= 95 ? 'neg' : 'mute');
+    } else {
+      bandEl.textContent = px > 0 ? '$' + px.toFixed(2) + ' (warming)' : '--';
+      bandEl.className = 'v mute';
+    }
+  }
+
+  // RSI(14)
+  const rsiEl = $(prefix + '-rsi');
+  if (rsiEl){
+    if (s.bb_ready){
+      rsiEl.textContent = rsi.toFixed(1);
+      rsiEl.className = 'v ' + (rsi <= rsiMax ? 'pos' : rsi >= (+s.rsi_exit_min || 60) ? 'neg' : '');
+    } else {
+      rsiEl.textContent = '--';
+      rsiEl.className   = 'v mute';
+    }
+  }
+
+  // Vol frac (σ/μ) — render as bp; band gates [vol_frac_min, vol_frac_max].
+  const vol  = +s.vol_frac || 0;
+  const vmin = +s.vol_frac_min || 0.0008;
+  const vmax = +s.vol_frac_max || 0.0120;
+  const volEl = $(prefix + '-vol');
+  if (volEl){
+    if (vol > 0){
+      const inBand = vol >= vmin && vol <= vmax;
+      volEl.textContent = (vol * 10000).toFixed(1) + 'bp ' + (inBand ? '✓' : '✗');
+      volEl.className = 'v ' + (inBand ? 'pos' : 'neg');
+    } else {
+      volEl.textContent = '--';
+      volEl.className   = 'v mute';
+    }
+  }
+
+  // Buffer
+  const samples = +s.buffer_samples || 0;
+  const span    = +s.buffer_span_ms || 0;
+  set(prefix + '-buf', samples + ' samples / ' + _engFmtBufferSpan(span));
+
+  // Status — RMR has a hard "ready" flag (bb_ready) that cleanly separates
+  // warming from armed; no time-based heuristic needed.
+  const warming = !s.bb_ready;
+  if      (s.halted) { _engSetStatus(prefix + '-status', 's-halted',  'HALTED');  _engSetCardClass(cardId, 'halted');  }
+  else if (s.active) { _engSetStatus(prefix + '-status', 's-active',  'IN POS');  _engSetCardClass(cardId, 'active');  }
+  else if (warming)  { _engSetStatus(prefix + '-status', 's-warming', 'WARMING'); _engSetCardClass(cardId, 'warming'); }
+  else               { _engSetStatus(prefix + '-status', 's-armed',   'ARMED');   _engSetCardClass(cardId, 'armed');   }
+
+  _engUpdatePos(prefix + '-pos-row', prefix + '-pos', s);
+  _engUpdateStats(prefix, s);
+}
+
+function renderRangeMeanReversion(arr){
+  if (!Array.isArray(arr)) return;
+  // Order matches main.cpp PAPER_SYMBOL_IDS = { SYM_BTC, SYM_ETH }.
+  if (arr[0]) renderRangeMeanReversionOne(arr[0], 'rmr-btc', 'eng-rmr-btc');
+  if (arr[1]) renderRangeMeanReversionOne(arr[1], 'rmr-eth', 'eng-rmr-eth');
+}
+
+/* ── Patch FUND/BASIS pills on the per-symbol cards from /api/state2 ──
+   The legacy /api/state path leaves d.perp_funding_rate / d.perp_basis_bp
+   at zero on the new VPS, so the symbol-card 'FUND' and 'BASIS' pills
+   stay '--'. /api/state2 carries live values via funding_window[i] /
+   basis_momentum[i]. Patch them in here every poll cycle.
+
+   Strictly additive: only overwrites pills that are still '--' or that
+   we've stamped here previously (tracked via dataset.s2). The legacy
+   renderer's writes still take precedence the moment it fills a pill,
+   because dataset.s2 is only set when the patcher itself fills it. */
+function _patchSymbolFundBasisFromState2(data){
+  const symPairs = [
+    [0, 'btc'],
+    [1, 'eth'],
+  ];
+  for (const pair of symPairs){
+    const idx = pair[0];
+    const sym = pair[1];
+    // FUND pill — funding_window[idx].current_rate (fractional).
+    const fwArr = Array.isArray(data.funding_window) ? data.funding_window : null;
+    if (fwArr && fwArr[idx] && typeof fwArr[idx].current_rate === 'number'){
+      const fr = fwArr[idx].current_rate;
+      const fnEl = $('fn-' + sym);
+      if (fnEl && (fnEl.textContent === '--' || fnEl.dataset.s2 === '1')){
+        if (fr !== 0){
+          const frBp = (fr * 10000).toFixed(2);
+          fnEl.textContent = (fr >= 0 ? '+' : '') + frBp + 'bp';
+          fnEl.className   = 'sm2-val ' + (fr > 0.0003 ? 'neg' : fr < -0.0002 ? 'pos' : 'zero');
+          fnEl.dataset.s2  = '1';
+        }
+      }
+    }
+
+    // BASIS pill — basis_momentum[idx].basis_now (already in bp).
+    const bmArr = Array.isArray(data.basis_momentum) ? data.basis_momentum : null;
+    if (bmArr && bmArr[idx] && typeof bmArr[idx].basis_now === 'number'){
+      const basis = bmArr[idx].basis_now;
+      const bsEl = $('bs-' + sym);
+      if (bsEl && (bsEl.textContent === '--' || bsEl.dataset.s2 === '1')){
+        if (Math.abs(basis) > 0.05){
+          bsEl.textContent = (basis >= 0 ? '+' : '') + basis.toFixed(1) + 'bp';
+          bsEl.className   = 'sm2-val ' + (basis > 5 ? 'neg' : basis < -5 ? 'pos' : 'zero');
+          bsEl.dataset.s2  = '1';
+        }
+      }
+    }
+  }
+}
+
 async function pollEngines(){
   let res;
   try {
@@ -999,6 +1132,8 @@ async function pollEngines(){
   renderCoinbasePremiumMRev   (data.coinbase_premium_mrev);
   renderFundingPersistenceFade(data.funding_persistence_fade);
   renderVolCompressionBreakout(data.vol_compression_breakout);
+  renderRangeMeanReversion    (data.range_mean_reversion);
+  _patchSymbolFundBasisFromState2(data);
 }
 
 pollEngines();

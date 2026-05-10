@@ -744,6 +744,30 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div class="eng-stats"><span>Trades<strong id="vcb-trades">0</strong></span><span>P&amp;L<strong id="vcb-pnl">+0bp</strong></span><span>WR<strong id="vcb-wr">--%</strong></span></div>
       </div>
 
+      <!-- Engine #9: Range Mean Reversion (BTC, 30-min Bollinger + RSI(14), high-freq) -->
+      <div class="eng-card" id="eng-rmr-btc">
+        <div class="eng-hd"><span class="eng-name">RANGE MR · BTC</span><span class="eng-status s-armed" id="rmr-btc-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="rmr-btc-bar"></div></div>
+        <div class="eng-row"><span>Price vs band</span><span class="v" id="rmr-btc-band">--</span></div>
+        <div class="eng-row"><span>RSI(14)</span><span class="v" id="rmr-btc-rsi">--</span></div>
+        <div class="eng-row"><span>Vol frac (σ/μ)</span><span class="v" id="rmr-btc-vol">--</span></div>
+        <div class="eng-row"><span>Buffer</span><span class="v mute" id="rmr-btc-buf">--</span></div>
+        <div class="eng-row" id="rmr-btc-pos-row" style="display:none"><span>Position</span><span class="v" id="rmr-btc-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="rmr-btc-trades">0</strong></span><span>P&amp;L<strong id="rmr-btc-pnl">+0bp</strong></span><span>WR<strong id="rmr-btc-wr">--%</strong></span></div>
+      </div>
+
+      <!-- Engine #9: Range Mean Reversion (ETH, 30-min Bollinger + RSI(14), high-freq) -->
+      <div class="eng-card" id="eng-rmr-eth">
+        <div class="eng-hd"><span class="eng-name">RANGE MR · ETH</span><span class="eng-status s-armed" id="rmr-eth-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="rmr-eth-bar"></div></div>
+        <div class="eng-row"><span>Price vs band</span><span class="v" id="rmr-eth-band">--</span></div>
+        <div class="eng-row"><span>RSI(14)</span><span class="v" id="rmr-eth-rsi">--</span></div>
+        <div class="eng-row"><span>Vol frac (σ/μ)</span><span class="v" id="rmr-eth-vol">--</span></div>
+        <div class="eng-row"><span>Buffer</span><span class="v mute" id="rmr-eth-buf">--</span></div>
+        <div class="eng-row" id="rmr-eth-pos-row" style="display:none"><span>Position</span><span class="v" id="rmr-eth-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="rmr-eth-trades">0</strong></span><span>P&amp;L<strong id="rmr-eth-pnl">+0bp</strong></span><span>WR<strong id="rmr-eth-wr">--%</strong></span></div>
+      </div>
+
     </div>
   </div>
 

@@ -1120,6 +1120,140 @@ function _patchSymbolFundBasisFromState2(data){
   }
 }
 
+/* ── Engine #10: Multi-Symbol Rotation (4h cross-sectional momentum) ──
+   Singleton object with a leaderboard array. Renders a single card showing
+   the current top symbol, its momentum / lead over #2, vol fraction, and
+   buffer fill. Bar fills as top.momentum_bp progresses toward MIN_MOMENTUM_BP. */
+function renderMultiSymbolRotation(s){
+  if (!s) return;
+
+  const lb = Array.isArray(s.leaderboard) ? s.leaderboard : [];
+  const top = lb[0] || null;
+  const second = lb[1] || null;
+
+  const minMomBp = +s.min_momentum_bp || 100;
+  const minLeadBp = +s.min_lead_bp || 30;
+  const maxVol = +s.max_vol_frac || 0.05;
+
+  // Progress = top.momentum_bp / MIN_MOMENTUM_BP, capped at 100. So the bar
+  // fully fills when the top symbol is at or above the entry threshold.
+  let pct = 0;
+  if (top && minMomBp > 0) {
+    pct = _engClampPct(((+top.momentum_bp || 0) / minMomBp) * 100);
+  }
+  const bar = $('msr-bar');
+  if (bar){ bar.className = _engBarClass(pct); bar.style.width = pct + '%'; }
+
+  // Top symbol label.
+  const topEl = $('msr-top');
+  if (topEl){
+    if (top && top.symbol){
+      const shortName = String(top.symbol).replace('usdt','').toUpperCase();
+      const px = +top.price || 0;
+      topEl.textContent = shortName + (px > 0 ? '  $' + px.toFixed(px < 1 ? 4 : 2) : '');
+      topEl.className = 'v';
+    } else {
+      topEl.textContent = '--';
+      topEl.className = 'v mute';
+    }
+  }
+
+  // Momentum + lead.
+  const momEl = $('msr-mom');
+  if (momEl){
+    if (top && second){
+      const mom  = +top.momentum_bp || 0;
+      const lead = mom - (+second.momentum_bp || 0);
+      momEl.textContent = _engFmtBp(mom, 0) + '  /  lead ' + _engFmtBp(lead, 0);
+      const leadOk = lead >= minLeadBp;
+      const momOk  = mom  >= minMomBp;
+      momEl.className = 'v ' + (momOk && leadOk ? 'pos' : mom > 0 ? '' : 'neg');
+    } else {
+      momEl.textContent = '--';
+      momEl.className = 'v mute';
+    }
+  }
+
+  // Vol fraction of the top symbol — render as % with ✓/✗ vs maxVol.
+  const volEl = $('msr-vol');
+  if (volEl){
+    if (top && (+top.vol_frac || 0) > 0){
+      const vf = +top.vol_frac || 0;
+      const ok = vf <= maxVol;
+      volEl.textContent = (vf * 100).toFixed(2) + '% ' + (ok ? '✓' : '✗');
+      volEl.className = 'v ' + (ok ? 'pos' : 'neg');
+    } else {
+      volEl.textContent = '--';
+      volEl.className = 'v mute';
+    }
+  }
+
+  // Buffer — show the MINIMUM buffer span across the basket (the basket-ready
+  // gate triggers on the slowest slot). Plus per-slot sample counts collapsed
+  // to "min..max samples".
+  const bufEl = $('msr-buf');
+  if (bufEl){
+    if (lb.length){
+      let minSpan = Infinity, maxSpan = 0;
+      let minN = Infinity, maxN = 0;
+      for (const r of lb){
+        const sp = +r.buffer_span_ms || 0;
+        const n  = +r.buffer_samples || 0;
+        if (sp < minSpan) minSpan = sp;
+        if (sp > maxSpan) maxSpan = sp;
+        if (n  < minN)    minN    = n;
+        if (n  > maxN)    maxN    = n;
+      }
+      if (!isFinite(minSpan)) minSpan = 0;
+      const minMin = (minSpan / 60000).toFixed(0);
+      const maxMin = (maxSpan / 60000).toFixed(0);
+      const sameSamples = (minN === maxN);
+      const sameSpan    = (minMin === maxMin);
+      const samplesStr  = sameSamples ? ('' + minN + ' samples') : (minN + '..' + maxN + ' samples');
+      const spanStr     = sameSpan    ? (minMin + 'm') : (minMin + '..' + maxMin + 'm');
+      bufEl.textContent = samplesStr + ' / ' + spanStr;
+    } else {
+      bufEl.textContent = '--';
+    }
+  }
+
+  // Position row + stats — the engine's stats fields are at the singleton
+  // level (not on the leaderboard rows), so we feed `s` directly.
+  // Rotations counter has its own slot inside the eng-stats span.
+  const rotEl = $('msr-rot');
+  if (rotEl) rotEl.textContent = (+s.rotations || 0);
+
+  // Status flow:
+  //   halted → HALTED
+  //   active → IN POS
+  //   !basket_ready → WARMING
+  //   else → ARMED
+  const warming = !s.basket_ready;
+  if      (s.halted) { _engSetStatus('msr-status', 's-halted',  'HALTED');  _engSetCardClass('eng-msr', 'halted');  }
+  else if (s.active) { _engSetStatus('msr-status', 's-active',  'IN POS');  _engSetCardClass('eng-msr', 'active');  }
+  else if (warming)  { _engSetStatus('msr-status', 's-warming', 'WARMING'); _engSetCardClass('eng-msr', 'warming'); }
+  else               { _engSetStatus('msr-status', 's-armed',   'ARMED');   _engSetCardClass('eng-msr', 'armed');   }
+
+  // Position row: when active, prefix with the current symbol short name.
+  const posRow = $('msr-pos-row');
+  const posVal = $('msr-pos');
+  if (posRow && posVal){
+    if (!s.active){ posRow.style.display = 'none'; }
+    else {
+      posRow.style.display = '';
+      const cur = String(s.current_symbol || '').replace('usdt','').toUpperCase() || '?';
+      const move  = (+s.move_bp || 0).toFixed(1);
+      const mfe   = (+s.mfe_bp  || 0).toFixed(1);
+      const mae   = (+s.mae_bp  || 0).toFixed(1);
+      const sizeR = (+s.size_R  || 0).toFixed(2);
+      posVal.textContent = cur + '  ' + move + 'bp  (mfe ' + mfe + ' / mae ' + mae + ')  ' + sizeR + 'R';
+      posVal.className = 'v ' + _engPnlClass(s.move_bp);
+    }
+  }
+
+  _engUpdateStats('msr', s);
+}
+
 async function pollEngines(){
   let res;
   try {
@@ -1133,6 +1267,7 @@ async function pollEngines(){
   renderFundingPersistenceFade(data.funding_persistence_fade);
   renderVolCompressionBreakout(data.vol_compression_breakout);
   renderRangeMeanReversion    (data.range_mean_reversion);
+  renderMultiSymbolRotation   (data.multi_symbol_rotation);
   _patchSymbolFundBasisFromState2(data);
 }
 

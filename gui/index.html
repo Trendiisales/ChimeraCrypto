@@ -768,6 +768,18 @@ html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);fo
         <div class="eng-stats"><span>Trades<strong id="rmr-eth-trades">0</strong></span><span>P&amp;L<strong id="rmr-eth-pnl">+0bp</strong></span><span>WR<strong id="rmr-eth-wr">--%</strong></span></div>
       </div>
 
+      <!-- Engine #10: Multi-Symbol Rotation (4h cross-sectional momentum, SOL/BNB/AVAX/LINK/XRP/DOGE) -->
+      <div class="eng-card" id="eng-msr">
+        <div class="eng-hd"><span class="eng-name">MULTI-SYM ROTATION</span><span class="eng-status s-armed" id="msr-status">--</span></div>
+        <div class="eng-progress"><div class="eng-progress-fill" id="msr-bar"></div></div>
+        <div class="eng-row"><span>Top symbol</span><span class="v" id="msr-top">--</span></div>
+        <div class="eng-row"><span>Top mom / lead</span><span class="v" id="msr-mom">--</span></div>
+        <div class="eng-row"><span>Top vol frac</span><span class="v" id="msr-vol">--</span></div>
+        <div class="eng-row"><span>Buffer (min)</span><span class="v mute" id="msr-buf">--</span></div>
+        <div class="eng-row" id="msr-pos-row" style="display:none"><span>Position</span><span class="v" id="msr-pos">--</span></div>
+        <div class="eng-stats"><span>Trades<strong id="msr-trades">0</strong></span><span>P&amp;L<strong id="msr-pnl">+0bp</strong></span><span>WR<strong id="msr-wr">--%</strong></span><span>Rot<strong id="msr-rot">0</strong></span></div>
+      </div>
+
     </div>
   </div>
 

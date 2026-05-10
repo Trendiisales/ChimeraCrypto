@@ -1,17 +1,41 @@
 # GenVersion.cmake — runs on every make via add_custom_target(gen_version ALL)
 # Writes include/version_generated.hpp with the current git short hash.
 # Using a cmake -P script avoids all shell quoting/escaping issues.
+#
+# Session 8 fix:
+#   * Pass `-c safe.directory=*` so git works regardless of who owns the
+#     repo vs who runs cmake (e.g. repo owned by `jo`, build run as root).
+#     This sidesteps the "fatal: detected dubious ownership" failure mode
+#     introduced in git 2.35.2 without requiring per-machine gitconfig.
+#   * Replace ERROR_QUIET with ERROR_VARIABLE + a build-time WARNING so
+#     future git failures surface visibly instead of silently producing
+#     build_ver="unknown" (which is what bit session 8 deploy on josgp1).
 
 execute_process(
-    COMMAND git rev-parse --short HEAD
+    COMMAND git -c "safe.directory=*" -c "safe.directory=${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     OUTPUT_VARIABLE GIT_HASH
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
+    ERROR_VARIABLE GIT_ERR
     RESULT_VARIABLE GIT_RESULT
 )
 
 if(NOT GIT_RESULT EQUAL 0 OR NOT GIT_HASH)
+    if(GIT_ERR)
+        message(WARNING
+            "GenVersion: git rev-parse failed (exit=${GIT_RESULT}): "
+            "${GIT_ERR}\n"
+            "BUILD_VERSION will be set to \"unknown\". To fix permanently:\n"
+            "  git config --global --add safe.directory '*'\n"
+            "Or check that git is installed and the source directory is a "
+            "valid repository: ${CMAKE_SOURCE_DIR}"
+        )
+    else()
+        message(WARNING
+            "GenVersion: git rev-parse returned empty hash (exit=${GIT_RESULT}); "
+            "BUILD_VERSION will be set to \"unknown\""
+        )
+    endif()
     set(GIT_HASH "unknown")
 endif()
 

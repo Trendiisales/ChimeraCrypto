@@ -69,7 +69,10 @@ namespace chimera {
 
 class FundingWindowEngine {
 public:
-    static constexpr double   ROUND_TRIP_COST_BP  = TradingConfig::MAKER_ROUND_TRIP_BP; // 15bp
+    // Per-symbol round-trip cost (session 8). Resolved via
+    // TradingConfig::maker_rt_bp_for_symbol(symbol_) in the constructor; see
+    // round_trip_cost_bp_ member below. Tier values (bp): BTC/ETH=17,
+    // BNB/SOL/XRP=20, AVAX/LINK/DOGE=22.
     static constexpr double   RATE_THRESHOLD      = 0.00015; // 15bp/8h minimum
     static constexpr double   BASIS_THRESHOLD     = 3.0;     // 3bp basis dislocation
     static constexpr int      WINDOW_SECS         = 180;     // 3 min before funding
@@ -83,7 +86,12 @@ public:
         chimera::risk::EngineType::FUNDING_WINDOW;
 
     explicit FundingWindowEngine(const std::string& sym = "")
-        : symbol_(sym), symbol_id_(sym_id(sym)) {}
+        : symbol_(sym), symbol_id_(sym_id(sym))
+    {
+        // Resolve the realistic per-symbol round-trip cost from the central
+        // config tier table. BTC/ETH=17 bp, mid alts=20, tail alts=22.
+        round_trip_cost_bp_ = TradingConfig::maker_rt_bp_for_symbol(sym);
+    }
 
     // Tier1Risk integration setter (session 6 wiring) — null-safe; default
     // behaviour (risk_ == nullptr) is identical to pre-session-6 behaviour.
@@ -190,7 +198,7 @@ public:
             bool timeout = (ts - entry_ts_) > MAX_HOLD_MS;
 
             if (sl || trail || timeout) {
-                double net_bp = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
+                double net_bp = (move_bp - round_trip_cost_bp_) * pos_size_R_;
                 total_pnl_bp_ += net_bp;
                 total_trades_++;
                 if (net_bp > 0) wins_++;
@@ -198,7 +206,7 @@ public:
                 const char* reason = trail ? "TRAIL" : sl ? "SL" : "TIMEOUT";
                 std::printf("[FUND-WIN-EXIT] %s | net=%.2fbp (gross=%.2f cost=%.1f) | "
                             "reason=%s | mfe=%.1f | total=%.1fbp\n",
-                    symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP,
+                    symbol_.c_str(), net_bp, move_bp, round_trip_cost_bp_,
                     reason, pos_mfe_bp_, total_pnl_bp_);
                 std::fflush(stdout);
 
@@ -242,14 +250,14 @@ public:
         if (pos_active_) {
             double exit_px = (last_price > 0.0) ? last_price : entry_price_;
             double move_bp = (exit_px - entry_price_) / entry_price_ * 10000.0;
-            double net_bp  = (move_bp - ROUND_TRIP_COST_BP) * pos_size_R_;
+            double net_bp  = (move_bp - round_trip_cost_bp_) * pos_size_R_;
             total_pnl_bp_ += net_bp;
             total_trades_++;
             if (net_bp > 0) wins_++;
 
             std::printf("[FUND-WIN-KILL] %s | net=%.2fbp (gross=%.2f cost=%.1f) | "
                         "exit_px=%.4f entry=%.4f | mfe=%.1f | total=%.1fbp\n",
-                symbol_.c_str(), net_bp, move_bp, ROUND_TRIP_COST_BP,
+                symbol_.c_str(), net_bp, move_bp, round_trip_cost_bp_,
                 exit_px, entry_price_, pos_mfe_bp_, total_pnl_bp_);
             std::fflush(stdout);
 
@@ -352,6 +360,13 @@ private:
     // ── Tier1Risk wiring (session 6) ─────────────────────────────────────────
     chimera::risk::Tier1Risk* risk_      = nullptr;
     int                       symbol_id_ = -1;
+
+    // ── Per-symbol cost model (session 8) ────────────────────────────────────
+    // Default of 17 bp matches the BTC/ETH tier so the engine remains safe if
+    // ever instantiated without a recognised symbol. The constructor body
+    // overrides this with TradingConfig::maker_rt_bp_for_symbol(sym) so the
+    // exit-time net P&L calculation reflects realistic per-symbol cost.
+    double  round_trip_cost_bp_ = TradingConfig::MAKER_RT_BP_BTC_ETH;
 
     // ── MOVE 2: kill-switch state ────────────────────────────────────────────
     bool    halted_           = false;

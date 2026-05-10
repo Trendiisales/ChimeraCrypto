@@ -62,6 +62,9 @@
 #include <iomanip>
 #include <algorithm>
 
+#include "core/SymbolIndex.hpp"
+#include "risk/Tier1Risk.hpp"
+
 namespace chimera {
 
 class FundingWindowEngine {
@@ -75,7 +78,16 @@ public:
     static constexpr int64_t  MAX_HOLD_MS         = 480000;  // 8 min
     static constexpr int64_t  COOLDOWN_MS         = 14400000;// 4h — one per funding session
 
-    explicit FundingWindowEngine(const std::string& sym = "") : symbol_(sym) {}
+    // Tier1Risk identity (session 6 wiring)
+    static constexpr chimera::risk::EngineType ETYPE =
+        chimera::risk::EngineType::FUNDING_WINDOW;
+
+    explicit FundingWindowEngine(const std::string& sym = "")
+        : symbol_(sym), symbol_id_(sym_id(sym)) {}
+
+    // Tier1Risk integration setter (session 6 wiring) — null-safe; default
+    // behaviour (risk_ == nullptr) is identical to pre-session-6 behaviour.
+    void set_risk(chimera::risk::Tier1Risk* r) { risk_ = r; }
 
     // ── MOVE 2: shadow-mode gate (mirrors SwingEngine convention) ────────────
     // Default true so the engine paper-trades. Real-execution wiring is
@@ -154,6 +166,10 @@ public:
                 pos_size_R_);
             std::fflush(stdout);
 
+            // Tier1Risk: register the open position with the risk wrapper.
+            if (risk_) risk_->on_position_open(ETYPE, symbol_id_,
+                                               /*is_long=*/true, pos_size_R_);
+
         } else {
             // ── MANAGE POSITION ────────────────────────────────────────────
             double move_bp = (price - entry_price_) / entry_price_ * 10000.0;
@@ -190,6 +206,10 @@ public:
                 entry_price_     = 0.0;
                 trail_floor_bp_  = -9999.0;
                 cooldown_until_ms_ = ts + COOLDOWN_MS;
+
+                // Tier1Risk: release the per-engine R budget and feed the
+                // realized P&L into the daily-loss circuit.
+                if (risk_) risk_->on_position_close(ETYPE, net_bp);
             }
         }
     }
@@ -237,6 +257,11 @@ public:
             entry_price_      = 0.0;
             trail_floor_bp_   = -9999.0;
             cooldown_until_ms_ = (now_ms > 0 ? now_ms : cooldown_until_ms_) + COOLDOWN_MS;
+
+            // Tier1Risk: release the per-engine R budget for the killed
+            // position. main.cpp's /api/kill handler also calls
+            // risk.halt_all() centrally, so we don't halt here.
+            if (risk_) risk_->on_position_close(ETYPE, net_bp);
         }
         halted_ = true;
         std::printf("[FUND-WIN-KILL] %s | engine halted; clear_halt() to resume\n",
@@ -323,6 +348,10 @@ public:
 
 private:
     std::string symbol_;
+
+    // ── Tier1Risk wiring (session 6) ─────────────────────────────────────────
+    chimera::risk::Tier1Risk* risk_      = nullptr;
+    int                       symbol_id_ = -1;
 
     // ── MOVE 2: kill-switch state ────────────────────────────────────────────
     bool    halted_           = false;

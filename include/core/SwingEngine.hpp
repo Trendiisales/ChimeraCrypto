@@ -162,6 +162,7 @@
 #include "core/SymbolIndex.hpp"
 #include "live/BinanceWSFeed.hpp"
 #include "live/SpotExecutor.hpp"
+#include "risk/Tier1Risk.hpp"
 #include "version_generated.hpp"
 #include <curl/curl.h>
 
@@ -351,6 +352,10 @@ struct SwingPosition {
 
 class SwingEngine {
 public:
+    // Tier1Risk identity (session 6 wiring) — engine #1 (SwingEngine v9).
+    static constexpr chimera::risk::EngineType ETYPE =
+        chimera::risk::EngineType::SWING;
+
     static constexpr int64_t H4_MS  = 14400000LL;
     static constexpr int64_t D1_MS  = 86400000LL;
 
@@ -508,6 +513,11 @@ public:
             total_pnl_pct_ += kill_pnl;
             if (kill_pnl > 0) ++wins_;
             _record_exit(i, prices_[i], now_ms_last_[i], "KILL", kill_pnl);
+
+            // Tier1Risk: release per-engine R for the killed position.
+            // main.cpp's /api/kill handler centralises the halt_all() call.
+            if (risk_) risk_->on_position_close(ETYPE, kill_pnl * 100.0);
+
             pos = SwingPosition{};
         }
     }
@@ -515,6 +525,13 @@ public:
     void update_price(int id, double price) {
         if (id >= 0 && id < MAX_SYMBOLS) prices_[id] = price;
     }
+
+    // Tier1Risk integration setter (session 6 wiring) — null-safe; default
+    // (risk_ == nullptr) preserves pre-session-6 behaviour. When set,
+    // _open_position_raw() consults risk_->available_R() before allowing
+    // a new entry, and entry/close paths register positions with the
+    // wrapper.
+    void set_risk(chimera::risk::Tier1Risk* r) { risk_ = r; }
 
     int total_trades()    const { return trade_counter_; }
     double total_pnl_pct() const { return total_pnl_pct_; }
@@ -679,6 +696,12 @@ private:
     int             last_exit_dir_[MAX_SYMBOLS]      = {};
     int64_t         last_exit_ms_[MAX_SYMBOLS]       = {};
     SpotExecutor*   executor_     = nullptr;
+
+    // ── Tier1Risk wiring (session 6) ───────────────────────────────────────
+    // Default null = pre-session-6 behaviour (no risk gating, no hooks).
+    // main.cpp calls set_risk(&risk) after construction to enable.
+    chimera::risk::Tier1Risk* risk_ = nullptr;
+
     int             trade_counter_ = 0;
     double          total_pnl_pct_ = 0.0;
     int             wins_          = 0;
@@ -1054,6 +1077,13 @@ private:
     void _open_position_raw(int id, bool is_long, double entry, double sl, double tp,
                              int64_t now_ms, SwingStrategy strat, int64_t max_hold_ms,
                              int d1_dir) {
+        // Tier1Risk: gate new entries on the centrally-managed budget. When
+        // halted (daily-loss circuit, manual halt) or capped (per-engine,
+        // total, correlation), available_R returns 0 and we skip the entry.
+        // Existing positions continue to be managed/closed normally — this
+        // gate only blocks NEW entries.
+        if (risk_ && risk_->available_R(ETYPE, id) <= 0.0) return;
+
         auto& existing = positions_[id];
         if (existing.active && existing.is_long != is_long) {
             printf("[SWING-CONFLICT] %s closing %s %s S%d to enter %s S%d\n",
@@ -1105,6 +1135,14 @@ private:
         fflush(stdout);
 
         if (executor_) executor_->execute(pos.symbol, is_long, qty, entry);
+
+        // Tier1Risk: register the open position. SwingEngine sizes in USD
+        // notional (qty * entry), not in normalised R units, so we register
+        // a fixed 1.0R per entry — the per_engine_r_cap default of 1.0
+        // means SwingEngine occupies exactly one slot of its own. If
+        // SwingEngine is later given pyramid wiring that increases exposure,
+        // bump the registered R here accordingly.
+        if (risk_) risk_->on_position_open(ETYPE, id, is_long, /*size_R=*/1.0);
     }
 
     void _manage(int id, double price, int64_t now_ms) {
@@ -1298,6 +1336,11 @@ private:
 
         total_pnl_pct_ += pnl_pct;
         if (pnl_pct > 0) ++wins_;
+
+        // Tier1Risk: release per-engine R + feed daily-loss circuit. The
+        // wrapper's daily_loss_kill_bp threshold is in bp; SwingEngine
+        // tracks pnl_pct (% of notional) so multiply by 100.
+        if (risk_) risk_->on_position_close(ETYPE, pnl_pct * 100.0);
 
         const char* pfx = shadow_mode ? "[SWING-SHADOW]" : "[SWING]";
         printf("%s %s CLOSE %s S%d entry=%.4f exit=%.4f pnl=%.3f%% mfe=%.4f why=%s\n",

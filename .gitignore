@@ -3,3 +3,11 @@ logs/
 *.log
 config/binance_credentials.json
 /tmp/chimera_*
+.test_build/
+# Historical data fetched by fetch_chimera_history.py — too large for git
+# (1.1 GB at 1y span). Kept on disk per machine only.
+data/funding/
+data/klines_spot/
+data/klines_perp/
+# Tier1Risk persistence file (live runtime state, not source of truth)
+data/tier1_risk_state.json

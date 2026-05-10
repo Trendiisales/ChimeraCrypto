@@ -35,11 +35,18 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "core/SymbolIndex.hpp"
+#include "risk/Tier1Risk.hpp"
+
 namespace chimera {
 
 class OrderbookImbalanceEngine {
 public:
     static constexpr double ROUND_TRIP_COST_BP = 15.0; // 7.5bp/side with BNB discount (0.075% per side)
+
+    // Tier1Risk identity (session 6 wiring)
+    static constexpr chimera::risk::EngineType ETYPE =
+        chimera::risk::EngineType::OBI;
 
     // ── MOVE 2: shadow-mode gate (mirrors SwingEngine convention) ────────────
     bool shadow_mode = true;
@@ -55,8 +62,12 @@ public:
         int    total_trades;
     };
 
-    explicit OrderbookImbalanceEngine(const std::string& sym) : symbol_(sym) {}
+    explicit OrderbookImbalanceEngine(const std::string& sym)
+        : symbol_(sym), symbol_id_(sym_id(sym)) {}
     OrderbookImbalanceEngine() = default;
+
+    // Tier1Risk integration setter (session 6 wiring) — null-safe.
+    void set_risk(chimera::risk::Tier1Risk* r) { risk_ = r; }
 
     // Called every tick from QuadEngine on_tick
     // Imbalance: +1 = all bids, -1 = all asks, 0 = neutral
@@ -112,6 +123,11 @@ public:
             std::printf("[OBI-ENTRY] %s | imbal=%.2f | spread=%.2fbp | vol=%.2f | basis=%.1fbp | size=%.1fR\n",
                 symbol_.c_str(), book_imbalance, spread_bps, vol_ratio, perp_basis_bp, pos_size_R_);
             std::fflush(stdout);
+
+            // Tier1Risk: register the open position (only confirmed LONG —
+            // the SHORT branch above already exited before reaching here).
+            if (risk_) risk_->on_position_open(ETYPE, symbol_id_,
+                                               /*is_long=*/true, pos_size_R_);
         }
         else {
             double move_bp = (price - entry_price_) / entry_price_ * 10000.0;
@@ -135,6 +151,11 @@ public:
                 std::fflush(stdout);
                 pos_active_     = false;
                 cooldown_until_ms_ = ts + 60000;  // 60s cooldown per symbol
+
+                // Tier1Risk: release per-engine R + feed daily-loss circuit.
+                // OBI's local net_bp is per-unit; scale by pos_size_R_ for
+                // consistency with how total_pnl_bp_ is accumulated above.
+                if (risk_) risk_->on_position_close(ETYPE, net_bp * pos_size_R_);
             }
         }
     }
@@ -177,6 +198,10 @@ public:
             pos_active_       = false;
             entry_price_      = 0.0;
             cooldown_until_ms_ = (now_ms > 0 ? now_ms : cooldown_until_ms_) + 60000;
+
+            // Tier1Risk: release the per-engine R budget for the killed
+            // position. main.cpp's /api/kill handler centralises halt_all().
+            if (risk_) risk_->on_position_close(ETYPE, net_bp);
         }
         halted_ = true;
         std::printf("[OBI-KILL] %s | engine halted; clear_halt() to resume\n",
@@ -237,6 +262,14 @@ private:
     bool    halted_      = false;
 
     std::string symbol_;
+
+    // ── Tier1Risk wiring (session 6) ─────────────────────────────────────────
+    // Declared after symbol_ so the constructor initializer list
+    // `: symbol_(sym), symbol_id_(sym_id(sym))` matches declaration order
+    // (silences -Wreorder).
+    chimera::risk::Tier1Risk* risk_      = nullptr;
+    int                       symbol_id_ = -1;
+
     double  entry_price_ = 0.0;
     int     pos_dir_     = 0;
     int64_t entry_ts_    = 0;

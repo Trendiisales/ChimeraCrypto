@@ -75,11 +75,16 @@
 
 #include "core/SymbolIndex.hpp"
 #include "live/BinanceWSFeed.hpp"
+#include "risk/Tier1Risk.hpp"
 
 namespace chimera {
 
 class EthBtcLeadLagEngine {
 public:
+    // Tier1Risk identity (session 6 wiring) — engine trades BTC-only.
+    static constexpr chimera::risk::EngineType ETYPE =
+        chimera::risk::EngineType::ETH_BTC_LEADLAG;
+
     // ── Cost model (single source of truth in TradingConfig) ──────────────
     static constexpr double  ROUND_TRIP_COST_BP = TradingConfig::MAKER_ROUND_TRIP_BP; // 15bp
 
@@ -122,6 +127,9 @@ public:
     static constexpr double  SIZE_FRAC_OF_R    = 0.5;
 
     EthBtcLeadLagEngine() = default;
+
+    // Tier1Risk integration setter (session 6 wiring) — null-safe.
+    void set_risk(chimera::risk::Tier1Risk* r) { risk_ = r; }
 
     // ── shadow-mode gate (mirrors SwingEngine / FundingWindowEngine convention) ──
     // Default true so the engine paper-trades. Real-execution wiring is
@@ -186,6 +194,10 @@ public:
             entry_price_        = 0.0;
             trail_floor_bp_     = -9999.0;
             cooldown_until_ms_  = (now_ms > 0 ? now_ms : last_now_ms_) + COOLDOWN_MS;
+
+            // Tier1Risk: release per-engine R for the killed BTC position.
+            // main.cpp's /api/kill handler centralises the halt_all() call.
+            if (risk_) risk_->on_position_close(ETYPE, net_bp);
         }
         halted_ = true;
         std::printf("[ELL-KILL] engine halted; clear_halt() to resume\n");
@@ -390,6 +402,10 @@ private:
             btc_price, pos_size_R_,
             (long long)LEAD_WINDOW_MS);
         std::fflush(stdout);
+
+        // Tier1Risk: register the BTC long position with the risk wrapper.
+        if (risk_) risk_->on_position_open(ETYPE, SYM_BTC,
+                                           /*is_long=*/true, pos_size_R_);
     }
 
     // ── manage open position ───────────────────────────────────────────────
@@ -436,7 +452,13 @@ private:
         entry_price_        = 0.0;
         trail_floor_bp_     = -9999.0;
         cooldown_until_ms_  = now_ms + COOLDOWN_MS;
+
+        // Tier1Risk: release per-engine R + feed daily-loss circuit.
+        if (risk_) risk_->on_position_close(ETYPE, net_bp);
     }
+
+    // ── Tier1Risk wiring (session 6) ───────────────────────────────────────
+    chimera::risk::Tier1Risk* risk_ = nullptr;
 };
 
 } // namespace chimera

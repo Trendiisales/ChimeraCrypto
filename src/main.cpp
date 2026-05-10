@@ -29,15 +29,26 @@
 //   perp WS   (PerpFeed)                   — markPrice + aggTrade for funding/basis/flow
 //
 // HTTP GUI :8080
-//   GET  /api/state   → SwingEngine state_json (unchanged for legacy dashboard)
-//   GET  /api/state2  → {"funding_window":[...],"basis_momentum":[...],
-//                         "obi":[...],"eth_btc_leadlag":{...},
-//                         "coinbase_premium_mrev":{...},
-//                         "funding_persistence_fade":{...},
-//                         "vol_compression_breakout":{...},
-//                         "range_mean_reversion":[...],
-//                         "multi_symbol_rotation":{...}}
-//   POST /api/kill    → kill_all on every engine (Swing + 9 paper)
+//   GET  /api/state          → SwingEngine state_json (unchanged for legacy dashboard)
+//   GET  /api/state2         → {"funding_window":[...],"basis_momentum":[...],
+//                                "obi":[...],"eth_btc_leadlag":{...},
+//                                "coinbase_premium_mrev":{...},
+//                                "funding_persistence_fade":{...},
+//                                "vol_compression_breakout":{...},
+//                                "range_mean_reversion":[...],
+//                                "multi_symbol_rotation":{...},
+//                                "tier1_risk":{halted,daily_realized_bp,
+//                                              total_open_R,per_engine_open_R{...}}}
+//   POST /api/kill           → kill_all on every engine + risk.halt_all()
+//   POST /api/risk/resume    → clear Tier1Risk halt (manual or daily-loss)
+//
+// SESSION 6 (2026-05-10): Tier1Risk wrapper wired across all 10 engines.
+// Per-tick available_R is now computed by risk.available_R(EngineType, id)
+// instead of the hardcoded 1.0 placeholder. Engines call risk.on_position_
+// open / on_position_close at every entry / exit / kill site so the
+// daily-loss circuit, correlation cap, per-engine cap, total cap and
+// rate limit all enforce centrally. State persists to
+// data/tier1_risk_state.json across restarts.
 // ============================================================================
 #include <thread>
 #include <chrono>
@@ -74,6 +85,7 @@
 #include "core/RangeMeanReversionEngine.hpp"
 #include "core/MultiSymbolRotationEngine.hpp"
 #include "core/SymbolIndex.hpp"
+#include "risk/Tier1Risk.hpp"
 
 #include "version_generated.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
@@ -137,6 +149,7 @@ static chimera::VolCompressionBreakoutEngine*   g_vcbe_ptr        = nullptr;
 static chimera::RangeMeanReversionEngine*       g_rmre_ptr        = nullptr;
 static chimera::MultiSymbolRotationEngine*      g_msre_ptr        = nullptr;
 static chimera::PerpFeed*                       g_perp_feed_ptr   = nullptr;
+static chimera::risk::Tier1Risk*                g_risk_ptr        = nullptr;
 
 // Last-seen Coinbase BTC-USD price (atomic so the GUI / state_json can read it
 // without taking g_engine_mtx). Updated from the Coinbase WS callback.
@@ -302,6 +315,18 @@ static std::string build_paper_state_json() {
         js << "{}";
     }
 
+    // ── tier1_risk (session 6 — central risk wrapper snapshot) ──────────────
+    // Surfaces halted/halt_reason, session daily realized P&L, total open R
+    // across all engines, and per-engine open R from the centrally-managed
+    // Tier1Risk wrapper. The GUI can render this as a global header strip
+    // (red banner + reason on halt) plus a per-engine R-utilisation bar.
+    js << ",\"tier1_risk\":";
+    if (g_risk_ptr) {
+        js << g_risk_ptr->snapshot_json();
+    } else {
+        js << "{}";
+    }
+
     js << "}";
     return js.str();
 }
@@ -354,6 +379,19 @@ static void http_server_thread(int port) {
             // Multi-symbol rotation: kill_all reads its own active_symbol_id_
             // and uses last_known_price=0.0 to fall back to last_price_[slot].
             if (g_msre_ptr)   g_msre_ptr->kill_all(0.0, now_ms);
+
+            // Tier1Risk: centrally halt the wrapper so no engine can take a
+            // new entry until POST /api/risk/resume clears it. Each engine's
+            // kill_all() above already called risk.on_position_close() to
+            // free its per-engine R, so positions_[] is now empty.
+            if (g_risk_ptr) g_risk_ptr->halt_all("manual_kill_via_api");
+            body = "{\"ok\":true}";
+        } else if (strstr(req, "POST /api/risk/resume")) {
+            // Clear a Tier1Risk halt (manual or daily-loss-circuit). The
+            // operator should review the state2 tier1_risk.halt_reason
+            // before calling this. Idempotent — no-op if not halted.
+            std::lock_guard<std::mutex> lk(g_engine_mtx);
+            if (g_risk_ptr) g_risk_ptr->resume_all();
             body = "{\"ok\":true}";
         } else if (strstr(req, "GET /api/state2")) {
             // NOTE: must be checked BEFORE /api/state (substring match).
@@ -416,10 +454,35 @@ int main() {
         std::fprintf(stderr, "[STARTUP] WARNING: executor init failed — shadow mode only\n");
     }
 
+    // ── Tier1Risk wrapper (session 6) ───────────────────────────────────────
+    // Centrally-managed risk budget across the whole 10-engine portfolio.
+    // Constructed early so every engine below can have set_risk(&risk) called
+    // immediately after instantiation. Persists daily P&L + halt state to
+    // data/tier1_risk_state.json — survives process restarts.
+    //
+    // Defaults from Tier1Risk::Config:
+    //   per_engine_r_cap         = 1.0 per engine (matches old placeholder)
+    //   total_r_cap              = 3.0 across all engines simultaneously
+    //   daily_loss_kill_bp       = -200 bp (auto-halt threshold)
+    //   max_engines_per_symbol_side = 2  (correlation cap)
+    //   max_orders_per_minute    = 10 per engine (rate limit)
+    //
+    // Tighten or relax via Config before construction once forward-shadow
+    // results inform per-engine sizing (Step 5 of the 5-point plan).
+    chimera::risk::Tier1Risk risk;
+    g_risk_ptr = &risk;
+    if (risk.is_halted()) {
+        std::printf("[STARTUP] Tier1Risk loaded HALTED — reason: %s\n",
+                    risk.halt_reason().c_str());
+        std::printf("[STARTUP] Engines will refuse new entries. POST /api/risk/resume to clear.\n");
+        std::fflush(stdout);
+    }
+
     // ── Engine #1: SwingEngine v9 (H4 Donchian, ETH-only, live shadow) ──────
     chimera::SwingEngine engine;
     engine.shadow_mode = true;
     if (exec_ok) engine.set_executor(&executor);
+    engine.set_risk(&risk);
     g_engine_ptr      = &engine;
     g_engine_ptr_kill = &engine;
 
@@ -428,7 +491,10 @@ int main() {
         chimera::FundingWindowEngine(chimera::sym_full(chimera::SYM_BTC)),
         chimera::FundingWindowEngine(chimera::sym_full(chimera::SYM_ETH))
     };
-    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) fwes[i].shadow_mode = true;
+    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+        fwes[i].shadow_mode = true;
+        fwes[i].set_risk(&risk);
+    }
     g_fwes_ptr = fwes;
 
     // ── Engine #3: BasisMomentum on BTC + ETH (paper) ───────────────────────
@@ -436,7 +502,10 @@ int main() {
         chimera::BasisMomentumEngine(chimera::sym_full(chimera::SYM_BTC)),
         chimera::BasisMomentumEngine(chimera::sym_full(chimera::SYM_ETH))
     };
-    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) bmes[i].shadow_mode = true;
+    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+        bmes[i].shadow_mode = true;
+        bmes[i].set_risk(&risk);
+    }
     g_bmes_ptr = bmes;
 
     // ── Engine #4: OrderbookImbalance on BTC + ETH (paper) ──────────────────
@@ -444,12 +513,16 @@ int main() {
         chimera::OrderbookImbalanceEngine(chimera::sym_full(chimera::SYM_BTC)),
         chimera::OrderbookImbalanceEngine(chimera::sym_full(chimera::SYM_ETH))
     };
-    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) obes[i].shadow_mode = true;
+    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+        obes[i].shadow_mode = true;
+        obes[i].set_risk(&risk);
+    }
     g_obes_ptr = obes;
 
     // ── Engine #5: EthBtcLeadLag — Phase 1, spot-only singleton (paper) ─────
     chimera::EthBtcLeadLagEngine ellaye;
     ellaye.shadow_mode = true;
+    ellaye.set_risk(&risk);
     g_ellaye_ptr = &ellaye;
 
     // ── Engine #6: CoinbasePremiumMRev — multi-day BTC mean reversion ───────
@@ -458,6 +531,7 @@ int main() {
     // ~24h of premium samples and trades on sustained discount.
     chimera::CoinbasePremiumMRevEngine cbprem;
     cbprem.shadow_mode = true;
+    cbprem.set_risk(&risk);
     g_cbprem_ptr = &cbprem;
 
     // ── Engine #7: FundingPersistenceFade — multi-day BTC mean reversion ────
@@ -467,6 +541,7 @@ int main() {
     // automatically once perp data is restored.
     chimera::FundingPersistenceFadeEngine fpfe;
     fpfe.shadow_mode = true;
+    fpfe.set_risk(&risk);
     g_fpfe_ptr = &fpfe;
 
     // ── Engine #8: VolCompressionBreakout — 24h vol-squeeze + Donchian ──────
@@ -474,6 +549,7 @@ int main() {
     // prices. Cannot fire until ~23h after startup (warm-up period).
     chimera::VolCompressionBreakoutEngine vcbe;
     vcbe.shadow_mode = true;
+    vcbe.set_risk(&risk);
     g_vcbe_ptr = &vcbe;
 
     // ── Engine #9: RangeMeanReversion on BTC + ETH (paper, high-frequency) ──
@@ -484,7 +560,10 @@ int main() {
         chimera::RangeMeanReversionEngine(chimera::sym_full(chimera::SYM_BTC)),
         chimera::RangeMeanReversionEngine(chimera::sym_full(chimera::SYM_ETH))
     };
-    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) rmre[i].shadow_mode = true;
+    for (int i = 0; i < PAPER_NUM_SYMBOLS; ++i) {
+        rmre[i].shadow_mode = true;
+        rmre[i].set_risk(&risk);
+    }
     g_rmre_ptr = rmre;
 
     // ── Engine #10: MultiSymbolRotation across SOL/BNB/AVAX/LINK/XRP/DOGE ──
@@ -493,6 +572,7 @@ int main() {
     // basket. Warm-up = ~4h (needs full 4h lookback in EVERY slot).
     chimera::MultiSymbolRotationEngine msre;
     msre.shadow_mode = true;
+    msre.set_risk(&risk);
     g_msre_ptr = &msre;
 
     // ── Perp WebSocket feed (powers FundingWindow + BasisMomentum + OBI's basis input) ──
@@ -555,18 +635,29 @@ int main() {
                 const double frate = perp_feed.funding_rate(id);
                 const double basis = perp_feed.basis_bp(id, mid);
                 const double flow  = perp_feed.perp_flow_ratio(id);
-                // available_R = 1.0 placeholder until Tier 1 risk wrapper exists.
-                const double avail_R = 1.0;
+
+                // Tier1Risk per-engine available R queries (session 6).
+                // Each returns 0.0 when entry is denied (halted, daily kill,
+                // per-engine cap, total cap, correlation cap, rate limit).
+                // Engines no-op cleanly when they receive 0 — see each
+                // engine's MIN_AVAIL_R / `if (available_R < ...) return;`
+                // gates in their _try_enter().
+                const double fw_R  = risk.available_R(
+                    chimera::risk::EngineType::FUNDING_WINDOW, id);
+                const double bm_R  = risk.available_R(
+                    chimera::risk::EngineType::BASIS_MOMENTUM, id);
+                const double obi_R = risk.available_R(
+                    chimera::risk::EngineType::OBI, id);
 
                 // FundingWindow — uses funding_rate + basis
-                fwes[paper_slot].on_tick(mid, now_ms, frate, basis, avail_R);
+                fwes[paper_slot].on_tick(mid, now_ms, frate, basis, fw_R);
 
                 // BasisMomentum — uses basis + perp flow + vol_ratio.
                 // vol_ratio = 1.0 placeholder (engine requires >= 0.7); replace
                 // with a real per-symbol vol estimate once we have a regime
                 // classifier in main.cpp.
                 bmes[paper_slot].on_tick(mid, now_ms, basis, flow,
-                                          /*vol_ratio=*/1.0, avail_R);
+                                          /*vol_ratio=*/1.0, bm_R);
 
                 // OrderbookImbalance — uses tick.book_imbalance + tick.spread_bps
                 // + perp_basis. regime is hardcoded to 1 (GRIND) and vol_ratio
@@ -579,19 +670,24 @@ int main() {
                                           /*vol_ratio=*/1.5,
                                           /*perp_basis_bp=*/basis,
                                           /*regime=*/1,
-                                          avail_R);
+                                          obi_R);
             }
 
             // ── Engine #5: ETH→BTC Lead-Lag (Phase 1, spot-only) ─────────────
-            // The engine self-routes: BTC/ETH only, others ignored.
-            ellaye.on_tick(id, tick, now_ms, /*available_R=*/1.0);
+            // The engine self-routes: BTC/ETH only, others ignored. Trade leg
+            // is BTC, so we query risk for BTC sizing.
+            const double ell_R = risk.available_R(
+                chimera::risk::EngineType::ETH_BTC_LEADLAG, chimera::SYM_BTC);
+            ellaye.on_tick(id, tick, now_ms, ell_R);
 
             // ── Engines #6-#8: BTC-singleton multi-day / vol-regime engines ─
             // Each ignores any symbol_id != SYM_BTC internally, so calling on
             // every tick is safe. Strategy A (Coinbase Premium) needs the
             // BTC tick to update its Binance leg; the Coinbase leg comes via
             // a separate WS callback below.
-            cbprem.update_binance_btc(id, tick, now_ms, /*available_R=*/1.0);
+            const double cbprem_R = risk.available_R(
+                chimera::risk::EngineType::COINBASE_PREMIUM_MREV, chimera::SYM_BTC);
+            cbprem.update_binance_btc(id, tick, now_ms, cbprem_R);
 
             // Strategy B (Funding Persistence) reads funding via PerpFeed.
             // While the perp WS is silent, frate is 0.0 here (no PerpFeed
@@ -599,10 +695,14 @@ int main() {
             const double frate_btc = (perp_feed.ready(chimera::SYM_BTC))
                                        ? perp_feed.funding_rate(chimera::SYM_BTC)
                                        : 0.0;
-            fpfe.on_tick(id, tick, now_ms, frate_btc, /*available_R=*/1.0);
+            const double fpfe_R = risk.available_R(
+                chimera::risk::EngineType::FUNDING_PERSIST_FADE, chimera::SYM_BTC);
+            fpfe.on_tick(id, tick, now_ms, frate_btc, fpfe_R);
 
             // Strategy C (Vol Compression) is fully spot-only.
-            vcbe.on_tick(id, tick, now_ms, /*available_R=*/1.0);
+            const double vcbe_R = risk.available_R(
+                chimera::risk::EngineType::VOL_COMPRESSION_BREAKOUT, chimera::SYM_BTC);
+            vcbe.on_tick(id, tick, now_ms, vcbe_R);
 
             // ── Engine #9: RangeMeanReversion (high-frequency) ───────────────
             // BTC + ETH only; route per-symbol like FW/BM/OBI. Perp data not
@@ -610,7 +710,9 @@ int main() {
             // Fires every tick AFTER its 30-min warm-up; trades clustering
             // when the range-vol fraction is in [8 bp, 120 bp].
             if (paper_slot >= 0) {
-                rmre[paper_slot].on_tick(tick, now_ms, /*available_R=*/1.0);
+                const double rmre_R = risk.available_R(
+                    chimera::risk::EngineType::RANGE_MEAN_REVERSION, id);
+                rmre[paper_slot].on_tick(tick, now_ms, rmre_R);
             }
 
             // ── Engine #10: MultiSymbolRotation (NEW, cross-sectional 4h) ────
@@ -618,7 +720,11 @@ int main() {
             // SYM_DOGE]. Routes to internal per-slot ring buffers, then
             // throttled leaderboard recompute (every 60s) decides entry /
             // rotation / exit. Active position management is per-tick.
-            msre.on_tick(id, tick, now_ms, /*available_R=*/1.0);
+            // For risk query: pass `id` — for basket ticks this gives the
+            // right symbol; for non-basket ticks the engine ignores anyway.
+            const double msre_R = risk.available_R(
+                chimera::risk::EngineType::MULTI_SYMBOL_ROTATION, id);
+            msre.on_tick(id, tick, now_ms, msre_R);
         }
 
         static std::atomic<int> tc{0};
@@ -687,7 +793,9 @@ int main() {
     std::printf("[STARTUP]   - MultiSymbolRotation (4h relative-strength rotation, 4-24h hold)\n");
     std::printf("[STARTUP] Coinbase feed live (BTC-USD only) — powers CoinbasePremiumMRev.\n");
     std::printf("[STARTUP] All paper engines run in shadow_mode (printf log only, no executor).\n");
-    std::printf("[STARTUP] GUI: http://localhost:8080  (state2 = paper engines JSON)\n");
+    std::printf("[STARTUP] Tier1Risk wired across all 10 engines (state: %s).\n",
+                risk.is_halted() ? "HALTED" : "active");
+    std::printf("[STARTUP] GUI: http://localhost:8080  (state2 = paper engines + tier1_risk JSON)\n");
     std::fflush(stdout);
 
     while (g_running) {

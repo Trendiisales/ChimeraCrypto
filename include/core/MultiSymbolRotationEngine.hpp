@@ -89,11 +89,17 @@
 
 #include "core/SymbolIndex.hpp"
 #include "live/BinanceWSFeed.hpp"
+#include "risk/Tier1Risk.hpp"
 
 namespace chimera {
 
 class MultiSymbolRotationEngine {
 public:
+    // Tier1Risk identity (session 6 wiring) — singleton engine, active
+    // symbol varies (read from active_symbol_id_ at the open hook).
+    static constexpr chimera::risk::EngineType ETYPE =
+        chimera::risk::EngineType::MULTI_SYMBOL_ROTATION;
+
     // ── Cost model ─────────────────────────────────────────────────────────
     static constexpr double  ROUND_TRIP_COST_BP   = TradingConfig::MAKER_ROUND_TRIP_BP; // 15 bp
 
@@ -128,6 +134,9 @@ public:
     static constexpr double  SIZE_FRAC_OF_R       =  0.5;
 
     MultiSymbolRotationEngine() = default;
+
+    // Tier1Risk integration setter (session 6 wiring) — null-safe.
+    void set_risk(chimera::risk::Tier1Risk* r) { risk_ = r; }
 
     bool shadow_mode = true;
 
@@ -195,6 +204,10 @@ public:
             pos_active_         = false;
             entry_price_        = 0.0;
             cooldown_until_ms_  = (now_ms > 0 ? now_ms : last_now_ms_) + COOLDOWN_MS;
+
+            // Tier1Risk: release per-engine R for the killed position.
+            // main.cpp's /api/kill handler centralises the halt_all() call.
+            if (risk_) risk_->on_position_close(ETYPE, net_bp);
         }
         halted_ = true;
         std::printf("[MSR-KILL] engine halted; clear_halt() to resume\n");
@@ -441,6 +454,12 @@ private:
             top_vol, MAX_VOL_FRAC,
             price, pos_size_R_);
         std::fflush(stdout);
+
+        // Tier1Risk: register the open spot LONG. Symbol varies per rotation
+        // — pass the just-set active_symbol_id_ so correlation cap and
+        // per-engine cap track the right symbol.
+        if (risk_) risk_->on_position_open(ETYPE, active_symbol_id_,
+                                           /*is_long=*/true, pos_size_R_);
     }
 
     void _maybe_rotate(int64_t now_ms) {
@@ -532,7 +551,15 @@ private:
         active_symbol_id_   = -1;
         entry_price_        = 0.0;
         cooldown_until_ms_  = now_ms + COOLDOWN_MS;
+
+        // Tier1Risk: release per-engine R + feed daily-loss circuit. This
+        // path covers BOTH normal exits and rotations (rotation calls
+        // _close_position then _try_enter on the next eval boundary).
+        if (risk_) risk_->on_position_close(ETYPE, net_bp);
     }
+
+    // ── Tier1Risk wiring (session 6) ───────────────────────────────────────
+    chimera::risk::Tier1Risk* risk_ = nullptr;
 };
 
 } // namespace chimera

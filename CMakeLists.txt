@@ -161,3 +161,22 @@ add_custom_command(TARGET chimera_backtest_paper POST_BUILD
     COMMAND chmod +x $<TARGET_FILE:chimera_backtest_paper>
     COMMENT "Restoring execute permission after LTO link"
 )
+
+# ── Tier1Risk header-only test suite ────────────────────────────────────────
+# Pure unit tests for include/risk/Tier1Risk.hpp. No live deps; just stdlib +
+# pthread. Build with: cmake --build build --target test_tier1_risk
+# Run with:           ./build/test_tier1_risk
+add_executable(test_tier1_risk
+    tools/test/test_tier1_risk.cpp
+)
+
+target_link_libraries(test_tier1_risk
+    pthread
+)
+
+target_compile_options(test_tier1_risk PRIVATE
+    -O2
+    -Wall
+    -Wextra
+    -Wno-unused-parameter
+)

@@ -8,6 +8,12 @@
 #include <algorithm>
 #include <cstdlib>
 
+// [REST FALLBACK] — added 2026-05-10. libcurl is already linked in
+// CMakeLists.txt (used by BinanceREST.hpp). curl_global_init is called
+// elsewhere in the binary (BinanceREST::load_credentials), so we rely on
+// the implicit init done by curl_easy_init() here as a safety net.
+#include <curl/curl.h>
+
 namespace chimera {
 
 static PerpFeed* g_perp_feed = nullptr;
@@ -40,12 +46,20 @@ void PerpFeed::start() {
     std::fflush(stdout);
 
     thread_ = std::thread([this]{ run(); });
+
+    // [REST FALLBACK] launch the REST poller alongside the WS thread.
+    // See rest_run() for the design notes (header has the full comment).
+    rest_thread_ = std::thread([this]{ rest_run(); });
 }
 
 void PerpFeed::stop() {
     if (!running_.exchange(false)) return;
     if (context_) lws_cancel_service(context_);
     if (thread_.joinable()) thread_.join();
+
+    // [REST FALLBACK] join. running_ already flipped to false above; the
+    // REST loop polls running_ and exits cleanly within one poll cycle.
+    if (rest_thread_.joinable()) rest_thread_.join();
 }
 
 // ── Accessors ────────────────────────────────────────────────────────────────
@@ -346,6 +360,159 @@ bool PerpFeed::extract_bool(const std::string& msg, const std::string& key) {
     if (pos == std::string::npos) return false;
     pos += nb.size();
     return msg.substr(pos, 4) == "true";
+}
+
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// REST fallback (added 2026-05-10)
+// ────────────────────────────────────────────────────────────────────────────
+// Polls https://fapi.binance.com/fapi/v1/premiumIndex?symbol=<SYM>USDT for
+// each of our 8 symbols every REST_POLL_MS milliseconds. Parses markPrice
+// and lastFundingRate. Writes them to the same atomics as handle_mark_price()
+// — but only when the WS path is silent (last_msg_ms_ older than
+// REST_WS_FRESHNESS_MS). When WS is alive, REST writes are no-ops and
+// behaviour is identical to the pre-fallback build.
+//
+// One curl handle per loop iteration (per symbol per cycle). libcurl reuses
+// the underlying TLS connection between calls to the same host within the
+// same handle, but for the cleanest crash-safety we open/close per call —
+// each call is ~80ms from Tokyo, 8 symbols × 80ms = ~640ms per cycle, well
+// under the 5s poll interval.
+//
+// Bandwidth: ~250B per symbol response × 8 symbols / 5s ≈ 400 B/s ≈ 35 MB/day.
+// ════════════════════════════════════════════════════════════════════════════
+
+namespace {
+    constexpr int  REST_POLL_MS         = 5000;   // 5s between full sweeps
+    constexpr int  REST_WS_FRESHNESS_MS = 5000;   // WS frames within 5s = WS alive
+    constexpr long REST_TIMEOUT_S       = 8;      // libcurl per-request timeout
+}
+
+size_t PerpFeed::curl_write_cb(void* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* s = static_cast<std::string*>(userdata);
+    s->append(static_cast<const char*>(ptr), size * nmemb);
+    return size * nmemb;
+}
+
+void PerpFeed::rest_run() {
+    std::printf("[PERP-REST] REST fallback thread starting (poll every %dms, "
+                "WS-freshness gate %dms)\n", REST_POLL_MS, REST_WS_FRESHNESS_MS);
+    std::fflush(stdout);
+
+    // Initial brief sleep so we don't race the WS thread's first connect
+    // attempt. If WS comes up cleanly we'll see a fresh last_msg_ms_ within
+    // a couple of seconds and our writes will gate themselves off.
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    int total_polls   = 0;
+    int total_skipped = 0;   // skipped because WS was fresh
+    int total_writes  = 0;   // wrote into atomics
+    int last_log_polls = 0;
+
+    while (running_.load(std::memory_order_acquire)) {
+        auto cycle_start = std::chrono::steady_clock::now();
+
+        // Gate: is WS fresh?
+        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        int64_t last_ws = last_msg_ms_.load(std::memory_order_relaxed);
+        bool ws_fresh = (last_ws > 0) && (now_ms - last_ws) < REST_WS_FRESHNESS_MS;
+
+        for (int id = 0; id < MAX_SYMBOLS; ++id) {
+            if (!running_.load(std::memory_order_acquire)) break;
+
+            std::string sym = sym_full(id);
+            for (char& c : sym) c = (char)std::toupper((unsigned char)c);
+
+            std::string url = "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" + sym;
+            std::string body;
+            body.reserve(512);
+
+            CURL* curl = curl_easy_init();
+            if (!curl) {
+                std::printf("[PERP-REST] curl_easy_init failed -- skipping cycle\n");
+                std::fflush(stdout);
+                break;
+            }
+
+            curl_easy_setopt(curl, CURLOPT_URL,            url.c_str());
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  curl_write_cb);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA,      &body);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT,        REST_TIMEOUT_S);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+            curl_easy_setopt(curl, CURLOPT_NOSIGNAL,       1L);
+            curl_easy_setopt(curl, CURLOPT_USERAGENT,      "chimera-perp-rest/1.0");
+            // SSL verification on by default — relies on the system CA bundle
+            // shipped with the VPS (ubuntu/debian have /etc/ssl/certs).
+
+            CURLcode rc = curl_easy_perform(curl);
+            long http_code = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+            curl_easy_cleanup(curl);
+
+            ++total_polls;
+            if (rc != CURLE_OK || http_code != 200 || body.empty()) {
+                // Don't log every miss — would spam if Binance has a brief
+                // outage. Quiet failure; the engines will see stale data.
+                continue;
+            }
+
+            // Parse markPrice + lastFundingRate from the JSON response.
+            // Response is a single object: {"symbol":"BTCUSDT","markPrice":"...",
+            //   "lastFundingRate":"...","nextFundingTime":...,"time":...}
+            double mp = extract_dbl(body, "markPrice");
+            double fr = extract_dbl(body, "lastFundingRate");
+
+            if (mp <= 0.0) continue;
+
+            // ── The gate. If WS has written within the freshness window,
+            //    skip the write so we don't fight with WS. WS data is
+            //    higher-frequency and authoritative when available.
+            if (ws_fresh) { ++total_skipped; continue; }
+
+            // WS is silent — we're the data source.
+            store_dbl(state_[id].mark_price_bits,    mp);
+            store_dbl(state_[id].funding_rate_bits,  fr);
+            state_[id].ready.store(true, std::memory_order_release);
+            ++total_writes;
+            rest_last_ok_ms_.store(now_ms, std::memory_order_relaxed);
+        }
+
+        // Periodic status line: every ~60s (12 cycles). Emits a single line
+        // showing polls / skipped (WS alive) / writes (WS dead) ratios so the
+        // operator can tell at a glance what mode the fallback is in.
+        if (total_polls - last_log_polls >= MAX_SYMBOLS * 12) {
+            std::printf("[PERP-REST] polls=%d ws_fresh_skip=%d rest_wrote=%d  "
+                        "(mode: %s)\n",
+                total_polls, total_skipped, total_writes,
+                ws_fresh ? "WS-active (REST idle)" : "REST-fallback-active");
+            std::fflush(stdout);
+            last_log_polls = total_polls;
+        }
+
+        // Sleep the remainder of the cycle. If the cycle took longer than
+        // REST_POLL_MS (e.g. all 8 symbols timed out), skip the sleep and
+        // poll again immediately.
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - cycle_start).count();
+        int sleep_ms = REST_POLL_MS - (int)elapsed;
+        if (sleep_ms > 0) {
+            // Sleep in 200ms chunks so a stop() request gets serviced
+            // promptly rather than waiting the full 5s.
+            int slept = 0;
+            while (slept < sleep_ms && running_.load(std::memory_order_acquire)) {
+                int chunk = std::min(200, sleep_ms - slept);
+                std::this_thread::sleep_for(std::chrono::milliseconds(chunk));
+                slept += chunk;
+            }
+        }
+    }
+
+    std::printf("[PERP-REST] REST fallback thread exiting "
+                "(polls=%d skipped=%d wrote=%d).\n",
+                total_polls, total_skipped, total_writes);
+    std::fflush(stdout);
 }
 
 } // namespace chimera

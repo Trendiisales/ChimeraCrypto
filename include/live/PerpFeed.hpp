@@ -70,6 +70,23 @@ private:
     static int64_t extract_i64(const std::string& msg, const std::string& key);
     static bool    extract_bool(const std::string& msg, const std::string& key);
 
+
+    // ── REST fallback (added 2026-05-10) ────────────────────────────────────
+    // Polls fapi.binance.com/fapi/v1/premiumIndex on its own thread and writes
+    // mark_price + funding_rate into the SAME atomics the WS callback writes
+    // to. Coexistence: REST writes are GATED on `last_msg_ms_` — when the WS
+    // path is alive (last frame within REST_WS_FRESHNESS_MS), REST writes are
+    // skipped and behaviour is identical to before. When the WS path is dead
+    // or blocked (Tokyo VPS data-plane scenario), REST takes over so engines
+    // #2 (FundingWindow), #3 (BasisMomentum), and #7 (FundingPersistenceFade)
+    // get the data they need. perp_flow_ratio / aggTrade are NOT served by
+    // REST — those stay at last WS value (or 0). Engines that depend on flow
+    // ratio gracefully no-op when it stays 0.
+    void rest_run();
+    static size_t curl_write_cb(void* ptr, size_t size, size_t nmemb, void* userdata);
+    std::thread       rest_thread_;
+    std::atomic<int64_t> rest_last_ok_ms_{0};
+
     // Per-symbol atomic state (double stored as uint64 bit-cast, lock-free)
     struct SymState {
         std::atomic<uint64_t> mark_price_bits{0};

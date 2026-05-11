@@ -29,11 +29,11 @@ include_directories(
     ${LWS_INCLUDE_DIRS}
 )
 
-# ── Sources shared between the live binary and the backtest binary ──────────
+# ── Sources for the live binary ─────────────────────────────────────────────
+# Tier-2 rewrite (2026-05-11): dropped PerpFeed + CoinbaseWSFeed — both were
+# only consumed by the deleted FundingWindow/BasisMomentum/OBI engines.
 set(CHIMERA_LIVE_SOURCES
     src/live/BinanceWSFeed.cpp
-    src/live/CoinbaseWSFeed.cpp
-    src/live/PerpFeed.cpp
     src/live/SpotExecutor.cpp
 )
 
@@ -42,7 +42,7 @@ set(CHIMERA_SOURCES
     ${CHIMERA_LIVE_SOURCES}
 )
 
-# Build version
+# Build version stamp
 set(VERSION_HEADER "${CMAKE_SOURCE_DIR}/include/version_generated.hpp")
 add_custom_target(gen_version ALL
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/GenVersion.cmake
@@ -84,80 +84,6 @@ add_custom_command(TARGET chimera POST_BUILD
     COMMENT "Restoring execute permission after LTO link"
 )
 
-# ── Backtest / replay binary ────────────────────────────────────────────────
-# Replays Binance H4 klines through SwingEngine offline. Reuses the same live
-# .cpp translation units so that linkage matches the production build (and any
-# extern symbols expected by BinanceWSFeed.cpp resolve cleanly).
-add_executable(chimera_backtest
-    tools/backtest/replay.cpp
-    ${CHIMERA_LIVE_SOURCES}
-)
-add_dependencies(chimera_backtest gen_version)
-
-set_property(SOURCE ${CMAKE_SOURCE_DIR}/tools/backtest/replay.cpp
-    APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
-
-target_link_libraries(chimera_backtest
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    ${CURL_LIBRARY}
-    ${LWS_LIBRARIES}
-    pthread
-)
-
-target_compile_options(chimera_backtest PRIVATE
-    -O3
-    -march=native
-    -flto
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-)
-
-set_target_properties(chimera_backtest PROPERTIES
-    LINK_FLAGS "-flto"
-)
-
-add_custom_command(TARGET chimera_backtest POST_BUILD
-    COMMAND chmod +x $<TARGET_FILE:chimera_backtest>
-    COMMENT "Restoring execute permission after LTO link"
-)
-
-# ── Paper-engines backtest binary ──────────────────────────────────────────
-# Replays FundingWindow + BasisMomentum over Binance 1m spot/perp klines
-# plus historical funding rates. Independent of the SwingEngine harness so
-# we can iterate on paper-engine validation without touching what works.
-# OBI is NOT included — it needs Binance Vision bookTicker dump support
-# (separate follow-up binary).
-add_executable(chimera_backtest_paper
-    tools/backtest/replay_paper.cpp
-)
-add_dependencies(chimera_backtest_paper gen_version)
-
-set_property(SOURCE ${CMAKE_SOURCE_DIR}/tools/backtest/replay_paper.cpp
-    APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
-
-target_link_libraries(chimera_backtest_paper
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    ${CURL_LIBRARY}
-    pthread
-)
-
-target_compile_options(chimera_backtest_paper PRIVATE
-    -O3
-    -march=native
-    -flto
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-)
-
-set_target_properties(chimera_backtest_paper PROPERTIES
-    LINK_FLAGS "-flto"
-)
-
-add_custom_command(TARGET chimera_backtest_paper POST_BUILD
-    COMMAND chmod +x $<TARGET_FILE:chimera_backtest_paper>
-    COMMENT "Restoring execute permission after LTO link"
-)
+# NOTE: chimera_backtest and chimera_backtest_paper binaries removed in the
+# Tier-2 rewrite. The Python backtest pipeline in chimera_edges/ (Binance REST
+# replay) supersedes them — see HANDOFF_TIER2.md.

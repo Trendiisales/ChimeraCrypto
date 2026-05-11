@@ -1,714 +1,211 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CHIMERA — Trading Desk</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chimera — Tier-2 Edges</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <style>
-:root {
-  --bg:#060a0d; --surface:#0a1018; --surface2:#0d1520; --border:#1a2a38; --border2:#243446;
-  --text:#cce4f0; --muted:#3d5a70; --dim:#0f1e2c;
-  --accent:#00d4ff; --green:#00e676; --red:#ff3d57; --yellow:#ffd600; --orange:#ff6b00;
-  --fm:'IBM Plex Mono',monospace; --fh:'Barlow Condensed',sans-serif;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--fm)}
+  :root {
+    --bg: #0a0e15;
+    --panel: #111722;
+    --panel-2: #161e2c;
+    --line: #1e2738;
+    --text: #cfd5e1;
+    --dim: #6f7a8c;
+    --accent: #4ad6c5;
+    --green: #3ce088;
+    --red: #ff5d7a;
+    --amber: #f8b94c;
+    --shadow: 0 1px 0 #1e2738, 0 8px 24px rgba(0,0,0,0.45);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+               font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; }
+  body { padding: 16px 22px; }
+  header {
+    display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+    padding: 8px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+  }
+  header .logo { font-weight: 900; letter-spacing: 0.18em; font-size: 22px; color: var(--accent); }
+  header .sub  { font-size: 12px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; }
+  header .build { margin-left: auto; font-size: 11px; color: var(--dim); }
+  header .kill {
+    background: transparent; border: 1px solid var(--red); color: var(--red);
+    padding: 6px 14px; border-radius: 4px; cursor: pointer; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px;
+  }
+  header .kill:hover { background: var(--red); color: #0a0e15; }
 
-/* TOPBAR */
-.topbar{
-  height:48px;display:flex;align-items:center;justify-content:space-between;
-  padding:0 20px;background:var(--surface);border-bottom:2px solid var(--border2);
-  flex-shrink:0;position:relative;z-index:100;
-}
-.logo{font-family:var(--fh);font-size:20px;font-weight:900;letter-spacing:6px;color:var(--accent);text-shadow:0 0 18px rgba(0,212,255,.4)}
-.logo-meta{display:flex;align-items:baseline;gap:10px}
-.logo-sub{font-size:10px;color:var(--muted);letter-spacing:3px;font-family:var(--fh)}
-#build-ver{font-size:11px;color:rgba(0,212,255,.6);letter-spacing:2px;font-family:var(--fm)}
-.tb-stats{display:flex;gap:0;align-items:stretch;height:100%}
-.tb-stat{display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 16px;border-left:1px solid var(--border);min-width:80px}
-.tb-label{font-size:8px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;font-family:var(--fh);margin-bottom:2px}
-.tb-val{font-size:14px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
-.tb-val.pos{color:var(--green)}.tb-val.neg{color:var(--red)}.tb-val.accent{color:var(--accent)}
-.tb-right{display:flex;gap:8px;align-items:center}
-.badge{padding:4px 10px;border-radius:2px;font-size:10px;font-weight:700;letter-spacing:2px;border:1px solid;font-family:var(--fh)}
-.badge-shadow{background:rgba(255,107,0,.12);color:var(--orange);border-color:var(--orange)}
-.badge-disc{background:rgba(255,61,87,.1);color:var(--red);border-color:var(--red)}
-.badge-conn{background:rgba(0,212,255,.1);color:var(--accent);border-color:var(--accent)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
-.dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.4s infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 14px;
+  }
 
-/* PAGE LAYOUT */
-.page{display:flex;flex-direction:column;height:calc(100vh - 48px);overflow:hidden}
+  .engine {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .engine.in-position { border-color: var(--accent); box-shadow: var(--shadow), 0 0 0 1px var(--accent) inset; }
+  .engine.halted      { border-color: var(--red); opacity: 0.7; }
 
-/* SYMBOL GRID — centre stage */
-.sym-grid{
-  display:grid;
-  grid-template-columns:repeat(7,1fr);
-  gap:6px;
-  padding:8px;
-  flex:none;
-}
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .tag { font-weight: 800; letter-spacing: 0.1em; font-size: 14px; color: #e8edf5; }
+  .symbol-row { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .pill {
+    display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line); letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .pill.shadow { color: var(--amber); border-color: rgba(248,185,76,0.35); background: rgba(248,185,76,0.08); }
+  .pill.live   { color: var(--green); border-color: rgba(60,224,136,0.35); background: rgba(60,224,136,0.08); }
+  .pill.armed  { color: var(--accent); border-color: rgba(74,214,197,0.35); background: rgba(74,214,197,0.08); }
+  .pill.intrade{ color: #0a0e15; background: var(--accent); border-color: var(--accent); }
+  .pill.halted { color: var(--red); border-color: rgba(255,93,122,0.35); background: rgba(255,93,122,0.10); }
 
-/* SYMBOL CARD — the main thing */
-.sym-card{
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:4px;
-  overflow:hidden;
-  cursor:pointer;
-  transition:border-color .2s;
-  position:relative;
-}
-.sym-card:hover{border-color:rgba(0,212,255,.3)}
-.sym-card.active{border-color:var(--green);box-shadow:0 0 12px rgba(0,230,118,.15)}
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px 14px;
+    margin-top: 14px;
+  }
+  .metric { display: flex; flex-direction: column; gap: 2px; }
+  .metric .lbl { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
+  .metric .val { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .dim { color: var(--dim); }
 
-/* Readiness gradient bar at top of card */
-.sym-card-bar{height:6px;width:100%;background:var(--dim);position:relative;overflow:hidden;transition:background .5s}
-.sym-card-bar-fill{position:absolute;left:0;top:0;height:100%;width:0%;transition:width .6s ease,background .5s;border-radius:0 2px 2px 0}
-.sym-ready-pct{font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:1px;opacity:0.8;margin-left:auto}
+  .trade-row {
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--dim);
+  }
+  .trade-row .price { color: var(--text); font-variant-numeric: tabular-nums; }
 
-/* Card body */
-.sym-card-body{padding:10px 12px}
-.sym-name{font-family:var(--fh);font-size:13px;font-weight:900;letter-spacing:2px;color:var(--muted)}
-.sym-price{font-size:28px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:4px 0}
-.sym-price.up{color:var(--green)}.sym-price.down{color:var(--red)}
-.sym-hl{display:flex;gap:8px;margin:1px 0 3px;font-size:10px;font-family:var(--fm);letter-spacing:.3px}
-.hl-high{color:var(--green);opacity:.8}.hl-low{color:var(--red);opacity:.8}
-.sym-regime-pill{
-  display:inline-block;font-family:var(--fh);font-size:9px;font-weight:700;
-  padding:2px 7px;border-radius:2px;letter-spacing:1px;margin-bottom:6px;
-}
-.rp-neutral{background:rgba(61,90,112,.25);color:var(--muted)}
-.rp-compression{background:rgba(255,214,0,.15);color:var(--yellow)}
-.rp-buildup{background:rgba(0,212,255,.15);color:var(--accent)}
-.rp-breakout{background:rgba(0,230,118,.2);color:var(--green)}
-.rp-dead{background:rgba(255,61,87,.1);color:var(--red)}
-
-/* Card metrics row */
-.sym-metrics{display:flex;justify-content:space-between;margin-top:4px}
-.sym-metric{display:flex;flex-direction:column;align-items:center}
-.sm-label{font-size:8px;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;font-family:var(--fh)}
-.sm-val{font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
-.sm-val.pos{color:var(--green)}.sm-val.neg{color:var(--red)}.sm-val.accent{color:var(--accent)}
-
-/* Engine dots row */
-.sym-engines{display:flex;gap:4px;margin-top:8px;align-items:center}
-.sym-metrics2{display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
-.sm2-label{font-size:8px;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;font-family:var(--fh);margin-bottom:1px}
-.sm2-val{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--muted)}
-.sm2-val.pos{color:var(--green)}.sm2-val.neg{color:var(--red)}.sm2-val.zero{color:var(--muted)}
-.sym-regime-pill{margin-bottom:5px}
-.eng-dot{display:none}.eng-dot-label{display:none}
-@keyframes pulse-arm{0%,100%{opacity:1}50%{opacity:.3}}
-.sym-engines{display:flex;gap:4px;margin-top:8px}
-.eng-badge{flex:1;display:flex;flex-direction:column;align-items:center;padding:5px 3px;border-radius:3px;border:1px solid var(--border2);background:var(--dim);transition:all .3s;cursor:default}
-.eng-badge.active{border-color:var(--green);background:rgba(0,230,118,.12);box-shadow:0 0 6px rgba(0,230,118,.15);animation:pulse-arm 1.2s infinite}
-.eng-badge.armed{border-color:var(--yellow);background:rgba(255,214,0,.1);animation:pulse-arm 1s infinite}
-.eng-badge.watching{border-color:rgba(0,212,255,.4);background:rgba(0,212,255,.06)}
-.eng-badge-name{font-family:var(--fh);font-size:8px;font-weight:700;letter-spacing:.8px;color:var(--muted)}
-.eng-badge.active .eng-badge-name{color:var(--green)}
-.eng-badge.armed .eng-badge-name{color:var(--yellow)}
-.eng-badge.watching .eng-badge-name{color:var(--accent)}
-.eng-badge-val{font-size:9px;font-weight:600;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
-.eng-badge.active .eng-badge-val,.eng-badge.armed .eng-badge-val{color:#fff}
-.eng-badge-bar{width:100%;height:2px;background:var(--border2);border-radius:1px;margin-top:3px;overflow:hidden}
-.eng-badge-bar-fill{height:100%;background:var(--accent);border-radius:1px;transition:width .5s ease}
-.eng-badge.active .eng-badge-bar-fill{background:var(--green)}
-
-/* P&L badge on card */
-.sym-pnl{font-family:var(--fh);font-size:11px;font-weight:700;margin-left:auto}
-.sym-pnl.pos{color:var(--green)}.sym-pnl.neg{color:var(--red)}.sym-pnl.zero{color:var(--muted)}
-
-/* LIVE POSITION PANEL */
-.live-panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:6px}
-.live-panel-title{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);margin-bottom:8px}
-.live-pos{display:grid;grid-template-columns:55px 60px 85px 85px 1fr;align-items:center;gap:10px;padding:12px 4px;border-bottom:1px solid var(--border)}
-.live-pos:last-child{border-bottom:none}
-.lp-sym{font-family:var(--fh);font-size:11px;font-weight:900;color:var(--text)}
-.lp-eng{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 5px;border-radius:2px;background:rgba(0,212,255,.15);color:var(--accent)}
-.lp-move{font-family:var(--fm);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
-.lp-move.pos{color:var(--green)}.lp-move.neg{color:var(--red)}
-.lp-mfe{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
-.lp-trail{font-size:11px;font-weight:600;line-height:1.4}
-.lp-trail.armed{color:var(--yellow)}.lp-trail.locked{color:var(--green)}
-.lp-bar-wrap{height:10px;background:var(--dim);border-radius:5px;overflow:hidden;position:relative;margin-top:4px}
-.lp-bar-fill{height:100%;border-radius:3px;transition:width .3s ease,background .3s}
-.lp-bar-trail{position:absolute;top:0;height:100%;width:2px;background:var(--yellow);border-radius:1px}
-.live-pos-empty{padding:18px 0;color:var(--muted);font-size:12px;font-style:italic;text-align:center;letter-spacing:.5px}
-/* BOTTOM SECTION: left=session stats, right=trade log */
-.bottom-section{
-  display:grid;
-  grid-template-columns:340px 1fr;
-  flex:1;
-  min-height:0;
-  border-top:2px solid var(--border2);
-}
-
-/* LEFT PANEL: session stats */
-.left-panel{
-  border-right:1px solid var(--border2);
-  display:flex;flex-direction:column;overflow:hidden;
-}
-.panel-hd{
-  padding:6px 12px;background:var(--dim);border-bottom:1px solid var(--border2);
-  font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:2px;color:var(--muted);
-  flex-shrink:0;
-}
-.session-stats{padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:6px;flex-shrink:0}
-.ss-item{display:flex;flex-direction:column;padding:6px 8px;background:rgba(0,0,0,.2);border-radius:3px;border:1px solid var(--border)}
-.ss-label{font-size:8px;color:var(--muted);letter-spacing:1.5px;font-family:var(--fh);text-transform:uppercase;margin-bottom:3px}
-.ss-val{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)}
-.ss-val.pos{color:var(--green)}.ss-val.neg{color:var(--red)}.ss-val.accent{color:var(--accent)}
-
-/* Engine summary table */
-.eng-tbl-wrap{flex:1;overflow-y:auto;padding:0 12px 8px}
-.eng-tbl-wrap::-webkit-scrollbar{width:3px}
-.eng-tbl-wrap::-webkit-scrollbar-thumb{background:var(--border2)}
-.by-eng-row{padding:5px 0;border-bottom:1px solid rgba(26,42,56,.5);display:flex;justify-content:space-between;align-items:center}
-.by-eng-row:last-child{border-bottom:none}
-.be-name{font-family:var(--fh);font-size:11px;font-weight:700;color:var(--accent);letter-spacing:1px}
-.be-stats{display:flex;gap:10px;font-size:11px;color:var(--muted)}
-.be-pnl{font-weight:700;font-variant-numeric:tabular-nums}
-.be-pnl.pos{color:var(--green)}.be-pnl.neg{color:var(--red)}
-.be-wr.good{color:var(--green)}.be-wr.bad{color:var(--red)}
-
-/* RIGHT PANEL: trade log */
-.right-panel{display:flex;flex-direction:column;overflow:hidden;background:var(--surface)}
-.trade-log-hd{
-  display:flex;align-items:center;gap:12px;padding:6px 12px;
-  background:var(--dim);border-bottom:1px solid var(--border2);flex-shrink:0;
-}
-.tl-stat{font-size:12px;color:var(--muted)}
-.tl-stat strong{color:var(--text);font-weight:700}
-.tl-stat strong.pos{color:var(--green)}.tl-stat strong.neg{color:var(--red)}
-.tl-sep{width:1px;height:14px;background:var(--border)}
-.tl-clear{background:rgba(255,61,87,.1);color:var(--red);border:1px solid rgba(255,61,87,.2);padding:2px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px;margin-left:auto;flex-shrink:0}
-.trade-log-cols{
-  display:grid;grid-template-columns:48px 48px 90px 62px 1fr 60px 58px 52px;
-  padding:3px 12px;background:rgba(0,0,0,.3);
-  font-family:var(--fh);font-size:9px;letter-spacing:1.2px;color:var(--muted);
-  border-bottom:1px solid var(--border);flex-shrink:0;
-}
-.trade-log-body{flex:1;overflow-y:auto}
-.trade-log-body::-webkit-scrollbar{width:3px}
-.trade-log-body::-webkit-scrollbar-thumb{background:var(--border2)}
-.tl-row{
-  display:grid;grid-template-columns:48px 48px 90px 62px 1fr 60px 58px 52px;
-  align-items:center;padding:4px 12px;
-  border-bottom:1px solid rgba(26,42,56,.5);font-size:12px;font-variant-numeric:tabular-nums;
-}
-.tl-row:hover{background:rgba(0,212,255,.02)}
-.tl-row.tl-win{border-left:2px solid rgba(0,230,118,.5)}
-.tl-row.tl-loss{border-left:2px solid rgba(255,61,87,.4)}
-.tl-time{color:var(--muted);font-size:10px}
-.tl-sym{font-family:var(--fh);font-weight:700;font-size:11px}
-.tl-eng{font-family:var(--fh);font-size:10px;color:var(--accent);letter-spacing:.5px}
-.tl-why{font-family:var(--fh);font-size:10px}
-.tl-why.why-tp{color:var(--green)}.tl-why.why-sl{color:var(--red)}.tl-why.why-trail{color:var(--accent)}.tl-why.why-to{color:var(--yellow)}
-.tl-pnl{font-weight:700}.tl-pnl.pos{color:var(--green)}.tl-pnl.neg{color:var(--red)}
-.tl-mfe{color:rgba(0,230,118,.7);font-size:10px}
-.tl-mae{color:rgba(255,61,87,.7);font-size:10px}
-.tl-hold{color:var(--muted);font-size:10px;text-align:right}
-.tl-empty{padding:12px 14px;color:var(--muted);font-size:11px;font-style:italic}
-
-/* Error + flash */
-#poll-error{display:none;position:fixed;bottom:0;left:0;right:0;z-index:300;background:rgba(255,61,87,.95);color:#fff;font-family:var(--fm);font-size:11px;font-weight:600;padding:5px 18px;flex-direction:row;align-items:center;gap:14px;border-top:2px solid var(--red)}
-#poll-error.show{display:flex}
-#win-flash{display:none;position:fixed;top:0;left:0;right:0;padding:12px;text-align:center;font-family:var(--fh);font-size:26px;font-weight:800;letter-spacing:8px;background:linear-gradient(90deg,var(--green),#69f0ae);color:#000;z-index:200}
-#win-flash.show{display:block;animation:slidedown .2s ease}
-@keyframes slidedown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
-
-/* Scrollbars */
-::-webkit-scrollbar{width:3px;height:3px}
-::-webkit-scrollbar-track{background:var(--bg)}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
-
-/* Kill button — fixed position, always visible regardless of topbar overflow */
-#kill-btn{
-  position:fixed;bottom:20px;right:20px;z-index:400;
-  background:rgba(255,61,87,.2);color:var(--red);
-  border:2px solid var(--red);padding:10px 22px;border-radius:4px;
-  font-size:13px;font-family:var(--fh);font-weight:900;letter-spacing:3px;
-  cursor:pointer;transition:all .15s;
-  box-shadow:0 0 20px rgba(255,61,87,.3);
-}
-#kill-btn:hover{background:rgba(255,61,87,.4);box-shadow:0 0 30px rgba(255,61,87,.5)}
-#kill-modal{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.75);align-items:center;justify-content:center}
-#kill-modal.show{display:flex}
-.kill-box{background:var(--surface);border:2px solid var(--red);border-radius:6px;padding:32px 40px;text-align:center;max-width:380px;box-shadow:0 0 40px rgba(255,61,87,.3)}
-.kill-title{font-family:var(--fh);font-size:22px;font-weight:900;letter-spacing:6px;color:var(--red);margin-bottom:8px}
-.kill-sub{font-size:12px;color:var(--muted);letter-spacing:1px;line-height:1.7;margin-bottom:24px}
-.kill-sub strong{color:var(--text)}
-.kill-actions{display:flex;gap:12px;justify-content:center}
-.kill-confirm{background:var(--red);color:#fff;border:none;padding:10px 28px;border-radius:3px;font-size:13px;font-family:inherit;font-weight:700;letter-spacing:2px;cursor:pointer;transition:opacity .15s}
-.kill-confirm:hover{opacity:.85}
-.kill-cancel{background:transparent;color:var(--muted);border:1px solid var(--border2);padding:10px 22px;border-radius:3px;font-size:12px;font-family:inherit;cursor:pointer;letter-spacing:1px}
-.kill-cancel:hover{color:var(--text);border-color:var(--text)}
-.kill-status{margin-top:16px;font-size:11px;min-height:16px;letter-spacing:1px}
-.kill-status.ok{color:var(--green)}.kill-status.err{color:var(--red)}
+  footer {
+    margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; color: var(--dim);
+  }
+  .ok    { color: var(--green); }
+  .stale { color: var(--amber); }
+  .down  { color: var(--red); }
 </style>
 </head>
 <body>
-<div id="poll-error"><span id="poll-error-count">ERR0</span><span id="poll-error-msg">Connecting...</span><span id="poll-error-time">--</span></div>
-<div id="win-flash">WIN</div>
 
-<!-- EMERGENCY KILL MODAL -->
-<div id="kill-modal">
-  <div class="kill-box">
-    <div class="kill-title">⚡ KILL ALL</div>
-    <div class="kill-sub">This will <strong>market-sell every open position</strong> immediately at current market price.<br>Cannot be undone.</div>
-    <div class="kill-actions">
-      <button class="kill-cancel" onclick="hideKillModal()">CANCEL</button>
-      <button class="kill-confirm" onclick="executeKill()">FLATTEN ALL NOW</button>
-    </div>
-    <div class="kill-status" id="kill-status"></div>
-  </div>
-</div>
+<header>
+  <div class="logo">CHIMERA</div>
+  <div class="sub">Tier-2 Edges</div>
+  <div class="build" id="build">build —</div>
+  <button class="kill" id="killAll" title="Force-flatten every paper position and halt all engines">Kill All</button>
+</header>
 
-<!-- TOPBAR -->
-<div class="topbar">
-  <div class="logo-meta">
-    <span class="logo">CHIMERA</span>
-    <span class="logo-sub">CRYPTO Engine</span>
-    <span id="build-ver">v?</span>
-  </div>
-  <div class="tb-stats">
-    <div class="tb-stat"><span class="tb-label">Equity</span><span id="tb-equity" class="tb-val">$10,000</span></div>
-    <div class="tb-stat"><span class="tb-label">Day P&amp;L</span><span id="tb-pnl" class="tb-val">+0.00bp</span></div>
-    <div class="tb-stat"><span class="tb-label">Trades</span><span id="tb-trades" class="tb-val accent">0</span></div>
-    <div class="tb-stat"><span class="tb-label">Positions</span><span id="tb-positions" class="tb-val">0</span></div>
-    <div class="tb-stat"><span class="tb-label">WS Delay</span><span id="tb-latency" class="tb-val accent">--ms</span></div>
-    <div class="tb-stat"><span class="tb-label">Uptime</span><span id="tb-uptime" class="tb-val" style="color:var(--muted)">00:00:00</span></div>
-  </div>
-  <div class="tb-right">
-    <button id="audio-unlock" onclick="unlockAudio()" style="background:rgba(255,214,0,.1);color:#ffd600;border:1px solid #ffd600;padding:3px 8px;border-radius:2px;font-size:9px;font-family:inherit;cursor:pointer;letter-spacing:1px">UNMUTE</button>
-    <button id="kill-btn" onclick="showKillModal()">⚡ KILL ALL</button>
-    <span id="mode-badge" class="badge badge-shadow">SHADOW</span>
-    <span id="conn-badge" class="badge badge-disc">OFFLINE</span>
-    <div id="live-dot" class="dot"></div>
-  </div>
-</div>
+<div class="grid" id="engines"></div>
 
-<!-- PAGE -->
-<div class="page">
+<footer>
+  <div id="status">Connecting...</div>
+  <div id="lastUpdated">—</div>
+</footer>
 
-  <!-- SYMBOL GRID -->
-  <div class="sym-grid">
+<script>
+  const $ = (sel) => document.querySelector(sel);
+  const fmtBp  = (v) => (v == null || isNaN(v)) ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + 'bp';
+  const fmtPx  = (v) => (v == null || isNaN(v) || v === 0) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+  const fmtInt = (v) => (v == null || isNaN(v)) ? '—' : Number(v).toString();
+  const wrPct  = (w, t) => (!t || t === 0) ? '—' : (100 * w / t).toFixed(0) + '%';
 
-    <!-- BTC -->
-    <div class="sym-card" id="sb-btc">
-      <div class="sym-card-bar" id="bar-btc"><div class="sym-card-bar-fill" id="bar-fill-btc"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">BTC</span>
-          <span class="sym-ready-pct" id="rdy-btc" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-btc">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-btc">--</div>
-        <div class="sym-hl" id="hl-btc"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
-        <span class="sym-regime-pill rp-neutral" id="reg-btc">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-btc">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-btc">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-btc">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-btc">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-btc">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-btc">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-btc">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-btc">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-btc" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-btc" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-btc-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-btc-liq">WAIT</span>
+  function renderEngine(e) {
+    const inPos = !!e.in_position;
+    const halted = !!e.halted;
+    const klass = halted ? 'engine halted' : (inPos ? 'engine in-position' : 'engine');
+    const stateClass = halted ? 'halted' : (inPos ? 'intrade' : (e.shadow ? 'shadow' : 'live'));
+    const stateText  = halted ? 'Halted' : (inPos ? 'In Trade' : (e.shadow ? 'Shadow' : 'Live'));
+    const totalClass = (e.total_bp || 0) > 0 ? 'val pos' : ((e.total_bp || 0) < 0 ? 'val neg' : 'val');
+    const lastClass  = (e.last_bp  || 0) > 0 ? 'val pos' : ((e.last_bp  || 0) < 0 ? 'val neg' : 'val');
+    const tfLabel = (() => {
+      const s = e.tf_secs || 0;
+      if (s === 3600)  return 'H1';
+      if (s === 7200)  return 'H2';
+      if (s === 14400) return 'H4';
+      if (s === 21600) return 'H6';
+      if (s === 86400) return 'D1';
+      return (s / 3600).toFixed(1) + 'h';
+    })();
+    return `
+      <div class="${klass}">
+        <div class="row">
+          <div>
+            <div class="tag">${e.tag || '—'}</div>
+            <div class="symbol-row">${(e.symbol || '').toUpperCase()} &nbsp;·&nbsp; ${e.strategy || ''} &nbsp;·&nbsp; ${tfLabel}</div>
           </div>
-          <div class="eng-badge" id="badge-btc-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-btc-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-btc" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-btc-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-btc-basis">--</span>
-          </div>
-          <div class="eng-badge" id="badge-btc-fundwin" title="Pre-funding window engine">
-            <span class="eng-badge-name">FUND</span>
-            <span class="eng-badge-val" id="badge-val-btc-fundwin">--</span>
-          </div>
+          <div class="pill ${stateClass}">${stateText}</div>
         </div>
+
+        <div class="metrics">
+          <div class="metric"><div class="lbl">Total Net</div><div class="${totalClass}">${fmtBp(e.total_bp)}</div></div>
+          <div class="metric"><div class="lbl">Last Trade</div><div class="${lastClass}">${fmtBp(e.last_bp)}</div></div>
+          <div class="metric"><div class="lbl">Trades</div><div class="val">${fmtInt(e.trades)}</div></div>
+          <div class="metric"><div class="lbl">Win Rate</div><div class="val">${wrPct(e.wins, e.trades)}</div></div>
+          <div class="metric"><div class="lbl">Last Close</div><div class="val">${fmtPx(e.last_close)}</div></div>
+          <div class="metric"><div class="lbl">Wins</div><div class="val">${fmtInt(e.wins)}</div></div>
+          <div class="metric"><div class="lbl">Bars Buf</div><div class="val">${fmtInt(e.bars_in_buffer)}</div></div>
+          <div class="metric"><div class="lbl">Mode</div><div class="val">${e.shadow ? 'shadow' : 'live'}</div></div>
+        </div>
+
+        ${inPos ? `
+        <div class="trade-row">
+          OPEN @ <span class="price">${fmtPx(e.entry_px)}</span>
+          &nbsp;·&nbsp; SL @ <span class="price">${fmtPx(e.sl_px)}</span>
+        </div>` : ''}
       </div>
-    </div>
+    `;
+  }
 
-    <!-- ETH -->
-    <div class="sym-card" id="sb-eth">
-      <div class="sym-card-bar" id="bar-eth"><div class="sym-card-bar-fill" id="bar-fill-eth"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">ETH</span>
-          <span class="sym-ready-pct" id="rdy-eth" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-eth">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-eth">--</div>
-        <div class="sym-hl" id="hl-eth"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
-        <span class="sym-regime-pill rp-neutral" id="reg-eth">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-eth">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-eth">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-eth">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-eth">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-eth">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-eth">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-eth">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-eth">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-eth" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-eth" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-eth-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-eth-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-eth-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-eth-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-eth" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-eth-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-eth-basis">--</span>
-          </div>
-          <div class="eng-badge" id="badge-eth-fundwin" title="Pre-funding window engine">
-            <span class="eng-badge-name">FUND</span>
-            <span class="eng-badge-val" id="badge-val-eth-fundwin">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
+  let lastFetchOk = 0;
 
-    <!-- SOL -->
-    <div class="sym-card" id="sb-sol">
-      <div class="sym-card-bar" id="bar-sol"><div class="sym-card-bar-fill" id="bar-fill-sol"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">SOL</span>
-          <span class="sym-ready-pct" id="rdy-sol" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-sol">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-sol">--</div>
-        <div class="sym-hl" id="hl-sol"><span class="hl-high">H: --</span><span class="hl-low">L: --</span></div>
-        <span class="sym-regime-pill rp-neutral" id="reg-sol">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-sol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-sol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-sol">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-sol">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-sol">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-sol">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-sol">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-sol">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-sol" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-sol" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-sol-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-sol-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-sol-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-sol-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-sol" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-sol-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-sol-basis">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
+  async function refresh() {
+    const status = $('#status');
+    try {
+      const r = await fetch('/api/state2', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      $('#build').textContent = 'build ' + (j.build || '—');
+      const html = (j.engines || []).map(renderEngine).join('');
+      $('#engines').innerHTML = html;
+      lastFetchOk = Date.now();
+      status.textContent = 'Live';
+      status.className = 'ok';
+      $('#lastUpdated').textContent = new Date().toLocaleTimeString();
+    } catch (err) {
+      const age = lastFetchOk ? Math.round((Date.now() - lastFetchOk) / 1000) : null;
+      if (age != null && age < 10) {
+        status.textContent = 'Stale (' + age + 's)';
+        status.className = 'stale';
+      } else {
+        status.textContent = 'Disconnected — ' + err.message;
+        status.className = 'down';
+      }
+    }
+  }
 
-    <!-- BNB -->
-    <div class="sym-card" id="sb-bnb">
-      <div class="sym-card-bar" id="bar-bnb"><div class="sym-card-bar-fill" id="bar-fill-bnb"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">BNB</span>
-          <span class="sym-ready-pct" id="rdy-bnb" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-bnb">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-bnb">--</div>
-        <span class="sym-regime-pill rp-neutral" id="reg-bnb">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-bnb">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-bnb">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-bnb" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-bnb" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-bnb-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-bnb-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-bnb-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-bnb-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-bnb" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-bnb-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-bnb-basis">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
+  $('#killAll').addEventListener('click', async () => {
+    if (!confirm('Kill all engines? This will flatten every open paper position and halt new entries.')) return;
+    try {
+      const r = await fetch('/api/kill', { method: 'POST' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      alert('Kill sent.');
+      refresh();
+    } catch (err) {
+      alert('Kill failed: ' + err.message);
+    }
+  });
 
-    <!-- AVAX -->
-    <div class="sym-card" id="sb-avax">
-      <div class="sym-card-bar" id="bar-avax"><div class="sym-card-bar-fill" id="bar-fill-avax"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">AVAX</span>
-          <span class="sym-ready-pct" id="rdy-avax" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-avax">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-avax">--</div>
-        <span class="sym-regime-pill rp-neutral" id="reg-avax">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-avax">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-avax">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-avax">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-avax">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-avax">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-avax">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-avax">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-avax">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-avax" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-avax" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-avax-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-avax-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-avax-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-avax-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-avax" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-avax-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-avax-basis">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- LINK -->
-    <div class="sym-card" id="sb-link">
-      <div class="sym-card-bar" id="bar-link"><div class="sym-card-bar-fill" id="bar-fill-link"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">LINK</span>
-          <span class="sym-ready-pct" id="rdy-link" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-link">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-link">--</div>
-        <span class="sym-regime-pill rp-neutral" id="reg-link">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-link">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-link">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-link">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-link">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-link">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-link">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-link">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-link">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-link" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-link" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-link-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-link-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-link-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-link-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-link" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-link-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-link-basis">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- XRP -->
-    <div class="sym-card" id="sb-xrp">
-      <div class="sym-card-bar" id="bar-xrp"><div class="sym-card-bar-fill" id="bar-fill-xrp"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">XRP</span>
-          <span class="sym-ready-pct" id="rdy-xrp" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-xrp">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-xrp">--</div>
-        <span class="sym-regime-pill rp-neutral" id="reg-xrp">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-xrp">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-xrp">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-xrp" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-xrp" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-xrp-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-xrp-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-xrp-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-xrp-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-xrp" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-xrp-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-xrp-basis">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- DOGE -->
-    <div class="sym-card" id="sb-doge">
-      <div class="sym-card-bar" id="bar-doge"><div class="sym-card-bar-fill" id="bar-fill-doge"></div></div>
-      <div class="sym-card-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <span class="sym-name">DOGE</span>
-          <span class="sym-ready-pct" id="rdy-doge" style="color:var(--muted)">0%</span>
-          <span class="sym-pnl zero" id="mini-pnl-doge">+0.00bp</span>
-        </div>
-        <div class="sym-price" id="px-doge">--</div>
-        <span class="sym-regime-pill rp-neutral" id="reg-doge">NEUTRAL</span>
-        <div class="sym-metrics">
-          <div class="sym-metric"><span class="sm-label">VOL</span><span class="sm-val" id="vr-doge">--</span></div>
-          <div class="sym-metric"><span class="sm-label">DISP</span><span class="sm-val" id="dp-doge">--</span></div>
-          <div class="sym-metric"><span class="sm-label">CAP</span><span class="sm-val accent" id="cap-doge">--</span></div>
-          <div class="sym-metric"><span class="sm-label">T</span><span class="sm-val" id="mini-t-doge">0</span></div>
-        </div>
-        <div class="sym-metrics2">
-          <div class="sym-metric"><span class="sm2-label">FUND</span><span class="sm2-val zero" id="fn-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">BASIS</span><span class="sm2-val zero" id="bs-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">LIQ</span><span class="sm2-val zero" id="lq-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES PNL</span><span class="sm2-val zero" id="sp-doge">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES HI</span><span class="sm2-val" id="sh-doge" style="color:var(--green)">--</span></div>
-          <div class="sym-metric"><span class="sm2-label">SES LO</span><span class="sm2-val" id="sl-doge" style="color:var(--red)">--</span></div>
-        </div>
-        <div class="sym-engines">
-          <div class="eng-badge" id="badge-doge-liq" title="Liquidation cascade engine">
-            <span class="eng-badge-name">LIQ</span>
-            <span class="eng-badge-val" id="badge-val-doge-liq">WAIT</span>
-          </div>
-          <div class="eng-badge" id="badge-doge-bracket" title="Compression bracket engine">
-            <span class="eng-badge-name">BRACKET</span>
-            <span class="eng-badge-val" id="badge-val-doge-bracket">IDLE</span>
-            <div class="eng-badge-bar"><div class="eng-badge-bar-fill" id="badge-bar-doge" style="width:0%"></div></div>
-          </div>
-          <div class="eng-badge" id="badge-doge-basis" title="Perp basis momentum engine">
-            <span class="eng-badge-name">BASIS</span>
-            <span class="eng-badge-val" id="badge-val-doge-basis">--</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- /sym-grid -->
-
-  <!-- BOTTOM SECTION -->
-  <!-- LIVE POSITIONS PANEL -->
-  <div class="live-panel" id="live-positions-panel">
-    <div class="live-panel-title">◉ LIVE POSITIONS</div>
-    <div id="live-positions-list"><div class="live-pos-empty">No open positions</div></div>
-  </div>
-
-  <div class="bottom-section">
-
-    <!-- LEFT: Session stats + engine breakdown -->
-    <div class="left-panel">
-      <div class="panel-hd">SESSION</div>
-      <div class="session-stats">
-        <div class="ss-item"><span class="ss-label">P&amp;L</span><span class="ss-val" id="ts-pnl">+0.00bp</span></div>
-        <div class="ss-item"><span class="ss-label">Trades</span><span class="ss-val accent" id="ts-count">0</span></div>
-        <div class="ss-item"><span class="ss-label">Win Rate</span><span class="ss-val" id="ts-wr">--%</span></div>
-        <div class="ss-item"><span class="ss-label">W / L</span><span class="ss-val"><span id="ts-wins" style="color:var(--green)">0</span> / <span id="ts-losses" style="color:var(--red)">0</span></span></div>
-        <div class="ss-item"><span class="ss-label">Avg Win</span><span class="ss-val pos" id="ts-avgwin">--</span></div>
-        <div class="ss-item"><span class="ss-label">Avg Loss</span><span class="ss-val neg" id="ts-avgloss">--</span></div>
-        <div class="ss-item"><span class="ss-label">TP / SL</span><span class="ss-val"><span id="st-tp" style="color:var(--green)">0</span> / <span id="st-sl" style="color:var(--red)">0</span></span></div>
-        <div class="ss-item"><span class="ss-label">Expectancy</span><span class="ss-val" id="ts-exp">--</span></div>
-      </div>
-      <div class="panel-hd" style="border-top:1px solid var(--border2)">BY LAYER</div>
-      <div class="eng-tbl-wrap">
-        <div id="st-by-layer" style="color:var(--muted);font-size:11px;padding:8px 0;font-style:italic">No trades yet</div>
-      </div>
-    </div>
-
-    <!-- RIGHT: Trade log -->
-    <div class="right-panel">
-      <div class="trade-log-hd">
-        <span class="panel-hd" style="padding:0;border:none;background:none">TRADE LOG</span>
-        <div class="tl-sep"></div>
-        <span class="tl-stat">W:<strong class="pos" id="tp-wins">0</strong></span>
-        <span class="tl-stat">L:<strong class="neg" id="tp-losses">0</strong></span>
-        <span class="tl-stat">WR:<strong id="tp-wr">--%</strong></span>
-        <span class="tl-stat">PnL:<strong id="tp-pnl">+0.00bp</strong></span>
-        <span class="tl-stat">TR:<strong class="accent" id="st-trail">0</strong></span>
-        <span class="tl-stat">TO:<strong style="color:var(--yellow)" id="st-timeout">0</strong></span>
-        <button class="tl-clear" onclick="clearTrades()">CLEAR</button>
-      </div>
-      <div class="trade-log-cols">
-        <span>TIME</span><span>SYM</span><span>ENGINE</span><span>EXIT</span><span>P&amp;L</span><span>MFE</span><span>MAE</span><span>HOLD</span>
-      </div>
-      <div class="trade-log-body" id="btm-trade-rows">
-        <div class="tl-empty">Waiting for first trade...</div>
-      </div>
-    </div>
-
-  </div><!-- /bottom-section -->
-
-</div><!-- /page -->
-<script src="/app.js"></script>
+  refresh();
+  setInterval(refresh, 1000);
+</script>
 </body>
 </html>
-

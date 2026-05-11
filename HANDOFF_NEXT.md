@@ -1,6 +1,6 @@
-# Chimera Handoff — 2026-05-11 (post-Tier-2 deploy)
+# Chimera Handoff — 2026-05-11 (post-GUI fix)
 
-**Status:** Tier-2 build `f8e86f8` deployed and running. 5 paper engines live on the VPS in `shadow_mode = true`, dashboard rendering correctly. Awaiting bar warm-up and first paper entries.
+**Status:** Tier-2 build `57501a9` is on GitHub. Five paper engines (BTC/ETH/SOL/XRP/LINK) shipped as Tier-2 rewrite. Dashboard now shows live spot prices for all 8 feed symbols immediately on load (no warm-up needed for the display). Engines themselves still cold-start their bar history from live ticks — fixing that is priority #1 for the next session.
 
 **Use this file as the opener for the next chat — paste this whole thing as the first message.**
 
@@ -8,15 +8,17 @@
 
 ## TL;DR for next session
 
-Five Tier-2 long-only edges shipped to the VPS as a rewrite of the previous SwingEngine + microstructure paper-engine stack. All shadow-mode. All five engines verified rendering on the dashboard. Backtest pipeline that selected them is in `chimera_edges/` (local outputs folder).
+The Tier-2 GUI was missing real-time symbol pricing because the rewrite replaced the old engine stack with brand-new EdgeEngine instances whose internal bar-aggregator starts empty (`bars_in_buffer = 0`, `last_close = 0.0`). The previous GUI session fixed the display layer by routing live WebSocket tick prices into a new `spot_prices` field on `/api/state2` and rendering an 8-symbol live ticker strip + per-card "Live Price" line.
+
+The display is fixed. The underlying engine cold-start is not. Priority next session is `seed_from_history()` — pull Binance REST klines on engine construction so the bar deques are pre-populated with real historical OHLC. Without this, BTC-TSMOM-D1 needs ~20 calendar days to take its first trade.
 
 Five things to pick up, ranked:
 
-1. **Add `seed_from_history()` to `EdgeEngine`** so engines warm up immediately from Binance REST kline replay rather than waiting ~20 days for BTC D1 to accumulate live bars. Biggest single quality-of-life improvement.
-2. **Tier-1 risk wrapper** (REQUIRED before flipping any `shadow_mode` to false). Daily loss circuit, correlation-aware sizing, per-engine kill, state persistence, reconciliation. Spec lives in `HANDOFF_TIER2.md` deferred section.
-3. **Clean up orphan engine headers** in `include/core/` (RangeMeanReversionEngine, MultiSymbolRotationEngine, FundingSignalEngine, LeadLagEngine, CompressionBreakoutEngine, Tier1Risk earlier wrapper). They don't compile into the binary but pollute the repo.
-4. **Revisit DOGE / AVAX / BNB** — none survived OOS in this round. Try weekly Donchian, cross-sectional momentum vs BTC, RSI-revert at H1.
-5. **Promotion gate** — after 4 weeks of paper, compare trades/yr, WR, PF to backtest. Engines within ±10% on all three graduate to `shadow_mode = false` (live execution).
+1. **`seed_from_history()` on `EdgeEngine`** — see "Open work" below for the full spec. 3-file change. Critical: this is what the user is unhappy about.
+2. **Verify the GUI fix actually deployed** — pull commit `57501a9` to the VPS, rebuild, confirm dashboard shows live BTC/ETH/SOL/BNB/AVAX/LINK/XRP/DOGE prices in the top strip and per-card "Live Price" rows.
+3. **Tier-1 risk wrapper** — required before flipping any `shadow_mode` to false. Daily loss circuit, correlation-aware sizing, per-engine kill, state persistence, reconciliation. Spec lives in `HANDOFF_TIER2.md` deferred section.
+4. **Clean up orphan engine headers** in `include/core/` (RangeMeanReversionEngine, MultiSymbolRotationEngine, FundingSignalEngine, LeadLagEngine, CompressionBreakoutEngine, Tier1Risk earlier wrapper). They don't compile into the binary but pollute the repo.
+5. **Promotion gate** — after 4 weeks of paper trades, compare trades/yr, WR, PF to backtest. Engines within ±10% on all three graduate to `shadow_mode = false` (live execution).
 
 ---
 
@@ -26,15 +28,16 @@ Five things to pick up, ranked:
 
 - GitHub: `https://github.com/Trendiisales/ChimeraCrypto`
 - Branch: `main`
-- HEAD: `f8e86f8` ("Repo-wide IP fix: 154.45.251.118 -> 143.198.89.54")
-- PAT: stored in your local `CLAUDE.md` (never paste into commits — GitHub secret-scanner rejects).
+- HEAD: `57501a9` ("GUI: live spot-price strip + per-card live price (no warmup needed)")
+- PAT: stored in user's local `CLAUDE.md` (NEVER paste into commits — GitHub secret-scanner rejects, and it's a security risk to expose tokens in chat).
 
 Recent commit chain:
 ```
+57501a9  GUI: live spot-price strip + per-card live price (no warmup needed)
+19e5d44  Add HANDOFF_NEXT.md (previous opener)
 f8e86f8  Repo-wide IP fix (154.45.251.118 -> 143.198.89.54)
 fce9a5b  HANDOFF_TIER2 IP fix
-cca1e5d  Tier-2 rewrite (replaces Swing + 3 paper engines with 5 backtested edges)
-8c15287  session 9 handoff (pre-Tier-2)
+cca1e5d  Tier-2 rewrite (replaces SwingEngine + 3 paper engines with 5 backtested edges)
 c4aff38  Tier1Risk: cap FUNDING_PERSIST_FADE per-engine R to 0.0 (session 8)
 ```
 
@@ -46,165 +49,170 @@ c4aff38  Tier1Risk: cap FUNDING_PERSIST_FADE per-engine R to 0.0 (session 8)
 - OS: Ubuntu 24.04 LTS
 - Hostname: `josgp1`
 - Public IPv4: **`143.198.89.54`**
-- Private IPv4: `10.104.0.2`
 - SSH: `ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54`
-- Cost: $24/mo
 - Dashboard: **`https://143.198.89.54:9443/`** (nginx HTTPS → internal `:8080`)
 - Repo path on VPS: `/home/jo/ChimeraCrypto/`
 - Built binary: `/home/jo/ChimeraCrypto/build/chimera`
 - Service: `chimera.service` (systemd, auto-restart, runs as user `jo`)
-- nginx config: `/etc/nginx/sites-enabled/chimera` → `/etc/nginx/sites-available/chimera`
+- nginx config: `/etc/nginx/sites-enabled/chimera`
 
-### Authentication state (verified working at handoff time)
+### Authentication
 
-- `~/.ssh/chimera_ed25519` (Mac) is the active key — fingerprint `SHA256:Q84l1ETRNzvrwrp5XCMb9RxX0Fw2fUtKDU1D9RCfxvI`
-- Mac SSH agent also has `ChimeraGH.pem` loaded as `jo@Mac.hub` — fingerprint `SHA256:BAMj9vShA8bfEECKluLFCgI4+9TqT5LOCvxXzI39baw`. Not currently authorized on VPS but harmless.
-- VPS `/home/jo/.ssh/authorized_keys`: only `chimera-vps` key (placeholder `your_email@example.com` removed during this session)
-- VPS `/root/.ssh/authorized_keys`: 3 keys — DigitalOcean Droplet Agent (DOTTY, expires 2026-05-11T10:09:52Z so will rotate automatically) + `chimera-vps` (added this session) + one other
-- Sudo: `jo` is in `sudo` group with passwordless sudo via `/etc/sudoers.d/jo`
+- Mac key: `~/.ssh/chimera_ed25519` — fingerprint `SHA256:Q84l1ETRNzvrwrp5XCMb9RxX0Fw2fUtKDU1D9RCfxvI`
+- Public key on VPS in both `/home/jo/.ssh/authorized_keys` and `/root/.ssh/authorized_keys` under comment `chimera-vps`
+- Placeholder `your_email@example.com` key was removed last session — only the real key remains
+- jo has passwordless sudo via `/etc/sudoers.d/jo`
 
----
+### What is currently running on the VPS
 
-## The 5 deployed engines
+Five `EdgeEngine` instances, all `shadow_mode = true`:
 
-All `shadow_mode = true`. Backtest evidence in `chimera_edges/results/FINAL_REPORT.md`.
+| Tag | Symbol | Strategy | Timeframe | OOS PF | Expected trades/yr |
+|---|---|---|---|---|---|
+| BTC-TSMOM-D1 | btcusdt | tsmom | D1 | 1.19 | ~20 |
+| ETH-BB-H6 | ethusdt | bollinger | H6 | 1.31 | ~50 |
+| SOL-DONCH-H6 | solusdt | donchian | H6 | 1.24 | ~25 |
+| XRP-DONCH-H1 | xrpusdt | donchian | H1 | 1.20 | ~140 |
+| LINK-RSI-H6 | linkusdt | rsi_revert | H6 | 2.82 | ~15 |
 
-| Instance | Symbol | Strategy | TF | Lookback | Hold | SL ATR | OOS PF | Expected trades/yr | First signal warm-up |
-|---|---|---|---|---:|---:|---:|---:|---:|---|
-| `BTC-TSMOM-D1` | btcusdt | TSMOM | D1 | 20 | 12 | 3.0× | 1.19 | ~20 | ~20 days |
-| `ETH-BB-H6` | ethusdt | BOLLINGER | H6 | 20 | 12 | 2.5× | 1.31 | ~50 | ~5 days |
-| `SOL-DONCH-H6` | solusdt | DONCHIAN | H6 | 20 | 24 | 2.5× | 1.24 | ~25 | ~5 days |
-| `XRP-DONCH-H1` | xrpusdt | DONCHIAN | H1 | 20 | 24 | 2.5× | 1.20 | ~140 | ~21 hours |
-| `LINK-RSI-H6` | linkusdt | RSI_REVERT | H6 | rsi=14 | 8 | 2.0× | 2.82 | ~15 | ~4 days |
+WebSocket spot feed subscribes to all 8 symbols in `include/core/SymbolIndex.hpp` (BTC, ETH, SOL, BNB, AVAX, LINK, XRP, DOGE). BNB/AVAX/DOGE flow into `g_last_spot_px_bits[]` for display but have no engine.
 
-Exit logic (every engine): entry at next-bar OPEN after signal, hard SL at `entry − sl_atr_mult × ATR14`, time exit at `hold_bars`, no TP. 10bp round-trip cost deducted from logged P&L.
+### API schema (post commit 57501a9)
 
-Rejected during OOS (do NOT add back): DOGE tsmom D1, SOL tsmom D1, BNB donchian H6.
+`GET /api/state2` returns:
 
-### What was deleted in the Tier-2 rewrite
-
-- `include/core/SwingEngine.hpp` (1442 lines)
-- `include/core/FundingWindowEngine.hpp`
-- `include/core/BasisMomentumEngine.hpp`
-- `include/core/OrderbookImbalanceEngine.hpp`
-- `include/core/LiquidationEngine.hpp`, `LiquidationFeed.hpp`, `LiqBracketEngine.hpp`
-- `include/live/PerpFeed.hpp` + `src/live/PerpFeed.cpp`
-- `include/live/CoinbaseWSFeed.hpp` + `src/live/CoinbaseWSFeed.cpp`
-- `tools/backtest/replay.cpp`
-- `tools/backtest/replay_paper.cpp`
-- `tools/backtest/ab_test_swing.sh`
-
-Net diff: +920 lines / −6353 lines.
-
-### Orphan engine headers still in repo (next-session cleanup)
-
-These are leftover from sessions 7–8, no longer referenced by main.cpp, won't compile into binary, safe to delete:
-
-- `include/core/RangeMeanReversionEngine.hpp`
-- `include/core/MultiSymbolRotationEngine.hpp`
-- `include/core/FundingSignalEngine.hpp` (FundingPersistenceFade)
-- `include/core/LeadLagEngine.hpp` (ETH→BTC lead-lag)
-- `include/core/CompressionBreakoutEngine.hpp` (Vol Compress BO)
-- The earlier `Tier1Risk` header (need to confirm path)
-- `src/core/Portfolio.cpp`, `src/core/StatefulGovernor.cpp` (already unreferenced in CMakeLists)
-
----
-
-## Deferred work (priority order)
-
-### 1. `seed_from_history()` — quality of life
-
-Each `EdgeEngine` should pull historical klines on startup so it doesn't need ~20 real-time days to warm up.
-
-API sketch (add to `include/core/EdgeEngine.hpp`):
-
-```cpp
-// Call before feed.start(). Fetches max_history bars at cfg_.tf_secs via
-// Binance REST klines, populates closed-bar deques, leaves cur_bar_id_ = 0 so
-// the first live tick begins a fresh bar.
-void seed_from_history();
+```json
+{
+  "build": "57501a9",
+  "spot_prices": {
+    "btcusdt":  61234.500000,
+    "ethusdt":   2934.120000,
+    "solusdt":    143.870000,
+    "bnbusdt":    589.400000,
+    "avaxusdt":    24.180000,
+    "linkusdt":    14.560000,
+    "xrpusdt":      2.480000,
+    "dogeusdt":     0.156400
+  },
+  "engines": [ {...}, {...}, {...}, {...}, {...} ]
+}
 ```
 
-Implementation notes:
-- Use `tools/backtest/` REST helper or write a fresh one — Binance REST `https://api.binance.com/api/v3/klines?symbol={SYM}&interval={INT}&limit={N}` where `INT` maps `tf_secs` → `1h|6h|1d` etc.
-- 64-bar buffer × 5 engines × 1 REST call each = 5 calls total at startup, no rate-limit issue.
-- After seeding, the first live tick on the bar after the most recent kline kicks off `cur_bar_id_`.
-- Log: `[BTC-TSMOM-D1] SEEDED 64 bars  range=2026-04-22 -> 2026-05-10  last_close=80958.6750`
+Each engine object: `{ tag, symbol, strategy, tf_secs, shadow, halted, in_position, entry_px, sl_px, last_close, trades, wins, total_bp, last_bp, bars_in_buffer }`.
 
-### 2. Tier-1 risk wrapper — required before live
+`POST /api/kill` — flatten every open paper position + halt all engines. Returns `{"ok":true}`.
 
-Required before flipping any engine's `shadow_mode = false`. The old `Tier1Risk` header from sessions 7-8 was wired across 10 engines but is now orphaned. Decide: resurrect/adapt it, or write fresh.
+---
 
-Required components:
-- Daily loss circuit (kill all engines if portfolio_pnl_today_bp < threshold)
-- Per-engine R cap (so a misbehaving engine can't blow through capital)
-- Correlation-aware position sizing (5 engines on different symbols but BTC/ETH/SOL/XRP/LINK are positively correlated — sizing should reflect that)
-- State persistence to disk (so a service restart doesn't reset risk counters mid-day)
-- Position reconciliation (Binance position vs internal state, kill on mismatch)
+## Open work
 
-### 3. Orphan cleanup (one commit, low risk)
+### #1 — `seed_from_history()` for `EdgeEngine` (CRITICAL, user-requested)
+
+**Problem.** The Tier-2 rewrite (commit `cca1e5d`) replaced `SwingEngine` + `FundingWindow` + `BasisMomentum` + `OBI` with brand-new `EdgeEngine` instances. The new class accumulates bars from live ticks. Even though the *service* has been running for weeks, these *specific engines* are new code with no history. Result: BTC-TSMOM-D1 needs ~20 calendar days to take its first trade because it accumulates one D1 bar per day from live ticks.
+
+**Fix.** On engine construction, fetch the last N OHLC klines from Binance REST and pre-populate `opens_`/`highs_`/`lows_`/`closes_`/`bar_ts_ms_` deques. Engines warm-cold-start in seconds instead of days.
+
+**Files to change (3):**
+
+1. `include/live/BinanceREST.hpp` — add a public method:
+   ```cpp
+   struct Kline { int64_t open_ts_ms; double o, h, l, c; };
+   std::vector<Kline> fetch_klines(const std::string& symbol,
+                                   const std::string& interval,
+                                   int limit = 64) const;
+   ```
+   Calls `GET /api/v3/klines?symbol=BTCUSDT&interval=1d&limit=64` (public endpoint, no auth needed). Parse the JSON array — Binance returns `[[open_time, open, high, low, close, ...], ...]`. Use the existing `curl` machinery in the file.
+
+2. `include/core/EdgeEngine.hpp` — add a public method:
+   ```cpp
+   void seed_bars(const std::vector<BinanceREST::Kline>& bars) {
+       for (auto& b : bars) {
+           opens_.push_back(b.o);
+           highs_.push_back(b.h);
+           lows_.push_back(b.l);
+           closes_.push_back(b.c);
+           bar_ts_ms_.push_back(b.open_ts_ms);
+       }
+       while ((int)closes_.size() > cfg_.max_history) {
+           opens_.pop_front(); highs_.pop_front(); lows_.pop_front();
+           closes_.pop_front(); bar_ts_ms_.pop_front();
+       }
+       if (!closes_.empty()) last_close_ = closes_.back();
+   }
+   ```
+   Map `cfg_.tf_secs` → Binance interval string: `3600 → "1h"`, `21600 → "6h"`, `86400 → "1d"`.
+
+3. `src/main.cpp::main()` — between engine construction and `feed.start()`, call `seed_bars()` for each engine. Use a single `BinanceREST` instance (already constructed for the executor) or a new dedicated read-only one. Log how many bars each engine got. If a fetch fails, log and continue — engine will fall back to live-tick warm-up.
+
+**Verification after deploy:**
+- `bars_in_buffer` on every engine card should be ≥ `lookback` (20) within seconds of service start
+- `last_close` on every engine card should be non-zero
+- First entries can fire on the next bar close (within an hour for XRP H1, within a day for BTC D1)
+
+### #2 — Verify GUI fix actually rendered on VPS
+
+User just pushed `57501a9` from chat — needs to verify it built and deployed:
 
 ```bash
-ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 'cd ~/ChimeraCrypto && \
-    git rm include/core/RangeMeanReversionEngine.hpp \
-            include/core/MultiSymbolRotationEngine.hpp \
-            include/core/FundingSignalEngine.hpp \
-            include/core/LeadLagEngine.hpp \
-            include/core/CompressionBreakoutEngine.hpp && \
-    git commit -m "cleanup: drop orphan engine headers (Tier-2 unused)" && \
-    git push origin main'
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 '
+  cd ~/ChimeraCrypto && git pull --ff-only origin main && git log --oneline -3
+  sudo systemctl stop chimera.service
+  while pgrep -x chimera >/dev/null; do sleep 0.5; done
+  cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j"$(nproc)" chimera 2>&1 | tail -20
+  sudo systemctl start chimera.service
+  sleep 4
+  curl -s http://localhost:8080/api/state2 | python3 -m json.tool | head -30
+'
 ```
 
-(Verify each file is really unused with `grep -r "RangeMeanReversionEngine" src/ include/` first.)
+Then open `https://143.198.89.54:9443/` — expect to see the 8-symbol ticker strip at top, plus a "Live Price" row inside each of the 5 engine cards.
 
-### 4. DOGE / AVAX / BNB — second-pass edge discovery
+### #3 — Tier-1 risk wrapper
 
-In the 200-cell backtest none of these survived OOS. Try:
-- **Weekly Donchian** (lookback=4 weekly bars, hold=2-3 weeks)
-- **Cross-sectional momentum vs BTC** — rank symbols by 30-day return, long top quartile
-- **RSI-revert at H1** (was H6 in this round)
-- **Volume-spike + retest** — DOGE specifically has memecoin volume bursts
+Required before flipping any `shadow_mode = false`. Full spec lives in `HANDOFF_TIER2.md` deferred section. Components:
+- Daily loss circuit (kill all if intraday drawdown > X bp)
+- Correlation-aware position sizing (cap aggregate exposure across correlated symbols)
+- Per-engine kill switch (independent of /api/kill)
+- State persistence (positions, daily P&L, kill flags survive restarts)
+- Reconciliation (compare engine-state position vs SpotExecutor cash + holdings, halt if drift)
 
-Add to `chimera_edges/backtest.py` as new strategies, rerun, post-cut filter, push survivors as additional engine instances.
+### #4 — Repo cleanup
 
-### 5. Promote gating (after 4 weeks of paper)
+Orphan headers in `include/core/` that don't compile into the binary:
+- `RangeMeanReversionEngine.hpp`
+- `MultiSymbolRotationEngine.hpp`
+- `FundingSignalEngine.hpp`
+- `LeadLagEngine.hpp`
+- `CompressionBreakoutEngine.hpp`
+- earlier `Tier1Risk` wrapper
 
-Each Friday for the next 4 weeks, run:
+Either delete them or move to `archive/`.
 
-```bash
-ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 \
-    'for tag in BTC-TSMOM-D1 ETH-BB-H6 SOL-DONCH-H6 XRP-DONCH-H1 LINK-RSI-H6; do
-        echo "=== $tag ==="
-        sudo journalctl -u chimera.service --since "4 weeks ago" | grep "$tag" | grep "EXIT" | tail -50
-    done'
-```
+### #5 — Promotion gate
 
-For each engine, compute:
-- trades_per_week
-- win_rate
-- total_bp_net
-- avg_bp_net
-- max losing streak
+After 4 weeks of paper trades, compare each engine's:
+- trades/yr
+- win rate
+- profit factor
 
-Promote (`shadow_mode = false`) only if within ±10% of backtest expectations on trades_per_yr AND WR AND PF >= 1.10. ALL THREE.
+against backtest expectations. Engines within ±10% on all three graduate to `shadow_mode = false`. Anything outside that range stays paper or gets killed.
 
 ---
 
-## User preferences (carry forward)
+## User preferences (apply throughout)
 
-- **Always provide full code files**, no snippets / diffs.
-- **Warn at 70% chat context** with a summary.
-- **Warn before time / session blocks.**
-- **Never modify core code without explicit instruction.**
-- Use the PAT in CLAUDE.md without arguments when committing.
-- Email: kiwi18@gmail.com
-- Name: Jo
+- **Full code with context.** No snippets, no diffs, no partial files. Provide the complete file every time.
+- **Warn at 70% chat context.** Give a summary before approaching the limit.
+- **Warn before time/session usage block.**
+- **Never modify core code unless instructed clearly.** "Core" = engine classes, signal logic, risk wrapper. GUI/HTML/build files are fair game when asked.
+- **Mac dev path:** `jo@Jos-MacBook-Pro ChimeraCrypto %` (i.e. `~/ChimeraCrypto` on the Mac)
+- **Email:** `kiwi18@gmail.com`
 
 ---
 
-## Quick reference — deploy / rollback / debug
+## Quick deploy / rollback reference
 
-### Deploy a new commit
+**Deploy current main to VPS:**
 ```bash
 ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 '
   set -e
@@ -212,68 +220,68 @@ ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 '
   git pull --ff-only origin main
   sudo systemctl stop chimera.service
   while pgrep -x chimera >/dev/null; do sleep 0.5; done
-  cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j"$(nproc)" chimera
+  cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j"$(nproc)" chimera 2>&1 | tail -20
   sudo systemctl start chimera.service
   sleep 4
   sudo journalctl -u chimera.service --since "10 seconds ago" --no-pager | head -30
 '
 ```
 
-### Rollback to previous build
+**Roll back to a specific commit:**
 ```bash
 ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 '
-  cd ~/ChimeraCrypto
-  git log --oneline -5
-  sudo systemctl stop chimera.service
-  git reset --hard <previous-commit-hash>
-  cd build && make -j"$(nproc)" chimera
-  sudo systemctl start chimera.service
+  cd ~/ChimeraCrypto && git fetch origin
+  git checkout <commit>
+  sudo systemctl restart chimera.service
 '
 ```
 
-### Watch trades roll in
+**Force-flatten everything (paper):**
+```bash
+curl -X POST http://143.198.89.54:8080/api/kill
+```
+
+**Tail the log:**
 ```bash
 ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 \
     'sudo journalctl -u chimera.service -f' \
-    | grep -E "ARMED|ENTRY|EXIT|FATAL|STARTUP"
+    | grep -E "ARMED|ENTRY|EXIT|FATAL|STARTUP|TICK"
 ```
 
-### State check
+**Backup-tarball before risky deploy:**
 ```bash
-curl -s http://localhost:8080/api/state2 | python3 -m json.tool
-# Or from your Mac (HTTPS via nginx):
-curl -sk https://143.198.89.54:9443/api/state2 | python3 -m json.tool
-```
-
-### Kill all engines
-Dashboard top-right button, or:
-```bash
-curl -sk -X POST https://143.198.89.54:9443/api/kill
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54 '
+  cd ~/ChimeraCrypto
+  tar czf ~/chimera-backup-$(date +%Y%m%d-%H%M).tgz --exclude=build --exclude=.git .
+  ls -lah ~/chimera-backup-*.tgz | tail -5
+'
 ```
 
 ---
 
-## Files produced this session (local outputs folder)
+## What changed this session (chronological)
 
-```
-outputs/
-├── chimera_edges/                # Backtest pipeline (Python)
-│   ├── data/*.parquet            # 38,192 1h bars per symbol, 8 symbols
-│   ├── backtest.py               # 200-cell harness
-│   ├── analyse.py                # post-cut filter + ranking
-│   ├── verify.py                 # OOS split + random-entry control
-│   ├── download_one.py
-│   └── results/
-│       ├── results.csv           # all 200 cells
-│       ├── edges_ranked.csv
-│       ├── edges_keepers.csv     # 8 cells passing keeper filter
-│       ├── verification.csv      # 5 OOS survivors + 3 failures
-│       └── FINAL_REPORT.md       # full writeup + wire plan
-└── chimera-build/                # New C++ source (mirrored to /tmp/chimera-repo and pushed)
-    ├── include/core/EdgeEngine.hpp
-    ├── src/main.cpp
-    ├── gui/index.html
-    ├── CMakeLists.txt
-    ├── HANDOFF_TIER2.md
-    └── HANDOFF_NEXT.md           # this file
-```
+1. Diagnosed why the new Tier-2 dashboard showed `—` everywhere despite the service running for weeks → confirmed the Tier-2 rewrite replaced the old engine stack with brand-new `EdgeEngine` instances that have no bar history.
+2. Modified `src/main.cpp::build_state_json()` to add a `spot_prices` object pulling from `g_last_spot_px_bits[]` (the WebSocket tick cache). Independent of engine bar accumulation — shows real prices on first paint.
+3. Rewrote `gui/index.html`:
+   - Added an 8-symbol live ticker strip at top (BTC/ETH/SOL/BNB/AVAX/LINK/XRP/DOGE). Engine-traded symbols highlighted in accent colour; spot-only symbols dimmer.
+   - Each engine card got a prominent "Live Price" row pulled from `spot_prices[engine.symbol]`. Falls back to `last_close` once that's non-zero.
+   - Up/down price colouring on 1s poll diff.
+   - "Last Close" preserved as a separate small metric (still useful once engine warms up).
+4. Committed and pushed as `57501a9`.
+5. **Did NOT touch any engine/trading logic.** GUI display fix only.
+
+---
+
+## Files of note (paths on Mac / GitHub)
+
+- `src/main.cpp` — wraps engines, runs HTTP server, owns the WS feed callback
+- `gui/index.html` — single-file dashboard
+- `include/core/EdgeEngine.hpp` — the Tier-2 engine class (touching this needs explicit user instruction)
+- `include/core/SymbolIndex.hpp` — central symbol registry (8 symbols)
+- `include/live/BinanceWSFeed.hpp` — WebSocket feed (libwebsockets)
+- `include/live/BinanceREST.hpp` — REST executor + auth (curl) — `fetch_klines()` to be added here for seed_from_history
+- `include/live/SpotExecutor.hpp` — spot-only executor (long buys + sells, no shorts)
+- `CMakeLists.txt` — build config
+- `HANDOFF_TIER2.md` — deeper spec for risk wrapper + deferred items
+- `HANDOFF_NEXT.md` — this file (regenerate at end of each session)

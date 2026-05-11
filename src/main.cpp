@@ -16,7 +16,11 @@
 // only after 4 weeks of paper trades match backtest WR/PF within +/- 10%.
 //
 // HTTP GUI :8080
-//   GET  /api/state2  -> {"engines":[ <one EdgeEngine state_json> x 5 ]}
+//   GET  /api/state2  -> {
+//       "build":"<hash>",
+//       "spot_prices":{ "<symbol>": <last_tick_px>, ... 8 symbols },
+//       "engines":[ <one EdgeEngine state_json> x 5 ]
+//   }
 //   POST /api/kill    -> kill_all on every engine (flatten + halt)
 // ============================================================================
 #include <thread>
@@ -27,6 +31,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <mutex>
@@ -88,7 +93,8 @@ struct EngineSlot {
 static std::vector<EngineSlot>  g_slots;
 static std::mutex               g_engine_mtx;
 
-// Last-seen mid per symbol — used by /api/kill flatten paths.
+// Last-seen mid per symbol — used by /api/kill flatten paths and the
+// /api/state2 "spot_prices" field that the GUI renders as a live price strip.
 static std::atomic<uint64_t>    g_last_spot_px_bits[chimera::MAX_SYMBOLS]{};
 
 static double load_dbl_atomic(const std::atomic<uint64_t>& a) {
@@ -116,9 +122,35 @@ static std::string read_file(const std::string& path) {
 static std::string gui_root;
 
 // Build the structured JSON for /api/state2.
+//
+// Schema:
+//   {
+//     "build":       "<git short hash>",
+//     "spot_prices": { "btcusdt": <px>, "ethusdt": <px>, ... 8 entries },
+//     "engines":     [ <state_json>, ... 5 entries ]
+//   }
+//
+// "spot_prices" is the live last-tick price for every symbol the WebSocket feed
+// subscribes to (BTC/ETH/SOL/BNB/AVAX/LINK/XRP/DOGE). It is independent of
+// engine bar accumulation, so the GUI can show real prices on first paint even
+// when no bar has closed yet (engines start with bars_in_buffer=0 and
+// last_close=0 until their first bar window completes).
 static std::string build_state_json() {
     std::ostringstream js;
-    js << "{\"build\":\"" << BUILD_VERSION << "\",\"engines\":[";
+    js << "{\"build\":\"" << BUILD_VERSION << "\",";
+
+    // ── spot_prices ─────────────────────────────────────────────────────────
+    js << "\"spot_prices\":{";
+    js << std::fixed << std::setprecision(6);
+    for (int i = 0; i < chimera::MAX_SYMBOLS; ++i) {
+        if (i > 0) js << ",";
+        double px = load_dbl_atomic(g_last_spot_px_bits[i]);
+        js << "\"" << chimera::sym_full(i) << "\":" << px;
+    }
+    js << "},";
+
+    // ── engines ─────────────────────────────────────────────────────────────
+    js << "\"engines\":[";
     for (size_t i = 0; i < g_slots.size(); ++i) {
         if (i > 0) js << ",";
         if (g_slots[i].engine) js << g_slots[i].engine->state_json();

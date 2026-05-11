@@ -25,7 +25,7 @@
   body { padding: 16px 22px; }
   header {
     display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
-    padding: 8px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+    padding: 8px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 14px;
   }
   header .logo { font-weight: 900; letter-spacing: 0.18em; font-size: 22px; color: var(--accent); }
   header .sub  { font-size: 12px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; }
@@ -36,6 +36,43 @@
     letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px;
   }
   header .kill:hover { background: var(--red); color: #0a0e15; }
+
+  /* ── Live spot-price strip — current pricing for all 8 feed symbols ─── */
+  .ticker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+    margin-bottom: 18px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+  }
+  .tile {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 10px;
+    border-right: 1px solid var(--line);
+  }
+  .tile:last-child { border-right: none; }
+  .tile.engine-symbol { background: rgba(74,214,197,0.04); border-radius: 4px; }
+  .tile .sym {
+    font-size: 10px; letter-spacing: 0.12em; color: var(--dim);
+    text-transform: uppercase; font-weight: 700;
+  }
+  .tile.engine-symbol .sym { color: var(--accent); }
+  .tile .px  {
+    font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--text); letter-spacing: -0.01em;
+  }
+  .tile.no-data .px { color: var(--dim); font-weight: 400; }
+  .tile .px.up   { color: var(--green); }
+  .tile .px.down { color: var(--red);   }
+  .tile .tag {
+    font-size: 9px; color: var(--dim); letter-spacing: 0.08em;
+    text-transform: uppercase; margin-top: 1px;
+  }
+  .tile.engine-symbol .tag { color: var(--accent); opacity: 0.8; }
 
   .grid {
     display: grid;
@@ -66,11 +103,24 @@
   .pill.intrade{ color: #0a0e15; background: var(--accent); border-color: var(--accent); }
   .pill.halted { color: var(--red); border-color: rgba(255,93,122,0.35); background: rgba(255,93,122,0.10); }
 
+  /* Big "current price" line on each engine card */
+  .spot-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--panel-2); border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  .spot-row .lbl { font-size: 10px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; }
+  .spot-row .px  { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .spot-row .px.up   { color: var(--green); }
+  .spot-row .px.down { color: var(--red);   }
+  .spot-row.no-data .px { color: var(--dim); font-weight: 500; }
+
   .metrics {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 10px 14px;
-    margin-top: 14px;
+    margin-top: 12px;
   }
   .metric { display: flex; flex-direction: column; gap: 2px; }
   .metric .lbl { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -104,6 +154,9 @@
   <button class="kill" id="killAll" title="Force-flatten every paper position and halt all engines">Kill All</button>
 </header>
 
+<!-- Live spot-price strip — populated from /api/state2 spot_prices on every poll -->
+<div class="ticker" id="ticker"></div>
+
 <div class="grid" id="engines"></div>
 
 <footer>
@@ -112,13 +165,71 @@
 </footer>
 
 <script>
+  // Symbol metadata: display order, short name, which engine (if any) trades it.
+  // Order matches SymbolIndex.hpp on the backend.
+  const SYMBOLS = [
+    { full: 'btcusdt',  short: 'BTC',  engineTag: 'BTC-TSMOM-D1' },
+    { full: 'ethusdt',  short: 'ETH',  engineTag: 'ETH-BB-H6'    },
+    { full: 'solusdt',  short: 'SOL',  engineTag: 'SOL-DONCH-H6' },
+    { full: 'bnbusdt',  short: 'BNB',  engineTag: null           },
+    { full: 'avaxusdt', short: 'AVAX', engineTag: null           },
+    { full: 'linkusdt', short: 'LINK', engineTag: 'LINK-RSI-H6'  },
+    { full: 'xrpusdt',  short: 'XRP',  engineTag: 'XRP-DONCH-H1' },
+    { full: 'dogeusdt', short: 'DOGE', engineTag: null           },
+  ];
+
+  // Hold previous tick price per symbol so we can colour up/down moves.
+  const prevPx = Object.create(null);
+
   const $ = (sel) => document.querySelector(sel);
   const fmtBp  = (v) => (v == null || isNaN(v)) ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + 'bp';
-  const fmtPx  = (v) => (v == null || isNaN(v) || v === 0) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
   const fmtInt = (v) => (v == null || isNaN(v)) ? '—' : Number(v).toString();
   const wrPct  = (w, t) => (!t || t === 0) ? '—' : (100 * w / t).toFixed(0) + '%';
 
-  function renderEngine(e) {
+  // Format a price with a reasonable number of decimals depending on magnitude.
+  // BTC ~60000 -> 2dp, XRP ~2.50 -> 4dp, DOGE ~0.15 -> 5dp.
+  function fmtPx(v) {
+    if (v == null || isNaN(v) || v <= 0) return '—';
+    const n = Number(v);
+    if (n >= 1000)  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (n >= 10)    return n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    if (n >= 1)     return n.toFixed(4);
+    if (n >= 0.01)  return n.toFixed(5);
+    return n.toFixed(6);
+  }
+
+  function pxClass(symFull, newPx) {
+    const old = prevPx[symFull];
+    if (old == null || newPx == null || newPx <= 0 || old <= 0) return '';
+    if (newPx > old) return 'up';
+    if (newPx < old) return 'down';
+    return '';
+  }
+
+  function renderTicker(spotPrices) {
+    spotPrices = spotPrices || {};
+    return SYMBOLS.map(s => {
+      const px = spotPrices[s.full];
+      const has = (px != null && !isNaN(px) && px > 0);
+      const tileClass = [
+        'tile',
+        s.engineTag ? 'engine-symbol' : '',
+        has ? '' : 'no-data',
+      ].filter(Boolean).join(' ');
+      const pc = has ? pxClass(s.full, px) : '';
+      const tagLine = s.engineTag ? s.engineTag : 'spot';
+      return `
+        <div class="${tileClass}">
+          <div class="sym">${s.short}</div>
+          <div class="px ${pc}">${has ? fmtPx(px) : '—'}</div>
+          <div class="tag">${tagLine}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderEngine(e, spotPrices) {
+    spotPrices = spotPrices || {};
     const inPos = !!e.in_position;
     const halted = !!e.halted;
     const klass = halted ? 'engine halted' : (inPos ? 'engine in-position' : 'engine');
@@ -126,6 +237,15 @@
     const stateText  = halted ? 'Halted' : (inPos ? 'In Trade' : (e.shadow ? 'Shadow' : 'Live'));
     const totalClass = (e.total_bp || 0) > 0 ? 'val pos' : ((e.total_bp || 0) < 0 ? 'val neg' : 'val');
     const lastClass  = (e.last_bp  || 0) > 0 ? 'val pos' : ((e.last_bp  || 0) < 0 ? 'val neg' : 'val');
+
+    // Current price for this engine — prefer live spot tick, fall back to
+    // engine bar-aggregated last_close (only useful once first bar has closed).
+    const symKey = (e.symbol || '').toLowerCase();
+    const spotPx = spotPrices[symKey];
+    const livePx = (spotPx != null && spotPx > 0) ? spotPx : (e.last_close > 0 ? e.last_close : null);
+    const hasLive = (livePx != null && livePx > 0);
+    const livePxClass = hasLive ? pxClass(symKey, livePx) : '';
+
     const tfLabel = (() => {
       const s = e.tf_secs || 0;
       if (s === 3600)  return 'H1';
@@ -143,6 +263,11 @@
             <div class="symbol-row">${(e.symbol || '').toUpperCase()} &nbsp;·&nbsp; ${e.strategy || ''} &nbsp;·&nbsp; ${tfLabel}</div>
           </div>
           <div class="pill ${stateClass}">${stateText}</div>
+        </div>
+
+        <div class="spot-row ${hasLive ? '' : 'no-data'}">
+          <div class="lbl">Live Price</div>
+          <div class="px ${livePxClass}">${hasLive ? fmtPx(livePx) : '—'}</div>
         </div>
 
         <div class="metrics">
@@ -173,9 +298,19 @@
       const r = await fetch('/api/state2', { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
+
+      const spot = j.spot_prices || {};
+
       $('#build').textContent = 'build ' + (j.build || '—');
-      const html = (j.engines || []).map(renderEngine).join('');
-      $('#engines').innerHTML = html;
+      $('#ticker').innerHTML  = renderTicker(spot);
+      $('#engines').innerHTML = (j.engines || []).map(e => renderEngine(e, spot)).join('');
+
+      // Update prevPx AFTER render so the up/down colouring is "since last poll".
+      SYMBOLS.forEach(s => {
+        const px = spot[s.full];
+        if (px != null && !isNaN(px) && px > 0) prevPx[s.full] = px;
+      });
+
       lastFetchOk = Date.now();
       status.textContent = 'Live';
       status.className = 'ok';

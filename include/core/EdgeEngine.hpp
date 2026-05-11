@@ -27,6 +27,11 @@
 //
 // Bar synthesis is internal: each engine accumulates ticks into its own
 // timeframe bars (no shared bar bus required).
+//
+// Cold-start mitigation: seed_bars() pre-populates the closed-bar deques from
+// historical OHLC pulled by main.cpp (BinanceREST::fetch_klines), so an engine
+// can evaluate signals on bar 1 instead of waiting ~lookback bars for live
+// ticks to build the history (which would take ~20 days for BTC-TSMOM-D1).
 // ============================================================================
 #pragma once
 
@@ -80,6 +85,19 @@ public:
         int          max_history = 64;
     };
 
+    // -----------------------------------------------------------------------
+    // SeedBar — one historical OHLC bar supplied to seed_bars().
+    // Decoupled from any specific REST client so EdgeEngine.hpp stays free
+    // of curl/openssl includes. main.cpp converts BinanceREST::Kline to this.
+    // -----------------------------------------------------------------------
+    struct SeedBar {
+        int64_t open_ts_ms = 0;
+        double  o = 0.0;
+        double  h = 0.0;
+        double  l = 0.0;
+        double  c = 0.0;
+    };
+
     bool shadow_mode = true;  // public for main.cpp init parity with old engines
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
@@ -91,6 +109,67 @@ public:
             (long long)cfg_.tf_secs, cfg_.lookback, cfg_.hold_bars, cfg_.sl_atr_mult,
             shadow_mode ? 1 : 0);
         std::fflush(stdout);
+    }
+
+    // -----------------------------------------------------------------------
+    // seed_bars — pre-populate the closed-bar history from REST klines.
+    //
+    // Called once at startup before the live tick stream begins. Bars must
+    // arrive OLDEST-FIRST (which is how Binance returns them). After seeding,
+    // cur_bar_id_ is set to the last seeded bar's id so the next live tick
+    // either extends the current (partial) bar or starts a fresh one cleanly.
+    //
+    // Returns the number of bars actually inserted (after max_history trim).
+    // Safe to call with an empty vector (no-op).
+    // -----------------------------------------------------------------------
+    int seed_bars(const std::vector<SeedBar>& bars) {
+        if (bars.empty()) return 0;
+
+        for (const auto& b : bars) {
+            if (b.o <= 0.0 || b.h <= 0.0 || b.l <= 0.0 || b.c <= 0.0) continue;
+            opens_.push_back(b.o);
+            highs_.push_back(b.h);
+            lows_.push_back(b.l);
+            closes_.push_back(b.c);
+            bar_ts_ms_.push_back(b.open_ts_ms);
+        }
+
+        // Trim to max_history (drop oldest first).
+        while ((int)closes_.size() > cfg_.max_history) {
+            opens_.pop_front();
+            highs_.pop_front();
+            lows_.pop_front();
+            closes_.pop_front();
+            bar_ts_ms_.pop_front();
+        }
+
+        if (!closes_.empty()) {
+            last_close_ = closes_.back();
+
+            // Anchor cur_bar_id_ to the most recent SEEDED bar so the first
+            // live tick after seeding doesn't fire close_bar_() with garbage.
+            // open_ts_ms is the bar OPEN timestamp; the corresponding bar id
+            // is (open_ts_ms / 1000) / tf_secs.
+            int64_t last_open_ts_ms = bar_ts_ms_.back();
+            cur_bar_id_     = last_open_ts_ms / 1000 / cfg_.tf_secs;
+            cur_open_ts_ms_ = cur_bar_id_ * cfg_.tf_secs * 1000;
+
+            // Initialise the in-flight bar at the last close so the first
+            // live tick either updates the high/low/close of this same bar
+            // (if still within its window) or rolls forward via the normal
+            // gap-fill path in on_tick().
+            cur_open_  = last_close_;
+            cur_high_  = last_close_;
+            cur_low_   = last_close_;
+            cur_close_ = last_close_;
+        }
+
+        std::printf("[%s] SEED   bars_in=%d closes_kept=%d last_close=%.6f\n",
+            cfg_.tag.c_str(),
+            (int)bars.size(), (int)closes_.size(), last_close_);
+        std::fflush(stdout);
+
+        return (int)closes_.size();
     }
 
     // Called on every spot tick for this symbol. Builds bars internally.
@@ -168,6 +247,7 @@ public:
     int wins() const { return wins_; }
     double total_bp() const { return total_bp_; }
     bool in_position() const { return in_position_; }
+    int bars_in_buffer() const { return (int)closes_.size(); }
 
 private:
     Config cfg_;

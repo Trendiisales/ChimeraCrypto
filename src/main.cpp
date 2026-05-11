@@ -15,6 +15,14 @@
 // All instances spot-LONG-only, shadow_mode = true by default. Promote to live
 // only after 4 weeks of paper trades match backtest WR/PF within +/- 10%.
 //
+// COLD-START SEEDING: After constructing the engines and before starting the
+// live tick feed, we fetch the most recent N OHLC bars from Binance REST
+// (/api/v3/klines, public endpoint) and pre-populate each engine's closed-bar
+// deque. Without this, BTC-TSMOM-D1 would need ~20 calendar days to evaluate
+// its first signal because it would have to build the lookback window from
+// live ticks one bar at a time. With seeding, the engine is signal-ready on
+// bar 1 of live data.
+//
 // HTTP GUI :8080
 //   GET  /api/state2  -> {
 //       "build":"<hash>",
@@ -45,6 +53,7 @@
 #include <arpa/inet.h>
 
 #include "live/BinanceWSFeed.hpp"
+#include "live/BinanceREST.hpp"
 #include "live/SpotExecutor.hpp"
 #include "core/EdgeEngine.hpp"
 #include "core/SymbolIndex.hpp"
@@ -134,7 +143,8 @@ static std::string gui_root;
 // subscribes to (BTC/ETH/SOL/BNB/AVAX/LINK/XRP/DOGE). It is independent of
 // engine bar accumulation, so the GUI can show real prices on first paint even
 // when no bar has closed yet (engines start with bars_in_buffer=0 and
-// last_close=0 until their first bar window completes).
+// last_close=0 until their first bar window completes — though with
+// seed_bars() at startup, last_close is non-zero almost immediately).
 static std::string build_state_json() {
     std::ostringstream js;
     js << "{\"build\":\"" << BUILD_VERSION << "\",";
@@ -235,6 +245,70 @@ static void http_server_thread(int port) {
 // ── Signal handler ────────────────────────────────────────────────────────────
 static std::atomic<bool> g_running{true};
 void signal_handler(int) { g_running = false; }
+
+// ── Map EdgeEngine tf_secs -> Binance kline interval string ────────────────
+// Returns empty string if the timeframe doesn't map to a Binance interval.
+static const char* tf_to_binance_interval(int64_t tf_secs) {
+    switch (tf_secs) {
+        case 60:     return "1m";
+        case 180:    return "3m";
+        case 300:    return "5m";
+        case 900:    return "15m";
+        case 1800:   return "30m";
+        case 3600:   return "1h";
+        case 7200:   return "2h";
+        case 14400:  return "4h";
+        case 21600:  return "6h";
+        case 28800:  return "8h";
+        case 43200:  return "12h";
+        case 86400:  return "1d";
+        case 259200: return "3d";
+        case 604800: return "1w";
+        default:     return "";
+    }
+}
+
+// ── Seed one engine from REST klines (called once per engine at startup) ───
+// Pulls `limit` historical bars matching the engine's timeframe from Binance,
+// converts to EdgeEngine::SeedBar, and hands them off to the engine.
+// Logs success/failure but never aborts startup — engine falls back to live-
+// tick warm-up if REST is unreachable.
+static void seed_engine_from_history(chimera::BinanceREST& rest,
+                                     chimera::EdgeEngine& engine,
+                                     const std::string& symbol,
+                                     int64_t tf_secs,
+                                     const std::string& tag,
+                                     int limit = 64)
+{
+    const char* interval = tf_to_binance_interval(tf_secs);
+    if (!interval || !*interval) {
+        std::fprintf(stderr, "[SEED][%s] no Binance interval for tf_secs=%lld — skip\n",
+                     tag.c_str(), (long long)tf_secs);
+        return;
+    }
+
+    auto klines = rest.fetch_klines(symbol, interval, limit);
+    if (klines.empty()) {
+        std::fprintf(stderr, "[SEED][%s] fetch_klines returned 0 bars (symbol=%s interval=%s) — "
+                              "engine will cold-start from live ticks\n",
+                     tag.c_str(), symbol.c_str(), interval);
+        return;
+    }
+
+    std::vector<chimera::EdgeEngine::SeedBar> seed;
+    seed.reserve(klines.size());
+    for (const auto& k : klines) {
+        chimera::EdgeEngine::SeedBar b{};
+        b.open_ts_ms = k.open_ts_ms;
+        b.o = k.o; b.h = k.h; b.l = k.l; b.c = k.c;
+        seed.push_back(b);
+    }
+
+    int kept = engine.seed_bars(seed);
+    std::printf("[SEED][%s] symbol=%s interval=%s fetched=%d kept=%d\n",
+                tag.c_str(), symbol.c_str(), interval, (int)klines.size(), kept);
+    std::fflush(stdout);
+}
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
@@ -341,6 +415,32 @@ int main() {
     g_slots.push_back({chimera::SYM_SOL,  &sol_donch_h6});
     g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h1});
     g_slots.push_back({chimera::SYM_LINK, &link_rsi_h6});
+
+    // ── Seed each engine's bar buffer from Binance REST klines ──────────────
+    // This is what lets BTC-TSMOM-D1 evaluate signals on bar 1 instead of
+    // waiting ~20 calendar days to accumulate the lookback window from live
+    // ticks. The kline endpoint is public (no auth) so this works even if the
+    // executor failed to init credentials. Fetch is best-effort: any failure
+    // is logged and the engine cold-starts from live ticks as before.
+    {
+        chimera::BinanceREST seed_rest;     // dedicated read-only client; no creds needed
+        std::printf("[STARTUP] Seeding engine bar buffers from Binance REST klines...\n");
+        std::fflush(stdout);
+
+        seed_engine_from_history(seed_rest, btc_tsmom_d1,
+                                 btc_cfg.symbol,  btc_cfg.tf_secs,  btc_cfg.tag,  64);
+        seed_engine_from_history(seed_rest, eth_bb_h6,
+                                 eth_cfg.symbol,  eth_cfg.tf_secs,  eth_cfg.tag,  64);
+        seed_engine_from_history(seed_rest, sol_donch_h6,
+                                 sol_cfg.symbol,  sol_cfg.tf_secs,  sol_cfg.tag,  64);
+        seed_engine_from_history(seed_rest, xrp_donch_h1,
+                                 xrp_cfg.symbol,  xrp_cfg.tf_secs,  xrp_cfg.tag,  64);
+        seed_engine_from_history(seed_rest, link_rsi_h6,
+                                 link_cfg.symbol, link_cfg.tf_secs, link_cfg.tag, 64);
+
+        std::printf("[STARTUP] Seeding complete.\n");
+        std::fflush(stdout);
+    }
 
     // GUI root
     {

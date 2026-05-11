@@ -14,12 +14,20 @@
 //   - HMAC-SHA256 signed, timestamp + recvWindow attached
 //   - Response parsed for orderId, status, executedQty, price
 //
+// PUBLIC DATA:
+//   - fetch_klines() pulls historical OHLC bars from /api/v3/klines.
+//     Used at startup to seed each EdgeEngine's bar buffer so engines can
+//     evaluate signals on bar 1 instead of waiting for ~lookback live bars.
+//     This endpoint is unauthenticated; works even before load_credentials().
+//
 // THREAD SAFETY: All public methods are thread-safe (mutex-protected).
 // ============================================================================
 #include <string>
+#include <vector>
 #include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
 #include <atomic>
 #include <mutex>
 #include <sstream>
@@ -59,6 +67,20 @@ struct AccountBalance {
 
 class BinanceREST {
 public:
+    // -----------------------------------------------------------------------
+    // Kline — one row from GET /api/v3/klines.
+    // Binance returns [open_ts_ms, open, high, low, close, volume, ...]
+    // We only need OHLC + open_ts_ms for engine seeding.
+    // -----------------------------------------------------------------------
+    struct Kline {
+        int64_t open_ts_ms = 0;
+        double  o = 0.0;
+        double  h = 0.0;
+        double  l = 0.0;
+        double  c = 0.0;
+        double  v = 0.0;   // base volume (kept for future use; unused by seeding)
+    };
+
     // -----------------------------------------------------------------------
     // load_credentials — reads config/binance_credentials.json
     // Returns true if keys are loaded and ping succeeds.
@@ -159,6 +181,73 @@ public:
                     bal.usdt_free, bal.btc_free, bal.eth_free, bal.sol_free);
         std::fflush(stdout);
         return bal;
+    }
+
+    // -----------------------------------------------------------------------
+    // fetch_klines — GET /api/v3/klines (public endpoint, no auth).
+    //
+    // symbol:    e.g. "BTCUSDT" (case-insensitive — uppercased internally)
+    // interval:  "1m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w"
+    // limit:     1..1000 bars (Binance hard cap = 1000)
+    //
+    // Returns vector of klines ORDERED OLDEST-FIRST. If the request fails the
+    // vector is empty — caller should log and continue (engine will then
+    // warm-cold-start from live ticks).
+    //
+    // Curl is initialised lazily here in case load_credentials() hasn't run
+    // yet — safe to call repeatedly.
+    // -----------------------------------------------------------------------
+    std::vector<Kline> fetch_klines(const std::string& symbol,
+                                    const std::string& interval,
+                                    int limit = 64) {
+        std::vector<Kline> result;
+        if (symbol.empty() || interval.empty()) return result;
+        if (limit <= 0)     limit = 1;
+        if (limit > 1000)   limit = 1000;
+
+        // Lazy curl init (no-op if already done by load_credentials).
+        static std::once_flag curl_init_once;
+        std::call_once(curl_init_once, [](){ curl_global_init(CURL_GLOBAL_DEFAULT); });
+
+        // Force uppercase symbol (Binance REST is case-sensitive on this endpoint).
+        std::string up; up.reserve(symbol.size());
+        for (char ch : symbol)
+            up.push_back((ch >= 'a' && ch <= 'z') ? char(ch - 32) : ch);
+
+        std::ostringstream url_ss;
+        url_ss << "https://api.binance.com/api/v3/klines"
+               << "?symbol="   << up
+               << "&interval=" << interval
+               << "&limit="    << limit;
+        std::string url = url_ss.str();
+
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            std::fprintf(stderr, "[REST] klines: curl_easy_init failed\n");
+            return result;
+        }
+
+        std::string body;
+        long http_code = 0;
+
+        curl_easy_setopt(curl, CURLOPT_URL,           url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA,     &body);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT,       15L);
+        // No X-MBX-APIKEY header needed — public endpoint.
+
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_cleanup(curl);
+
+        if (res != CURLE_OK || http_code != 200) {
+            std::fprintf(stderr, "[REST] klines %s %s failed: res=%d http=%ld\n",
+                         up.c_str(), interval.c_str(), (int)res, http_code);
+            return result;
+        }
+
+        result = parse_klines_(body);
+        return result;
     }
 
     // -----------------------------------------------------------------------
@@ -669,6 +758,84 @@ private:
         auto end = body.find('"', free_pos);
         if (end == std::string::npos) return 0.0;
         try { return std::stod(body.substr(free_pos, end - free_pos)); } catch (...) { return 0.0; }
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_klines_ — parse the JSON array returned by GET /api/v3/klines.
+    //
+    // Response shape (oldest first):
+    //   [
+    //     [ <open_ts_ms>, "<open>", "<high>", "<low>", "<close>", "<volume>",
+    //       <close_ts_ms>, "<quote_vol>", <num_trades>, "<taker_buy_vol>",
+    //       "<taker_buy_quote_vol>", "0" ],
+    //     ...
+    //   ]
+    //
+    // Field 0 is a bare integer; fields 1..5 are strings. We only need 0..4
+    // (open_ts_ms + OHLC) and 5 (volume, future use). Hand-rolled to avoid a
+    // third-party JSON lib.
+    // -----------------------------------------------------------------------
+    static std::vector<Kline> parse_klines_(const std::string& body) {
+        std::vector<Kline> out;
+        const size_t n = body.size();
+        size_t p = 0;
+
+        // Find outer '['
+        while (p < n && body[p] != '[') p++;
+        if (p >= n) return out;
+        p++; // past outer [
+
+        while (p < n) {
+            // Skip whitespace, commas
+            while (p < n && (body[p] == ',' || body[p] == ' ' || body[p] == '\t'
+                                            || body[p] == '\n' || body[p] == '\r')) p++;
+            if (p >= n) break;
+            if (body[p] == ']') break;          // end of outer array
+            if (body[p] != '[') { p++; continue; }
+            p++; // past inner [
+
+            Kline k{};
+
+            // Field 0: open_ts_ms — bare integer up to first ','
+            while (p < n && (body[p] == ' ' || body[p] == '\t')) p++;
+            size_t s0 = p;
+            while (p < n && body[p] != ',' && body[p] != ']') p++;
+            if (p >= n) break;
+            try { k.open_ts_ms = std::stoll(body.substr(s0, p - s0)); }
+            catch (...) { k.open_ts_ms = 0; }
+            if (body[p] == ']') { /* malformed row */ p++; continue; }
+            p++; // past ','
+
+            // Fields 1..5: o, h, l, c, v as quoted strings
+            auto read_quoted_double = [&]() -> double {
+                while (p < n && body[p] != '"' && body[p] != ']') p++;
+                if (p >= n || body[p] == ']') return 0.0;
+                p++; // past opening quote
+                size_t s = p;
+                while (p < n && body[p] != '"') p++;
+                if (p >= n) return 0.0;
+                std::string v = body.substr(s, p - s);
+                p++; // past closing quote
+                try { return std::stod(v); } catch (...) { return 0.0; }
+            };
+
+            k.o = read_quoted_double();
+            k.h = read_quoted_double();
+            k.l = read_quoted_double();
+            k.c = read_quoted_double();
+            k.v = read_quoted_double();
+
+            out.push_back(k);
+
+            // Walk to the matching ']' of this kline row (skip remaining fields)
+            int depth = 1;
+            while (p < n && depth > 0) {
+                char c = body[p++];
+                if      (c == '[') depth++;
+                else if (c == ']') depth--;
+            }
+        }
+        return out;
     }
 };
 

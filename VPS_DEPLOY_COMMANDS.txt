@@ -9,7 +9,7 @@
 PREREQUISITES (verify first)
 ═══════════════════════════════════════════════════════════════════════
 
-1. You have SSH'd into: jo@154.45.251.118
+1. You have SSH'd into: jo@143.198.89.54
 2. Tarball uploaded: ~/ChimeraCrypto_PRODUCTION.tar.gz
 3. You have sudo access
 
@@ -147,7 +147,7 @@ if [ ! -f "/etc/ssl/certs/chimera.crt" ]; then
     sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout /etc/ssl/private/chimera.key \
         -out /etc/ssl/certs/chimera.crt \
-        -subj "/C=US/ST=State/L=City/O=Chimera/CN=154.45.251.118"
+        -subj "/C=US/ST=State/L=City/O=Chimera/CN=143.198.89.54"
     
     sudo chmod 600 /etc/ssl/private/chimera.key
     sudo chmod 644 /etc/ssl/certs/chimera.crt
@@ -256,7 +256,7 @@ echo "════════════════════════�
 echo "  DEPLOYMENT COMPLETE"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
-echo "🌐 GUI Access: https://154.45.251.118:9443"
+echo "🌐 GUI Access: https://143.198.89.54:9443"
 echo ""
 echo "⚠️  SHADOW MODE ACTIVE"
 echo "   - All trading logic runs LIVE"
@@ -285,7 +285,7 @@ echo ""
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 echo "✅ Next Steps:"
-echo "1. Open browser: https://154.45.251.118:9443"
+echo "1. Open browser: https://143.198.89.54:9443"
 echo "2. Monitor logs: tail -f logs/chimera.log"
 echo "3. Watch shadow orders: tail -f logs/shadow_orders.log"
 echo "4. Let it run for 24-48 hours in shadow mode"
@@ -303,7 +303,7 @@ DEPLOYMENT SCRIPT ENDS HERE
 
 After deployment completes:
 
-1. ✓ GUI should be accessible at: https://154.45.251.118:9443
+1. ✓ GUI should be accessible at: https://143.198.89.54:9443
 2. ✓ Accept the self-signed certificate warning
 3. ✓ You should see live telemetry updating
 4. ✓ Shadow mode logs will show trading signals

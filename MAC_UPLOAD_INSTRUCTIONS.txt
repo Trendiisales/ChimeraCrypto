@@ -2,7 +2,7 @@
            ChimeraCrypto Production - Mac Upload Instructions
 ═══════════════════════════════════════════════════════════════════════
 
-YOUR VPS: jo@154.45.251.118
+YOUR VPS: jo@143.198.89.54
 SSH KEY: ~/.ssh/chimera_ed25519
 
 ═══════════════════════════════════════════════════════════════════════
@@ -37,7 +37,7 @@ Run this EXACT command in Terminal:
 
 scp -i ~/.ssh/chimera_ed25519 \
     ChimeraCrypto_PRODUCTION.tar.gz \
-    jo@154.45.251.118:~/
+    jo@143.198.89.54:~/
 
 Expected output:
 ChimeraCrypto_PRODUCTION.tar.gz        100%   45KB   1.5MB/s   00:00
@@ -57,7 +57,7 @@ STEP 4: VERIFY UPLOAD
 
 SSH into VPS to verify:
 
-ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54
 
 Once logged in, check:
 
@@ -72,7 +72,7 @@ If file exists, proceed to VPS_DEPLOY_COMMANDS.txt
 TROUBLESHOOTING
 ═══════════════════════════════════════════════════════════════════════
 
-Error: "ssh: connect to host 154.45.251.118 port 22: Connection refused"
+Error: "ssh: connect to host 143.198.89.54 port 22: Connection refused"
 Solution: VPS might be down or firewall blocking. Check VPS status.
 
 Error: "Permission denied (publickey)"
@@ -82,7 +82,7 @@ Solution:
 
 Error: "Host key verification failed"
 Solution:
-  ssh-keyscan 154.45.251.118 >> ~/.ssh/known_hosts
+  ssh-keyscan 143.198.89.54 >> ~/.ssh/known_hosts
 
 Error: Upload stalls at 0%
 Solution: Check your internet connection and VPS firewall
@@ -95,12 +95,12 @@ If you want to upload from a different directory:
 
 scp -i ~/.ssh/chimera_ed25519 \
     /full/path/to/ChimeraCrypto_PRODUCTION.tar.gz \
-    jo@154.45.251.118:~/
+    jo@143.198.89.54:~/
 
 Example:
 scp -i ~/.ssh/chimera_ed25519 \
     ~/Desktop/ChimeraCrypto_PRODUCTION.tar.gz \
-    jo@154.45.251.118:~/
+    jo@143.198.89.54:~/
 
 ═══════════════════════════════════════════════════════════════════════
 NEXT STEP

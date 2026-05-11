@@ -95,7 +95,7 @@ In the meantime, OBI runs in shadow on the live VPS — every entry/exit lands i
 - **SessionMomentumEngine.** Needs a small `PositionTracker` helper because — unlike the other Tier 2 engines — it only emits entry signals via `check_signal()` and doesn't manage its own positions. Wiring it would require more `main.cpp` surgery than we want in the same batch as 3 other engines.
 - **Higher-resolution paper backtest** (perp aggTrade replay instead of 1m kline closes) if the 1m results justify it.
 - **Real per-symbol regime classifier + vol_ratio.** Replace the OBI / BasisMomentum hardcodes once we decide the right place to compute them (probably a `RegimeClassifier` helper in `main.cpp` that reads spot price history).
-- **Dashboard wiring of `/api/state2`.** The endpoint exists and returns structured JSON, but `gui/app.js` doesn't fetch it yet. For now: `curl http://154.45.251.118:8080/api/state2 | jq`.
+- **Dashboard wiring of `/api/state2`.** The endpoint exists and returns structured JSON, but `gui/app.js` doesn't fetch it yet. For now: `curl http://143.198.89.54:8080/api/state2 | jq`.
 - **Tier 1 risk wrapper** (daily loss circuit, correlation-aware sizing, per-engine kill, state persistence, reconciliation). Required before any of these engines move from `shadow_mode = true` to live execution.
 
 ---
@@ -137,7 +137,7 @@ git commit -m "Move 2: wire FundingWindow + BasisMomentum + OBI in shadow mode (
 git push origin main
 
 # On VPS
-ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54
 sudo systemctl stop chimera.service
 while pgrep -x chimera >/dev/null; do sleep 0.5; done
 cd /home/jo/ChimeraCrypto && git pull --ff-only origin main
@@ -194,7 +194,7 @@ Paste those tail blocks here and we'll calculate per-engine win rate, average ne
 ### Roll back if needed
 
 ```bash
-ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54
 cd /home/jo/ChimeraCrypto
 git log --oneline -5                          # find the previous v9 commit hash
 sudo systemctl stop chimera.service

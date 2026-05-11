@@ -18,13 +18,13 @@ The mental model is **two or three uncorrelated edges running in parallel under 
 
 ### Live
 
-- **VPS:** `jo@JBurgh` at `154.45.251.118`, SSH key `~/.ssh/chimera_ed25519`.
+- **VPS:** `jo@JBurgh` at `143.198.89.54`, SSH key `~/.ssh/chimera_ed25519`.
 - **Repo on VPS:** `/home/jo/ChimeraCrypto` (this folder, sync'd from GitHub).
 - **Repo on Mac:** `~/ChimeraCrypto/chimera-git` (the canonical working dir for edits + git push).
 - **GitHub:** `https://github.com/Trendiisales/ChimeraCrypto`, default branch `main`.
 - **systemd unit:** `chimera.service` (running, enabled, restarts on crash).
 - **Sidecar service:** `push_trades.service` (auto-pushes trade log somewhere — leave alone).
-- **GUI:** `http://154.45.251.118:8080/` (exposed; reads `engine.state_json()` via internal HTTP).
+- **GUI:** `http://143.198.89.54:8080/` (exposed; reads `engine.state_json()` via internal HTTP).
 - **Build system:** CMake. `cd /home/jo/ChimeraCrypto/build && make -j"$(nproc)" chimera chimera_backtest`.
 
 ### Engine state
@@ -157,7 +157,7 @@ cd ~/ChimeraCrypto/chimera-git
 # ... edit code ...
 git add -A && git commit -m "..." && git push origin main
 
-# On VPS (ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118)
+# On VPS (ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54)
 sudo systemctl stop chimera.service
 while pgrep -x chimera >/dev/null; do sleep 0.5; done
 cd /home/jo/ChimeraCrypto && git pull --ff-only origin main
@@ -185,7 +185,7 @@ sudo journalctl -u chimera.service -f --since "1 hour ago" | grep -E "SWING|STAR
 
 ### View GUI
 
-`http://154.45.251.118:8080/` from any browser.
+`http://143.198.89.54:8080/` from any browser.
 
 ### Emergency kill of live engine
 

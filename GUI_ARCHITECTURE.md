@@ -257,18 +257,18 @@ Before deployment, verify:
 
 ### 1. Static File Test
 ```bash
-curl https://154.45.251.118:9443/
+curl https://143.198.89.54:9443/
 # Should return HTML
 ```
 
 ### 2. WebSocket Test
 ```bash
-wscat -c wss://154.45.251.118:9443/ws
+wscat -c wss://143.198.89.54:9443/ws
 # Should receive JSON telemetry
 ```
 
 ### 3. Browser Test
-1. Open: `https://154.45.251.118:9443`
+1. Open: `https://143.198.89.54:9443`
 2. Accept self-signed certificate
 3. Open DevTools (F12)
 4. Check Console for "[WS] Connected"
@@ -332,7 +332,7 @@ sudo netstat -tlnp | grep 9001
 **Styles not loading:**
 ```bash
 # Check nginx serves static files
-curl https://154.45.251.118:9443/style.css
+curl https://143.198.89.54:9443/style.css
 
 # Verify paths in nginx config
 sudo cat /etc/nginx/sites-available/chimera | grep root

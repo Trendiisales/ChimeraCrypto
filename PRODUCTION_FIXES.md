@@ -222,7 +222,7 @@ kill $(cat ~/ChimeraCrypto/chimera.pid)
 
 ### Check Open Positions:
 ```bash
-# View in GUI: https://154.45.251.118:9443
+# View in GUI: https://143.198.89.54:9443
 # Or Binance web: Wallet > Spot
 ```
 

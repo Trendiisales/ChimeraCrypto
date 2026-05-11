@@ -146,7 +146,7 @@ public:
             std::printf("  ║  24/7 TRADING: no kill window — crypto never sleeps  ║\n");
             std::printf("  ║  PYRAMIDING: armed at +30bp, unit2=50%% size        ║\n");
             std::printf("  ║  PERSISTENCE: positions survive restart             ║\n");
-            std::printf("  ║  GUI: http://154.45.251.118:8080                    ║\n");
+            std::printf("  ║  GUI: http://143.198.89.54:8080                    ║\n");
             std::printf("  ╚══════════════════════════════════════════════════════╝\n");
             std::printf("\n");
             std::fflush(stdout);

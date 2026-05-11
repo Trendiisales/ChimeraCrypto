@@ -48,7 +48,7 @@ public:
         std::printf("║                                                                ║\n");
         std::printf("║ Directional Dominance:     ENFORCED                            ║\n");
         std::printf("║ Portfolio Cap:             2.0R per symbol (6.0R total)        ║\n");
-        std::printf("║ GUI:                       http://154.45.251.118:8080          ║\n");
+        std::printf("║ GUI:                       http://143.198.89.54:8080          ║\n");
         std::printf("╚════════════════════════════════════════════════════════════════╝\n");
         std::printf("\n");
         std::fflush(stdout);

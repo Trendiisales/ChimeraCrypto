@@ -67,7 +67,7 @@ cd ~/ChimeraCrypto/chimera-git
 git pull --ff-only origin main
 
 # On VPS
-ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54
 sudo systemctl stop chimera.service
 while pgrep -x chimera >/dev/null; do sleep 0.5; done
 cd /home/jo/ChimeraCrypto && git pull --ff-only origin main
@@ -122,7 +122,7 @@ Expected after 4 weeks (rough; depends on regime):
 ## Rollback
 
 ```bash
-ssh -i ~/.ssh/chimera_ed25519 jo@154.45.251.118
+ssh -i ~/.ssh/chimera_ed25519 jo@143.198.89.54
 cd /home/jo/ChimeraCrypto
 git log --oneline -5                          # find the pre-Tier-2 commit
 sudo systemctl stop chimera.service

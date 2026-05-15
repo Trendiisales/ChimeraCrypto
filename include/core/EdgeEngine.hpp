@@ -18,8 +18,10 @@
 // Exit logic (every strategy):
 //   - Entry at next-bar OPEN after signal close (no look-ahead)
 //   - Hard SL at entry - sl_atr_mult * ATR14(at signal bar)
+//   - Trailing stop: arms at 1.0x ATR profit, trails at peak - 0.5x ATR
+//     (ratchets up only, never down). Once armed, the effective stop is
+//     max(hard_sl, trail_stop) — so the trail only helps, never hurts.
 //   - Time exit at hold_bars after entry
-//   - No take-profit (mirrors Omega tsmom spec)
 //
 // All instances are LONG-only spot (per ChimeraCrypto SPOT-ONLY guardrail).
 // Shadow mode default = true; promote to live only after 4 weeks of paper
@@ -83,6 +85,15 @@ public:
         double       round_trip_bp = 10.0;
         // Max bar buffer history kept (must be >= max(lookback, bb_len, atr_period)+5)
         int          max_history = 64;
+
+        // ── Trailing stop parameters ──────────────────────────────────────
+        // trail_arm_atr: profit (in ATR multiples) required before trail
+        //   activates. E.g. 1.0 means price must reach entry + 1.0*ATR.
+        // trail_dist_atr: once armed, trail sits this far below peak price
+        //   (in ATR multiples). E.g. 0.5 means trail_stop = peak - 0.5*ATR.
+        // Trail only ratchets UP. Effective stop = max(hard_sl, trail_stop).
+        double       trail_arm_atr  = 1.0;
+        double       trail_dist_atr = 0.5;
     };
 
     // -----------------------------------------------------------------------
@@ -103,10 +114,11 @@ public:
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
         if (cfg_.max_history < cfg_.atr_period + 5) cfg_.max_history = cfg_.atr_period + 5;
-        std::printf("[%s] ARMED  symbol=%s strat=%s tf=%llds lookback=%d hold=%d sl=%.2f*atr  shadow=%d\n",
+        std::printf("[%s] ARMED  symbol=%s strat=%s tf=%llds lookback=%d hold=%d sl=%.2f*atr trail_arm=%.1f*atr trail_dist=%.1f*atr  shadow=%d\n",
             cfg_.tag.c_str(), cfg_.symbol.c_str(),
             strategy_name(cfg_.kind),
             (long long)cfg_.tf_secs, cfg_.lookback, cfg_.hold_bars, cfg_.sl_atr_mult,
+            cfg_.trail_arm_atr, cfg_.trail_dist_atr,
             shadow_mode ? 1 : 0);
         std::fflush(stdout);
     }
@@ -217,7 +229,7 @@ public:
         halted_ = true;
     }
 
-    // JSON state line for /api/state2 (one object per engine; main.cpp wraps in array).
+    // JSON state line for /api/state (one object per engine; main.cpp wraps in array).
     std::string state_json() const {
         std::ostringstream js;
         js << "{";
@@ -230,14 +242,22 @@ public:
         js << "\"in_position\":" << (in_position_ ? "true" : "false") << ",";
         js << std::fixed << std::setprecision(6);
         js << "\"entry_px\":"  << (in_position_ ? entry_px_ : 0.0)  << ",";
-        js << "\"sl_px\":"     << (in_position_ ? sl_px_    : 0.0)  << ",";
+        js << "\"sl_px\":"     << (in_position_ ? effective_stop_() : 0.0) << ",";
         js << "\"last_close\":" << last_close_ << ",";
         js << "\"trades\":"    << trades_ << ",";
         js << "\"wins\":"      << wins_   << ",";
         js << std::setprecision(2);
         js << "\"total_bp\":"  << total_bp_      << ",";
         js << "\"last_bp\":"   << last_trade_bp_ << ",";
-        js << "\"bars_in_buffer\":" << (int)closes_.size();
+        js << "\"bars_in_buffer\":" << (int)closes_.size() << ",";
+        // Trailing stop state for GUI
+        js << "\"trail_armed\":" << (trail_armed_ ? "true" : "false") << ",";
+        js << std::setprecision(6);
+        js << "\"mfe_px\":" << (in_position_ ? mfe_px_ : 0.0) << ",";
+        js << std::setprecision(2);
+        js << "\"mfe_bp\":" << (in_position_ ? mfe_bp_ : 0.0) << ",";
+        js << std::setprecision(6);
+        js << "\"trail_stop_px\":" << (trail_armed_ ? trail_stop_px_ : 0.0);
         js << "}";
         return js.str();
     }
@@ -268,11 +288,18 @@ private:
     // Position state
     bool    in_position_ = false;
     double  entry_px_    = 0.0;
-    double  sl_px_       = 0.0;
+    double  sl_px_       = 0.0;     // hard stop-loss (never moves)
     int64_t entry_ts_ms_ = 0;
     int64_t time_exit_ts_ms_ = 0;
     double  atr_at_entry_ = 0.0;
     int     bars_held_ = 0;
+
+    // Trailing stop state
+    bool    trail_armed_    = false;
+    double  trail_stop_px_  = 0.0;  // ratchets up, never down
+    double  trail_arm_px_   = 0.0;  // price level that arms the trail
+    double  mfe_px_         = 0.0;  // max favourable excursion (highest price seen)
+    double  mfe_bp_         = 0.0;  // MFE in basis points from entry
 
     // Stats
     int    trades_ = 0;
@@ -280,6 +307,12 @@ private:
     double total_bp_ = 0.0;
     double last_trade_bp_ = 0.0;
     bool   halted_ = false;
+
+    // ── Effective stop: max(hard_sl, trail_stop) ─────────────────────────────
+    double effective_stop_() const {
+        if (trail_armed_ && trail_stop_px_ > sl_px_) return trail_stop_px_;
+        return sl_px_;
+    }
 
     // ── Bar close ────────────────────────────────────────────────────────────
     void close_bar_() {
@@ -440,18 +473,58 @@ private:
         in_position_  = true;
         bars_held_    = 0;
 
-        std::printf("[%s] ENTRY  px=%.6f  sl=%.6f  atr=%.6f  hold=%dbars  shadow=%d\n",
-            cfg_.tag.c_str(), entry_px_, sl_px_, a, cfg_.hold_bars, shadow_mode ? 1 : 0);
+        // Initialise trailing stop state
+        trail_armed_   = false;
+        trail_stop_px_ = 0.0;
+        trail_arm_px_  = entry_px_ + cfg_.trail_arm_atr * a;
+        mfe_px_        = entry_px_;
+        mfe_bp_        = 0.0;
+
+        double arm_bp = (trail_arm_px_ / entry_px_ - 1.0) * 1e4;
+        std::printf("[%s] ENTRY  px=%.6f  sl=%.6f  atr=%.6f  hold=%dbars  trail_arm=%.6f(+%.0fbp)  shadow=%d\n",
+            cfg_.tag.c_str(), entry_px_, sl_px_, a, cfg_.hold_bars,
+            trail_arm_px_, arm_bp,
+            shadow_mode ? 1 : 0);
         std::fflush(stdout);
     }
 
     void check_exits_(double price, int64_t ts_ms) {
         if (!in_position_) return;
-        // Stop-loss: price touched the stop.
-        if (price <= sl_px_) {
-            exit_position_(sl_px_, ts_ms, "SL");
+
+        // Update MFE tracking
+        if (price > mfe_px_) {
+            mfe_px_ = price;
+            mfe_bp_ = (price / entry_px_ - 1.0) * 1e4;
+        }
+
+        // Trailing stop logic: arm when price reaches the arm level,
+        // then ratchet the trail stop up as price makes new highs.
+        if (!trail_armed_) {
+            if (price >= trail_arm_px_) {
+                trail_armed_ = true;
+                trail_stop_px_ = mfe_px_ - cfg_.trail_dist_atr * atr_at_entry_;
+                double trail_bp = (trail_stop_px_ / entry_px_ - 1.0) * 1e4;
+                std::printf("[%s] TRAIL_ARM  px=%.6f  mfe=%.6f(+%.1fbp)  trail_stop=%.6f(+%.1fbp)\n",
+                    cfg_.tag.c_str(), price, mfe_px_, mfe_bp_,
+                    trail_stop_px_, trail_bp);
+                std::fflush(stdout);
+            }
+        } else {
+            // Ratchet: if price made a new high, update the trail stop
+            double new_trail = mfe_px_ - cfg_.trail_dist_atr * atr_at_entry_;
+            if (new_trail > trail_stop_px_) {
+                trail_stop_px_ = new_trail;
+            }
+        }
+
+        // Exit check: use effective stop (max of hard SL and trail stop)
+        double eff_stop = effective_stop_();
+        if (price <= eff_stop) {
+            const char* reason = (trail_armed_ && trail_stop_px_ >= sl_px_) ? "TRAIL" : "SL";
+            exit_position_(eff_stop, ts_ms, reason);
             return;
         }
+
         // Time exit: held long enough.
         if (ts_ms >= time_exit_ts_ms_) {
             exit_position_(price, ts_ms, "TIME");
@@ -468,9 +541,9 @@ private:
         last_trade_bp_  = net_bp;
 
         std::printf("[%s] EXIT   reason=%s  px=%.6f  gross=%+8.2fbp  net=%+8.2fbp  "
-                    "trades=%d wins=%d total=%+8.1fbp\n",
+                    "mfe=%+.1fbp  trades=%d wins=%d total=%+8.1fbp\n",
             cfg_.tag.c_str(), reason, exit_px, gross_bp, net_bp,
-            trades_, wins_, total_bp_);
+            mfe_bp_, trades_, wins_, total_bp_);
         std::fflush(stdout);
 
         in_position_ = false;
@@ -480,6 +553,13 @@ private:
         time_exit_ts_ms_ = 0;
         atr_at_entry_    = 0.0;
         bars_held_       = 0;
+
+        // Reset trailing stop state
+        trail_armed_    = false;
+        trail_stop_px_  = 0.0;
+        trail_arm_px_   = 0.0;
+        mfe_px_         = 0.0;
+        mfe_bp_         = 0.0;
     }
 };
 

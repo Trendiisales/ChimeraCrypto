@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Chimera — Tier-2 Edges</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #0a0e15;
@@ -37,61 +38,59 @@
   }
   header .kill:hover { background: var(--red); color: #0a0e15; }
 
-  /* ── Live spot-price strip — current pricing for all 8 feed symbols ─── */
+  /* ── Live spot-price strip ─── */
   .ticker {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px;
-    margin-bottom: 18px;
-    padding: 10px 12px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: var(--shadow);
+    gap: 8px; margin-bottom: 18px; padding: 10px 12px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; box-shadow: var(--shadow);
   }
   .tile {
     display: flex; flex-direction: column; gap: 2px;
-    padding: 6px 10px;
-    border-right: 1px solid var(--line);
+    padding: 6px 10px; border-right: 1px solid var(--line);
   }
   .tile:last-child { border-right: none; }
   .tile.engine-symbol { background: rgba(74,214,197,0.04); border-radius: 4px; }
-  .tile .sym {
-    font-size: 10px; letter-spacing: 0.12em; color: var(--dim);
-    text-transform: uppercase; font-weight: 700;
-  }
+  .tile .sym { font-size: 10px; letter-spacing: 0.12em; color: var(--dim); text-transform: uppercase; font-weight: 700; }
   .tile.engine-symbol .sym { color: var(--accent); }
-  .tile .px  {
-    font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums;
-    color: var(--text); letter-spacing: -0.01em;
-  }
+  .tile .px { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
   .tile.no-data .px { color: var(--dim); font-weight: 400; }
   .tile .px.up   { color: var(--green); }
   .tile .px.down { color: var(--red);   }
-  .tile .tag {
-    font-size: 9px; color: var(--dim); letter-spacing: 0.08em;
-    text-transform: uppercase; margin-top: 1px;
-  }
+  .tile .tag { font-size: 9px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 1px; }
   .tile.engine-symbol .tag { color: var(--accent); opacity: 0.8; }
 
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-    gap: 14px;
+  /* ── P&L summary cards ─── */
+  .pnl-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px; margin-bottom: 18px;
   }
+  .pnl-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px 14px; box-shadow: var(--shadow);
+  }
+  .pnl-card .lbl { font-size: 10px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; margin-bottom: 4px; }
+  .pnl-card .val { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .pnl-card .val.pos { color: var(--green); }
+  .pnl-card .val.neg { color: var(--red); }
+  .pnl-card .val.neutral { color: var(--text); }
+
+  /* ── Two-column layout: engine + chart ─── */
+  .main-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px;
+  }
+  @media (max-width: 800px) { .main-grid { grid-template-columns: 1fr; } }
 
   .engine {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 14px 16px;
-    box-shadow: var(--shadow);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 16px; box-shadow: var(--shadow);
   }
   .engine.in-position { border-color: var(--accent); box-shadow: var(--shadow), 0 0 0 1px var(--accent) inset; }
-  .engine.halted      { border-color: var(--red); opacity: 0.7; }
+  .engine.halted { border-color: var(--red); opacity: 0.7; }
 
   .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .tag { font-weight: 800; letter-spacing: 0.1em; font-size: 14px; color: #e8edf5; }
+  .etag { font-weight: 800; letter-spacing: 0.1em; font-size: 14px; color: #e8edf5; }
   .symbol-row { font-size: 12px; color: var(--dim); margin-top: 2px; }
   .pill {
     display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px;
@@ -99,16 +98,13 @@
   }
   .pill.shadow { color: var(--amber); border-color: rgba(248,185,76,0.35); background: rgba(248,185,76,0.08); }
   .pill.live   { color: var(--green); border-color: rgba(60,224,136,0.35); background: rgba(60,224,136,0.08); }
-  .pill.armed  { color: var(--accent); border-color: rgba(74,214,197,0.35); background: rgba(74,214,197,0.08); }
   .pill.intrade{ color: #0a0e15; background: var(--accent); border-color: var(--accent); }
   .pill.halted { color: var(--red); border-color: rgba(255,93,122,0.35); background: rgba(255,93,122,0.10); }
 
-  /* Big "current price" line on each engine card */
   .spot-row {
     display: flex; align-items: baseline; justify-content: space-between;
     margin-top: 10px; padding: 8px 10px;
-    background: var(--panel-2); border-radius: 4px;
-    border: 1px solid var(--line);
+    background: var(--panel-2); border-radius: 4px; border: 1px solid var(--line);
   }
   .spot-row .lbl { font-size: 10px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; }
   .spot-row .px  { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -117,10 +113,8 @@
   .spot-row.no-data .px { color: var(--dim); font-weight: 500; }
 
   .metrics {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px 14px;
-    margin-top: 12px;
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px 14px; margin-top: 12px;
   }
   .metric { display: flex; flex-direction: column; gap: 2px; }
   .metric .lbl { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -134,6 +128,46 @@
     font-size: 12px; color: var(--dim);
   }
   .trade-row .price { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* ── Equity curve chart ─── */
+  .chart-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column;
+  }
+  .chart-panel .chart-title {
+    font-size: 12px; font-weight: 700; color: var(--dim); letter-spacing: 0.10em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .chart-panel canvas { flex: 1; min-height: 200px; }
+
+  /* ── Trade history table ─── */
+  .trades-section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 16px; box-shadow: var(--shadow); margin-bottom: 18px;
+  }
+  .trades-section .section-title {
+    font-size: 12px; font-weight: 700; color: var(--dim); letter-spacing: 0.10em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .trades-table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .trades-table th {
+    text-align: left; padding: 6px 8px; font-size: 10px; color: var(--dim);
+    letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--line);
+    font-weight: 600; position: sticky; top: 0; background: var(--panel);
+  }
+  .trades-table td {
+    padding: 5px 8px; border-bottom: 1px solid rgba(30,39,56,0.5); color: var(--text);
+  }
+  .trades-table tr:hover td { background: rgba(74,214,197,0.04); }
+  .trades-table .no-trades { text-align: center; color: var(--dim); padding: 30px; font-size: 13px; }
+  .trade-scroll { max-height: 340px; overflow-y: auto; }
+  .trade-scroll::-webkit-scrollbar { width: 6px; }
+  .trade-scroll::-webkit-scrollbar-track { background: transparent; }
+  .trade-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 
   footer {
     margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line);
@@ -150,46 +184,67 @@
 <header>
   <div class="logo">CHIMERA</div>
   <div class="sub">Tier-2 Edges</div>
-  <div class="build" id="build">build —</div>
+  <div class="build" id="build">build ---</div>
   <button class="kill" id="killAll" title="Force-flatten every paper position and halt all engines">Kill All</button>
 </header>
 
-<!-- Live spot-price strip — populated from /api/state2 spot_prices on every poll -->
 <div class="ticker" id="ticker"></div>
 
-<div class="grid" id="engines"></div>
+<!-- P&L summary strip -->
+<div class="pnl-strip" id="pnlStrip"></div>
+
+<!-- Engine card + Equity curve side by side -->
+<div class="main-grid">
+  <div id="engines"></div>
+  <div class="chart-panel">
+    <div class="chart-title">Equity Curve (cumulative bp)</div>
+    <canvas id="equityChart"></canvas>
+  </div>
+</div>
+
+<!-- Trade history table -->
+<div class="trades-section">
+  <div class="section-title">Trade History</div>
+  <div class="trade-scroll" id="tradeScroll">
+    <table class="trades-table" id="tradesTable">
+      <thead>
+        <tr>
+          <th>#</th><th>Date</th><th>Engine</th><th>Reason</th>
+          <th>Entry</th><th>Exit</th><th>Gross bp</th><th>Net bp</th><th>MFE bp</th>
+        </tr>
+      </thead>
+      <tbody id="tradesBody">
+        <tr><td colspan="9" class="no-trades">No trades yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
 
 <footer>
   <div id="status">Connecting...</div>
-  <div id="lastUpdated">—</div>
+  <div id="lastUpdated">---</div>
 </footer>
 
 <script>
-  // Symbol metadata: display order, short name, which engine (if any) trades it.
-  // Order matches SymbolIndex.hpp on the backend.
   const SYMBOLS = [
     { full: 'btcusdt',  short: 'BTC',  engineTag: 'BTC-TSMOM-D1' },
-    { full: 'ethusdt',  short: 'ETH',  engineTag: 'ETH-BB-H6'    },
-    { full: 'solusdt',  short: 'SOL',  engineTag: 'SOL-DONCH-H6' },
-    { full: 'bnbusdt',  short: 'BNB',  engineTag: null           },
-    { full: 'avaxusdt', short: 'AVAX', engineTag: null           },
-    { full: 'linkusdt', short: 'LINK', engineTag: 'LINK-RSI-H6'  },
-    { full: 'xrpusdt',  short: 'XRP',  engineTag: 'XRP-DONCH-H1' },
-    { full: 'dogeusdt', short: 'DOGE', engineTag: null           },
+    { full: 'ethusdt',  short: 'ETH',  engineTag: null },
+    { full: 'solusdt',  short: 'SOL',  engineTag: null },
+    { full: 'bnbusdt',  short: 'BNB',  engineTag: null },
+    { full: 'avaxusdt', short: 'AVAX', engineTag: null },
+    { full: 'linkusdt', short: 'LINK', engineTag: null },
+    { full: 'xrpusdt',  short: 'XRP',  engineTag: null },
+    { full: 'dogeusdt', short: 'DOGE', engineTag: null },
   ];
 
-  // Hold previous tick price per symbol so we can colour up/down moves.
   const prevPx = Object.create(null);
-
   const $ = (sel) => document.querySelector(sel);
-  const fmtBp  = (v) => (v == null || isNaN(v)) ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + 'bp';
-  const fmtInt = (v) => (v == null || isNaN(v)) ? '—' : Number(v).toString();
-  const wrPct  = (w, t) => (!t || t === 0) ? '—' : (100 * w / t).toFixed(0) + '%';
+  const fmtBp  = (v) => (v == null || isNaN(v)) ? '---' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + 'bp';
+  const fmtInt = (v) => (v == null || isNaN(v)) ? '---' : Number(v).toString();
+  const wrPct  = (w, t) => (!t || t === 0) ? '---' : (100 * w / t).toFixed(0) + '%';
 
-  // Format a price with a reasonable number of decimals depending on magnitude.
-  // BTC ~60000 -> 2dp, XRP ~2.50 -> 4dp, DOGE ~0.15 -> 5dp.
   function fmtPx(v) {
-    if (v == null || isNaN(v) || v <= 0) return '—';
+    if (v == null || isNaN(v) || v <= 0) return '---';
     const n = Number(v);
     if (n >= 1000)  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (n >= 10)    return n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -198,12 +253,20 @@
     return n.toFixed(6);
   }
 
+  function fmtDate(tsMs) {
+    if (!tsMs || tsMs <= 0) return '---';
+    const d = new Date(tsMs);
+    const mo = String(d.getMonth()+1).padStart(2,'0');
+    const dy = String(d.getDate()).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    return d.getFullYear() + '-' + mo + '-' + dy + ' ' + hh + ':' + mm;
+  }
+
   function pxClass(symFull, newPx) {
     const old = prevPx[symFull];
     if (old == null || newPx == null || newPx <= 0 || old <= 0) return '';
-    if (newPx > old) return 'up';
-    if (newPx < old) return 'down';
-    return '';
+    return newPx > old ? 'up' : (newPx < old ? 'down' : '');
   }
 
   function renderTicker(spotPrices) {
@@ -211,21 +274,48 @@
     return SYMBOLS.map(s => {
       const px = spotPrices[s.full];
       const has = (px != null && !isNaN(px) && px > 0);
-      const tileClass = [
-        'tile',
-        s.engineTag ? 'engine-symbol' : '',
-        has ? '' : 'no-data',
-      ].filter(Boolean).join(' ');
+      const tileClass = ['tile', s.engineTag ? 'engine-symbol' : '', has ? '' : 'no-data'].filter(Boolean).join(' ');
       const pc = has ? pxClass(s.full, px) : '';
       const tagLine = s.engineTag ? s.engineTag : 'spot';
-      return `
-        <div class="${tileClass}">
-          <div class="sym">${s.short}</div>
-          <div class="px ${pc}">${has ? fmtPx(px) : '—'}</div>
-          <div class="tag">${tagLine}</div>
-        </div>
-      `;
+      return '<div class="' + tileClass + '">' +
+        '<div class="sym">' + s.short + '</div>' +
+        '<div class="px ' + pc + '">' + (has ? fmtPx(px) : '---') + '</div>' +
+        '<div class="tag">' + tagLine + '</div></div>';
     }).join('');
+  }
+
+  function renderPnlStrip(trades, engine) {
+    const totalBp = trades.reduce((s, t) => s + (t.net_bp || 0), 0);
+    const grossBp = trades.reduce((s, t) => s + (t.gross_bp || 0), 0);
+    const wins = trades.filter(t => (t.net_bp || 0) > 0).length;
+    const total = trades.length;
+    const wr = total > 0 ? (100 * wins / total).toFixed(0) + '%' : '---';
+    const avgWin = wins > 0 ? (trades.filter(t=>t.net_bp>0).reduce((s,t)=>s+t.net_bp,0) / wins).toFixed(1) : '---';
+    const losses = trades.filter(t => (t.net_bp || 0) <= 0).length;
+    const avgLoss = losses > 0 ? (trades.filter(t=>t.net_bp<=0).reduce((s,t)=>s+t.net_bp,0) / losses).toFixed(1) : '---';
+
+    // Profit factor
+    const grossWins = trades.filter(t=>t.net_bp>0).reduce((s,t)=>s+t.net_bp,0);
+    const grossLosses = Math.abs(trades.filter(t=>t.net_bp<=0).reduce((s,t)=>s+t.net_bp,0));
+    const pf = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : (grossWins > 0 ? '999' : '---');
+
+    // Max drawdown in bp
+    let peak = 0, mdd = 0, cum = 0;
+    trades.forEach(t => { cum += (t.net_bp||0); if (cum > peak) peak = cum; const dd = peak - cum; if (dd > mdd) mdd = dd; });
+
+    const cards = [
+      { lbl: 'Total P&L', val: fmtBp(totalBp), cls: totalBp > 0 ? 'pos' : (totalBp < 0 ? 'neg' : 'neutral') },
+      { lbl: 'Trades', val: total.toString(), cls: 'neutral' },
+      { lbl: 'Win Rate', val: wr, cls: 'neutral' },
+      { lbl: 'Profit Factor', val: pf, cls: 'neutral' },
+      { lbl: 'Avg Win', val: avgWin !== '---' ? '+' + avgWin + 'bp' : '---', cls: 'pos' },
+      { lbl: 'Avg Loss', val: avgLoss !== '---' ? avgLoss + 'bp' : '---', cls: 'neg' },
+      { lbl: 'Max DD', val: mdd > 0 ? '-' + mdd.toFixed(1) + 'bp' : '---', cls: 'neg' },
+      { lbl: 'Gross P&L', val: fmtBp(grossBp), cls: grossBp > 0 ? 'pos' : (grossBp < 0 ? 'neg' : 'neutral') },
+    ];
+    return cards.map(c =>
+      '<div class="pnl-card"><div class="lbl">' + c.lbl + '</div><div class="val ' + c.cls + '">' + c.val + '</div></div>'
+    ).join('');
   }
 
   function renderEngine(e, spotPrices) {
@@ -238,8 +328,6 @@
     const totalClass = (e.total_bp || 0) > 0 ? 'val pos' : ((e.total_bp || 0) < 0 ? 'val neg' : 'val');
     const lastClass  = (e.last_bp  || 0) > 0 ? 'val pos' : ((e.last_bp  || 0) < 0 ? 'val neg' : 'val');
 
-    // Current price for this engine — prefer live spot tick, fall back to
-    // engine bar-aggregated last_close (only useful once first bar has closed).
     const symKey = (e.symbol || '').toLowerCase();
     const spotPx = spotPrices[symKey];
     const livePx = (spotPx != null && spotPx > 0) ? spotPx : (e.last_close > 0 ? e.last_close : null);
@@ -248,49 +336,164 @@
 
     const tfLabel = (() => {
       const s = e.tf_secs || 0;
-      if (s === 3600)  return 'H1';
-      if (s === 7200)  return 'H2';
-      if (s === 14400) return 'H4';
-      if (s === 21600) return 'H6';
-      if (s === 86400) return 'D1';
-      return (s / 3600).toFixed(1) + 'h';
+      if (s === 3600)  return 'H1'; if (s === 7200)  return 'H2';
+      if (s === 14400) return 'H4'; if (s === 21600) return 'H6';
+      if (s === 86400) return 'D1'; return (s / 3600).toFixed(1) + 'h';
     })();
-    return `
-      <div class="${klass}">
-        <div class="row">
-          <div>
-            <div class="tag">${e.tag || '—'}</div>
-            <div class="symbol-row">${(e.symbol || '').toUpperCase()} &nbsp;·&nbsp; ${e.strategy || ''} &nbsp;·&nbsp; ${tfLabel}</div>
-          </div>
-          <div class="pill ${stateClass}">${stateText}</div>
-        </div>
 
-        <div class="spot-row ${hasLive ? '' : 'no-data'}">
-          <div class="lbl">Live Price</div>
-          <div class="px ${livePxClass}">${hasLive ? fmtPx(livePx) : '—'}</div>
-        </div>
+    let html = '<div class="' + klass + '">' +
+      '<div class="row"><div>' +
+        '<div class="etag">' + (e.tag || '---') + '</div>' +
+        '<div class="symbol-row">' + (e.symbol || '').toUpperCase() + ' &middot; ' + (e.strategy || '') + ' &middot; ' + tfLabel + '</div>' +
+      '</div><div class="pill ' + stateClass + '">' + stateText + '</div></div>' +
+      '<div class="spot-row ' + (hasLive ? '' : 'no-data') + '">' +
+        '<div class="lbl">Live Price</div>' +
+        '<div class="px ' + livePxClass + '">' + (hasLive ? fmtPx(livePx) : '---') + '</div></div>' +
+      '<div class="metrics">' +
+        '<div class="metric"><div class="lbl">Total Net</div><div class="' + totalClass + '">' + fmtBp(e.total_bp) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Last Trade</div><div class="' + lastClass + '">' + fmtBp(e.last_bp) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Trades</div><div class="val">' + fmtInt(e.trades) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Win Rate</div><div class="val">' + wrPct(e.wins, e.trades) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Last Close</div><div class="val">' + fmtPx(e.last_close) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Wins</div><div class="val">' + fmtInt(e.wins) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Bars Buf</div><div class="val">' + fmtInt(e.bars_in_buffer) + '</div></div>' +
+        '<div class="metric"><div class="lbl">Mode</div><div class="val">' + (e.shadow ? 'shadow' : 'live') + '</div></div>' +
+      '</div>';
 
-        <div class="metrics">
-          <div class="metric"><div class="lbl">Total Net</div><div class="${totalClass}">${fmtBp(e.total_bp)}</div></div>
-          <div class="metric"><div class="lbl">Last Trade</div><div class="${lastClass}">${fmtBp(e.last_bp)}</div></div>
-          <div class="metric"><div class="lbl">Trades</div><div class="val">${fmtInt(e.trades)}</div></div>
-          <div class="metric"><div class="lbl">Win Rate</div><div class="val">${wrPct(e.wins, e.trades)}</div></div>
-          <div class="metric"><div class="lbl">Last Close</div><div class="val">${fmtPx(e.last_close)}</div></div>
-          <div class="metric"><div class="lbl">Wins</div><div class="val">${fmtInt(e.wins)}</div></div>
-          <div class="metric"><div class="lbl">Bars Buf</div><div class="val">${fmtInt(e.bars_in_buffer)}</div></div>
-          <div class="metric"><div class="lbl">Mode</div><div class="val">${e.shadow ? 'shadow' : 'live'}</div></div>
-        </div>
-
-        ${inPos ? `
-        <div class="trade-row">
-          OPEN @ <span class="price">${fmtPx(e.entry_px)}</span>
-          &nbsp;·&nbsp; SL @ <span class="price">${fmtPx(e.sl_px)}</span>
-        </div>` : ''}
-      </div>
-    `;
+    if (inPos) {
+      html += '<div class="trade-row">OPEN @ <span class="price">' + fmtPx(e.entry_px) + '</span>' +
+              ' &middot; SL @ <span class="price">' + fmtPx(e.sl_px) + '</span></div>';
+    }
+    html += '</div>';
+    return html;
   }
 
+  function renderTradesTable(trades) {
+    if (!trades || trades.length === 0) {
+      return '<tr><td colspan="9" class="no-trades">No trades yet --- waiting for first signal</td></tr>';
+    }
+    // Show newest first
+    const sorted = [...trades].sort((a, b) => (b.exit_ts || 0) - (a.exit_ts || 0));
+    return sorted.map(t => {
+      const netCls = (t.net_bp || 0) > 0 ? 'pos' : ((t.net_bp || 0) < 0 ? 'neg' : '');
+      const grossCls = (t.gross_bp || 0) > 0 ? 'pos' : ((t.gross_bp || 0) < 0 ? 'neg' : '');
+      return '<tr>' +
+        '<td>' + (t.trade_num || '---') + '</td>' +
+        '<td>' + fmtDate(t.exit_ts) + '</td>' +
+        '<td>' + (t.tag || '---') + '</td>' +
+        '<td>' + (t.reason || '---') + '</td>' +
+        '<td>' + fmtPx(t.entry_px) + '</td>' +
+        '<td>' + fmtPx(t.exit_px) + '</td>' +
+        '<td class="' + grossCls + '">' + fmtBp(t.gross_bp) + '</td>' +
+        '<td class="' + netCls + '">' + fmtBp(t.net_bp) + '</td>' +
+        '<td>' + fmtBp(t.mfe_bp) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  // ── Equity curve chart ───────────────────────────────────────
+  let equityChart = null;
+
+  function initEquityChart() {
+    const ctx = document.getElementById('equityChart').getContext('2d');
+    equityChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Cumulative Net (bp)',
+          data: [],
+          borderColor: '#4ad6c5',
+          backgroundColor: 'rgba(74,214,197,0.08)',
+          fill: true,
+          tension: 0.2,
+          pointRadius: 3,
+          pointBackgroundColor: '#4ad6c5',
+          pointBorderColor: '#4ad6c5',
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#161e2c',
+            titleColor: '#cfd5e1',
+            bodyColor: '#cfd5e1',
+            borderColor: '#1e2738',
+            borderWidth: 1,
+            callbacks: {
+              label: function(ctx) { return 'Cumulative: ' + ctx.parsed.y.toFixed(1) + ' bp'; }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#6f7a8c', font: { size: 10 }, maxRotation: 45 },
+            grid: { color: 'rgba(30,39,56,0.5)' },
+          },
+          y: {
+            ticks: { color: '#6f7a8c', font: { size: 10 }, callback: v => v + ' bp' },
+            grid: { color: 'rgba(30,39,56,0.5)' },
+          }
+        }
+      }
+    });
+  }
+
+  function updateEquityChart(trades) {
+    if (!equityChart || !trades || trades.length === 0) {
+      if (equityChart) {
+        equityChart.data.labels = ['Start'];
+        equityChart.data.datasets[0].data = [0];
+        equityChart.update('none');
+      }
+      return;
+    }
+    // Sort by exit time ascending
+    const sorted = [...trades].sort((a, b) => (a.exit_ts || 0) - (b.exit_ts || 0));
+    const labels = ['Start'];
+    const data = [0];
+    let cum = 0;
+    sorted.forEach((t, i) => {
+      cum += (t.net_bp || 0);
+      const d = new Date(t.exit_ts || 0);
+      const mo = String(d.getMonth()+1).padStart(2,'0');
+      const dy = String(d.getDate()).padStart(2,'0');
+      labels.push('#' + (t.trade_num || (i+1)) + ' ' + mo + '/' + dy);
+      data.push(parseFloat(cum.toFixed(1)));
+    });
+
+    // Colour line green if net positive, red if negative
+    const lastVal = data[data.length - 1];
+    const lineColor = lastVal >= 0 ? '#3ce088' : '#ff5d7a';
+    const fillColor = lastVal >= 0 ? 'rgba(60,224,136,0.08)' : 'rgba(255,93,122,0.08)';
+    equityChart.data.datasets[0].borderColor = lineColor;
+    equityChart.data.datasets[0].backgroundColor = fillColor;
+    equityChart.data.datasets[0].pointBackgroundColor = lineColor;
+    equityChart.data.datasets[0].pointBorderColor = lineColor;
+
+    equityChart.data.labels = labels;
+    equityChart.data.datasets[0].data = data;
+    equityChart.update('none');
+  }
+
+  // ── Polling ──────────────────────────────────────────────────
   let lastFetchOk = 0;
+  let lastTradesJson = '';
+
+  async function fetchTrades() {
+    try {
+      const r = await fetch('/api/trades', { cache: 'no-store' });
+      if (!r.ok) return null;
+      const text = await r.text();
+      if (text === lastTradesJson) return null; // no change
+      lastTradesJson = text;
+      return JSON.parse(text);
+    } catch(e) { return null; }
+  }
 
   async function refresh() {
     const status = $('#status');
@@ -300,12 +503,10 @@
       const j = await r.json();
 
       const spot = j.spot_prices || {};
-
-      $('#build').textContent = 'build ' + (j.build || '—');
+      $('#build').textContent = 'build ' + (j.build || '---');
       $('#ticker').innerHTML  = renderTicker(spot);
       $('#engines').innerHTML = (j.engines || []).map(e => renderEngine(e, spot)).join('');
 
-      // Update prevPx AFTER render so the up/down colouring is "since last poll".
       SYMBOLS.forEach(s => {
         const px = spot[s.full];
         if (px != null && !isNaN(px) && px > 0) prevPx[s.full] = px;
@@ -321,9 +522,18 @@
         status.textContent = 'Stale (' + age + 's)';
         status.className = 'stale';
       } else {
-        status.textContent = 'Disconnected — ' + err.message;
+        status.textContent = 'Disconnected --- ' + err.message;
         status.className = 'down';
       }
+    }
+  }
+
+  async function refreshTrades() {
+    const trades = await fetchTrades();
+    if (trades !== null) {
+      $('#pnlStrip').innerHTML = renderPnlStrip(trades);
+      $('#tradesBody').innerHTML = renderTradesTable(trades);
+      updateEquityChart(trades);
     }
   }
 
@@ -339,8 +549,12 @@
     }
   });
 
+  // Init
+  initEquityChart();
   refresh();
+  refreshTrades();
   setInterval(refresh, 1000);
+  setInterval(refreshTrades, 5000); // trades don't change as often
 </script>
 </body>
 </html>

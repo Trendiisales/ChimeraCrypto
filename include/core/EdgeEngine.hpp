@@ -52,6 +52,7 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+#include <functional>
 
 namespace chimera {
 
@@ -131,7 +132,33 @@ public:
         double  c = 0.0;
     };
 
+    // -----------------------------------------------------------------------
+    // TradeRecord — emitted via on_trade callback after every exit.
+    // main.cpp persists these to disk for the dashboard trade history.
+    // -----------------------------------------------------------------------
+    struct TradeRecord {
+        std::string tag;
+        std::string symbol;
+        std::string strategy;
+        std::string reason;      // "SL", "TRAIL", "TIME", "KILL"
+        int64_t     entry_ts_ms  = 0;
+        int64_t     exit_ts_ms   = 0;
+        double      entry_px     = 0.0;
+        double      exit_px      = 0.0;
+        double      sl_px        = 0.0;
+        double      gross_bp     = 0.0;
+        double      net_bp       = 0.0;
+        double      mfe_bp       = 0.0;  // max favourable excursion
+        int         trade_num    = 0;    // sequential trade number
+        bool        shadow       = true;
+    };
+
+    using TradeCallback = std::function<void(const TradeRecord&)>;
+
     bool shadow_mode = true;  // public for main.cpp init parity with old engines
+
+    // Set a callback to receive trade records on each exit.
+    void set_on_trade(TradeCallback cb) { on_trade_ = std::move(cb); }
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
@@ -330,6 +357,9 @@ private:
     double total_bp_ = 0.0;
     double last_trade_bp_ = 0.0;
     bool   halted_ = false;
+
+    // Trade callback (set by main.cpp for persistence)
+    TradeCallback on_trade_;
 
     // ── Effective stop: max(hard_sl, trail_stop) ─────────────────────────────
     double effective_stop_() const {
@@ -653,6 +683,26 @@ private:
             cfg_.tag.c_str(), reason, exit_px, gross_bp, net_bp,
             mfe_bp_, trades_, wins_, total_bp_);
         std::fflush(stdout);
+
+        // Fire trade callback for persistence
+        if (on_trade_) {
+            TradeRecord rec;
+            rec.tag         = cfg_.tag;
+            rec.symbol      = cfg_.symbol;
+            rec.strategy    = strategy_name(cfg_.kind);
+            rec.reason      = reason;
+            rec.entry_ts_ms = entry_ts_ms_;
+            rec.exit_ts_ms  = ts_ms;
+            rec.entry_px    = entry_px_;
+            rec.exit_px     = exit_px;
+            rec.sl_px       = sl_px_;
+            rec.gross_bp    = gross_bp;
+            rec.net_bp      = net_bp;
+            rec.mfe_bp      = mfe_bp_;
+            rec.trade_num   = trades_;
+            rec.shadow      = shadow_mode;
+            on_trade_(rec);
+        }
 
         in_position_ = false;
         entry_px_ = 0.0;

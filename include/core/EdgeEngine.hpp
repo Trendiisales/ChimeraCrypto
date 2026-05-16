@@ -34,6 +34,12 @@
 // historical OHLC pulled by main.cpp (BinanceREST::fetch_klines), so an engine
 // can evaluate signals on bar 1 instead of waiting ~lookback bars for live
 // ticks to build the history (which would take ~20 days for BTC-TSMOM-D1).
+//
+// Time-gated strategies (added 2026-05-16):
+//   OVERNIGHT  — buy at 21:00 UTC bar close (H1) when trend is positive.
+//                Captures the documented overnight premium (21-23 UTC window).
+//   WEEKDAY    — buy on Monday D1 bar close when close > SMA(5).
+//                Captures the Monday effect (+0.51%/day avg).
 // ============================================================================
 #pragma once
 
@@ -45,6 +51,7 @@
 #include <cstdio>
 #include <sstream>
 #include <iomanip>
+#include <ctime>
 
 namespace chimera {
 
@@ -52,7 +59,9 @@ enum class StrategyKind {
     TSMOM,       // 20-bar return > 0
     DONCHIAN,    // close > prior 20-bar high
     BOLLINGER,   // bar pierces lower BB(20,2) then closes back above
-    RSI_REVERT   // RSI(14) crosses up from <= 30
+    RSI_REVERT,  // RSI(14) crosses up from <= 30
+    OVERNIGHT,   // H1 bar at 21:00 UTC + uptrend filter
+    WEEKDAY      // D1 bar on Monday + SMA(5) filter
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -61,6 +70,8 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::DONCHIAN:   return "DONCHIAN";
         case StrategyKind::BOLLINGER:  return "BOLLINGER";
         case StrategyKind::RSI_REVERT: return "RSI_REVERT";
+        case StrategyKind::OVERNIGHT:  return "OVERNIGHT";
+        case StrategyKind::WEEKDAY:    return "WEEKDAY";
     }
     return "UNK";
 }
@@ -94,6 +105,17 @@ public:
         // Trail only ratchets UP. Effective stop = max(hard_sl, trail_stop).
         double       trail_arm_atr  = 1.0;
         double       trail_dist_atr = 0.5;
+
+        // ── OVERNIGHT strategy parameters ────────────────────────────────
+        // entry_hour_utc: the UTC hour at which the H1 bar must close for
+        //   signal to fire. Default 21 = the 21:00-22:00 bar close.
+        int          entry_hour_utc = 21;
+
+        // ── WEEKDAY strategy parameters ──────────────────────────────────
+        // entry_dow: day-of-week for entry (0=Sunday, 1=Monday, ..., 6=Saturday)
+        int          entry_dow = 1;  // Monday
+        // sma_len: SMA length for the momentum filter (close > SMA to enter)
+        int          sma_len = 5;
     };
 
     // -----------------------------------------------------------------------
@@ -114,6 +136,7 @@ public:
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
         if (cfg_.max_history < cfg_.atr_period + 5) cfg_.max_history = cfg_.atr_period + 5;
+        if (cfg_.max_history < cfg_.sma_len + 5)    cfg_.max_history = cfg_.sma_len + 5;
         std::printf("[%s] ARMED  symbol=%s strat=%s tf=%llds lookback=%d hold=%d sl=%.2f*atr trail_arm=%.1f*atr trail_dist=%.1f*atr  shadow=%d\n",
             cfg_.tag.c_str(), cfg_.symbol.c_str(),
             strategy_name(cfg_.kind),
@@ -314,6 +337,31 @@ private:
         return sl_px_;
     }
 
+    // ── Helper: extract UTC hour from a millisecond epoch timestamp ──────────
+    static int utc_hour_from_ms_(int64_t ts_ms) {
+        time_t secs = static_cast<time_t>(ts_ms / 1000);
+        struct tm utc;
+        gmtime_r(&secs, &utc);
+        return utc.tm_hour;
+    }
+
+    // ── Helper: extract day-of-week (0=Sun,1=Mon,...6=Sat) from ms epoch ────
+    static int utc_dow_from_ms_(int64_t ts_ms) {
+        time_t secs = static_cast<time_t>(ts_ms / 1000);
+        struct tm utc;
+        gmtime_r(&secs, &utc);
+        return utc.tm_wday;
+    }
+
+    // ── Simple Moving Average of last n closes ──────────────────────────────
+    double sma_(int n) const {
+        if ((int)closes_.size() < n) return 0.0;
+        double sum = 0.0;
+        const int sz = (int)closes_.size();
+        for (int i = sz - n; i < sz; ++i) sum += closes_[i];
+        return sum / (double)n;
+    }
+
     // ── Bar close ────────────────────────────────────────────────────────────
     void close_bar_() {
         opens_.push_back(cur_open_);
@@ -445,6 +493,64 @@ private:
         return (r_prev <= cfg_.rsi_threshold) && (r_now > cfg_.rsi_threshold);
     }
 
+    // ── OVERNIGHT: buy at the entry_hour_utc H1 bar close when trend is up ──
+    // Time gate: only fires when the just-closed bar's open hour matches
+    //   cfg_.entry_hour_utc (default 21 = the 21:00-22:00 UTC bar).
+    // Trend filter: TSMOM over lookback bars (close > close[lookback] ago).
+    //   This prevents buying in downtrends where the overnight premium is
+    //   consumed by the larger bearish drift.
+    // Bullish bar filter: the bar itself must be green (close > open) to
+    //   confirm buying pressure is present in the session window.
+    bool signal_overnight_() const {
+        if ((int)closes_.size() < cfg_.lookback + 1) return false;
+
+        // Time gate: check UTC hour of the just-closed bar
+        int64_t bar_open_ms = bar_ts_ms_.back();
+        int bar_hour = utc_hour_from_ms_(bar_open_ms);
+        if (bar_hour != cfg_.entry_hour_utc) return false;
+
+        // Trend filter: 20-bar TSMOM must be positive
+        double now = closes_.back();
+        double ref = closes_[closes_.size() - 1 - cfg_.lookback];
+        if (now <= ref) return false;
+
+        // Bullish bar: this bar's close > open
+        if (closes_.back() <= opens_.back()) return false;
+
+        std::printf("[%s] OVERNIGHT signal | bar_hour=%d(UTC) | trend_ret=+%.1fbp | bar_ret=+%.1fbp\n",
+            cfg_.tag.c_str(), bar_hour,
+            (now / ref - 1.0) * 1e4,
+            (closes_.back() / opens_.back() - 1.0) * 1e4);
+        std::fflush(stdout);
+
+        return true;
+    }
+
+    // ── WEEKDAY: buy on Monday D1 bar close when close > SMA(sma_len) ───────
+    // Time gate: only fires when the just-closed D1 bar falls on entry_dow
+    //   (default 1 = Monday).
+    // Momentum filter: close must be above SMA(sma_len) to confirm the
+    //   underlying trend supports the Monday premium.
+    bool signal_weekday_() const {
+        if ((int)closes_.size() < cfg_.sma_len) return false;
+
+        // Time gate: check day-of-week of the just-closed bar
+        int64_t bar_open_ms = bar_ts_ms_.back();
+        int bar_dow = utc_dow_from_ms_(bar_open_ms);
+        if (bar_dow != cfg_.entry_dow) return false;
+
+        // Momentum filter: close > SMA
+        double sma = sma_(cfg_.sma_len);
+        if (sma <= 0.0) return false;
+        if (closes_.back() <= sma) return false;
+
+        std::printf("[%s] WEEKDAY signal | dow=%d | close=%.2f > sma(%d)=%.2f\n",
+            cfg_.tag.c_str(), bar_dow, closes_.back(), cfg_.sma_len, sma);
+        std::fflush(stdout);
+
+        return true;
+    }
+
     void evaluate_signal_() {
         bool fire = false;
         switch (cfg_.kind) {
@@ -452,6 +558,8 @@ private:
             case StrategyKind::DONCHIAN:   fire = signal_donchian_();   break;
             case StrategyKind::BOLLINGER:  fire = signal_bollinger_();  break;
             case StrategyKind::RSI_REVERT: fire = signal_rsi_revert_(); break;
+            case StrategyKind::OVERNIGHT:  fire = signal_overnight_();  break;
+            case StrategyKind::WEEKDAY:    fire = signal_weekday_();    break;
         }
         if (!fire) return;
 

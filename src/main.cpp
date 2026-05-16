@@ -1,16 +1,23 @@
 // ============================================================================
 // Chimera — Tier-2 long-only longer-timeframe edges (rewrite 2026-05-11)
 //
-// Replaces the old SwingEngine + 3 microstructure paper engines with 5 backtested
-// keeper edges selected by the Omega-style signal-discovery pipeline:
+// After full OOS backtest + 12,096-combo parameter sweep (2026-05-16):
+//   - BTC-TSMOM-D1 is the ONLY engine with validated edge
+//   - Optimized params: lookback=10, hold=12, sl=3.0, trail=1.0/0.4
+//   - OOS PF=1.92, Sharpe=1.67, +3924bp, 75% WR, 85% neighbour stability
+//   - All other engines disabled (no OOS edge after costs)
 //
-//   instance         symbol     strategy     tf     OOS PF  expected trades/yr
+//   instance         symbol     strategy     tf     OOS PF  OOS Sharpe
 //   ------------------------------------------------------------------------
-//   btc_tsmom_d1     BTCUSDT    tsmom        D1     1.19      ~20
-//   eth_bb_h6        ETHUSDT    bollinger    H6     1.31      ~50
-//   sol_donch_h6     SOLUSDT    donchian     H6     1.24      ~25
-//   xrp_donch_h1     XRPUSDT    donchian     H1     1.20     ~140
-//   link_rsi_h6      LINKUSDT   rsi_revert   H6     2.82      ~15
+//   btc_tsmom_d1     BTCUSDT    tsmom        D1     1.92    1.67
+//
+// DISABLED (no OOS edge — configs preserved below for reference):
+//   eth_bb_h6        ETHUSDT    bollinger    H6     0.72   -0.59
+//   sol_donch_h6     SOLUSDT    donchian     H6     0.83   -0.57
+//   xrp_donch_h1     XRPUSDT    donchian     H1     0.82   -1.19
+//   link_rsi_h6      LINKUSDT   rsi_revert   H6     1.17    0.14  (4 trades)
+//   btc_overnight_h1 BTCUSDT    overnight    H1     0.31   -4.91
+//   btc_weekday_d1   BTCUSDT    weekday      D1     0.44   -1.86
 //
 // All instances spot-LONG-only, shadow_mode = true by default. Promote to live
 // only after 4 weeks of paper trades match backtest WR/PF within +/- 10%.
@@ -27,7 +34,7 @@
 //   GET  /api/state2  -> {
 //       "build":"<hash>",
 //       "spot_prices":{ "<symbol>": <last_tick_px>, ... 8 symbols },
-//       "engines":[ <one EdgeEngine state_json> x 5 ]
+//       "engines":[ <one EdgeEngine state_json> x 1 ]
 //   }
 //   POST /api/kill    -> kill_all on every engine (flatten + halt)
 // ============================================================================
@@ -136,7 +143,7 @@ static std::string gui_root;
 //   {
 //     "build":       "<git short hash>",
 //     "spot_prices": { "btcusdt": <px>, "ethusdt": <px>, ... 8 entries },
-//     "engines":     [ <state_json>, ... 5 entries ]
+//     "engines":     [ <state_json>, ... ]
 //   }
 //
 // "spot_prices" is the live last-tick price for every symbol the WebSocket feed
@@ -328,100 +335,161 @@ int main() {
     }
     (void)exec_ok;
 
-    // ── Build the 5 keeper edges from the backtest pipeline ─────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // BTC-TSMOM-D1 — OPTIMIZED (2026-05-16 parameter sweep)
+    //
+    // Sweep: 12,096 combos on BTC D1 2022-2026, 80/20 IS/OOS split, 17bp cost
+    // Result: PF=1.92, Sharpe=1.67, +3924bp, 75% WR, 85% neighbour stability
+    //
+    // Changes from original:
+    //   lookback:       20 → 10  (faster trend detection)
+    //   hold_bars:      12 → 12  (unchanged — sweet spot)
+    //   sl_atr_mult:    3.0 → 3.0 (unchanged)
+    //   trail_arm_atr:  1.0 → 1.0 (unchanged)
+    //   trail_dist_atr: 0.5 → 0.4 (tighter trail — locks in more profit)
+    //   round_trip_bp:  10 → 17  (realistic Binance spot + BNB discount)
+    // ══════════════════════════════════════════════════════════════════════
     chimera::EdgeEngine::Config btc_cfg{
         .symbol         = "btcusdt",
         .tag            = "BTC-TSMOM-D1",
         .kind           = chimera::StrategyKind::TSMOM,
         .tf_secs        = 86400,
-        .lookback       = 20,
+        .lookback       = 10,
         .hold_bars      = 12,
         .sl_atr_mult    = 3.0,
         .atr_period     = 14,
         .bb_k           = 2.0,
         .rsi_threshold  = 30.0,
-        .round_trip_bp  = 10.0,
+        .round_trip_bp  = 17.0,
         .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.4,
     };
     chimera::EdgeEngine btc_tsmom_d1(btc_cfg);
 
-    chimera::EdgeEngine::Config eth_cfg{
-        .symbol         = "ethusdt",
-        .tag            = "ETH-BB-H6",
-        .kind           = chimera::StrategyKind::BOLLINGER,
-        .tf_secs        = 21600,
-        .lookback       = 20,
-        .hold_bars      = 12,
-        .sl_atr_mult    = 2.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 10.0,
-        .max_history    = 64,
-    };
-    chimera::EdgeEngine eth_bb_h6(eth_cfg);
+    // ══════════════════════════════════════════════════════════════════════
+    // DISABLED ENGINES — No OOS edge after costs (2026-05-16 backtest)
+    //
+    // Configs preserved for reference. To re-enable, uncomment the config,
+    // constructor, g_slots.push_back, and seed_engine_from_history lines.
+    // ══════════════════════════════════════════════════════════════════════
 
-    chimera::EdgeEngine::Config sol_cfg{
-        .symbol         = "solusdt",
-        .tag            = "SOL-DONCH-H6",
-        .kind           = chimera::StrategyKind::DONCHIAN,
-        .tf_secs        = 21600,
-        .lookback       = 20,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 2.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 10.0,
-        .max_history    = 64,
-    };
-    chimera::EdgeEngine sol_donch_h6(sol_cfg);
+    // ── ETH-BB-H6 — DISABLED (OOS PF=0.72, Sharpe=-0.59) ────────────────
+    // chimera::EdgeEngine::Config eth_cfg{
+    //     .symbol         = "ethusdt",
+    //     .tag            = "ETH-BB-H6",
+    //     .kind           = chimera::StrategyKind::BOLLINGER,
+    //     .tf_secs        = 21600,
+    //     .lookback       = 20,
+    //     .hold_bars      = 12,
+    //     .sl_atr_mult    = 2.5,
+    //     .atr_period     = 14,
+    //     .bb_k           = 2.0,
+    //     .rsi_threshold  = 30.0,
+    //     .round_trip_bp  = 10.0,
+    //     .max_history    = 64,
+    // };
+    // chimera::EdgeEngine eth_bb_h6(eth_cfg);
 
-    chimera::EdgeEngine::Config xrp_cfg{
-        .symbol         = "xrpusdt",
-        .tag            = "XRP-DONCH-H1",
-        .kind           = chimera::StrategyKind::DONCHIAN,
-        .tf_secs        = 3600,
-        .lookback       = 20,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 2.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 10.0,
-        .max_history    = 64,
-    };
-    chimera::EdgeEngine xrp_donch_h1(xrp_cfg);
+    // ── SOL-DONCH-H6 — DISABLED (OOS PF=0.83, Sharpe=-0.57) ─────────────
+    // chimera::EdgeEngine::Config sol_cfg{
+    //     .symbol         = "solusdt",
+    //     .tag            = "SOL-DONCH-H6",
+    //     .kind           = chimera::StrategyKind::DONCHIAN,
+    //     .tf_secs        = 21600,
+    //     .lookback       = 20,
+    //     .hold_bars      = 24,
+    //     .sl_atr_mult    = 2.5,
+    //     .atr_period     = 14,
+    //     .bb_k           = 2.0,
+    //     .rsi_threshold  = 30.0,
+    //     .round_trip_bp  = 10.0,
+    //     .max_history    = 64,
+    // };
+    // chimera::EdgeEngine sol_donch_h6(sol_cfg);
 
-    chimera::EdgeEngine::Config link_cfg{
-        .symbol         = "linkusdt",
-        .tag            = "LINK-RSI-H6",
-        .kind           = chimera::StrategyKind::RSI_REVERT,
-        .tf_secs        = 21600,
-        .lookback       = 20,
-        .hold_bars      = 8,
-        .sl_atr_mult    = 2.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 10.0,
-        .max_history    = 64,
-    };
-    chimera::EdgeEngine link_rsi_h6(link_cfg);
+    // ── XRP-DONCH-H1 — DISABLED (OOS PF=0.82, Sharpe=-1.19) ─────────────
+    // chimera::EdgeEngine::Config xrp_cfg{
+    //     .symbol         = "xrpusdt",
+    //     .tag            = "XRP-DONCH-H1",
+    //     .kind           = chimera::StrategyKind::DONCHIAN,
+    //     .tf_secs        = 3600,
+    //     .lookback       = 20,
+    //     .hold_bars      = 24,
+    //     .sl_atr_mult    = 2.5,
+    //     .atr_period     = 14,
+    //     .bb_k           = 2.0,
+    //     .rsi_threshold  = 30.0,
+    //     .round_trip_bp  = 10.0,
+    //     .max_history    = 64,
+    // };
+    // chimera::EdgeEngine xrp_donch_h1(xrp_cfg);
 
-    // Register all 5 in slot vector (order = dashboard display order)
+    // ── LINK-RSI-H6 — DISABLED (OOS PF=1.17 but only 4 trades) ──────────
+    // chimera::EdgeEngine::Config link_cfg{
+    //     .symbol         = "linkusdt",
+    //     .tag            = "LINK-RSI-H6",
+    //     .kind           = chimera::StrategyKind::RSI_REVERT,
+    //     .tf_secs        = 21600,
+    //     .lookback       = 20,
+    //     .hold_bars      = 8,
+    //     .sl_atr_mult    = 2.0,
+    //     .atr_period     = 14,
+    //     .bb_k           = 2.0,
+    //     .rsi_threshold  = 30.0,
+    //     .round_trip_bp  = 10.0,
+    //     .max_history    = 64,
+    // };
+    // chimera::EdgeEngine link_rsi_h6(link_cfg);
+
+    // ── BTC-OVERNIGHT-H1 — DISABLED (OOS PF=0.31, Sharpe=-4.91) ─────────
+    // chimera::EdgeEngine::Config overnight_cfg{
+    //     .symbol         = "btcusdt",
+    //     .tag            = "BTC-OVERNIGHT-H1",
+    //     .kind           = chimera::StrategyKind::OVERNIGHT,
+    //     .tf_secs        = 3600,
+    //     .lookback       = 20,
+    //     .hold_bars      = 2,
+    //     .sl_atr_mult    = 1.5,
+    //     .atr_period     = 14,
+    //     .bb_k           = 2.0,
+    //     .rsi_threshold  = 30.0,
+    //     .round_trip_bp  = 17.0,
+    //     .max_history    = 64,
+    //     .trail_arm_atr  = 0.8,
+    //     .trail_dist_atr = 0.4,
+    //     .entry_hour_utc = 21,
+    // };
+    // chimera::EdgeEngine btc_overnight_h1(overnight_cfg);
+
+    // ── BTC-WEEKDAY-D1 — DISABLED (OOS PF=0.44, Sharpe=-1.86) ───────────
+    // chimera::EdgeEngine::Config weekday_cfg{
+    //     .symbol         = "btcusdt",
+    //     .tag            = "BTC-WEEKDAY-D1",
+    //     .kind           = chimera::StrategyKind::WEEKDAY,
+    //     .tf_secs        = 86400,
+    //     .lookback       = 20,
+    //     .hold_bars      = 3,
+    //     .sl_atr_mult    = 2.0,
+    //     .atr_period     = 14,
+    //     .bb_k           = 2.0,
+    //     .rsi_threshold  = 30.0,
+    //     .round_trip_bp  = 17.0,
+    //     .max_history    = 64,
+    //     .trail_arm_atr  = 1.0,
+    //     .trail_dist_atr = 0.5,
+    //     .entry_hour_utc = 21,
+    //     .entry_dow      = 1,
+    //     .sma_len        = 5,
+    // };
+    // chimera::EdgeEngine btc_weekday_d1(weekday_cfg);
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Register active engines only
+    // ══════════════════════════════════════════════════════════════════════
     g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_d1});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_bb_h6});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_donch_h6});
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h1});
-    g_slots.push_back({chimera::SYM_LINK, &link_rsi_h6});
 
-    // ── Seed each engine's bar buffer from Binance REST klines ──────────────
-    // This is what lets BTC-TSMOM-D1 evaluate signals on bar 1 instead of
-    // waiting ~20 calendar days to accumulate the lookback window from live
-    // ticks. The kline endpoint is public (no auth) so this works even if the
-    // executor failed to init credentials. Fetch is best-effort: any failure
-    // is logged and the engine cold-starts from live ticks as before.
+    // ── Seed engine bar buffer from Binance REST klines ────────────────────
     {
         chimera::BinanceREST seed_rest;     // dedicated read-only client; no creds needed
         std::printf("[STARTUP] Seeding engine bar buffers from Binance REST klines...\n");
@@ -429,14 +497,6 @@ int main() {
 
         seed_engine_from_history(seed_rest, btc_tsmom_d1,
                                  btc_cfg.symbol,  btc_cfg.tf_secs,  btc_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, eth_bb_h6,
-                                 eth_cfg.symbol,  eth_cfg.tf_secs,  eth_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, sol_donch_h6,
-                                 sol_cfg.symbol,  sol_cfg.tf_secs,  sol_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, xrp_donch_h1,
-                                 xrp_cfg.symbol,  xrp_cfg.tf_secs,  xrp_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, link_rsi_h6,
-                                 link_cfg.symbol, link_cfg.tf_secs, link_cfg.tag, 64);
 
         std::printf("[STARTUP] Seeding complete.\n");
         std::fflush(stdout);
@@ -457,8 +517,8 @@ int main() {
     std::thread http_thread(http_server_thread, 8080);
     http_thread.detach();
 
-    // ── Spot WebSocket feed (subscribes to all 8 symbols even though only 5
-    //    map to engines — keeps the feed config matched to SymbolIndex). ──
+    // ── Spot WebSocket feed (subscribes to all 8 symbols — keeps the feed
+    //    config matched to SymbolIndex for GUI spot price strip). ──────────
     chimera::BinanceWSFeed feed;
     for (int i = 0; i < chimera::MAX_SYMBOLS; ++i)
         feed.add_symbol(chimera::sym_full(i));
@@ -504,12 +564,9 @@ int main() {
 
     feed.start();
 
-    std::printf("[STARTUP] Spot feed live. 5 paper engines running (all shadow_mode=true):\n");
-    std::printf("[STARTUP]   BTC  tsmom    D1   (lookback=20, hold=12, sl=3.0*atr)\n");
-    std::printf("[STARTUP]   ETH  bollinger H6  (bb_len=20 k=2.0, hold=12, sl=2.5*atr)\n");
-    std::printf("[STARTUP]   SOL  donchian H6   (lookback=20, hold=24, sl=2.5*atr)\n");
-    std::printf("[STARTUP]   XRP  donchian H1   (lookback=20, hold=24, sl=2.5*atr)\n");
-    std::printf("[STARTUP]   LINK rsi_revert H6 (rsi<=30 cross, hold=8, sl=2.0*atr)\n");
+    std::printf("[STARTUP] Spot feed live. 1 engine running (shadow_mode=true):\n");
+    std::printf("[STARTUP]   BTC  tsmom  D1  (lookback=10, hold=12, sl=3.0*atr, trail=1.0/0.4*atr, cost=17bp)\n");
+    std::printf("[STARTUP]   OOS PF=1.92, Sharpe=1.67, +3924bp, 75%% WR, 85%% neighbour stability\n");
     std::printf("[STARTUP] GUI: http://localhost:8080\n");
     std::fflush(stdout);
 

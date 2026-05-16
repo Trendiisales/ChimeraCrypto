@@ -1,0 +1,7 @@
+# Binaries
+backtest
+optimizer
+verify_optimized
+
+# Downloaded kline data (re-fetchable from Binance)
+data/

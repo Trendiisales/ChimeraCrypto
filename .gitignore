@@ -3,3 +3,4 @@ logs/
 *.log
 config/binance_credentials.json
 /tmp/chimera_*
+backtest/data/

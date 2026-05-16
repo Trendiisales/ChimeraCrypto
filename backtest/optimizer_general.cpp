@@ -343,8 +343,12 @@ int main(int argc, char* argv[]) {
 
     // Parse timeframe
     int64_t tf_secs;
-    if      (tf_s == "D1")  tf_secs = 86400;
+    if      (tf_s == "D3")  tf_secs = 259200;
+    else if (tf_s == "D2")  tf_secs = 172800;
+    else if (tf_s == "D1")  tf_secs = 86400;
+    else if (tf_s == "H16") tf_secs = 57600;
     else if (tf_s == "H12") tf_secs = 43200;
+    else if (tf_s == "H8")  tf_secs = 28800;
     else if (tf_s == "H6")  tf_secs = 21600;
     else if (tf_s == "H4")  tf_secs = 14400;
     else if (tf_s == "H3")  tf_secs = 10800;
@@ -387,7 +391,7 @@ int main(int argc, char* argv[]) {
             auto h1 = load_all_parts(data_dir, h1_prefix);
             klines = synthesize_tf(h1, tf_secs);
         }
-    } else if (tf_s == "H12" || tf_s == "H6" || tf_s == "H4" || tf_s == "H3" || tf_s == "H2") {
+    } else if (tf_s == "D3" || tf_s == "D2" || tf_s == "H16" || tf_s == "H12" || tf_s == "H8" || tf_s == "H6" || tf_s == "H4" || tf_s == "H3" || tf_s == "H2") {
         auto h1 = load_all_parts(data_dir, h1_prefix);
         klines = synthesize_tf(h1, tf_secs);
     } else {

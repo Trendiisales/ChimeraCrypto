@@ -155,10 +155,35 @@ public:
 
     using TradeCallback = std::function<void(const TradeRecord&)>;
 
+    // -----------------------------------------------------------------------
+    // BarRecord — emitted via on_bar callback after every completed bar.
+    // main.cpp persists these to disk for warm-start and audit trail.
+    // -----------------------------------------------------------------------
+    struct BarRecord {
+        std::string tag;
+        int64_t     open_ts_ms  = 0;
+        int64_t     tf_secs     = 0;
+        double      o           = 0.0;
+        double      h           = 0.0;
+        double      l           = 0.0;
+        double      c           = 0.0;
+        double      atr         = 0.0;
+        double      momentum_pct = 0.0;
+        bool        signal_ready = false;
+        bool        signal_fired = false;
+        bool        in_position  = false;
+        int         bars_in_buffer = 0;
+    };
+
+    using BarCallback = std::function<void(const BarRecord&)>;
+
     bool shadow_mode = true;  // public for main.cpp init parity with old engines
 
     // Set a callback to receive trade records on each exit.
     void set_on_trade(TradeCallback cb) { on_trade_ = std::move(cb); }
+
+    // Set a callback to receive bar records on each bar close.
+    void set_on_bar(BarCallback cb) { on_bar_ = std::move(cb); }
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
@@ -307,7 +332,36 @@ public:
         js << std::setprecision(2);
         js << "\"mfe_bp\":" << (in_position_ ? mfe_bp_ : 0.0) << ",";
         js << std::setprecision(6);
-        js << "\"trail_stop_px\":" << (trail_armed_ ? trail_stop_px_ : 0.0);
+        js << "\"trail_stop_px\":" << (trail_armed_ ? trail_stop_px_ : 0.0) << ",";
+
+        // ── Diagnostic fields (read-only, no effect on trading logic) ────
+        js << "\"lookback\":" << cfg_.lookback << ",";
+        js << "\"hold_bars_cfg\":" << cfg_.hold_bars << ",";
+        js << "\"sl_atr_mult\":" << std::setprecision(1) << cfg_.sl_atr_mult << ",";
+        js << "\"round_trip_bp\":" << std::setprecision(1) << cfg_.round_trip_bp << ",";
+        js << "\"trail_arm_atr\":" << std::setprecision(1) << cfg_.trail_arm_atr << ",";
+        js << "\"trail_dist_atr\":" << std::setprecision(1) << cfg_.trail_dist_atr << ",";
+
+        // Momentum: close[now] vs close[now - lookback]
+        bool signal_ready = ((int)closes_.size() >= cfg_.lookback + 1);
+        double lb_close = 0.0;
+        double momentum_pct = 0.0;
+        if (signal_ready) {
+            lb_close = closes_[closes_.size() - 1 - cfg_.lookback];
+            if (lb_close > 0.0)
+                momentum_pct = (closes_.back() / lb_close - 1.0) * 100.0;
+        }
+        js << "\"signal_ready\":" << (signal_ready ? "true" : "false") << ",";
+        js << std::setprecision(4);
+        js << "\"lookback_close\":" << lb_close << ",";
+        js << "\"momentum_pct\":" << momentum_pct << ",";
+
+        // Bar timing: when did the current bar open, when does it close?
+        int64_t next_bar_close_ms = (cur_bar_id_ + 1) * cfg_.tf_secs * 1000;
+        js << "\"cur_bar_open_ms\":" << cur_open_ts_ms_ << ",";
+        js << "\"next_bar_close_ms\":" << next_bar_close_ms << ",";
+        js << "\"bars_held\":" << bars_held_;
+
         js << "}";
         return js.str();
     }
@@ -360,6 +414,8 @@ private:
 
     // Trade callback (set by main.cpp for persistence)
     TradeCallback on_trade_;
+    // Bar callback (set by main.cpp for bar persistence + warm-start)
+    BarCallback on_bar_;
 
     // ── Effective stop: max(hard_sl, trail_stop) ─────────────────────────────
     double effective_stop_() const {
@@ -412,11 +468,36 @@ private:
         }
 
         // Then, evaluate a new signal (only if flat and not halted).
+        bool was_flat = !in_position_;
         if (!in_position_ && !halted_) {
             evaluate_signal_();
         }
+        bool signal_fired = was_flat && in_position_;  // we just entered
 
         bars_held_ = in_position_ ? (bars_held_ + 1) : 0;
+
+        // ── Fire bar callback for persistence + audit trail ──────────────
+        if (on_bar_) {
+            BarRecord br;
+            br.tag            = cfg_.tag;
+            br.open_ts_ms     = bar_ts_ms_.back();
+            br.tf_secs        = cfg_.tf_secs;
+            br.o              = opens_.back();
+            br.h              = highs_.back();
+            br.l              = lows_.back();
+            br.c              = closes_.back();
+            br.atr            = atr_(cfg_.atr_period);
+            br.bars_in_buffer = (int)closes_.size();
+            br.signal_ready   = ((int)closes_.size() >= cfg_.lookback + 1);
+            br.signal_fired   = signal_fired;
+            br.in_position    = in_position_;
+            br.momentum_pct   = 0.0;
+            if (br.signal_ready) {
+                double lb_c = closes_[closes_.size() - 1 - cfg_.lookback];
+                if (lb_c > 0.0) br.momentum_pct = (closes_.back() / lb_c - 1.0) * 100.0;
+            }
+            on_bar_(br);
+        }
     }
 
     // ── Indicators (all read from the closed-bar buffer) ─────────────────────

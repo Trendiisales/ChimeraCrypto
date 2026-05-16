@@ -1906,8 +1906,8 @@ int main() {
 
     feed.start();
 
-    std::printf("[STARTUP] Spot feed live. 37 engines running (shadow_mode=true):\n");
-    std::printf("[STARTUP]   D1(5) + H12(3) + H6(8) + H4(7) + H3(6) + H2(5) + H1(3) = 37 engines\n");
+    std::printf("[STARTUP] Spot feed live. 49 engines running (shadow_mode=true):\n");
+    std::printf("[STARTUP]   TSMOM: D1(5)+H12(3)+H6(8)+H4(7)+H3(6)+H2(5)+H1(3)=37 | Counter-trend: RSI_REV(9)+BOLL(3)=12 | Total=49\n");
     std::printf("[STARTUP] GUI: http://localhost:8080\n");
     std::fflush(stdout);
 

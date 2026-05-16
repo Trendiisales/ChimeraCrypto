@@ -571,6 +571,66 @@ static void http_server_thread(int port) {
             }
             bjs << "]";
             body = bjs.str();
+        } else if (strstr(req, "GET /api/positions")) {
+            // /api/positions — return only engines currently holding a position
+            // with full details: tag, symbol, strategy, timeframe, entry price,
+            // stop-loss, trailing stop, unrealised P&L, bars held, MFE
+            std::lock_guard<std::mutex> lk(g_engine_mtx);
+            std::ostringstream pjs;
+            pjs << std::fixed << std::setprecision(6);
+            pjs << "{\"positions\":[";
+            int count = 0;
+            for (size_t i = 0; i < g_slots.size(); ++i) {
+                if (!g_slots[i].engine || !g_slots[i].engine->in_position()) continue;
+                if (count > 0) pjs << ",";
+                // Get spot price for unrealised P&L
+                double spot = load_dbl_atomic(g_last_spot_px_bits[g_slots[i].symbol_id]);
+                double entry = 0.0;
+                // Parse entry_px from state_json (engine has no public accessor)
+                std::string ej = g_slots[i].engine->state_json();
+                // Extract entry_px
+                auto extract = [&](const char* key) -> double {
+                    auto pos = ej.find(std::string("\"") + key + "\":");
+                    if (pos == std::string::npos) return 0.0;
+                    pos += strlen(key) + 3;
+                    return std::stod(ej.substr(pos));
+                };
+                entry = extract("entry_px");
+                double sl = extract("sl_px");
+                double trail_stop = extract("trail_stop_px");
+                double mfe_bp = extract("mfe_bp");
+                int bars_held = (int)extract("bars_held");
+                bool trail_armed = (ej.find("\"trail_armed\":true") != std::string::npos);
+                double unreal_bp = (spot > 0.0 && entry > 0.0)
+                    ? (spot / entry - 1.0) * 1e4 : 0.0;
+
+                pjs << "{";
+                pjs << "\"tag\":\"" << g_slots[i].tag << "\",";
+                pjs << "\"symbol\":\"" << g_slots[i].symbol_str << "\",";
+                pjs << "\"tf_secs\":" << g_slots[i].tf_secs << ",";
+                pjs << "\"tf_human\":\"";
+                if (g_slots[i].tf_secs >= 86400) pjs << (g_slots[i].tf_secs/86400) << "D";
+                else pjs << (g_slots[i].tf_secs/3600) << "H";
+                pjs << "\",";
+                pjs << "\"entry_px\":" << entry << ",";
+                pjs << "\"spot_px\":" << spot << ",";
+                pjs << "\"sl_px\":" << sl << ",";
+                pjs << "\"trail_stop_px\":" << trail_stop << ",";
+                pjs << "\"trail_armed\":" << (trail_armed ? "true" : "false") << ",";
+                pjs << std::setprecision(2);
+                pjs << "\"unreal_bp\":" << unreal_bp << ",";
+                pjs << "\"mfe_bp\":" << mfe_bp << ",";
+                pjs << "\"bars_held\":" << bars_held << ",";
+                pjs << std::setprecision(2);
+                pjs << "\"oos_pf\":" << g_slots[i].oos_pf << ",";
+                pjs << "\"oos_sharpe\":" << g_slots[i].oos_sharpe << ",";
+                pjs << "\"session\":" << g_slots[i].session;
+                pjs << std::setprecision(6);
+                pjs << "}";
+                count++;
+            }
+            pjs << "],\"count\":" << count << "}";
+            body = pjs.str();
         } else if (strstr(req, "GET /api/trades")) {
             body = build_trades_json();
         } else if (strstr(req, "POST /api/kill")) {
@@ -683,9 +743,95 @@ static void seed_engine_from_history(chimera::BinanceREST& rest,
     std::fflush(stdout);
 }
 
+// ── Seed one engine from H1 klines aggregated to target timeframe ─────────
+// For engines whose timeframe has no native Binance interval (H3, H16, D2),
+// we fetch H1 klines (which Binance DOES provide) and aggregate them into
+// the target timeframe. This eliminates cold-start entirely.
+//
+// E.g. for H3 (10800s): fetch 192 H1 bars → aggregate into 64 H3 bars.
+// For H16 (57600s): fetch 1000 H1 bars → aggregate into 62 H16 bars.
+// For D2 (172800s): fetch 1000 H1 bars → aggregate into 20 D2 bars.
+// ───────────────────────────────────────────────────────────────────────────
+static void seed_engine_from_h1_aggregation(chimera::BinanceREST& rest,
+                                            chimera::EdgeEngine& engine,
+                                            const std::string& symbol,
+                                            int64_t tf_secs,
+                                            const std::string& tag,
+                                            int target_bars = 64)
+{
+    // How many H1 bars do we need to produce target_bars of the target TF?
+    int h1_per_target = (int)(tf_secs / 3600);
+    if (h1_per_target < 2) {
+        std::fprintf(stderr, "[SEED-AGG][%s] tf_secs=%lld too small for H1 aggregation\n",
+                     tag.c_str(), (long long)tf_secs);
+        return;
+    }
+
+    int h1_needed = h1_per_target * target_bars;
+    if (h1_needed > 1000) h1_needed = 1000;  // Binance hard limit
+
+    auto klines = rest.fetch_klines(symbol, "1h", h1_needed);
+    if (klines.empty()) {
+        std::fprintf(stderr, "[SEED-AGG][%s] fetch_klines(1h) returned 0 — cold-start from ticks\n",
+                     tag.c_str());
+        return;
+    }
+
+    // Aggregate H1 bars into target timeframe bars.
+    // Bar boundaries are aligned to epoch: bar_id = (open_ts_ms / 1000) / tf_secs
+    std::vector<chimera::EdgeEngine::SeedBar> seed;
+    seed.reserve(target_bars);
+
+    chimera::EdgeEngine::SeedBar cur{};
+    int64_t cur_bar_id = -1;
+
+    for (const auto& k : klines) {
+        int64_t bar_id = (k.open_ts_ms / 1000) / tf_secs;
+
+        if (bar_id != cur_bar_id) {
+            // Save the previous completed bar (if any)
+            if (cur_bar_id >= 0 && cur.o > 0.0) {
+                seed.push_back(cur);
+            }
+            // Start a new bar
+            cur_bar_id     = bar_id;
+            cur.open_ts_ms = bar_id * tf_secs * 1000;
+            cur.o = k.o;
+            cur.h = k.h;
+            cur.l = k.l;
+            cur.c = k.c;
+        } else {
+            // Extend the current bar
+            if (k.h > cur.h) cur.h = k.h;
+            if (k.l < cur.l) cur.l = k.l;
+            cur.c = k.c;  // last close wins
+        }
+    }
+
+    // Push the final bar (may be partially complete — that's OK).
+    // The engine's on_tick() will extend or roll it forward correctly.
+    // Including it is critical for D2 engines where 1000 H1 bars only
+    // produces ~20 complete bars and lookback=20 needs 21 in the buffer.
+    if (cur_bar_id >= 0 && cur.o > 0.0) {
+        seed.push_back(cur);
+    }
+
+    if (seed.empty()) {
+        std::fprintf(stderr, "[SEED-AGG][%s] aggregation produced 0 bars\n",
+                     tag.c_str());
+        return;
+    }
+
+    int kept = engine.seed_bars(seed);
+    std::printf("[SEED-AGG][%s] symbol=%s h1_fetched=%d -> aggregated=%d bars (tf=%llds) kept=%d\n",
+                tag.c_str(), symbol.c_str(), (int)klines.size(),
+                (int)seed.size(), (long long)tf_secs, kept);
+    std::fflush(stdout);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (37 active) | build=%s\n", BUILD_VERSION);
+    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (230 active) | build=%s\n", BUILD_VERSION);
     std::fflush(stdout);
 
     acquire_instance_lock();
@@ -5532,36 +5678,77 @@ int main() {
     ::mkdir("data", 0755);        // no-op if exists
     ::mkdir("data/bars", 0755);   // bar persistence directory
 
-    // ── Seed engine bar buffers: saved bars first, then REST klines ──────
-    // Warm-start: load saved bars from data/bars/{TAG}.ndjson. This is
-    // critical for H3 engines (no native Binance interval) — without this,
-    // they lose days of accumulated data on every restart.
-    // For engines WITH a Binance interval: try saved bars first; if none
-    // available, fall back to REST klines.
+    // ── Seed engine bar buffers ──────────────────────────────────────────
+    // Strategy:
+    //   1. If the engine has a NATIVE Binance interval (H1,H2,H4,H6,H8,H12,D1,D3):
+    //      → Always fetch from REST (guaranteed 64 bars, signal-ready immediately)
+    //      → Saved bars are ignored (REST is always fresher and more complete)
+    //   2. If the engine has NO native interval (H3, H16, D2):
+    //      → Try H1 aggregation first (fetch H1 klines, aggregate to target TF)
+    //      → Fall back to saved bars if aggregation fails
+    //      → Cold-start from ticks as last resort
+    //
+    // This fixes the bug where partial saved bars (e.g. 11 bars from short
+    // runs) would block the REST fetch that provides 64 bars, leaving engines
+    // stuck below their lookback threshold and unable to evaluate signals.
     {
         chimera::BinanceREST seed_rest;
-        std::printf("[STARTUP] Seeding 61 engine bar buffers (warm-start + REST fallback)...\n");
+        int total = (int)g_slots.size();
+        std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
+        std::printf("[STARTUP] SEEDING %d engines from Binance REST API...\n", total);
+        std::printf("[STARTUP] (This takes 30-60s on first boot — REST + H1 aggregation)\n");
+        std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
         std::fflush(stdout);
+
+        int seeded_rest = 0, seeded_agg = 0, seeded_saved = 0, cold = 0;
+        int progress = 0;
 
         for (auto& slot : g_slots) {
             if (!slot.engine) continue;
+            progress++;
 
-            // Try warm-start from saved bars first
-            auto saved = load_saved_bars(slot.tag, 64);
-            if (!saved.empty()) {
-                int kept = slot.engine->seed_bars(saved);
-                std::printf("[WARM_START][%s] Seeded from saved bars: loaded=%d kept=%d\n",
-                    slot.tag.c_str(), (int)saved.size(), kept);
+            // Progress update every 25 engines
+            if (progress % 25 == 0 || progress == total) {
+                std::printf("[SEED] Progress: %d/%d engines seeded...\n", progress, total);
                 std::fflush(stdout);
-                continue;  // saved bars are sufficient — skip REST
             }
 
-            // No saved bars — fall back to REST klines
-            seed_engine_from_history(seed_rest, *slot.engine,
-                                     slot.symbol_str, slot.tf_secs, slot.tag, 64);
+            const char* interval = tf_to_binance_interval(slot.tf_secs);
+            bool has_native_interval = (interval && *interval);
+
+            if (has_native_interval) {
+                // ── Native interval: always use REST (64 bars, freshest data) ──
+                seed_engine_from_history(seed_rest, *slot.engine,
+                                         slot.symbol_str, slot.tf_secs, slot.tag, 64);
+                seeded_rest++;
+            } else {
+                // ── No native interval (H3/H16/D2): try H1 aggregation ─────────
+                seed_engine_from_h1_aggregation(seed_rest, *slot.engine,
+                                                slot.symbol_str, slot.tf_secs, slot.tag, 64);
+
+                // Check if aggregation gave us enough bars
+                if (slot.engine->bars_in_buffer() > 0) {
+                    seeded_agg++;
+                } else {
+                    // Aggregation failed — try saved bars as fallback
+                    auto saved = load_saved_bars(slot.tag, 64);
+                    if (!saved.empty()) {
+                        int kept = slot.engine->seed_bars(saved);
+                        std::printf("[WARM_START][%s] Seeded from saved bars: loaded=%d kept=%d\n",
+                            slot.tag.c_str(), (int)saved.size(), kept);
+                        std::fflush(stdout);
+                        seeded_saved++;
+                    } else {
+                        std::fprintf(stderr, "[SEED][%s] No data source — cold-start from live ticks\n",
+                            slot.tag.c_str());
+                        cold++;
+                    }
+                }
+            }
         }
 
-        std::printf("[STARTUP] Seeding complete.\n");
+        std::printf("[STARTUP] Seeding complete: REST=%d  H1-agg=%d  saved=%d  cold=%d\n",
+            seeded_rest, seeded_agg, seeded_saved, cold);
         std::fflush(stdout);
     }
 
@@ -5580,12 +5767,15 @@ int main() {
         } else { gui_root = "../gui"; }
     }
 
+    std::printf("[STARTUP] HTTP server starting on port 8080...\n");
+    std::fflush(stdout);
     std::thread http_thread(http_server_thread, 8080);
     http_thread.detach();
 
-    // ── Spot WebSocket feed (subscribes to all 8 symbols — keeps the feed
-    //    config matched to SymbolIndex for GUI spot price strip). ──────────
+    // ── Spot WebSocket feed (subscribes to all 12 symbols) ───────────────
     chimera::BinanceWSFeed feed;
+    std::printf("[STARTUP] Subscribing to %d symbol streams on Binance...\n", chimera::MAX_SYMBOLS);
+    std::fflush(stdout);
     for (int i = 0; i < chimera::MAX_SYMBOLS; ++i)
         feed.add_symbol(chimera::sym_full(i));
 
@@ -5630,9 +5820,13 @@ int main() {
 
     feed.start();
 
-    std::printf("[STARTUP] Spot feed live. 49 engines running (shadow_mode=true):\n");
-    std::printf("[STARTUP]   TSMOM: D1(5)+H12(3)+H6(8)+H4(7)+H3(6)+H2(5)+H1(3)=37 | Counter-trend: RSI_REV(9)+BOLL(3)=12 | Total=49\n");
-    std::printf("[STARTUP] GUI: http://localhost:8080\n");
+    std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
+    std::printf("[STARTUP] ✓ CHIMERA READY — %d engines running (shadow_mode=true)\n", (int)g_slots.size());
+    std::printf("[STARTUP]   TSMOM=95 | RSI_REVERT=51 | BOLLINGER=44 | DONCHIAN=28\n");
+    std::printf("[STARTUP]   12 symbols | spot-long-only | all edges validated\n");
+    std::printf("[STARTUP]   GUI: http://localhost:8080\n");
+    std::printf("[STARTUP]   API: /api/state2  /api/positions  /api/trades\n");
+    std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
     std::fflush(stdout);
 
     while (g_running) {

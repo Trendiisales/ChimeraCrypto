@@ -107,6 +107,13 @@ public:
         double       trail_arm_atr  = 1.0;
         double       trail_dist_atr = 0.5;
 
+        // ── Staged ratcheting trail (Session 24) ─────────────────────────
+        // When unrealised profit exceeds trail_tighten_atr * ATR, the trail
+        // distance tightens from trail_dist_atr to trail_tighten_dist_atr.
+        // Set trail_tighten_atr = 0.0 to disable (default — no tightening).
+        double       trail_tighten_atr      = 0.0;   // 0 = disabled; e.g. 3.0
+        double       trail_tighten_dist_atr = 0.3;   // tighter trail once threshold hit
+
         // ── OVERNIGHT strategy parameters ────────────────────────────────
         // entry_hour_utc: the UTC hour at which the H1 bar must close for
         //   signal to fire. Default 21 = the 21:00-22:00 bar close.
@@ -341,6 +348,8 @@ public:
         js << "\"round_trip_bp\":" << std::setprecision(1) << cfg_.round_trip_bp << ",";
         js << "\"trail_arm_atr\":" << std::setprecision(1) << cfg_.trail_arm_atr << ",";
         js << "\"trail_dist_atr\":" << std::setprecision(1) << cfg_.trail_dist_atr << ",";
+        js << "\"trail_tighten_atr\":" << std::setprecision(1) << cfg_.trail_tighten_atr << ",";
+        js << "\"trail_tighten_dist_atr\":" << std::setprecision(1) << cfg_.trail_tighten_dist_atr << ",";
 
         // Momentum: close[now] vs close[now - lookback]
         bool signal_ready = ((int)closes_.size() >= cfg_.lookback + 1);
@@ -729,8 +738,14 @@ private:
                 std::fflush(stdout);
             }
         } else {
-            // Ratchet: if price made a new high, update the trail stop
-            double new_trail = mfe_px_ - cfg_.trail_dist_atr * atr_at_entry_;
+            // Ratchet: if price made a new high, update the trail stop.
+            // Use tighter trail distance if profit exceeds tighten threshold.
+            double cur_profit_atr = (mfe_px_ - entry_px_) / atr_at_entry_;
+            double dist = cfg_.trail_dist_atr;
+            if (cfg_.trail_tighten_atr > 0.0 && cur_profit_atr >= cfg_.trail_tighten_atr) {
+                dist = cfg_.trail_tighten_dist_atr;
+            }
+            double new_trail = mfe_px_ - dist * atr_at_entry_;
             if (new_trail > trail_stop_px_) {
                 trail_stop_px_ = new_trail;
             }

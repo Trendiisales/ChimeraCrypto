@@ -868,6 +868,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_tsmom_d1(btc_d1_cfg);
     btc_tsmom_d1.set_on_trade(on_trade_callback);
@@ -888,6 +890,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_tsmom_d1(eth_d1_cfg);
     eth_tsmom_d1.set_on_trade(on_trade_callback);
@@ -908,6 +912,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sol_tsmom_d1(sol_d1_cfg);
     sol_tsmom_d1.set_on_trade(on_trade_callback);
@@ -928,6 +934,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_tsmom_d1(link_d1_cfg);
     link_tsmom_d1.set_on_trade(on_trade_callback);
@@ -948,6 +956,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_tsmom_d1(bnb_d1_cfg);
     bnb_tsmom_d1.set_on_trade(on_trade_callback);
@@ -972,6 +982,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h12(btc_h12_cfg);
     btc_tsmom_h12.set_on_trade(on_trade_callback);
@@ -992,6 +1004,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h12(doge_h12_cfg);
     doge_tsmom_h12.set_on_trade(on_trade_callback);
@@ -1012,6 +1026,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_tsmom_h12(avax_h12_cfg);
     avax_tsmom_h12.set_on_trade(on_trade_callback);
@@ -1037,6 +1053,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h6(xrp_h6_cfg);
     xrp_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1057,6 +1075,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h6(btc_h6_cfg);
     btc_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1077,6 +1097,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h6(eth_h6_cfg);
     eth_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1097,6 +1119,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h6(sol_h6_cfg);
     sol_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1117,6 +1141,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h6(bnb_h6_cfg);
     bnb_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1137,6 +1163,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h6(link_h6_cfg);
     link_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1157,6 +1185,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h6(doge_h6_cfg);
     doge_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1177,6 +1207,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_tsmom_h6(avax_h6_cfg);
     avax_tsmom_h6.set_on_trade(on_trade_callback);
@@ -1201,6 +1233,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h4(xrp_h4_cfg);
     xrp_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1221,6 +1255,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h4(bnb_h4_cfg);
     bnb_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1241,6 +1277,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h4(link_h4_cfg);
     link_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1261,6 +1299,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h4(sol_h4_cfg);
     sol_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1281,6 +1321,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h4(btc_h4_cfg);
     btc_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1301,6 +1343,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h4(eth_h4_cfg);
     eth_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1321,6 +1365,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_tsmom_h4(avax_h4_cfg);
     avax_tsmom_h4.set_on_trade(on_trade_callback);
@@ -1346,6 +1392,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h1(xrp_h1_cfg);
     xrp_tsmom_h1.set_on_trade(on_trade_callback);
@@ -1366,6 +1414,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h1(sol_h1_cfg);
     sol_tsmom_h1.set_on_trade(on_trade_callback);
@@ -1386,6 +1436,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h1(link_h1_cfg);
     link_tsmom_h1.set_on_trade(on_trade_callback);
@@ -1410,6 +1462,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h2(btc_h2_cfg);
     btc_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1430,6 +1484,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h2(eth_h2_cfg);
     eth_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1450,6 +1506,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h2(sol_h2_cfg);
     sol_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1470,6 +1528,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h2(xrp_h2_cfg);
     xrp_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1490,6 +1550,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h2(link_h2_cfg);
     link_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1510,6 +1572,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h2(doge_h2_cfg);
     doge_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1530,6 +1594,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h2(bnb_h2_cfg);
     bnb_tsmom_h2.set_on_trade(on_trade_callback);
@@ -1554,6 +1620,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h3(btc_h3_cfg);
     btc_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1574,6 +1642,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h3(eth_h3_cfg);
     eth_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1594,6 +1664,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h3(sol_h3_cfg);
     sol_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1614,6 +1686,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h3(xrp_h3_cfg);
     xrp_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1634,6 +1708,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h3(link_h3_cfg);
     link_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1654,6 +1730,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h3(bnb_h3_cfg);
     bnb_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1674,6 +1752,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h3(doge_h3_cfg);
     doge_tsmom_h3.set_on_trade(on_trade_callback);
@@ -1707,6 +1787,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi30_h3(eth_rsi30_h3_cfg);
     eth_rsi30_h3.set_on_trade(on_trade_callback);
@@ -1727,6 +1809,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi30_h4(eth_rsi30_h4_cfg);
     eth_rsi30_h4.set_on_trade(on_trade_callback);
@@ -1747,6 +1831,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi30_h3(doge_rsi30_h3_cfg);
     doge_rsi30_h3.set_on_trade(on_trade_callback);
@@ -1767,6 +1853,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_rsi25_h2(avax_rsi25_h2_cfg);
     avax_rsi25_h2.set_on_trade(on_trade_callback);
@@ -1787,6 +1875,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi25_h2(doge_rsi25_h2_cfg);
     doge_rsi25_h2.set_on_trade(on_trade_callback);
@@ -1807,6 +1897,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_rsi35_h3(btc_rsi35_h3_cfg);
     btc_rsi35_h3.set_on_trade(on_trade_callback);
@@ -1827,6 +1919,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_boll25_h3(bnb_boll25_h3_cfg);
     bnb_boll25_h3.set_on_trade(on_trade_callback);
@@ -1849,6 +1943,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_boll25_h3(eth_boll25_h3_cfg);
     eth_boll25_h3.set_on_trade(on_trade_callback);
@@ -1869,6 +1965,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_rsi25_h2(btc_rsi25_h2_cfg);
     btc_rsi25_h2.set_on_trade(on_trade_callback);
@@ -1889,6 +1987,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll30_h1(link_boll30_h1_cfg);
     link_boll30_h1.set_on_trade(on_trade_callback);
@@ -1909,6 +2009,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_rsi30_h6(xrp_rsi30_h6_cfg);
     xrp_rsi30_h6.set_on_trade(on_trade_callback);
@@ -1929,6 +2031,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_rsi30_h2(xrp_rsi30_h2_cfg);
     xrp_rsi30_h2.set_on_trade(on_trade_callback);
@@ -1956,6 +2060,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine near_tsmom_d1(near_d1_cfg);
     near_tsmom_d1.set_on_trade(on_trade_callback);
@@ -1976,6 +2082,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_tsmom_h12(near_h12_cfg);
     near_tsmom_h12.set_on_trade(on_trade_callback);
@@ -1996,6 +2104,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_tsmom_h6(near_h6_cfg);
     near_tsmom_h6.set_on_trade(on_trade_callback);
@@ -2016,6 +2126,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_tsmom_h4(near_h4_cfg);
     near_tsmom_h4.set_on_trade(on_trade_callback);
@@ -2036,6 +2148,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_tsmom_h3(near_h3_cfg);
     near_tsmom_h3.set_on_trade(on_trade_callback);
@@ -2056,6 +2170,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_tsmom_h6(sui_h6_cfg);
     sui_tsmom_h6.set_on_trade(on_trade_callback);
@@ -2076,6 +2192,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_tsmom_h4(sui_h4_cfg);
     sui_tsmom_h4.set_on_trade(on_trade_callback);
@@ -2096,6 +2214,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_tsmom_h6(apt_h6_cfg);
     apt_tsmom_h6.set_on_trade(on_trade_callback);
@@ -2116,6 +2236,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_tsmom_h6(arb_h6_cfg);
     arb_tsmom_h6.set_on_trade(on_trade_callback);
@@ -2142,6 +2264,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h6(near_rsi_h6_cfg);
     near_rsi_h6.set_on_trade(on_trade_callback);
@@ -2162,6 +2286,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h4(near_rsi_h4_cfg);
     near_rsi_h4.set_on_trade(on_trade_callback);
@@ -2182,6 +2308,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h3(near_rsi_h3_cfg);
     near_rsi_h3.set_on_trade(on_trade_callback);
@@ -2202,6 +2330,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h2(near_rsi_h2_cfg);
     near_rsi_h2.set_on_trade(on_trade_callback);
@@ -2222,6 +2352,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_rsi_h3(sui_rsi_h3_cfg);
     sui_rsi_h3.set_on_trade(on_trade_callback);
@@ -2242,6 +2374,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_rsi_h2(sui_rsi_h2_cfg);
     sui_rsi_h2.set_on_trade(on_trade_callback);
@@ -2262,6 +2396,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_rsi_h4(sui_rsi_h4_cfg);
     sui_rsi_h4.set_on_trade(on_trade_callback);
@@ -2282,6 +2418,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h2(apt_rsi_h2_cfg);
     apt_rsi_h2.set_on_trade(on_trade_callback);
@@ -2302,6 +2440,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h1(apt_rsi_h1_cfg);
     apt_rsi_h1.set_on_trade(on_trade_callback);
@@ -2322,6 +2462,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h4(apt_rsi_h4_cfg);
     apt_rsi_h4.set_on_trade(on_trade_callback);
@@ -2342,6 +2484,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h6(apt_rsi_h6_cfg);
     apt_rsi_h6.set_on_trade(on_trade_callback);
@@ -2362,6 +2506,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h3(apt_rsi_h3_cfg);
     apt_rsi_h3.set_on_trade(on_trade_callback);
@@ -2382,6 +2528,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h2(arb_rsi_h2_cfg);
     arb_rsi_h2.set_on_trade(on_trade_callback);
@@ -2402,6 +2550,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h4(arb_rsi_h4_cfg);
     arb_rsi_h4.set_on_trade(on_trade_callback);
@@ -2422,6 +2572,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h1(arb_rsi_h1_cfg);
     arb_rsi_h1.set_on_trade(on_trade_callback);
@@ -2442,6 +2594,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h6(arb_rsi_h6_cfg);
     arb_rsi_h6.set_on_trade(on_trade_callback);
@@ -2462,6 +2616,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h3(arb_rsi_h3_cfg);
     arb_rsi_h3.set_on_trade(on_trade_callback);
@@ -2482,6 +2638,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h3(near_boll_h3_cfg);
     near_boll_h3.set_on_trade(on_trade_callback);
@@ -2502,6 +2660,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h6(near_boll_h6_cfg);
     near_boll_h6.set_on_trade(on_trade_callback);
@@ -2522,6 +2682,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h2(near_boll_h2_cfg);
     near_boll_h2.set_on_trade(on_trade_callback);
@@ -2542,6 +2704,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h4(near_boll_h4_cfg);
     near_boll_h4.set_on_trade(on_trade_callback);
@@ -2562,6 +2726,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_boll_h2(apt_boll_h2_cfg);
     apt_boll_h2.set_on_trade(on_trade_callback);
@@ -2582,6 +2748,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_boll_h4(apt_boll_h4_cfg);
     apt_boll_h4.set_on_trade(on_trade_callback);
@@ -2602,6 +2770,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_boll_h3(apt_boll_h3_cfg);
     apt_boll_h3.set_on_trade(on_trade_callback);
@@ -2622,6 +2792,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_boll_h6(arb_boll_h6_cfg);
     arb_boll_h6.set_on_trade(on_trade_callback);
@@ -2642,6 +2814,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_boll_h3(arb_boll_h3_cfg);
     arb_boll_h3.set_on_trade(on_trade_callback);
@@ -2662,6 +2836,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_boll_h6(apt_boll_h6_cfg);
     apt_boll_h6.set_on_trade(on_trade_callback);
@@ -2682,6 +2858,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_boll_h6(sui_boll_h6_cfg);
     sui_boll_h6.set_on_trade(on_trade_callback);
@@ -2702,6 +2880,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_boll_h4(sui_boll_h4_cfg);
     sui_boll_h4.set_on_trade(on_trade_callback);
@@ -2722,6 +2902,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_boll_h2(arb_boll_h2_cfg);
     arb_boll_h2.set_on_trade(on_trade_callback);
@@ -2742,6 +2924,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_boll_h4(arb_boll_h4_cfg);
     arb_boll_h4.set_on_trade(on_trade_callback);
@@ -2767,6 +2951,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h8(btc_tsmom_h8_cfg);
     btc_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2786,6 +2972,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h8(eth_tsmom_h8_cfg);
     eth_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2805,6 +2993,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h8(sol_tsmom_h8_cfg);
     sol_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2824,6 +3014,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h8(xrp_tsmom_h8_cfg);
     xrp_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2843,6 +3035,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h8(link_tsmom_h8_cfg);
     link_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2862,6 +3056,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_tsmom_h8(near_tsmom_h8_cfg);
     near_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2881,6 +3077,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h8(bnb_tsmom_h8_cfg);
     bnb_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2900,6 +3098,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h8(doge_tsmom_h8_cfg);
     doge_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2919,6 +3119,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_tsmom_h8(avax_tsmom_h8_cfg);
     avax_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2938,6 +3140,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_tsmom_h8(sui_tsmom_h8_cfg);
     sui_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2957,6 +3161,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_tsmom_h8(apt_tsmom_h8_cfg);
     apt_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2976,6 +3182,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_tsmom_h8(arb_tsmom_h8_cfg);
     arb_tsmom_h8.set_on_trade(on_trade_callback);
@@ -2995,6 +3203,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h16(btc_tsmom_h16_cfg);
     btc_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3014,6 +3224,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h16(eth_tsmom_h16_cfg);
     eth_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3033,6 +3245,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h16(sol_tsmom_h16_cfg);
     sol_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3052,6 +3266,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h16(xrp_tsmom_h16_cfg);
     xrp_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3071,6 +3287,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h16(link_tsmom_h16_cfg);
     link_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3090,6 +3308,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_tsmom_h16(near_tsmom_h16_cfg);
     near_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3109,6 +3329,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h16(bnb_tsmom_h16_cfg);
     bnb_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3128,6 +3350,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h16(doge_tsmom_h16_cfg);
     doge_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3147,6 +3371,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_tsmom_h16(avax_tsmom_h16_cfg);
     avax_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3166,6 +3392,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_tsmom_h16(sui_tsmom_h16_cfg);
     sui_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3185,6 +3413,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_tsmom_h16(apt_tsmom_h16_cfg);
     apt_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3204,6 +3434,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_tsmom_h16(arb_tsmom_h16_cfg);
     arb_tsmom_h16.set_on_trade(on_trade_callback);
@@ -3223,6 +3455,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_tsmom_d2(btc_tsmom_d2_cfg);
     btc_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3242,6 +3476,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_tsmom_d2(eth_tsmom_d2_cfg);
     eth_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3261,6 +3497,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sol_tsmom_d2(sol_tsmom_d2_cfg);
     sol_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3280,6 +3518,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine xrp_tsmom_d2(xrp_tsmom_d2_cfg);
     xrp_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3299,6 +3539,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_tsmom_d2(link_tsmom_d2_cfg);
     link_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3318,6 +3560,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine near_tsmom_d2(near_tsmom_d2_cfg);
     near_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3337,6 +3581,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_tsmom_d2(bnb_tsmom_d2_cfg);
     bnb_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3356,6 +3602,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine doge_tsmom_d2(doge_tsmom_d2_cfg);
     doge_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3375,6 +3623,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine avax_tsmom_d2(avax_tsmom_d2_cfg);
     avax_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3394,6 +3644,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sui_tsmom_d2(sui_tsmom_d2_cfg);
     sui_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3413,6 +3665,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine arb_tsmom_d2(arb_tsmom_d2_cfg);
     arb_tsmom_d2.set_on_trade(on_trade_callback);
@@ -3432,6 +3686,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_tsmom_d3(btc_tsmom_d3_cfg);
     btc_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3451,6 +3707,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_tsmom_d3(eth_tsmom_d3_cfg);
     eth_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3470,6 +3728,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sol_tsmom_d3(sol_tsmom_d3_cfg);
     sol_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3489,6 +3749,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine xrp_tsmom_d3(xrp_tsmom_d3_cfg);
     xrp_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3508,6 +3770,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_tsmom_d3(link_tsmom_d3_cfg);
     link_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3527,6 +3791,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine near_tsmom_d3(near_tsmom_d3_cfg);
     near_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3546,6 +3812,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_tsmom_d3(bnb_tsmom_d3_cfg);
     bnb_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3565,6 +3833,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine doge_tsmom_d3(doge_tsmom_d3_cfg);
     doge_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3584,6 +3854,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine avax_tsmom_d3(avax_tsmom_d3_cfg);
     avax_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3603,6 +3875,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sui_tsmom_d3(sui_tsmom_d3_cfg);
     sui_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3622,6 +3896,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine arb_tsmom_d3(arb_tsmom_d3_cfg);
     arb_tsmom_d3.set_on_trade(on_trade_callback);
@@ -3641,6 +3917,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_rsi_h6(btc_rsi_h6_cfg);
     btc_rsi_h6.set_on_trade(on_trade_callback);
@@ -3660,6 +3938,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi_h6(eth_rsi_h6_cfg);
     eth_rsi_h6.set_on_trade(on_trade_callback);
@@ -3680,6 +3960,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_rsi_h6(link_rsi_h6_cfg);
     link_rsi_h6.set_on_trade(on_trade_callback);
@@ -3699,6 +3981,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_rsi_h6(bnb_rsi_h6_cfg);
     bnb_rsi_h6.set_on_trade(on_trade_callback);
@@ -3718,6 +4002,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi_h6(doge_rsi_h6_cfg);
     doge_rsi_h6.set_on_trade(on_trade_callback);
@@ -3737,6 +4023,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_rsi_h6(avax_rsi_h6_cfg);
     avax_rsi_h6.set_on_trade(on_trade_callback);
@@ -3756,6 +4044,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h6(btc_boll_h6_cfg);
     btc_boll_h6.set_on_trade(on_trade_callback);
@@ -3775,6 +4065,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_boll_h6(eth_boll_h6_cfg);
     eth_boll_h6.set_on_trade(on_trade_callback);
@@ -3794,6 +4086,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_boll_h6(sol_boll_h6_cfg);
     sol_boll_h6.set_on_trade(on_trade_callback);
@@ -3813,6 +4107,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h6(xrp_boll_h6_cfg);
     xrp_boll_h6.set_on_trade(on_trade_callback);
@@ -3832,6 +4128,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll_h6(link_boll_h6_cfg);
     link_boll_h6.set_on_trade(on_trade_callback);
@@ -3851,6 +4149,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_boll_h6(bnb_boll_h6_cfg);
     bnb_boll_h6.set_on_trade(on_trade_callback);
@@ -3870,6 +4170,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_boll_h6(doge_boll_h6_cfg);
     doge_boll_h6.set_on_trade(on_trade_callback);
@@ -3889,6 +4191,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_boll_h6(avax_boll_h6_cfg);
     avax_boll_h6.set_on_trade(on_trade_callback);
@@ -3908,6 +4212,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_rsi_h12(btc_rsi_h12_cfg);
     btc_rsi_h12.set_on_trade(on_trade_callback);
@@ -3927,6 +4233,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi_h12(eth_rsi_h12_cfg);
     eth_rsi_h12.set_on_trade(on_trade_callback);
@@ -3946,6 +4254,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_rsi_h12(sol_rsi_h12_cfg);
     sol_rsi_h12.set_on_trade(on_trade_callback);
@@ -3965,6 +4275,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_rsi_h12(xrp_rsi_h12_cfg);
     xrp_rsi_h12.set_on_trade(on_trade_callback);
@@ -3984,6 +4296,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_rsi_h12(link_rsi_h12_cfg);
     link_rsi_h12.set_on_trade(on_trade_callback);
@@ -4003,6 +4317,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi_h12(doge_rsi_h12_cfg);
     doge_rsi_h12.set_on_trade(on_trade_callback);
@@ -4022,6 +4338,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_rsi_h12(avax_rsi_h12_cfg);
     avax_rsi_h12.set_on_trade(on_trade_callback);
@@ -4041,6 +4359,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h12(btc_boll_h12_cfg);
     btc_boll_h12.set_on_trade(on_trade_callback);
@@ -4060,6 +4380,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_boll_h12(sol_boll_h12_cfg);
     sol_boll_h12.set_on_trade(on_trade_callback);
@@ -4079,6 +4401,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h12(xrp_boll_h12_cfg);
     xrp_boll_h12.set_on_trade(on_trade_callback);
@@ -4098,6 +4422,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll_h12(link_boll_h12_cfg);
     link_boll_h12.set_on_trade(on_trade_callback);
@@ -4117,6 +4443,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_boll_h12(doge_boll_h12_cfg);
     doge_boll_h12.set_on_trade(on_trade_callback);
@@ -4136,6 +4464,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_rsi_h8(btc_rsi_h8_cfg);
     btc_rsi_h8.set_on_trade(on_trade_callback);
@@ -4170,6 +4500,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h6(near_donch_h6_cfg);
     near_donch_h6.set_on_trade(on_trade_callback);
@@ -4190,6 +4522,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_donch_h6(sui_donch_h6_cfg);
     sui_donch_h6.set_on_trade(on_trade_callback);
@@ -4210,6 +4544,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_donch_h4(apt_donch_h4_cfg);
     apt_donch_h4.set_on_trade(on_trade_callback);
@@ -4229,6 +4565,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_donch_h6(apt_donch_h6_cfg);
     apt_donch_h6.set_on_trade(on_trade_callback);
@@ -4248,6 +4586,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_donch_h6(arb_donch_h6_cfg);
     arb_donch_h6.set_on_trade(on_trade_callback);
@@ -4268,6 +4608,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_rsi_d1(btc_rsi_d1_cfg);
     btc_rsi_d1.set_on_trade(on_trade_callback);
@@ -4287,6 +4629,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine doge_rsi_d1(doge_rsi_d1_cfg);
     doge_rsi_d1.set_on_trade(on_trade_callback);
@@ -4306,6 +4650,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_rsi_d1(link_rsi_d1_cfg);
     link_rsi_d1.set_on_trade(on_trade_callback);
@@ -4331,6 +4677,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi_h8(eth_rsi_h8_cfg);
     eth_rsi_h8.set_on_trade(on_trade_callback);
@@ -4350,6 +4698,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_rsi_h8(bnb_rsi_h8_cfg);
     bnb_rsi_h8.set_on_trade(on_trade_callback);
@@ -4369,6 +4719,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi_h8(doge_rsi_h8_cfg);
     doge_rsi_h8.set_on_trade(on_trade_callback);
@@ -4388,6 +4740,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_rsi_h8(xrp_rsi_h8_cfg);
     xrp_rsi_h8.set_on_trade(on_trade_callback);
@@ -4407,6 +4761,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h8(apt_rsi_h8_cfg);
     apt_rsi_h8.set_on_trade(on_trade_callback);
@@ -4426,6 +4782,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_rsi_h8(sol_rsi_h8_cfg);
     sol_rsi_h8.set_on_trade(on_trade_callback);
@@ -4445,6 +4803,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_rsi_h8(link_rsi_h8_cfg);
     link_rsi_h8.set_on_trade(on_trade_callback);
@@ -4464,6 +4824,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h8(arb_rsi_h8_cfg);
     arb_rsi_h8.set_on_trade(on_trade_callback);
@@ -4483,6 +4845,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h8(near_rsi_h8_cfg);
     near_rsi_h8.set_on_trade(on_trade_callback);
@@ -4502,6 +4866,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h8(btc_boll_h8_cfg);
     btc_boll_h8.set_on_trade(on_trade_callback);
@@ -4521,6 +4887,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_boll_h8(eth_boll_h8_cfg);
     eth_boll_h8.set_on_trade(on_trade_callback);
@@ -4540,6 +4908,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_boll_h8(sol_boll_h8_cfg);
     sol_boll_h8.set_on_trade(on_trade_callback);
@@ -4559,6 +4929,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_boll_h8(bnb_boll_h8_cfg);
     bnb_boll_h8.set_on_trade(on_trade_callback);
@@ -4578,6 +4950,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_boll_h8(avax_boll_h8_cfg);
     avax_boll_h8.set_on_trade(on_trade_callback);
@@ -4597,6 +4971,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll_h8(link_boll_h8_cfg);
     link_boll_h8.set_on_trade(on_trade_callback);
@@ -4616,6 +4992,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h8(xrp_boll_h8_cfg);
     xrp_boll_h8.set_on_trade(on_trade_callback);
@@ -4635,6 +5013,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_boll_h8(doge_boll_h8_cfg);
     doge_boll_h8.set_on_trade(on_trade_callback);
@@ -4654,6 +5034,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_boll_h8(sui_boll_h8_cfg);
     sui_boll_h8.set_on_trade(on_trade_callback);
@@ -4673,6 +5055,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_boll_h8(apt_boll_h8_cfg);
     apt_boll_h8.set_on_trade(on_trade_callback);
@@ -4692,6 +5076,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h8(near_boll_h8_cfg);
     near_boll_h8.set_on_trade(on_trade_callback);
@@ -4711,6 +5097,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_boll_h8(arb_boll_h8_cfg);
     arb_boll_h8.set_on_trade(on_trade_callback);
@@ -4730,6 +5118,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi_h16(eth_rsi_h16_cfg);
     eth_rsi_h16.set_on_trade(on_trade_callback);
@@ -4749,6 +5139,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_rsi_h16(bnb_rsi_h16_cfg);
     bnb_rsi_h16.set_on_trade(on_trade_callback);
@@ -4768,6 +5160,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_rsi_h16(xrp_rsi_h16_cfg);
     xrp_rsi_h16.set_on_trade(on_trade_callback);
@@ -4787,6 +5181,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_rsi_h16(link_rsi_h16_cfg);
     link_rsi_h16.set_on_trade(on_trade_callback);
@@ -4806,6 +5202,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h16(near_rsi_h16_cfg);
     near_rsi_h16.set_on_trade(on_trade_callback);
@@ -4825,6 +5223,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_rsi_h16(btc_rsi_h16_cfg);
     btc_rsi_h16.set_on_trade(on_trade_callback);
@@ -4844,6 +5244,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_rsi_h16(sol_rsi_h16_cfg);
     sol_rsi_h16.set_on_trade(on_trade_callback);
@@ -4863,6 +5265,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi_h16(doge_rsi_h16_cfg);
     doge_rsi_h16.set_on_trade(on_trade_callback);
@@ -4882,6 +5286,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll_h16(link_boll_h16_cfg);
     link_boll_h16.set_on_trade(on_trade_callback);
@@ -4901,6 +5307,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h16(xrp_boll_h16_cfg);
     xrp_boll_h16.set_on_trade(on_trade_callback);
@@ -4920,6 +5328,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h16(btc_boll_h16_cfg);
     btc_boll_h16.set_on_trade(on_trade_callback);
@@ -4939,6 +5349,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h16(near_boll_h16_cfg);
     near_boll_h16.set_on_trade(on_trade_callback);
@@ -4958,6 +5370,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_boll_h16(eth_boll_h16_cfg);
     eth_boll_h16.set_on_trade(on_trade_callback);
@@ -4977,6 +5391,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h8(xrp_donch_h8_cfg);
     xrp_donch_h8.set_on_trade(on_trade_callback);
@@ -4996,6 +5412,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h8(near_donch_h8_cfg);
     near_donch_h8.set_on_trade(on_trade_callback);
@@ -5015,6 +5433,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_donch_h8(sui_donch_h8_cfg);
     sui_donch_h8.set_on_trade(on_trade_callback);
@@ -5034,6 +5454,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_donch_h8(btc_donch_h8_cfg);
     btc_donch_h8.set_on_trade(on_trade_callback);
@@ -5053,6 +5475,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_donch_h8(arb_donch_h8_cfg);
     arb_donch_h8.set_on_trade(on_trade_callback);
@@ -5072,6 +5496,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h16(xrp_donch_h16_cfg);
     xrp_donch_h16.set_on_trade(on_trade_callback);
@@ -5091,6 +5517,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_donch_h16(bnb_donch_h16_cfg);
     bnb_donch_h16.set_on_trade(on_trade_callback);
@@ -5110,6 +5538,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_donch_h16(btc_donch_h16_cfg);
     btc_donch_h16.set_on_trade(on_trade_callback);
@@ -5129,6 +5559,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_donch_h16(link_donch_h16_cfg);
     link_donch_h16.set_on_trade(on_trade_callback);
@@ -5148,6 +5580,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_donch_h16(sui_donch_h16_cfg);
     sui_donch_h16.set_on_trade(on_trade_callback);
@@ -5167,6 +5601,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.0,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h16(near_donch_h16_cfg);
     near_donch_h16.set_on_trade(on_trade_callback);
@@ -5186,6 +5622,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_donch_h16(sol_donch_h16_cfg);
     sol_donch_h16.set_on_trade(on_trade_callback);
@@ -5205,6 +5643,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_donch_h16(doge_donch_h16_cfg);
     doge_donch_h16.set_on_trade(on_trade_callback);
@@ -5224,6 +5664,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_donch_d2(bnb_donch_d2_cfg);
     bnb_donch_d2.set_on_trade(on_trade_callback);
@@ -5243,6 +5685,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine xrp_donch_d2(xrp_donch_d2_cfg);
     xrp_donch_d2.set_on_trade(on_trade_callback);
@@ -5262,6 +5706,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_donch_d2(btc_donch_d2_cfg);
     btc_donch_d2.set_on_trade(on_trade_callback);
@@ -5281,6 +5727,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_donch_d2(eth_donch_d2_cfg);
     eth_donch_d2.set_on_trade(on_trade_callback);
@@ -5300,6 +5748,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_donch_d2(link_donch_d2_cfg);
     link_donch_d2.set_on_trade(on_trade_callback);
@@ -5319,6 +5769,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_donch_d3(btc_donch_d3_cfg);
     btc_donch_d3.set_on_trade(on_trade_callback);
@@ -5338,6 +5790,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_donch_d3(eth_donch_d3_cfg);
     eth_donch_d3.set_on_trade(on_trade_callback);
@@ -5357,6 +5811,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 1.0,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine xrp_donch_d3(xrp_donch_d3_cfg);
     xrp_donch_d3.set_on_trade(on_trade_callback);
@@ -5376,6 +5832,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_donch_d3(bnb_donch_d3_cfg);
     bnb_donch_d3.set_on_trade(on_trade_callback);
@@ -5395,6 +5853,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 3.0,
+        .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine doge_donch_d3(doge_donch_d3_cfg);
     doge_donch_d3.set_on_trade(on_trade_callback);
@@ -5419,6 +5879,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h2(xrp_donch_h2_cfg);
     xrp_donch_h2.set_on_trade(on_trade_callback);
@@ -5439,6 +5901,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h2(near_donch_h2_cfg);
     near_donch_h2.set_on_trade(on_trade_callback);
@@ -5459,6 +5923,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h3(xrp_donch_h3_cfg);
     xrp_donch_h3.set_on_trade(on_trade_callback);
@@ -5479,6 +5945,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h3(near_donch_h3_cfg);
     near_donch_h3.set_on_trade(on_trade_callback);
@@ -5499,6 +5967,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h4(xrp_donch_h4_cfg);
     xrp_donch_h4.set_on_trade(on_trade_callback);
@@ -5519,6 +5989,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 2.0,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h6(xrp_donch_h6_cfg);
     xrp_donch_h6.set_on_trade(on_trade_callback);
@@ -5539,6 +6011,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.5,
         .trail_dist_atr = 0.6,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_donch_h6(bnb_donch_h6_cfg);
     bnb_donch_h6.set_on_trade(on_trade_callback);
@@ -5559,6 +6033,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 1.2,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h12(xrp_donch_h12_cfg);
     xrp_donch_h12.set_on_trade(on_trade_callback);
@@ -5579,6 +6055,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h12(near_donch_h12_cfg);
     near_donch_h12.set_on_trade(on_trade_callback);
@@ -5599,6 +6077,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.8,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h12(eth_tsmom_h12_cfg);
     eth_tsmom_h12.set_on_trade(on_trade_callback);
@@ -5619,6 +6099,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h12(sol_tsmom_h12_cfg);
     sol_tsmom_h12.set_on_trade(on_trade_callback);
@@ -5639,6 +6121,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h12(bnb_tsmom_h12_cfg);
     bnb_tsmom_h12.set_on_trade(on_trade_callback);
@@ -5659,6 +6143,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h12(link_tsmom_h12_cfg);
     link_tsmom_h12.set_on_trade(on_trade_callback);
@@ -5679,6 +6165,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h12(xrp_tsmom_h12_cfg);
     xrp_tsmom_h12.set_on_trade(on_trade_callback);
@@ -5699,6 +6187,8 @@ int main() {
         .max_history    = 64,
         .trail_arm_atr  = 0.5,
         .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_tsmom_h12(apt_tsmom_h12_cfg);
     apt_tsmom_h12.set_on_trade(on_trade_callback);

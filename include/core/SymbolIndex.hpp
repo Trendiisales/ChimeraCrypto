@@ -11,16 +11,18 @@ namespace chimera {
 // All others are followers. Adding a new symbol = add entry here + main.cpp.
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 8;
+static constexpr int MAX_SYMBOLS = 12;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
-    "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE"
+    "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE",
+    "SUI", "APT", "NEAR", "ARB"
 };
 
 // Full Binance stream names (lowercase)
 static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
-    "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt"
+    "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt",
+    "suiusdt", "aptusdt", "nearusdt", "arbusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -49,6 +51,10 @@ enum SymbolId : uint8_t {
     SYM_LINK = 5,
     SYM_XRP  = 6,
     SYM_DOGE = 7,
+    SYM_SUI  = 8,
+    SYM_APT  = 9,
+    SYM_NEAR = 10,
+    SYM_ARB  = 11,
     SYM_COUNT = MAX_SYMBOLS
 };
 

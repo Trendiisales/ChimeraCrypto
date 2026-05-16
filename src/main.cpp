@@ -6,11 +6,12 @@
 //   - 3 H12 engines (Session 14)
 //   - 8 H6 engines (Session 15 — strongest timeframe discovered)
 //   - 7 H4 engines (Session 14)
-//   - 5 H2 engines (Session 17 — new timeframe discovery)
-//   - 6 H3 engines (Session 17 — new timeframe, no native Binance candles)
+//   - 7 H2 engines (Session 17+20 — new timeframe discovery)
+//   - 7 H3 engines (Session 17+20 — new timeframe, no native Binance candles)
 //   - 3 H1 engines (Session 15 — XRP/SOL/LINK only, rest eaten by costs)
 //   - 12 counter-trend engines (Session 19 — RSI_REVERT + BOLLINGER dip-buy)
-//   - Total: 49 engines, all shadow mode, all long-only spot
+//   - 9 new-symbol engines (Session 20 — NEAR/SUI/APT/ARB)
+//   - Total: 61 engines, all shadow mode, all long-only spot
 //
 // SESSION 15 DISCOVERY:
 //   H6 timeframe was never tested before Session 15.
@@ -59,14 +60,17 @@
 //   sol_tsmom_h2          SOLUSDT    TSMOM   H2    1.78    4.17     100%    340
 //   xrp_tsmom_h2          XRPUSDT    TSMOM   H2    2.00    4.70     100%    320
 //   link_tsmom_h2         LINKUSDT   TSMOM   H2    1.69    3.76     100%    357
+//   doge_tsmom_h2         DOGEUSDT   TSMOM   H2    1.21    1.72      93%    387
+//   bnb_tsmom_h2          BNBUSDT    TSMOM   H2    1.19    1.12      87%    436
 //
-//   H3 ENGINES (6) — NEW SESSION 17 (no native Binance candles — cold-start):
+//   H3 ENGINES (7) — SESSION 17+20 (no native Binance candles — cold-start):
 //   btc_tsmom_h3          BTCUSDT    TSMOM   H3    1.96    3.52     100%    156
 //   eth_tsmom_h3          ETHUSDT    TSMOM   H3    1.74    3.65      98%    278
 //   sol_tsmom_h3          SOLUSDT    TSMOM   H3    1.92    4.15      93%    259
 //   xrp_tsmom_h3          XRPUSDT    TSMOM   H3    2.19    4.70     100%    243
 //   link_tsmom_h3         LINKUSDT   TSMOM   H3    1.94    4.19     100%    254
 //   bnb_tsmom_h3          BNBUSDT    TSMOM   H3    1.55    2.74      97%    349
+//   doge_tsmom_h3         DOGEUSDT   TSMOM   H3    1.25    1.48      87%    309
 //
 //   H1 ENGINES (3) — SESSION 15:
 //   xrp_tsmom_h1          XRPUSDT    TSMOM   H1    1.66    3.73     100%    327
@@ -1339,6 +1343,46 @@ int main() {
     chimera::EdgeEngine link_tsmom_h2(link_h2_cfg);
     link_tsmom_h2.set_on_trade(on_trade_callback);
 
+    // ENGINE F6: DOGE-TSMOM-H2 — PF=1.21, Sharpe=1.72, 387 trades, Nbr=93%
+    chimera::EdgeEngine::Config doge_h2_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-TSMOM-H2",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 7200,
+        .lookback       = 20,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine doge_tsmom_h2(doge_h2_cfg);
+    doge_tsmom_h2.set_on_trade(on_trade_callback);
+
+    // ENGINE F7: BNB-TSMOM-H2 — PF=1.19, Sharpe=1.12, 436 trades, Nbr=87%
+    chimera::EdgeEngine::Config bnb_h2_cfg{
+        .symbol         = "bnbusdt",
+        .tag            = "BNB-TSMOM-H2",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 7200,
+        .lookback       = 40,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine bnb_tsmom_h2(bnb_h2_cfg);
+    bnb_tsmom_h2.set_on_trade(on_trade_callback);
+
     // ══════════════════════════════════════════════════════════════════════
     // ── SECTION G: H3 ENGINES (Session 17 — no native Binance candles) ──
     // ══════════════════════════════════════════════════════════════════════
@@ -1462,6 +1506,26 @@ int main() {
     };
     chimera::EdgeEngine bnb_tsmom_h3(bnb_h3_cfg);
     bnb_tsmom_h3.set_on_trade(on_trade_callback);
+
+    // ENGINE G7: DOGE-TSMOM-H3 — PF=1.25, Sharpe=1.48, 309 trades, Nbr=87%
+    chimera::EdgeEngine::Config doge_h3_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-TSMOM-H3",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 10800,
+        .lookback       = 40,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine doge_tsmom_h3(doge_h3_cfg);
+    doge_tsmom_h3.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
     // BEAR-MARKET COUNTER-TREND ENGINES — Session 19 (2026-05-16)
@@ -1719,6 +1783,193 @@ int main() {
     xrp_rsi30_h2.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
+    // ── SECTION H: NEW SYMBOL ENGINES — Session 20 (SUI/APT/NEAR/ARB) ───
+    // ══════════════════════════════════════════════════════════════════════
+    // Discovered by running optimizer_general on freshly downloaded H1 klines.
+    // NEAR is the strongest single symbol ever tested — passes D1 through H3.
+    // All use cost=22bp (higher spread on newer/smaller-cap alts).
+
+    // ENGINE H1: NEAR-TSMOM-D1 — PF=2.79, Sharpe=2.61, 46 trades, Nbr=100%
+    chimera::EdgeEngine::Config near_d1_cfg{
+        .symbol         = "nearusdt",
+        .tag            = "NEAR-TSMOM-D1",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 86400,
+        .lookback       = 10,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine near_tsmom_d1(near_d1_cfg);
+    near_tsmom_d1.set_on_trade(on_trade_callback);
+
+    // ENGINE H2: NEAR-TSMOM-H12 — PF=1.92, Sharpe=3.03, 126 trades, Nbr=95%
+    chimera::EdgeEngine::Config near_h12_cfg{
+        .symbol         = "nearusdt",
+        .tag            = "NEAR-TSMOM-H12",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 43200,
+        .lookback       = 35,
+        .hold_bars      = 6,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine near_tsmom_h12(near_h12_cfg);
+    near_tsmom_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE H3: NEAR-TSMOM-H6 — PF=1.85, Sharpe=3.62, 257 trades, Nbr=100%
+    chimera::EdgeEngine::Config near_h6_cfg{
+        .symbol         = "nearusdt",
+        .tag            = "NEAR-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 35,
+        .hold_bars      = 4,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine near_tsmom_h6(near_h6_cfg);
+    near_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE H4: NEAR-TSMOM-H4 — PF=2.17, Sharpe=3.59, 209 trades, Nbr=100%
+    chimera::EdgeEngine::Config near_h4_cfg{
+        .symbol         = "nearusdt",
+        .tag            = "NEAR-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine near_tsmom_h4(near_h4_cfg);
+    near_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE H5: NEAR-TSMOM-H3 — PF=1.75, Sharpe=3.65, 351 trades, Nbr=87%
+    chimera::EdgeEngine::Config near_h3_cfg{
+        .symbol         = "nearusdt",
+        .tag            = "NEAR-TSMOM-H3",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 10800,
+        .lookback       = 40,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine near_tsmom_h3(near_h3_cfg);
+    near_tsmom_h3.set_on_trade(on_trade_callback);
+
+    // ENGINE H6: SUI-TSMOM-H6 — PF=1.80, Sharpe=3.22, 129 trades, Nbr=100%
+    chimera::EdgeEngine::Config sui_h6_cfg{
+        .symbol         = "suiusdt",
+        .tag            = "SUI-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 6,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine sui_tsmom_h6(sui_h6_cfg);
+    sui_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE H7: SUI-TSMOM-H4 — PF=1.44, Sharpe=2.11, 169 trades, Nbr=88%
+    chimera::EdgeEngine::Config sui_h4_cfg{
+        .symbol         = "suiusdt",
+        .tag            = "SUI-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine sui_tsmom_h4(sui_h4_cfg);
+    sui_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE H8: APT-TSMOM-H6 — PF=1.82, Sharpe=3.32, 149 trades, Nbr=92%
+    chimera::EdgeEngine::Config apt_h6_cfg{
+        .symbol         = "aptusdt",
+        .tag            = "APT-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 35,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine apt_tsmom_h6(apt_h6_cfg);
+    apt_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE H9: ARB-TSMOM-H6 — PF=1.48, Sharpe=2.31, 131 trades, Nbr=80%
+    chimera::EdgeEngine::Config arb_h6_cfg{
+        .symbol         = "arbusdt",
+        .tag            = "ARB-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 25,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine arb_tsmom_h6(arb_h6_cfg);
+    arb_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ══════════════════════════════════════════════════════════════════════
     // DISABLED ENGINES — No OOS edge after costs (Sessions 13-15)
     // ══════════════════════════════════════════════════════════════════════
     // ETH-BB-H6 (PF=0.72), SOL-DONCH-H6 (PF=0.83), XRP-DONCH-H1 (PF=0.82),
@@ -1774,6 +2025,8 @@ int main() {
     g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h2,   "solusdt",   7200, "SOL-TSMOM-H2",   1.78, 4.17, 100, 340, 17});
     g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h2,   "xrpusdt",   7200, "XRP-TSMOM-H2",   2.00, 4.70, 100, 320, 17});
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h2,  "linkusdt",  7200, "LINK-TSMOM-H2",  1.69, 3.76, 100, 357, 17});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h2,  "dogeusdt",  7200, "DOGE-TSMOM-H2",  1.21, 1.72,  93, 387, 20});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h2,   "bnbusdt",   7200, "BNB-TSMOM-H2",   1.19, 1.12,  87, 436, 20});
 
     // H3 engines (6) — NEW Session 17 (no native Binance candles — cold-start from ticks)
     g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h3,   "btcusdt",  10800, "BTC-TSMOM-H3",   1.96, 3.52, 100, 156, 17});
@@ -1782,6 +2035,7 @@ int main() {
     g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h3,   "xrpusdt",  10800, "XRP-TSMOM-H3",   2.19, 4.70, 100, 243, 17});
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h3,  "linkusdt", 10800, "LINK-TSMOM-H3",  1.94, 4.19, 100, 254, 17});
     g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h3,   "bnbusdt",  10800, "BNB-TSMOM-H3",   1.55, 2.74,  97, 349, 17});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h3,  "dogeusdt", 10800, "DOGE-TSMOM-H3",  1.25, 1.48,  87, 309, 20});
 
     // ── COUNTER-TREND engines (RSI_REVERT + BOLLINGER dip-buy) ─── Session 19 ──
     // TIER 1 — strong OOS edge + high neighbourhood stability
@@ -1798,6 +2052,17 @@ int main() {
     g_slots.push_back({chimera::SYM_LINK, &link_boll30_h1,  "linkusdt",  3600, "LINK-BOLL30-H1", 1.59, 1.48,  77, 134, 19});
     g_slots.push_back({chimera::SYM_XRP,  &xrp_rsi30_h6,   "xrpusdt",  21600, "XRP-RSI30-H6",   1.82, 1.69,  84,  48, 19});
     g_slots.push_back({chimera::SYM_XRP,  &xrp_rsi30_h2,   "xrpusdt",   7200, "XRP-RSI30-H2",   1.71, 1.58,  80, 112, 19});
+
+    // ── NEW SYMBOL engines (Session 20) — NEAR/SUI/APT/ARB ─────────────────
+    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d1,  "nearusdt", 86400, "NEAR-TSMOM-D1",  2.79, 2.61, 100,  46, 20});
+    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h12, "nearusdt", 43200, "NEAR-TSMOM-H12", 1.92, 3.03,  95, 126, 20});
+    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h6,  "nearusdt", 21600, "NEAR-TSMOM-H6",  1.85, 3.62, 100, 257, 20});
+    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h4,  "nearusdt", 14400, "NEAR-TSMOM-H4",  2.17, 3.59, 100, 209, 20});
+    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h3,  "nearusdt", 10800, "NEAR-TSMOM-H3",  1.75, 3.65,  87, 351, 20});
+    g_slots.push_back({chimera::SYM_SUI,  &sui_tsmom_h6,   "suiusdt",  21600, "SUI-TSMOM-H6",   1.80, 3.22, 100, 129, 20});
+    g_slots.push_back({chimera::SYM_SUI,  &sui_tsmom_h4,   "suiusdt",  14400, "SUI-TSMOM-H4",   1.44, 2.11,  88, 169, 20});
+    g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h6,   "aptusdt",  21600, "APT-TSMOM-H6",   1.82, 3.32,  92, 149, 20});
+    g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_h6,   "arbusdt",  21600, "ARB-TSMOM-H6",   1.48, 2.31,  80, 131, 20});
 
     // ── Wire up bar callbacks for persistence + audit trail ────────────────
     for (auto& slot : g_slots) {
@@ -1816,7 +2081,7 @@ int main() {
     // available, fall back to REST klines.
     {
         chimera::BinanceREST seed_rest;
-        std::printf("[STARTUP] Seeding 49 engine bar buffers (warm-start + REST fallback)...\n");
+        std::printf("[STARTUP] Seeding 61 engine bar buffers (warm-start + REST fallback)...\n");
         std::fflush(stdout);
 
         for (auto& slot : g_slots) {

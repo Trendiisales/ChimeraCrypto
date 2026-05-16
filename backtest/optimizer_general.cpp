@@ -320,7 +320,7 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "Usage: %s <symbol> <strategy> <tf> <cost_bp>\n", argv[0]);
         std::fprintf(stderr, "  symbol:   btcusdt, ethusdt, solusdt, xrpusdt, linkusdt\n");
         std::fprintf(stderr, "  strategy: TSMOM, DONCHIAN, BOLLINGER, RSI_REVERT\n");
-        std::fprintf(stderr, "  tf:       D1, H12, H6, H4, H1\n");
+        std::fprintf(stderr, "  tf:       D1, H12, H6, H4, H3, H2, H1\n");
         std::fprintf(stderr, "  cost_bp:  17, 20, 22, etc.\n");
         return 1;
     }
@@ -347,6 +347,8 @@ int main(int argc, char* argv[]) {
     else if (tf_s == "H12") tf_secs = 43200;
     else if (tf_s == "H6")  tf_secs = 21600;
     else if (tf_s == "H4")  tf_secs = 14400;
+    else if (tf_s == "H3")  tf_secs = 10800;
+    else if (tf_s == "H2")  tf_secs = 7200;
     else if (tf_s == "H1")  tf_secs = 3600;
     else {
         std::fprintf(stderr, "Unknown timeframe: %s\n", tf_s.c_str());
@@ -385,7 +387,7 @@ int main(int argc, char* argv[]) {
             auto h1 = load_all_parts(data_dir, h1_prefix);
             klines = synthesize_tf(h1, tf_secs);
         }
-    } else if (tf_s == "H12" || tf_s == "H6" || tf_s == "H4") {
+    } else if (tf_s == "H12" || tf_s == "H6" || tf_s == "H4" || tf_s == "H3" || tf_s == "H2") {
         auto h1 = load_all_parts(data_dir, h1_prefix);
         klines = synthesize_tf(h1, tf_secs);
     } else {

@@ -202,6 +202,7 @@ struct EngineSlot {
 
 static std::vector<EngineSlot>  g_slots;
 static std::mutex               g_engine_mtx;
+static int64_t                  g_startup_ts_ms = 0;   // epoch ms at startup
 
 // Last-seen mid per symbol — used by /api/kill flatten paths and the
 // /api/state2 "spot_prices" field that the GUI renders as a live price strip.
@@ -470,6 +471,7 @@ static std::vector<chimera::EdgeEngine::SeedBar> load_saved_bars(const std::stri
 static std::string build_state_json() {
     std::ostringstream js;
     js << "{\"build\":\"" << BUILD_VERSION << "\",";
+    js << "\"startup_ts\":" << g_startup_ts_ms << ",";
     js << "\"engine_count\":" << g_slots.size() << ",";
 
     // ── spot_prices ─────────────────────────────────────────────────────────
@@ -832,7 +834,9 @@ static void seed_engine_from_h1_aggregation(chimera::BinanceREST& rest,
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (230 active) | build=%s\n", BUILD_VERSION);
+    g_startup_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (245 active) | build=%s\n", BUILD_VERSION);
     std::fflush(stdout);
 
     acquire_instance_lock();
@@ -6647,6 +6651,37 @@ int main() {
 
     std::printf("\n[SHUTDOWN] Stopping...\n");
     std::fflush(stdout);
+
+    // ── Graceful close: flatten all open positions at last known price ───
+    // This ensures unrealised profits are captured as completed trades in
+    // the journal before the process exits.  Reason = "SHUTDOWN" so we can
+    // distinguish these from normal exits in the trade history.
+    {
+        std::lock_guard<std::mutex> lk(g_engine_mtx);
+        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        int closed = 0;
+        for (auto& s : g_slots) {
+            if (!s.engine || !s.engine->in_position()) continue;
+            // Use last known spot price for this symbol
+            double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
+            if (spot <= 0.0) {
+                // Fallback: use engine's last_close if spot unavailable
+                // (state_json exposes last_close_ but we can't access it directly,
+                //  so we re-use the atomic spot which is updated every tick)
+                std::fprintf(stderr, "[SHUTDOWN] WARNING: no spot price for %s, "
+                    "position will be lost\n", s.tag.c_str());
+                continue;
+            }
+            std::printf("[SHUTDOWN] Closing open position: %s @ %.6f\n",
+                s.tag.c_str(), spot);
+            // exit_position_ fires the on_trade callback which persists to disk
+            s.engine->graceful_close(spot, now_ms);
+            closed++;
+        }
+        std::printf("[SHUTDOWN] Gracefully closed %d open position(s)\n", closed);
+        std::fflush(stdout);
+    }
 
     std::atomic<bool> shutdown_done{false};
     std::thread watchdog([&](){

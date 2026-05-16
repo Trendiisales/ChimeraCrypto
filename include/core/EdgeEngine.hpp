@@ -311,6 +311,14 @@ public:
         halted_ = true;
     }
 
+    // Graceful close — flatten open position at given price without halting.
+    // Used during orderly shutdown to capture unrealised profits in the journal.
+    void graceful_close(double price, int64_t ts_ms) {
+        if (in_position_ && price > 0.0) {
+            exit_position_(price, ts_ms, "SHUTDOWN");
+        }
+    }
+
     // JSON state line for /api/state (one object per engine; main.cpp wraps in array).
     std::string state_json() const {
         std::ostringstream js;

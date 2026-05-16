@@ -306,9 +306,11 @@
   <span class="engine-count" id="engineCount">--- engines</span>
   <span class="version" id="buildVer">---</span>
   <div class="header-right">
+    <span class="status-text mono" id="clockDisplay" style="color:var(--accent);font-weight:700;font-size:13px;">--:--:--</span>
+    <span class="status-text mono" id="uptimeDisplay" style="color:var(--dim);">uptime ---</span>
     <span class="status-dot" id="statusDot"></span>
     <span class="status-text" id="statusText">Connecting...</span>
-    <span class="status-text" id="lastUpdated"></span>
+    <span id="bellIndicator" title="Click to enable trade alert sounds" style="cursor:pointer;font-size:16px;opacity:0.3;">&#128276;</span>
     <button class="kill-btn" id="killAll" title="Flatten all paper positions and halt engines">Kill All</button>
   </div>
 </header>
@@ -399,11 +401,15 @@ const SYMBOLS = [
   { full: 'linkusdt', short: 'LINK' },
   { full: 'xrpusdt',  short: 'XRP'  },
   { full: 'dogeusdt', short: 'DOGE' },
+  { full: 'nearusdt', short: 'NEAR' },
+  { full: 'suiusdt',  short: 'SUI'  },
+  { full: 'aptusdt',  short: 'APT'  },
+  { full: 'arbusdt',  short: 'ARB'  },
 ];
 
-const TF_ORDER = ['D1', 'H12', 'H6', 'H4', 'H3', 'H2', 'H1'];
-const TF_LABELS = { 86400:'D1', 43200:'H12', 21600:'H6', 14400:'H4', 10800:'H3', 7200:'H2', 3600:'H1' };
-const TF_NAMES = { 'D1':'1 Day', 'H12':'12 Hour', 'H6':'6 Hour', 'H4':'4 Hour', 'H3':'3 Hour', 'H2':'2 Hour', 'H1':'1 Hour' };
+const TF_ORDER = ['D3', 'D2', 'D1', 'H16', 'H12', 'H8', 'H6', 'H4', 'H3', 'H2', 'H1'];
+const TF_LABELS = { 259200:'D3', 172800:'D2', 86400:'D1', 57600:'H16', 43200:'H12', 28800:'H8', 21600:'H6', 14400:'H4', 10800:'H3', 7200:'H2', 3600:'H1' };
+const TF_NAMES = { 'D3':'3 Day', 'D2':'2 Day', 'D1':'1 Day', 'H16':'16 Hour', 'H12':'12 Hour', 'H8':'8 Hour', 'H6':'6 Hour', 'H4':'4 Hour', 'H3':'3 Hour', 'H2':'2 Hour', 'H1':'1 Hour' };
 
 const prevPx = Object.create(null);
 const $ = s => document.querySelector(s);
@@ -543,6 +549,8 @@ function playBellEntry() {
 
 let prevTradeCount = -1;   // -1 = first load, don't bell on startup
 let prevOpenPositions = new Set();
+let bellEnabled = false;
+let serverStartupTs = 0;
 
 // ── Ticker ───────────────────────────────────────────────────────────────────
 
@@ -1125,6 +1133,7 @@ async function refresh() {
       }
     });
 
+    if (j.startup_ts) serverStartupTs = j.startup_ts;
     $('#buildVer').textContent = 'build ' + (j.build || '---');
     $('#engineCount').textContent = engines.length + ' engines';
     $('#ticker').innerHTML = renderTicker(spot);
@@ -1133,7 +1142,7 @@ async function refresh() {
     const currentOpen = new Set(engines.filter(e => e.in_position).map(e => e.tag));
     if (prevOpenPositions.size > 0 || prevTradeCount >= 0) {
       currentOpen.forEach(tag => {
-        if (!prevOpenPositions.has(tag)) playBellEntry();
+        if (!prevOpenPositions.has(tag) && bellEnabled) playBellEntry();
       });
     }
     prevOpenPositions = currentOpen;
@@ -1173,10 +1182,9 @@ async function refreshTrades() {
     if (prevTradeCount >= 0 && trades.length > prevTradeCount) {
       const newTrades = trades.slice(prevTradeCount);
       newTrades.forEach(t => {
-        if ((t.net_bp || 0) > 0) {
-          playBellWin();
-        } else {
-          playBellLoss();
+        if (bellEnabled) {
+          if ((t.net_bp || 0) > 0) playBellWin();
+          else playBellLoss();
         }
       });
     }
@@ -1204,6 +1212,39 @@ $('#killAll').addEventListener('click', async () => {
   }
 });
 
+// ── Clock & Uptime ───────────────────────────────────────────────────────────
+
+function updateClock() {
+  const now = new Date();
+  const utc = now.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'UTC' });
+  $('#clockDisplay').textContent = utc + ' UTC';
+
+  if (serverStartupTs > 0) {
+    const elapsed = Math.floor((Date.now() - serverStartupTs) / 1000);
+    const d = Math.floor(elapsed / 86400);
+    const h = Math.floor((elapsed % 86400) / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    let uptimeStr = '';
+    if (d > 0) uptimeStr = d + 'd ' + h + 'h ' + m + 'm';
+    else if (h > 0) uptimeStr = h + 'h ' + m + 'm ' + s + 's';
+    else uptimeStr = m + 'm ' + s + 's';
+    $('#uptimeDisplay').textContent = 'up ' + uptimeStr;
+  }
+}
+
+// ── Bell Toggle ──────────────────────────────────────────────────────────────
+
+$('#bellIndicator').addEventListener('click', () => {
+  bellEnabled = !bellEnabled;
+  $('#bellIndicator').style.opacity = bellEnabled ? '1' : '0.3';
+  $('#bellIndicator').title = bellEnabled ? 'Trade alerts ON — click to mute' : 'Click to enable trade alert sounds';
+  if (bellEnabled) {
+    try { getAudioCtx(); } catch(e) {}
+    playBellEntry();
+  }
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 initCharts();
@@ -1211,6 +1252,8 @@ refresh();
 refreshTrades();
 setInterval(refresh, 2000);
 setInterval(refreshTrades, 5000);
+setInterval(updateClock, 1000);
+updateClock();
 </script>
 </body>
 </html>

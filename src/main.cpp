@@ -1,42 +1,60 @@
 // ============================================================================
-// Chimera — Tier-2 long-only longer-timeframe edges (rewrite 2026-05-11)
+// Chimera — Tier-2 long-only longer-timeframe edges (rewrite 2026-05-16)
 //
 // After full OOS backtest + multi-symbol parameter sweep (2026-05-16/17):
-//   - 4 existing D1 engines (Session 13)
-//   - 10 NEW H4 engines (Session 14 — new timeframe discovery)
-//   - 3 NEW H12 engines (Session 14)
-//   - 1 NEW D1 engine: BNB (Session 14)
-//   - Total: 18 engines, all shadow mode, all TSMOM, all long-only
+//   - 5 D1 engines (Sessions 13-14)
+//   - 7 H4 engines (Session 14 — new timeframe discovery)
+//   - 3 H12 engines (Session 14)
+//   - 8 H6 engines (Session 15 — strongest timeframe discovered)
+//   - 3 H1 engines (Session 15 — XRP/SOL/LINK only, rest eaten by costs)
+//   - 1 AVAX-TSMOM-H4 (Session 14, upgraded in Session 15 from H4 coverage)
+//   - Total: 29 engines, all shadow mode, all TSMOM, all long-only
 //
-// SESSION 14 DISCOVERY:
-//   H4 and H12 timeframes were never tested before Session 14.
-//   Scanner v2 found 61% of H12 combos and 51% of H4 combos profitable
-//   (vs only 6.9% on D1). Full optimizer runs confirmed with neighbourhood
-//   stability >= 83% on every deployed engine.
+// SESSION 15 DISCOVERY:
+//   H6 timeframe was never tested before Session 15.
+//   Optimizer found H6 to be the strongest timeframe overall:
+//     - XRP-H6: 98.9% of combos profitable, PF=2.68
+//     - BTC-H6: 73.3%, PF=2.59
+//     - All 8 symbols pass deploy criteria on H6
+//   H1 yielded 3 deploy-grade engines (XRP PF=1.66, SOL PF=1.40, LINK PF=1.32)
 //
 //   instance              symbol     strat   tf    OOS PF  OOS Shrp  Nbr%  Trades
 //   ──────────────────────────────────────────────────────────────────────────────
-//   EXISTING D1 ENGINES (Session 13):
+//   D1 ENGINES (5):
 //   btc_tsmom_d1          BTCUSDT    TSMOM   D1    1.92    1.67      85%     24
 //   eth_tsmom_d1          ETHUSDT    TSMOM   D1    3.15    3.17      91%     26
 //   sol_tsmom_d1          SOLUSDT    TSMOM   D1    2.25    2.41      89%     15
 //   link_tsmom_d1         LINKUSDT   TSMOM   D1    2.18    1.92     100%     23
+//   bnb_tsmom_d1          BNBUSDT    TSMOM   D1    3.16    2.91      90%     32
 //
-//   NEW H4 ENGINES (Session 14):
+//   H12 ENGINES (3):
+//   btc_tsmom_h12         BTCUSDT    TSMOM   H12   3.63    3.40      96%     31
+//   doge_tsmom_h12        DOGEUSDT   TSMOM   H12   2.78    3.66     100%     82
+//   avax_tsmom_h12        AVAXUSDT   TSMOM   H12   2.61    2.98      87%     76
+//
+//   H6 ENGINES (8) — NEW SESSION 15:
+//   xrp_tsmom_h6          XRPUSDT    TSMOM   H6    2.68    4.41     100%    120
+//   btc_tsmom_h6          BTCUSDT    TSMOM   H6    2.59    5.16     100%    169
+//   eth_tsmom_h6          ETHUSDT    TSMOM   H6    2.07    3.70     100%    151
+//   sol_tsmom_h6          SOLUSDT    TSMOM   H6    2.07    3.25     100%    127
+//   bnb_tsmom_h6          BNBUSDT    TSMOM   H6    2.07    2.76     100%     95
+//   link_tsmom_h6         LINKUSDT   TSMOM   H6    2.07    3.13     100%     81
+//   doge_tsmom_h6         DOGEUSDT   TSMOM   H6    1.72    2.24      77%     91
+//   avax_tsmom_h6         AVAXUSDT   TSMOM   H6    1.37    1.82      67%    207
+//
+//   H4 ENGINES (7):
 //   xrp_tsmom_h4          XRPUSDT    TSMOM   H4    2.43    5.80     100%    267
 //   bnb_tsmom_h4          BNBUSDT    TSMOM   H4    1.91    3.79     100%    291
 //   link_tsmom_h4         LINKUSDT   TSMOM   H4    1.91    4.07      95%    205
 //   sol_tsmom_h4          SOLUSDT    TSMOM   H4    1.89    3.82     100%    208
 //   btc_tsmom_h4          BTCUSDT    TSMOM   H4    1.82    3.54     100%    167
 //   eth_tsmom_h4          ETHUSDT    TSMOM   H4    1.76    3.26     100%    196
+//   avax_tsmom_h4         AVAXUSDT   TSMOM   H4    1.47    2.17      83%    231
 //
-//   NEW H12 ENGINES (Session 14):
-//   btc_tsmom_h12         BTCUSDT    TSMOM   H12   3.63    3.40      96%     31
-//   doge_tsmom_h12        DOGEUSDT   TSMOM   H12   2.78    3.66     100%     82
-//   avax_tsmom_h12        AVAXUSDT   TSMOM   H12   2.61    2.98      87%     76
-//
-//   NEW D1 ENGINE (Session 14):
-//   bnb_tsmom_d1          BNBUSDT    TSMOM   D1    3.16    2.91      90%     32
+//   H1 ENGINES (3) — NEW SESSION 15:
+//   xrp_tsmom_h1          XRPUSDT    TSMOM   H1    1.66    3.73     100%    327
+//   sol_tsmom_h1          SOLUSDT    TSMOM   H1    1.40    3.31     100%    527
+//   link_tsmom_h1         LINKUSDT   TSMOM   H1    1.32    3.08      95%    798
 //
 // DISABLED (no OOS edge — configs preserved below for reference):
 //   eth_bb_h6        ETHUSDT    bollinger    H6     0.72   -0.59
@@ -53,7 +71,7 @@
 // COLD-START SEEDING: After constructing the engines and before starting the
 // live tick feed, we fetch the most recent N OHLC bars from Binance REST
 // (/api/v3/klines, public endpoint) and pre-populate each engine's closed-bar
-// deque. H4 = "4h", H12 = "12h", D1 = "1d" — all valid Binance intervals.
+// deque. H1 = "1h", H4 = "4h", H6 = "6h", H12 = "12h", D1 = "1d".
 //
 // HTTP GUI :8080
 //   GET  /api/state2  -> JSON with build, spot_prices, engines[]
@@ -126,6 +144,16 @@ void release_instance_lock() {
 struct EngineSlot {
     int             symbol_id;          // index into SymbolIndex
     chimera::EdgeEngine* engine = nullptr;
+    // Fields cached from Config for seeding (EdgeEngine has no public accessor)
+    std::string     symbol_str;         // e.g. "btcusdt"
+    int64_t         tf_secs  = 0;       // timeframe in seconds
+    std::string     tag;                // e.g. "BTC-TSMOM-D1"
+    // Backtest metadata for GUI display (not used by engine logic)
+    double  oos_pf    = 0.0;
+    double  oos_sharpe = 0.0;
+    int     oos_nbr   = 0;
+    int     oos_trades = 0;
+    int     session   = 0;           // session that discovered this engine
 };
 
 static std::vector<EngineSlot>  g_slots;
@@ -295,9 +323,11 @@ static void on_trade_callback(const chimera::EdgeEngine::TradeRecord& rec) {
 }
 
 // Build the structured JSON for /api/state2.
+// Extends engine state_json with backtest metadata from EngineSlot.
 static std::string build_state_json() {
     std::ostringstream js;
     js << "{\"build\":\"" << BUILD_VERSION << "\",";
+    js << "\"engine_count\":" << g_slots.size() << ",";
 
     // ── spot_prices ─────────────────────────────────────────────────────────
     js << "\"spot_prices\":{";
@@ -309,12 +339,33 @@ static std::string build_state_json() {
     }
     js << "},";
 
-    // ── engines ─────────────────────────────────────────────────────────────
+    // ── engines — merge state_json() with slot metadata ─────────────────────
     js << "\"engines\":[";
     for (size_t i = 0; i < g_slots.size(); ++i) {
         if (i > 0) js << ",";
-        if (g_slots[i].engine) js << g_slots[i].engine->state_json();
-        else js << "null";
+        if (g_slots[i].engine) {
+            std::string ej = g_slots[i].engine->state_json();
+            // Insert backtest metadata before the closing brace
+            std::string meta;
+            {
+                std::ostringstream m;
+                m << std::fixed << std::setprecision(2);
+                m << ",\"oos_pf\":" << g_slots[i].oos_pf;
+                m << ",\"oos_sharpe\":" << g_slots[i].oos_sharpe;
+                m << ",\"oos_nbr\":" << g_slots[i].oos_nbr;
+                m << ",\"oos_trades\":" << g_slots[i].oos_trades;
+                m << ",\"session\":" << g_slots[i].session;
+                meta = m.str();
+            }
+            // Insert before final '}'
+            if (!ej.empty() && ej.back() == '}') {
+                ej.pop_back();
+                ej += meta + "}";
+            }
+            js << ej;
+        } else {
+            js << "null";
+        }
     }
     js << "]}";
     return js.str();
@@ -460,7 +511,7 @@ static void seed_engine_from_history(chimera::BinanceREST& rest,
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (18 active) | build=%s\n", BUILD_VERSION);
+    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (29 active) | build=%s\n", BUILD_VERSION);
     std::fflush(stdout);
 
     acquire_instance_lock();
@@ -477,7 +528,7 @@ int main() {
     (void)exec_ok;
 
     // ══════════════════════════════════════════════════════════════════════
-    // ── SECTION A: EXISTING D1 ENGINES (Session 13) ─────────────────────
+    // ── SECTION A: D1 ENGINES (Sessions 13-14) ──────────────────────────
     // ══════════════════════════════════════════════════════════════════════
 
     // ENGINE A1: BTC-TSMOM-D1 — PF=1.92, Sharpe=1.67, Nbr=85%
@@ -560,7 +611,7 @@ int main() {
     chimera::EdgeEngine link_tsmom_d1(link_d1_cfg);
     link_tsmom_d1.set_on_trade(on_trade_callback);
 
-    // ENGINE A5: BNB-TSMOM-D1 — NEW Session 14 — PF=3.16, Sharpe=2.91, Nbr=90%
+    // ENGINE A5: BNB-TSMOM-D1 — PF=3.16, Sharpe=2.91, Nbr=90%
     chimera::EdgeEngine::Config bnb_d1_cfg{
         .symbol         = "bnbusdt",
         .tag            = "BNB-TSMOM-D1",
@@ -581,156 +632,10 @@ int main() {
     bnb_tsmom_d1.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
-    // ── SECTION B: NEW H4 ENGINES (Session 14 — never tested before) ────
+    // ── SECTION B: H12 ENGINES (Session 14) ─────────────────────────────
     // ══════════════════════════════════════════════════════════════════════
 
-    // ENGINE B1: XRP-TSMOM-H4 — PF=2.43, Sharpe=5.80, 267 trades, Nbr=100%
-    // 98.7% of ALL parameter combos profitable — strongest H4 edge found
-    chimera::EdgeEngine::Config xrp_h4_cfg{
-        .symbol         = "xrpusdt",
-        .tag            = "XRP-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 30,
-        .hold_bars      = 20,
-        .sl_atr_mult    = 1.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 20.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.4,
-    };
-    chimera::EdgeEngine xrp_tsmom_h4(xrp_h4_cfg);
-    xrp_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ENGINE B2: BNB-TSMOM-H4 — PF=1.91, Sharpe=3.79, 291 trades, Nbr=100%
-    chimera::EdgeEngine::Config bnb_h4_cfg{
-        .symbol         = "bnbusdt",
-        .tag            = "BNB-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 40,
-        .hold_bars      = 16,
-        .sl_atr_mult    = 3.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 20.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.3,
-    };
-    chimera::EdgeEngine bnb_tsmom_h4(bnb_h4_cfg);
-    bnb_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ENGINE B3: LINK-TSMOM-H4 — PF=1.91, Sharpe=4.07, 205 trades, Nbr=95%
-    chimera::EdgeEngine::Config link_h4_cfg{
-        .symbol         = "linkusdt",
-        .tag            = "LINK-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 30,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 2.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 22.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.3,
-    };
-    chimera::EdgeEngine link_tsmom_h4(link_h4_cfg);
-    link_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ENGINE B4: SOL-TSMOM-H4 — PF=1.89, Sharpe=3.82, 208 trades, Nbr=100%
-    chimera::EdgeEngine::Config sol_h4_cfg{
-        .symbol         = "solusdt",
-        .tag            = "SOL-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 40,
-        .hold_bars      = 12,
-        .sl_atr_mult    = 3.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 20.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.3,
-    };
-    chimera::EdgeEngine sol_tsmom_h4(sol_h4_cfg);
-    sol_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ENGINE B5: BTC-TSMOM-H4 — PF=1.82, Sharpe=3.54, 167 trades, Nbr=100%
-    chimera::EdgeEngine::Config btc_h4_cfg{
-        .symbol         = "btcusdt",
-        .tag            = "BTC-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 25,
-        .hold_bars      = 16,
-        .sl_atr_mult    = 4.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 17.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.8,
-        .trail_dist_atr = 0.3,
-    };
-    chimera::EdgeEngine btc_tsmom_h4(btc_h4_cfg);
-    btc_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ENGINE B6: ETH-TSMOM-H4 — PF=1.76, Sharpe=3.26, 196 trades, Nbr=100%
-    chimera::EdgeEngine::Config eth_h4_cfg{
-        .symbol         = "ethusdt",
-        .tag            = "ETH-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 40,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 3.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 17.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.4,
-    };
-    chimera::EdgeEngine eth_tsmom_h4(eth_h4_cfg);
-    eth_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ENGINE B7: AVAX-TSMOM-H4 — PF=1.47, Sharpe=2.17, 231 trades, Nbr=83%
-    chimera::EdgeEngine::Config avax_h4_cfg{
-        .symbol         = "avaxusdt",
-        .tag            = "AVAX-TSMOM-H4",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 14400,
-        .lookback       = 40,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 2.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 22.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.4,
-    };
-    chimera::EdgeEngine avax_tsmom_h4(avax_h4_cfg);
-    avax_tsmom_h4.set_on_trade(on_trade_callback);
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ── SECTION C: NEW H12 ENGINES (Session 14 — never tested before) ───
-    // ══════════════════════════════════════════════════════════════════════
-
-    // ENGINE C1: BTC-TSMOM-H12 — PF=3.63, Sharpe=3.40, 31 trades, Nbr=96%
-    // 94.6% of ALL parameter combos profitable — most robust edge in the system
+    // ENGINE B1: BTC-TSMOM-H12 — PF=3.63, Sharpe=3.40, 31 trades, Nbr=96%
     chimera::EdgeEngine::Config btc_h12_cfg{
         .symbol         = "btcusdt",
         .tag            = "BTC-TSMOM-H12",
@@ -750,7 +655,7 @@ int main() {
     chimera::EdgeEngine btc_tsmom_h12(btc_h12_cfg);
     btc_tsmom_h12.set_on_trade(on_trade_callback);
 
-    // ENGINE C2: DOGE-TSMOM-H12 — PF=2.78, Sharpe=3.66, 82 trades, Nbr=100%
+    // ENGINE B2: DOGE-TSMOM-H12 — PF=2.78, Sharpe=3.66, 82 trades, Nbr=100%
     chimera::EdgeEngine::Config doge_h12_cfg{
         .symbol         = "dogeusdt",
         .tag            = "DOGE-TSMOM-H12",
@@ -770,7 +675,7 @@ int main() {
     chimera::EdgeEngine doge_tsmom_h12(doge_h12_cfg);
     doge_tsmom_h12.set_on_trade(on_trade_callback);
 
-    // ENGINE C3: AVAX-TSMOM-H12 — PF=2.61, Sharpe=2.98, 76 trades, Nbr=87%
+    // ENGINE B3: AVAX-TSMOM-H12 — PF=2.61, Sharpe=2.98, 76 trades, Nbr=87%
     chimera::EdgeEngine::Config avax_h12_cfg{
         .symbol         = "avaxusdt",
         .tag            = "AVAX-TSMOM-H12",
@@ -791,99 +696,440 @@ int main() {
     avax_tsmom_h12.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
-    // DISABLED ENGINES — No OOS edge after costs (Sessions 13-14)
+    // ── SECTION C: H6 ENGINES (Session 15 — strongest TF discovered) ────
     // ══════════════════════════════════════════════════════════════════════
 
-    // ── ETH-BB-H6 — DISABLED (OOS PF=0.72, Sharpe=-0.59) ────────────────
-    // chimera::EdgeEngine::Config eth_bb_cfg{
-    //     .symbol = "ethusdt", .tag = "ETH-BB-H6",
-    //     .kind = chimera::StrategyKind::BOLLINGER, .tf_secs = 21600,
-    //     .lookback = 20, .hold_bars = 12, .sl_atr_mult = 2.5,
-    //     .atr_period = 14, .bb_k = 2.0, .rsi_threshold = 30.0,
-    //     .round_trip_bp = 10.0, .max_history = 64,
-    // };
+    // ENGINE C1: XRP-TSMOM-H6 — PF=2.68, Sharpe=4.41, 120 trades, Nbr=100%
+    // 98.9% of ALL parameter combos profitable — most robust edge in the system
+    chimera::EdgeEngine::Config xrp_h6_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine xrp_tsmom_h6(xrp_h6_cfg);
+    xrp_tsmom_h6.set_on_trade(on_trade_callback);
 
-    // ── SOL-DONCH-H6 — DISABLED (OOS PF=0.83, Sharpe=-0.57) ─────────────
-    // chimera::EdgeEngine::Config sol_donch_cfg{
-    //     .symbol = "solusdt", .tag = "SOL-DONCH-H6",
-    //     .kind = chimera::StrategyKind::DONCHIAN, .tf_secs = 21600,
-    //     .lookback = 20, .hold_bars = 24, .sl_atr_mult = 2.5,
-    //     .atr_period = 14, .bb_k = 2.0, .rsi_threshold = 30.0,
-    //     .round_trip_bp = 10.0, .max_history = 64,
-    // };
+    // ENGINE C2: BTC-TSMOM-H6 — PF=2.59, Sharpe=5.16, 169 trades, Nbr=100%
+    chimera::EdgeEngine::Config btc_h6_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine btc_tsmom_h6(btc_h6_cfg);
+    btc_tsmom_h6.set_on_trade(on_trade_callback);
 
-    // ── XRP-DONCH-H1 — DISABLED (OOS PF=0.82, Sharpe=-1.19) ─────────────
-    // ── LINK-RSI-H6 — DISABLED (OOS PF=1.17 but only 4 trades) ──────────
-    // ── BTC-OVERNIGHT-H1 — DISABLED (OOS PF=0.31, Sharpe=-4.91) ─────────
-    // ── BTC-WEEKDAY-D1 — DISABLED (OOS PF=0.44, Sharpe=-1.86) ───────────
-    // ── DOGE-TSMOM-H4 — DISABLED (PF=1.28 but Nbr=49% — isolated peak) ─
+    // ENGINE C3: ETH-TSMOM-H6 — PF=2.07, Sharpe=3.70, 151 trades, Nbr=100%
+    chimera::EdgeEngine::Config eth_h6_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine eth_tsmom_h6(eth_h6_cfg);
+    eth_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE C4: SOL-TSMOM-H6 — PF=2.07, Sharpe=3.25, 127 trades, Nbr=100%
+    chimera::EdgeEngine::Config sol_h6_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 25,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine sol_tsmom_h6(sol_h6_cfg);
+    sol_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE C5: BNB-TSMOM-H6 — PF=2.07, Sharpe=2.76, 95 trades, Nbr=100%
+    chimera::EdgeEngine::Config bnb_h6_cfg{
+        .symbol         = "bnbusdt",
+        .tag            = "BNB-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.8,
+    };
+    chimera::EdgeEngine bnb_tsmom_h6(bnb_h6_cfg);
+    bnb_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE C6: LINK-TSMOM-H6 — PF=2.07, Sharpe=3.13, 81 trades, Nbr=100%
+    chimera::EdgeEngine::Config link_h6_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine link_tsmom_h6(link_h6_cfg);
+    link_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE C7: DOGE-TSMOM-H6 — PF=1.72, Sharpe=2.24, 91 trades, Nbr=77%
+    chimera::EdgeEngine::Config doge_h6_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 25,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.8,
+    };
+    chimera::EdgeEngine doge_tsmom_h6(doge_h6_cfg);
+    doge_tsmom_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE C8: AVAX-TSMOM-H6 — PF=1.37, Sharpe=1.82, 207 trades, Nbr=67%
+    chimera::EdgeEngine::Config avax_h6_cfg{
+        .symbol         = "avaxusdt",
+        .tag            = "AVAX-TSMOM-H6",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 21600,
+        .lookback       = 25,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine avax_tsmom_h6(avax_h6_cfg);
+    avax_tsmom_h6.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
-    // Register all active engines
+    // ── SECTION D: H4 ENGINES (Session 14) ──────────────────────────────
     // ══════════════════════════════════════════════════════════════════════
 
-    // D1 engines
-    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_d1});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_d1});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_d1});
-    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d1});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1});
+    // ENGINE D1: XRP-TSMOM-H4 — PF=2.43, Sharpe=5.80, 267 trades, Nbr=100%
+    chimera::EdgeEngine::Config xrp_h4_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 30,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine xrp_tsmom_h4(xrp_h4_cfg);
+    xrp_tsmom_h4.set_on_trade(on_trade_callback);
 
-    // H4 engines
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h4});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h4});
-    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h4});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h4});
-    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h4});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_h4});
-    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h4});
+    // ENGINE D2: BNB-TSMOM-H4 — PF=1.91, Sharpe=3.79, 291 trades, Nbr=100%
+    chimera::EdgeEngine::Config bnb_h4_cfg{
+        .symbol         = "bnbusdt",
+        .tag            = "BNB-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine bnb_tsmom_h4(bnb_h4_cfg);
+    bnb_tsmom_h4.set_on_trade(on_trade_callback);
 
-    // H12 engines
-    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h12});
-    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h12});
+    // ENGINE D3: LINK-TSMOM-H4 — PF=1.91, Sharpe=4.07, 205 trades, Nbr=95%
+    chimera::EdgeEngine::Config link_h4_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 30,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine link_tsmom_h4(link_h4_cfg);
+    link_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE D4: SOL-TSMOM-H4 — PF=1.89, Sharpe=3.82, 208 trades, Nbr=100%
+    chimera::EdgeEngine::Config sol_h4_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine sol_tsmom_h4(sol_h4_cfg);
+    sol_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE D5: BTC-TSMOM-H4 — PF=1.82, Sharpe=3.54, 167 trades, Nbr=100%
+    chimera::EdgeEngine::Config btc_h4_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 25,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine btc_tsmom_h4(btc_h4_cfg);
+    btc_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE D6: ETH-TSMOM-H4 — PF=1.76, Sharpe=3.26, 196 trades, Nbr=100%
+    chimera::EdgeEngine::Config eth_h4_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine eth_tsmom_h4(eth_h4_cfg);
+    eth_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE D7: AVAX-TSMOM-H4 — PF=1.47, Sharpe=2.17, 231 trades, Nbr=83%
+    chimera::EdgeEngine::Config avax_h4_cfg{
+        .symbol         = "avaxusdt",
+        .tag            = "AVAX-TSMOM-H4",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine avax_tsmom_h4(avax_h4_cfg);
+    avax_tsmom_h4.set_on_trade(on_trade_callback);
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── SECTION E: H1 ENGINES (Session 15 — XRP/SOL/LINK only) ──────────
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ENGINE E1: XRP-TSMOM-H1 — PF=1.66, Sharpe=3.73, 327 trades, Nbr=100%
+    // 69.3% of combos profitable — genuine edge even at H1 cost drag
+    chimera::EdgeEngine::Config xrp_h1_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-TSMOM-H1",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 3600,
+        .lookback       = 40,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 1.0,
+    };
+    chimera::EdgeEngine xrp_tsmom_h1(xrp_h1_cfg);
+    xrp_tsmom_h1.set_on_trade(on_trade_callback);
+
+    // ENGINE E2: SOL-TSMOM-H1 — PF=1.40, Sharpe=3.31, 527 trades, Nbr=100%
+    chimera::EdgeEngine::Config sol_h1_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-TSMOM-H1",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 3600,
+        .lookback       = 40,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine sol_tsmom_h1(sol_h1_cfg);
+    sol_tsmom_h1.set_on_trade(on_trade_callback);
+
+    // ENGINE E3: LINK-TSMOM-H1 — PF=1.32, Sharpe=3.08, 798 trades, Nbr=95%
+    chimera::EdgeEngine::Config link_h1_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-TSMOM-H1",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 3600,
+        .lookback       = 40,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine link_tsmom_h1(link_h1_cfg);
+    link_tsmom_h1.set_on_trade(on_trade_callback);
+
+    // ══════════════════════════════════════════════════════════════════════
+    // DISABLED ENGINES — No OOS edge after costs (Sessions 13-15)
+    // ══════════════════════════════════════════════════════════════════════
+    // ETH-BB-H6 (PF=0.72), SOL-DONCH-H6 (PF=0.83), XRP-DONCH-H1 (PF=0.82),
+    // LINK-RSI-H6 (PF=1.17/4trades), BTC-OVERNIGHT-H1 (PF=0.31),
+    // BTC-WEEKDAY-D1 (PF=0.44), DOGE-TSMOM-H4 (Nbr=49%),
+    // BTC-TSMOM-H1 (PF=1.17/Nbr=76%), ETH-TSMOM-H1 (PF=1.13/Nbr=59%),
+    // BNB-TSMOM-H1 (PF=1.11/Nbr=16%), DOGE-TSMOM-H1 (PF=1.11/Nbr=48%),
+    // AVAX-TSMOM-H1 (PF=1.03/Nbr=8%)
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Register all active engines with backtest metadata
+    // ══════════════════════════════════════════════════════════════════════
+
+    // D1 engines (5)
+    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_d1,   "btcusdt",  86400, "BTC-TSMOM-D1",   1.92, 1.67,  85,  24, 13});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_d1,   "ethusdt",  86400, "ETH-TSMOM-D1",   3.15, 3.17,  91,  26, 13});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_d1,   "solusdt",  86400, "SOL-TSMOM-D1",   2.25, 2.41,  89,  15, 13});
+    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d1,  "linkusdt", 86400, "LINK-TSMOM-D1",  2.18, 1.92, 100,  23, 13});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1,   "bnbusdt",  86400, "BNB-TSMOM-D1",   3.16, 2.91,  90,  32, 14});
+
+    // H12 engines (3)
+    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12,  "btcusdt",  43200, "BTC-TSMOM-H12",  3.63, 3.40,  96,  31, 14});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h12, "dogeusdt", 43200, "DOGE-TSMOM-H12", 2.78, 3.66, 100,  82, 14});
+    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h12, "avaxusdt", 43200, "AVAX-TSMOM-H12", 2.61, 2.98,  87,  76, 14});
+
+    // H6 engines (8) — NEW Session 15
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h6,   "xrpusdt",  21600, "XRP-TSMOM-H6",   2.68, 4.41, 100, 120, 15});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h6,    "btcusdt",  21600, "BTC-TSMOM-H6",   2.59, 5.16, 100, 169, 15});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_h6,    "ethusdt",  21600, "ETH-TSMOM-H6",   2.07, 3.70, 100, 151, 15});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h6,    "solusdt",  21600, "SOL-TSMOM-H6",   2.07, 3.25, 100, 127, 15});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h6,    "bnbusdt",  21600, "BNB-TSMOM-H6",   2.07, 2.76, 100,  95, 15});
+    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h6,   "linkusdt", 21600, "LINK-TSMOM-H6",  2.07, 3.13, 100,  81, 15});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h6,   "dogeusdt", 21600, "DOGE-TSMOM-H6",  1.72, 2.24,  77,  91, 15});
+    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h6,   "avaxusdt", 21600, "AVAX-TSMOM-H6",  1.37, 1.82,  67, 207, 15});
+
+    // H4 engines (7)
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h4,   "xrpusdt",  14400, "XRP-TSMOM-H4",   2.43, 5.80, 100, 267, 14});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h4,    "bnbusdt",  14400, "BNB-TSMOM-H4",   1.91, 3.79, 100, 291, 14});
+    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h4,   "linkusdt", 14400, "LINK-TSMOM-H4",  1.91, 4.07,  95, 205, 14});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h4,    "solusdt",  14400, "SOL-TSMOM-H4",   1.89, 3.82, 100, 208, 14});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h4,    "btcusdt",  14400, "BTC-TSMOM-H4",   1.82, 3.54, 100, 167, 14});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_h4,    "ethusdt",  14400, "ETH-TSMOM-H4",   1.76, 3.26, 100, 196, 14});
+    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h4,   "avaxusdt", 14400, "AVAX-TSMOM-H4",  1.47, 2.17,  83, 231, 14});
+
+    // H1 engines (3) — NEW Session 15
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h1,   "xrpusdt",   3600, "XRP-TSMOM-H1",   1.66, 3.73, 100, 327, 15});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h1,    "solusdt",   3600, "SOL-TSMOM-H1",   1.40, 3.31, 100, 527, 15});
+    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h1,   "linkusdt",  3600, "LINK-TSMOM-H1",  1.32, 3.08,  95, 798, 15});
 
     // ── Seed engine bar buffers from Binance REST klines ────────────────────
     {
         chimera::BinanceREST seed_rest;     // dedicated read-only client; no creds needed
-        std::printf("[STARTUP] Seeding 18 engine bar buffers from Binance REST klines...\n");
+        std::printf("[STARTUP] Seeding 29 engine bar buffers from Binance REST klines...\n");
         std::fflush(stdout);
 
-        // D1 engines
-        seed_engine_from_history(seed_rest, btc_tsmom_d1,
-                                 btc_d1_cfg.symbol,  btc_d1_cfg.tf_secs,  btc_d1_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, eth_tsmom_d1,
-                                 eth_d1_cfg.symbol,  eth_d1_cfg.tf_secs,  eth_d1_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, sol_tsmom_d1,
-                                 sol_d1_cfg.symbol,  sol_d1_cfg.tf_secs,  sol_d1_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, link_tsmom_d1,
-                                 link_d1_cfg.symbol, link_d1_cfg.tf_secs, link_d1_cfg.tag, 64);
-        seed_engine_from_history(seed_rest, bnb_tsmom_d1,
-                                 bnb_d1_cfg.symbol,  bnb_d1_cfg.tf_secs,  bnb_d1_cfg.tag,  64);
-
-        // H4 engines
-        seed_engine_from_history(seed_rest, xrp_tsmom_h4,
-                                 xrp_h4_cfg.symbol,  xrp_h4_cfg.tf_secs,  xrp_h4_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, bnb_tsmom_h4,
-                                 bnb_h4_cfg.symbol,  bnb_h4_cfg.tf_secs,  bnb_h4_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, link_tsmom_h4,
-                                 link_h4_cfg.symbol, link_h4_cfg.tf_secs, link_h4_cfg.tag, 64);
-        seed_engine_from_history(seed_rest, sol_tsmom_h4,
-                                 sol_h4_cfg.symbol,  sol_h4_cfg.tf_secs,  sol_h4_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, btc_tsmom_h4,
-                                 btc_h4_cfg.symbol,  btc_h4_cfg.tf_secs,  btc_h4_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, eth_tsmom_h4,
-                                 eth_h4_cfg.symbol,  eth_h4_cfg.tf_secs,  eth_h4_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, avax_tsmom_h4,
-                                 avax_h4_cfg.symbol, avax_h4_cfg.tf_secs, avax_h4_cfg.tag, 64);
-
-        // H12 engines
-        seed_engine_from_history(seed_rest, btc_tsmom_h12,
-                                 btc_h12_cfg.symbol,  btc_h12_cfg.tf_secs,  btc_h12_cfg.tag,  64);
-        seed_engine_from_history(seed_rest, doge_tsmom_h12,
-                                 doge_h12_cfg.symbol, doge_h12_cfg.tf_secs, doge_h12_cfg.tag, 64);
-        seed_engine_from_history(seed_rest, avax_tsmom_h12,
-                                 avax_h12_cfg.symbol, avax_h12_cfg.tf_secs, avax_h12_cfg.tag, 64);
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            seed_engine_from_history(seed_rest, *slot.engine,
+                                     slot.symbol_str, slot.tf_secs, slot.tag, 64);
+        }
 
         std::printf("[STARTUP] Seeding complete.\n");
         std::fflush(stdout);
@@ -955,25 +1201,8 @@ int main() {
 
     feed.start();
 
-    std::printf("[STARTUP] Spot feed live. 18 engines running (shadow_mode=true):\n");
-    std::printf("[STARTUP]   ── D1 engines (5) ──────────────────────────────────────────\n");
-    std::printf("[STARTUP]   BTC   TSMOM  D1   LB=10  HB=12 SL=3.0  T=1.0/0.4  cost=17bp  PF=1.92 Shrp=1.67 Nbr= 85%%\n");
-    std::printf("[STARTUP]   ETH   TSMOM  D1   LB=25  HB=8  SL=2.5  T=0.8/0.4  cost=17bp  PF=3.15 Shrp=3.17 Nbr= 91%%\n");
-    std::printf("[STARTUP]   SOL   TSMOM  D1   LB=10  HB=20 SL=2.0  T=0.5/0.3  cost=20bp  PF=2.25 Shrp=2.41 Nbr= 89%%\n");
-    std::printf("[STARTUP]   LINK  TSMOM  D1   LB=40  HB=20 SL=2.0  T=1.0/0.8  cost=22bp  PF=2.18 Shrp=1.92 Nbr=100%%\n");
-    std::printf("[STARTUP]   BNB   TSMOM  D1   LB=10  HB=20 SL=2.5  T=1.2/0.4  cost=20bp  PF=3.16 Shrp=2.91 Nbr= 90%%  ← NEW\n");
-    std::printf("[STARTUP]   ── H4 engines (7) — NEW TIMEFRAME ─────────────────────────\n");
-    std::printf("[STARTUP]   XRP   TSMOM  H4   LB=30  HB=20 SL=1.5  T=0.5/0.4  cost=20bp  PF=2.43 Shrp=5.80 Nbr=100%%  ← NEW\n");
-    std::printf("[STARTUP]   BNB   TSMOM  H4   LB=40  HB=16 SL=3.0  T=0.5/0.3  cost=20bp  PF=1.91 Shrp=3.79 Nbr=100%%  ← NEW\n");
-    std::printf("[STARTUP]   LINK  TSMOM  H4   LB=30  HB=24 SL=2.5  T=0.5/0.3  cost=22bp  PF=1.91 Shrp=4.07 Nbr= 95%%  ← NEW\n");
-    std::printf("[STARTUP]   SOL   TSMOM  H4   LB=40  HB=12 SL=3.0  T=0.5/0.3  cost=20bp  PF=1.89 Shrp=3.82 Nbr=100%%  ← NEW\n");
-    std::printf("[STARTUP]   BTC   TSMOM  H4   LB=25  HB=16 SL=4.0  T=0.8/0.3  cost=17bp  PF=1.82 Shrp=3.54 Nbr=100%%  ← NEW\n");
-    std::printf("[STARTUP]   ETH   TSMOM  H4   LB=40  HB=24 SL=3.0  T=0.5/0.4  cost=17bp  PF=1.76 Shrp=3.26 Nbr=100%%  ← NEW\n");
-    std::printf("[STARTUP]   AVAX  TSMOM  H4   LB=40  HB=24 SL=2.5  T=0.5/0.4  cost=22bp  PF=1.47 Shrp=2.17 Nbr= 83%%  ← NEW\n");
-    std::printf("[STARTUP]   ── H12 engines (3) — NEW TIMEFRAME ────────────────────────\n");
-    std::printf("[STARTUP]   BTC   TSMOM  H12  LB=15  HB=24 SL=4.0  T=1.2/0.8  cost=17bp  PF=3.63 Shrp=3.40 Nbr= 96%%  ← NEW\n");
-    std::printf("[STARTUP]   DOGE  TSMOM  H12  LB=35  HB=24 SL=2.0  T=0.5/0.4  cost=22bp  PF=2.78 Shrp=3.66 Nbr=100%%  ← NEW\n");
-    std::printf("[STARTUP]   AVAX  TSMOM  H12  LB=30  HB=12 SL=4.0  T=0.5/0.4  cost=22bp  PF=2.61 Shrp=2.98 Nbr= 87%%  ← NEW\n");
+    std::printf("[STARTUP] Spot feed live. 29 engines running (shadow_mode=true):\n");
+    std::printf("[STARTUP]   D1(5) + H12(3) + H6(8) + H4(7) + H1(3) = 29 engines\n");
     std::printf("[STARTUP] GUI: http://localhost:8080\n");
     std::fflush(stdout);
 

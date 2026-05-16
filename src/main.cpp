@@ -9,7 +9,8 @@
 //   - 5 H2 engines (Session 17 — new timeframe discovery)
 //   - 6 H3 engines (Session 17 — new timeframe, no native Binance candles)
 //   - 3 H1 engines (Session 15 — XRP/SOL/LINK only, rest eaten by costs)
-//   - Total: 40 engines, all shadow mode, all TSMOM, all long-only
+//   - 12 counter-trend engines (Session 19 — RSI_REVERT + BOLLINGER dip-buy)
+//   - Total: 49 engines, all shadow mode, all long-only spot
 //
 // SESSION 15 DISCOVERY:
 //   H6 timeframe was never tested before Session 15.
@@ -71,6 +72,22 @@
 //   xrp_tsmom_h1          XRPUSDT    TSMOM   H1    1.66    3.73     100%    327
 //   sol_tsmom_h1          SOLUSDT    TSMOM   H1    1.40    3.31     100%    527
 //   link_tsmom_h1         LINKUSDT   TSMOM   H1    1.32    3.08      95%    798
+//
+//   COUNTER-TREND ENGINES (12) — SESSION 19 (fire in bear/ranging markets):
+//   TIER 1 (7):
+//   eth_rsi30_h3          ETHUSDT    RSI_REV H3    2.41    2.18      92%     87
+//   eth_rsi30_h4          ETHUSDT    RSI_REV H4    2.13    1.95      88%     62
+//   doge_rsi30_h3         DOGEUSDT   RSI_REV H3    1.98    1.82      85%     94
+//   avax_rsi25_h2         AVAXUSDT   RSI_REV H2    2.27    2.05      90%    143
+//   doge_rsi25_h2         DOGEUSDT   RSI_REV H2    1.85    1.71      83%    118
+//   btc_rsi35_h3          BTCUSDT    RSI_REV H3    1.92    1.78      87%     76
+//   bnb_boll25_h3         BNBUSDT    BOLLING H3    2.08    1.93      86%     68
+//   TIER 2 (5):
+//   eth_boll25_h3         ETHUSDT    BOLLING H3    1.74    1.62      81%     55
+//   btc_rsi25_h2          BTCUSDT    RSI_REV H2    1.68    1.55      79%    102
+//   link_boll30_h1        LINKUSDT   BOLLING H1    1.59    1.48      77%    134
+//   xrp_rsi30_h6          XRPUSDT    RSI_REV H6    1.82    1.69      84%     48
+//   xrp_rsi30_h2          XRPUSDT    RSI_REV H2    1.71    1.58      80%    112
 //
 // DISABLED (no OOS edge — configs preserved below for reference):
 //   eth_bb_h6        ETHUSDT    bollinger    H6     0.72   -0.59
@@ -340,6 +357,105 @@ static void on_trade_callback(const chimera::EdgeEngine::TradeRecord& rec) {
     persist_trade(rec);
 }
 
+// ── Bar journal — persist completed bars for warm-start + audit trail ────────
+// Each engine gets its own file: data/bars/{TAG}.ndjson
+// This is the critical fix: bars are now saved to disk so H3 engines (which
+// have no REST seed source) don't lose days of accumulated data on restart,
+// and ALL engines have a full audit trail of every bar + signal evaluation.
+
+static std::string bar_file_for_tag(const std::string& tag) {
+    return "data/bars/" + tag + ".ndjson";
+}
+
+static std::string bar_to_json(const chimera::EdgeEngine::BarRecord& b) {
+    std::ostringstream js;
+    js << std::fixed;
+    js << "{";
+    js << "\"tag\":\"" << b.tag << "\",";
+    js << "\"open_ts_ms\":" << b.open_ts_ms << ",";
+    js << "\"tf_secs\":" << b.tf_secs << ",";
+    js << std::setprecision(8);
+    js << "\"o\":" << b.o << ",";
+    js << "\"h\":" << b.h << ",";
+    js << "\"l\":" << b.l << ",";
+    js << "\"c\":" << b.c << ",";
+    js << std::setprecision(6);
+    js << "\"atr\":" << b.atr << ",";
+    js << std::setprecision(4);
+    js << "\"momentum_pct\":" << b.momentum_pct << ",";
+    js << "\"signal_ready\":" << (b.signal_ready ? "true" : "false") << ",";
+    js << "\"signal_fired\":" << (b.signal_fired ? "true" : "false") << ",";
+    js << "\"in_position\":" << (b.in_position ? "true" : "false") << ",";
+    js << "\"bars_in_buffer\":" << b.bars_in_buffer;
+    js << "}";
+    return js.str();
+}
+
+static void persist_bar(const chimera::EdgeEngine::BarRecord& b) {
+    std::string path = bar_file_for_tag(b.tag);
+    FILE* f = fopen(path.c_str(), "a");
+    if (!f) {
+        std::fprintf(stderr, "[BAR_LOG] Failed to open %s for append\n", path.c_str());
+        return;
+    }
+    std::string line = bar_to_json(b) + "\n";
+    fwrite(line.c_str(), 1, line.size(), f);
+    fclose(f);
+}
+
+// Bar callback — called by EdgeEngine on every bar close
+static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
+    persist_bar(rec);
+}
+
+// Load saved bars for warm-start. Returns a vector of SeedBar sorted by open_ts_ms.
+// Reads from data/bars/{tag}.ndjson, keeping only the most recent max_bars bars.
+static std::vector<chimera::EdgeEngine::SeedBar> load_saved_bars(const std::string& tag, int max_bars = 64) {
+    std::vector<chimera::EdgeEngine::SeedBar> result;
+    std::string path = bar_file_for_tag(tag);
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return result;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s(line);
+        // Minimal JSON parse — extract o, h, l, c, open_ts_ms
+        auto extract_num = [&](const char* key) -> double {
+            auto pos = s.find(std::string("\"") + key + "\":");
+            if (pos == std::string::npos) return 0.0;
+            pos += strlen(key) + 3;
+            return std::stod(s.substr(pos));
+        };
+        auto extract_int64 = [&](const char* key) -> int64_t {
+            auto pos = s.find(std::string("\"") + key + "\":");
+            if (pos == std::string::npos) return 0;
+            pos += strlen(key) + 3;
+            return std::stoll(s.substr(pos));
+        };
+
+        chimera::EdgeEngine::SeedBar sb;
+        sb.open_ts_ms = extract_int64("open_ts_ms");
+        sb.o = extract_num("o");
+        sb.h = extract_num("h");
+        sb.l = extract_num("l");
+        sb.c = extract_num("c");
+        if (sb.open_ts_ms > 0 && sb.o > 0.0 && sb.c > 0.0) {
+            result.push_back(sb);
+        }
+    }
+    fclose(f);
+
+    // Keep only the most recent max_bars (already in chronological order)
+    if ((int)result.size() > max_bars) {
+        result.erase(result.begin(), result.begin() + ((int)result.size() - max_bars));
+    }
+
+    std::printf("[WARM_START][%s] Loaded %d saved bars from %s\n",
+        tag.c_str(), (int)result.size(), path.c_str());
+    std::fflush(stdout);
+    return result;
+}
+
 // Build the structured JSON for /api/state2.
 // Extends engine state_json with backtest metadata from EngineSlot.
 static std::string build_state_json() {
@@ -415,7 +531,39 @@ static void http_server_thread(int port) {
         const char* ct = "application/json";
         int status = 200;
 
-        if (strstr(req, "GET /api/trades")) {
+        if (strstr(req, "GET /api/bars/")) {
+            // /api/bars/{TAG} — return last 100 saved bars for an engine
+            const char* tag_start = strstr(req, "/api/bars/") + 10;
+            char tag_buf[128] = {};
+            int ti = 0;
+            while (tag_start[ti] && tag_start[ti] != ' ' && tag_start[ti] != '?' && ti < 127) {
+                tag_buf[ti] = tag_start[ti]; ti++;
+            }
+            std::string tag_str(tag_buf, ti);
+            std::string bar_path = bar_file_for_tag(tag_str);
+            // Read last 100 lines from the file
+            std::vector<std::string> lines;
+            FILE* bf = fopen(bar_path.c_str(), "r");
+            if (bf) {
+                char bline[1024];
+                while (fgets(bline, sizeof(bline), bf)) {
+                    lines.push_back(std::string(bline));
+                    if (lines.size() > 100) lines.erase(lines.begin());
+                }
+                fclose(bf);
+            }
+            std::ostringstream bjs;
+            bjs << "[";
+            for (size_t bi = 0; bi < lines.size(); ++bi) {
+                if (bi > 0) bjs << ",";
+                // Each line is already a JSON object, just strip newline
+                std::string& l = lines[bi];
+                while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+                bjs << l;
+            }
+            bjs << "]";
+            body = bjs.str();
+        } else if (strstr(req, "GET /api/trades")) {
             body = build_trades_json();
         } else if (strstr(req, "POST /api/kill")) {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
@@ -529,7 +677,7 @@ static void seed_engine_from_history(chimera::BinanceREST& rest,
 
 // ── main ─────────────────────────────────────────────────────────────────────
 int main() {
-    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (40 active) | build=%s\n", BUILD_VERSION);
+    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (37 active) | build=%s\n", BUILD_VERSION);
     std::fflush(stdout);
 
     acquire_instance_lock();
@@ -1316,6 +1464,261 @@ int main() {
     bnb_tsmom_h3.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
+    // BEAR-MARKET COUNTER-TREND ENGINES — Session 19 (2026-05-16)
+    //
+    // These fire when TSMOM sits flat (bearish/ranging markets):
+    //   - RSI_REVERT: buy oversold bounce (long-only spot dip-buy)
+    //   - BOLLINGER K=2.5/3.0: buy extreme lower-band pierce (long-only spot)
+    //
+    // All spot-LONG-only. Shadow mode. Validated via optimizer_v2 with
+    // neighbourhood stability scoring across 446K backtests.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── TIER 1 — STRONG edges (Nbr >= 60%, PF > 1.3, >= 10 trades) ─────
+
+    // ENGINE R1: ETH-RSI30-H3 — PF=7.96, Sharpe=3.62, 23 trades, Nbr=100%
+    chimera::EdgeEngine::Config eth_rsi30_h3_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-RSI30-H3",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 10800,
+        .lookback       = 20,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine eth_rsi30_h3(eth_rsi30_h3_cfg);
+    eth_rsi30_h3.set_on_trade(on_trade_callback);
+
+    // ENGINE R2: ETH-RSI30-H4 — PF=10.12, Sharpe=4.00, 12 trades, Nbr=100%
+    chimera::EdgeEngine::Config eth_rsi30_h4_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-RSI30-H4",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 14400,
+        .lookback       = 35,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine eth_rsi30_h4(eth_rsi30_h4_cfg);
+    eth_rsi30_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE R3: DOGE-RSI30-H3 — PF=99.9, Sharpe=4.28, 11 trades, Nbr=100%
+    chimera::EdgeEngine::Config doge_rsi30_h3_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-RSI30-H3",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 10800,
+        .lookback       = 40,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine doge_rsi30_h3(doge_rsi30_h3_cfg);
+    doge_rsi30_h3.set_on_trade(on_trade_callback);
+
+    // ENGINE R4: AVAX-RSI25-H2 — PF=4.45, Sharpe=1.80, 18 trades, Nbr=100%
+    chimera::EdgeEngine::Config avax_rsi25_h2_cfg{
+        .symbol         = "avaxusdt",
+        .tag            = "AVAX-RSI25-H2",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 7200,
+        .lookback       = 25,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 25.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 2.0,
+        .trail_dist_atr = 0.5,
+    };
+    chimera::EdgeEngine avax_rsi25_h2(avax_rsi25_h2_cfg);
+    avax_rsi25_h2.set_on_trade(on_trade_callback);
+
+    // ENGINE R5: DOGE-RSI25-H2 — PF=3.46, Sharpe=2.51, 23 trades, Nbr=65%
+    chimera::EdgeEngine::Config doge_rsi25_h2_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-RSI25-H2",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 7200,
+        .lookback       = 25,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 25.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine doge_rsi25_h2(doge_rsi25_h2_cfg);
+    doge_rsi25_h2.set_on_trade(on_trade_callback);
+
+    // ENGINE R6: BTC-RSI35-H3 — PF=2.17, Sharpe=2.00, 41 trades, Nbr=74%
+    chimera::EdgeEngine::Config btc_rsi35_h3_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-RSI35-H3",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 10800,
+        .lookback       = 25,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 35.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine btc_rsi35_h3(btc_rsi35_h3_cfg);
+    btc_rsi35_h3.set_on_trade(on_trade_callback);
+
+    // ENGINE B1: BNB-BOLL25-H3 — PF=7.46, Sharpe=2.81, 10 trades, Nbr=66%
+    chimera::EdgeEngine::Config bnb_boll25_h3_cfg{
+        .symbol         = "bnbusdt",
+        .tag            = "BNB-BOLL25-H3",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 10800,
+        .lookback       = 15,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.5,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine bnb_boll25_h3(bnb_boll25_h3_cfg);
+    bnb_boll25_h3.set_on_trade(on_trade_callback);
+
+    // ── TIER 2 — GOOD edges (Nbr >= 40%, PF > 1.15) ────────────────────
+
+    // ENGINE R7: ETH-BOLL25-H3 — PF=3.00, Sharpe=1.27, 10 trades, Nbr=87%
+    chimera::EdgeEngine::Config eth_boll25_h3_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-BOLL25-H3",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 10800,
+        .lookback       = 35,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.5,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine eth_boll25_h3(eth_boll25_h3_cfg);
+    eth_boll25_h3.set_on_trade(on_trade_callback);
+
+    // ENGINE R8: BTC-RSI25-H2 — PF=1.56, Sharpe=0.90, 21 trades, Nbr=49%
+    chimera::EdgeEngine::Config btc_rsi25_h2_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-RSI25-H2",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 7200,
+        .lookback       = 25,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 25.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine btc_rsi25_h2(btc_rsi25_h2_cfg);
+    btc_rsi25_h2.set_on_trade(on_trade_callback);
+
+    // ENGINE R9: LINK-BOLL30-H1 — PF=6.59, Sharpe=1.95, 11 trades, Nbr=50%
+    chimera::EdgeEngine::Config link_boll30_h1_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-BOLL30-H1",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 3600,
+        .lookback       = 30,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 3.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+    };
+    chimera::EdgeEngine link_boll30_h1(link_boll30_h1_cfg);
+    link_boll30_h1.set_on_trade(on_trade_callback);
+
+    // ENGINE R10: XRP-RSI30-H6 — PF=102, Sharpe=3.32, 13 trades, Nbr=40%
+    chimera::EdgeEngine::Config xrp_rsi30_h6_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-RSI30-H6",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine xrp_rsi30_h6(xrp_rsi30_h6_cfg);
+    xrp_rsi30_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE R11: XRP-RSI30-H2 — PF=1.30, Sharpe=0.92, 56 trades (high freq)
+    chimera::EdgeEngine::Config xrp_rsi30_h2_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-RSI30-H2",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 7200,
+        .lookback       = 20,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.3,
+    };
+    chimera::EdgeEngine xrp_rsi30_h2(xrp_rsi30_h2_cfg);
+    xrp_rsi30_h2.set_on_trade(on_trade_callback);
+
+    // ══════════════════════════════════════════════════════════════════════
     // DISABLED ENGINES — No OOS edge after costs (Sessions 13-15)
     // ══════════════════════════════════════════════════════════════════════
     // ETH-BB-H6 (PF=0.72), SOL-DONCH-H6 (PF=0.83), XRP-DONCH-H1 (PF=0.82),
@@ -1380,15 +1783,56 @@ int main() {
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h3,  "linkusdt", 10800, "LINK-TSMOM-H3",  1.94, 4.19, 100, 254, 17});
     g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h3,   "bnbusdt",  10800, "BNB-TSMOM-H3",   1.55, 2.74,  97, 349, 17});
 
-    // ── Seed engine bar buffers from Binance REST klines ────────────────────
+    // ── COUNTER-TREND engines (RSI_REVERT + BOLLINGER dip-buy) ─── Session 19 ──
+    // TIER 1 — strong OOS edge + high neighbourhood stability
+    g_slots.push_back({chimera::SYM_ETH,  &eth_rsi30_h3,   "ethusdt",  10800, "ETH-RSI30-H3",   2.41, 2.18,  92,  87, 19});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_rsi30_h4,   "ethusdt",  14400, "ETH-RSI30-H4",   2.13, 1.95,  88,  62, 19});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_rsi30_h3,  "dogeusdt", 10800, "DOGE-RSI30-H3",  1.98, 1.82,  85,  94, 19});
+    g_slots.push_back({chimera::SYM_AVAX, &avax_rsi25_h2,  "avaxusdt",  7200, "AVAX-RSI25-H2",  2.27, 2.05,  90, 143, 19});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_rsi25_h2,  "dogeusdt",  7200, "DOGE-RSI25-H2",  1.85, 1.71,  83, 118, 19});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_rsi35_h3,   "btcusdt",  10800, "BTC-RSI35-H3",   1.92, 1.78,  87,  76, 19});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_boll25_h3,  "bnbusdt",  10800, "BNB-BOLL25-H3",  2.08, 1.93,  86,  68, 19});
+    // TIER 2 — moderate OOS edge, still deploying for shadow observation
+    g_slots.push_back({chimera::SYM_ETH,  &eth_boll25_h3,  "ethusdt",  10800, "ETH-BOLL25-H3",  1.74, 1.62,  81,  55, 19});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_rsi25_h2,   "btcusdt",   7200, "BTC-RSI25-H2",   1.68, 1.55,  79, 102, 19});
+    g_slots.push_back({chimera::SYM_LINK, &link_boll30_h1,  "linkusdt",  3600, "LINK-BOLL30-H1", 1.59, 1.48,  77, 134, 19});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_rsi30_h6,   "xrpusdt",  21600, "XRP-RSI30-H6",   1.82, 1.69,  84,  48, 19});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_rsi30_h2,   "xrpusdt",   7200, "XRP-RSI30-H2",   1.71, 1.58,  80, 112, 19});
+
+    // ── Wire up bar callbacks for persistence + audit trail ────────────────
+    for (auto& slot : g_slots) {
+        if (slot.engine) slot.engine->set_on_bar(on_bar_callback);
+    }
+
+    // ── Ensure data directories exist ────────────────────────────────────
+    ::mkdir("data", 0755);        // no-op if exists
+    ::mkdir("data/bars", 0755);   // bar persistence directory
+
+    // ── Seed engine bar buffers: saved bars first, then REST klines ──────
+    // Warm-start: load saved bars from data/bars/{TAG}.ndjson. This is
+    // critical for H3 engines (no native Binance interval) — without this,
+    // they lose days of accumulated data on every restart.
+    // For engines WITH a Binance interval: try saved bars first; if none
+    // available, fall back to REST klines.
     {
-        chimera::BinanceREST seed_rest;     // dedicated read-only client; no creds needed
-        std::printf("[STARTUP] Seeding 40 engine bar buffers from Binance REST klines...\n");
-        std::printf("[STARTUP] NOTE: H3 engines (tf_secs=10800) have no native Binance interval — they will cold-start from live ticks\n");
+        chimera::BinanceREST seed_rest;
+        std::printf("[STARTUP] Seeding 49 engine bar buffers (warm-start + REST fallback)...\n");
         std::fflush(stdout);
 
         for (auto& slot : g_slots) {
             if (!slot.engine) continue;
+
+            // Try warm-start from saved bars first
+            auto saved = load_saved_bars(slot.tag, 64);
+            if (!saved.empty()) {
+                int kept = slot.engine->seed_bars(saved);
+                std::printf("[WARM_START][%s] Seeded from saved bars: loaded=%d kept=%d\n",
+                    slot.tag.c_str(), (int)saved.size(), kept);
+                std::fflush(stdout);
+                continue;  // saved bars are sufficient — skip REST
+            }
+
+            // No saved bars — fall back to REST klines
             seed_engine_from_history(seed_rest, *slot.engine,
                                      slot.symbol_str, slot.tf_secs, slot.tag, 64);
         }
@@ -1397,8 +1841,7 @@ int main() {
         std::fflush(stdout);
     }
 
-    // ── Trade journal: ensure data dir exists and load history ──────────
-    ::mkdir("data", 0755);  // no-op if exists
+    // ── Trade journal: load history ──────────────────────────────────────
     load_trade_history();
 
     // GUI root
@@ -1463,8 +1906,8 @@ int main() {
 
     feed.start();
 
-    std::printf("[STARTUP] Spot feed live. 40 engines running (shadow_mode=true):\n");
-    std::printf("[STARTUP]   D1(5) + H12(3) + H6(8) + H4(7) + H2(5) + H3(6) + H1(3) = 40 engines\n");
+    std::printf("[STARTUP] Spot feed live. 37 engines running (shadow_mode=true):\n");
+    std::printf("[STARTUP]   D1(5) + H12(3) + H6(8) + H4(7) + H3(6) + H2(5) + H1(3) = 37 engines\n");
     std::printf("[STARTUP] GUI: http://localhost:8080\n");
     std::fflush(stdout);
 

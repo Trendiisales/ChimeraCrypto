@@ -334,7 +334,7 @@
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════════
-// Chimera Dashboard v2 — 29 engines, grouped by timeframe
+// Chimera Dashboard v2 — 40 engines, grouped by timeframe
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const SYMBOLS = [
@@ -348,8 +348,8 @@ const SYMBOLS = [
   { full: 'dogeusdt', short: 'DOGE' },
 ];
 
-const TF_ORDER = ['D1', 'H12', 'H6', 'H4', 'H1'];
-const TF_LABELS = { 86400:'D1', 43200:'H12', 21600:'H6', 14400:'H4', 7200:'H2', 3600:'H1' };
+const TF_ORDER = ['D1', 'H12', 'H6', 'H4', 'H3', 'H2', 'H1'];
+const TF_LABELS = { 86400:'D1', 43200:'H12', 21600:'H6', 14400:'H4', 10800:'H3', 7200:'H2', 3600:'H1' };
 
 const prevPx = Object.create(null);
 const $ = s => document.querySelector(s);

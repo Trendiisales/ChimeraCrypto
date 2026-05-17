@@ -174,8 +174,8 @@ public:
         // during elevated volatility as measured by ATR(14)/ATR(50) ratio.
         // Set vol_filter = false to disable (default for trend-following).
         bool         vol_filter = false;
-        double       vol_chaos_threshold    = 1.6;  // ratio above this = suppress ALL
-        double       vol_elevated_threshold = 1.5;  // ratio above this = suppress counter-trend only (raised from 1.2 — S29 tuning)
+        double       vol_chaos_threshold    = 2.0;  // ratio above this = suppress ALL (raised from 1.6 — shadow tuning: let engines trade in elevated vol)
+        double       vol_elevated_threshold = 1.8;  // ratio above this = suppress counter-trend only (raised from 1.5 — shadow tuning)
 
         // ── Multi-timeframe gate (Session 28) ────────────────────────────
         // When enabled, suppresses counter-trend entries (RSI/BOLL/KELTNER)
@@ -191,7 +191,7 @@ public:
         // Does NOT affect counter-trend strategies (they want low ADX).
         bool         adx_filter = false;
         int          adx_period = 14;
-        double       adx_threshold = 20.0;  // ADX must be >= this for trend entry (lowered from 25 — S29 tuning)
+        double       adx_threshold = 12.0;  // ADX must be >= this for trend entry (lowered from 20 — shadow tuning: 20 blocks most ranging markets)
 
         // ── Volume regime filter (Session 29) ────────────────────────────
         // Counts ticks per bar as a volume proxy. If current bar's tick count
@@ -199,7 +199,7 @@ public:
         // ALL entries (detects weekend dead zones and exchange outages).
         // Requires vol_tick_warmup bars of history before activation.
         bool         volume_gate = false;
-        double       vol_tick_ratio = 0.30;       // suppress if ticks < 30% of avg
+        double       vol_tick_ratio = 0.15;       // suppress if ticks < 15% of avg (lowered from 30% — shadow tuning: 30% blocks normal quiet periods)
         int          vol_tick_lookback = 10;      // rolling average over N bars
         int          vol_tick_warmup = 5;         // don't activate until N bars seen
 
@@ -1506,7 +1506,7 @@ private:
         // When mtf_gate is enabled and D1 trend has been bearish for 3+ consecutive
         // readings, suppress counter-trend entries. Single-bar bearish dips no
         // longer block mean-reversion (those are actually ideal entry conditions).
-        if (cfg_.mtf_gate && !d1_bullish_ && d1_bearish_streak_ >= 3) {
+        if (cfg_.mtf_gate && !d1_bullish_ && d1_bearish_streak_ >= 5) {  // raised from 3 — shadow tuning: 3-day dips are normal, only suppress on sustained 5+ day downtrends
             bool is_counter_trend = (cfg_.kind == StrategyKind::RSI_REVERT ||
                                      cfg_.kind == StrategyKind::BOLLINGER ||
                                      cfg_.kind == StrategyKind::KELTNER_REVERT);

@@ -199,10 +199,17 @@ function fmtHold(ms) {
 
 function fmtPrice(p, sym) {
   if (!p || p <= 0) return '--';
+  const v = +p;
   const s = (sym || '').toUpperCase();
-  if (s === 'SOL' || s === 'LINK' || s === 'XRP' || s === 'DOGE') return '$' + (+p).toFixed(4);
-  if (s === 'AVAX') return '$' + (+p).toFixed(2);
-  return '$' + (+p).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+  if (s === 'PEPE' || s === 'SHIB' || s === 'FLOKI' || s === 'BONK')
+    return '$' + v.toFixed(8);
+  if (s === 'SOL' || s === 'LINK' || s === 'XRP' || s === 'DOGE')
+    return '$' + v.toFixed(4);
+  if (s === 'AVAX')
+    return '$' + v.toFixed(2);
+  if (v < 0.001)  return '$' + v.toFixed(8);
+  if (v < 1)      return '$' + v.toFixed(6);
+  return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
 function updateWinRate() {

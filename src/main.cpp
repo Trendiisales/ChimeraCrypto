@@ -488,7 +488,7 @@ static std::string build_state_json() {
 
     // ── spot_prices ─────────────────────────────────────────────────────────
     js << "\"spot_prices\":{";
-    js << std::fixed << std::setprecision(6);
+    js << std::fixed << std::setprecision(8);
     for (int i = 0; i < chimera::MAX_SYMBOLS; ++i) {
         if (i > 0) js << ",";
         double px = load_dbl_atomic(g_last_spot_px_bits[i]);
@@ -7541,20 +7541,13 @@ int main() {
         std::fflush(stdout);
     }
 
-    // ── Activate session filter on sub-H4 engines (Session 29b) ─────────────
-    // Suppress entries during Asian dead zone (00-08 UTC) for engines with
-    // tf_secs <= 14400 (H4 and below). Higher timeframes span multiple sessions
-    // so the session filter doesn't apply to them.
+    // ── Session filter DISABLED (shadow tuning 2026-05-17) ─────────────────
+    // Was suppressing sub-H4 entries during 00-08 UTC (= 8am-4pm SGT).
+    // On a Singapore VPS this kills prime trading hours. Disabled so all
+    // engines can generate shadow trades 24/7 for proper PnL validation.
+    // Re-evaluate once we have 4+ weeks of shadow data.
     {
-        int session_count = 0;
-        for (auto& slot : g_slots) {
-            if (!slot.engine) continue;
-            if (slot.tf_secs <= 14400) {  // H4 and below
-                slot.engine->enable_session_filter(true);
-                session_count++;
-            }
-        }
-        std::printf("[STARTUP] Activated session_filter on %d sub-H4 engines\n", session_count);
+        std::printf("[STARTUP] session_filter DISABLED — shadow mode needs 24/7 signal flow\n");
         std::fflush(stdout);
     }
 
@@ -7959,9 +7952,11 @@ int main() {
 
             // ── Session 30, Edge 3: Volatility regime classification ─────────
             // Use BTC's ATR(14)/ATR(50) from a D1 engine as the global vol regime.
-            // LOW: ratio < 0.8 (compressed, breakouts work)
-            // HIGH: ratio > 1.4 (chaotic, mean-reversion works)
-            // MEDIUM: 0.8-1.4 (both strategies active)
+            // LOW: ratio < 0.5 (deeply compressed — only extreme suppression)
+            // HIGH: ratio > 1.8 (truly chaotic — only extreme suppression)
+            // MEDIUM: 0.5-1.8 (both strategies active — widened for shadow mode)
+            // Shadow tuning 2026-05-17: was 0.8/1.4 which muted half the fleet
+            // in normal market conditions. Widened so engines generate trades.
             {
                 chimera::EdgeEngine::VolRegime regime = chimera::EdgeEngine::VolRegime::MEDIUM;
                 // Find BTC D1 TSMOM engine to read its vol_ratio
@@ -7971,8 +7966,8 @@ int main() {
                         s.engine->is_trend_following()) {
                         double vr = s.engine->vol_ratio_public();
                         if (vr > 0.0) {  // 0 = not enough data yet
-                            if (vr < 0.8) regime = chimera::EdgeEngine::VolRegime::LOW;
-                            else if (vr > 1.4) regime = chimera::EdgeEngine::VolRegime::HIGH;
+                            if (vr < 0.5) regime = chimera::EdgeEngine::VolRegime::LOW;
+                            else if (vr > 1.8) regime = chimera::EdgeEngine::VolRegime::HIGH;
                         }
                         break;
                     }
@@ -8058,8 +8053,8 @@ int main() {
             // Also check rolling drawdown: if total net_bp across all engines
             // over last 24h drops below DRAWDOWN_LIMIT_BP, halt all entries.
             {
-                constexpr int MAX_CONCURRENT_POSITIONS = 15;
-                constexpr double DRAWDOWN_HALT_BP = -500.0;  // -5% rolling DD = halt
+                constexpr int MAX_CONCURRENT_POSITIONS = 30;   // raised from 15 — shadow tuning: 285 engines need room to generate trades
+                constexpr double DRAWDOWN_HALT_BP = -800.0;  // raised from -500 — shadow tuning: wider buffer for paper trade validation
 
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
                 int open_positions = 0;
@@ -8068,12 +8063,15 @@ int main() {
                 }
 
                 // Check 24h rolling drawdown from trade log
+                // IMPORTANT: Skip SHUTDOWN trades — these are bookkeeping from
+                // service restarts, not real trading losses.
                 double recent_pnl = 0.0;
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
                     int64_t cutoff = now_ms - 86400000LL;  // 24h ago
                     for (int i = (int)g_trade_log.size() - 1; i >= 0; --i) {
                         if (g_trade_log[i].exit_ts_ms < cutoff) break;
+                        if (g_trade_log[i].reason == "SHUTDOWN") continue;
                         recent_pnl += g_trade_log[i].net_bp;
                     }
                 }
@@ -8140,7 +8138,7 @@ int main() {
                     // flag as high correlation. This is a conservative heuristic.
                     // TODO: upgrade to true rolling Pearson correlation on bar returns.
                     bool corr_flag = false;
-                    if (std::fabs(btc_momentum) > 3.0) {  // BTC moving > 3%
+                    if (std::fabs(btc_momentum) > 5.0) {  // BTC moving > 5% (raised from 3% — shadow tuning: 3% moves are routine, suppressed too many alts)
                         // Check this symbol's D1 momentum
                         if (s.tf_secs == 86400 && s.engine->is_trend_following()) {
                             std::string state = s.engine->state_json();

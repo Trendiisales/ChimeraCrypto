@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Chimera — Edge Dashboard</title>
+<title>Chimera — Trading Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -27,21 +27,16 @@
   html, body { background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
   }
-  body { padding: 12px 16px; min-height: 100vh; }
+  body { padding: 16px 20px; min-height: 100vh; }
 
   /* ── Header ─── */
   header {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 8px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px;
+    padding: 8px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px;
   }
-  .logo { font-weight: 900; letter-spacing: 0.18em; font-size: 20px; color: var(--accent); }
+  .logo { font-weight: 900; letter-spacing: 0.18em; font-size: 22px; color: var(--accent); }
   .version { font-size: 11px; color: var(--dim); letter-spacing: 0.08em; }
-  .engine-count {
-    font-size: 11px; color: var(--accent); background: rgba(74,214,197,0.08);
-    border: 1px solid rgba(74,214,197,0.2); padding: 2px 10px; border-radius: 999px;
-    letter-spacing: 0.08em; font-weight: 700;
-  }
-  .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .status-dot.ok { background: var(--green); box-shadow: 0 0 6px rgba(60,224,136,0.5); }
   .status-dot.stale { background: var(--amber); }
@@ -55,246 +50,159 @@
   }
   .kill-btn:hover { background: var(--red); color: #0a0e15; }
 
-  /* ── Ticker Strip ─── */
-  .ticker {
-    display: flex; gap: 0; overflow-x: auto; margin-bottom: 12px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    box-shadow: var(--shadow);
+  /* ── Summary Strip ─── */
+  .summary-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px; margin-bottom: 16px;
   }
-  .tick {
-    flex: 1; min-width: 90px; padding: 8px 12px;
-    border-right: 1px solid var(--line); text-align: center;
+  .stat-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; box-shadow: var(--shadow);
   }
-  .tick:last-child { border-right: none; }
-  .tick .sym { font-size: 10px; letter-spacing: 0.10em; color: var(--dim); font-weight: 700; }
-  .tick .px { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .tick .px.up { color: var(--green); }
-  .tick .px.down { color: var(--red); }
-  .tick .px.flat { color: var(--text); }
-  .tick .sparkline { height: 20px; margin-top: 2px; }
-
-  /* ── Summary Cards Row ─── */
-  .summary-row {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px; margin-bottom: 12px;
-  }
-  .sum-card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px; box-shadow: var(--shadow);
-  }
-  .sum-card .lbl { font-size: 9px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; margin-bottom: 3px; }
-  .sum-card .val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat-card .lbl { font-size: 9px; color: var(--dim); letter-spacing: 0.10em; text-transform: uppercase; margin-bottom: 4px; }
+  .stat-card .val { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .pos { color: var(--green); }
   .neg { color: var(--red); }
   .neutral { color: var(--text); }
 
-  /* ── Tab Bar ─── */
-  .tab-bar {
-    display: flex; gap: 2px; margin-bottom: 0;
-    background: var(--panel); border: 1px solid var(--line); border-bottom: none;
-    border-radius: 6px 6px 0 0; padding: 4px 4px 0;
+  /* ── Ticker Strip ─── */
+  .ticker {
+    display: flex; gap: 0; overflow-x: auto; margin-bottom: 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: var(--shadow);
   }
-  .tab {
-    padding: 8px 16px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--dim); cursor: pointer;
-    border-radius: 4px 4px 0 0; border: 1px solid transparent; border-bottom: none;
-    transition: all 0.15s; position: relative;
+  .tick {
+    flex: 1; min-width: 80px; padding: 8px 10px;
+    border-right: 1px solid var(--line); text-align: center;
   }
-  .tab:hover { color: var(--text); background: rgba(74,214,197,0.04); }
-  .tab.active {
-    color: var(--accent); background: var(--bg);
-    border-color: var(--line); border-bottom: 1px solid var(--bg);
-    margin-bottom: -1px; z-index: 1;
-  }
-  .tab .badge {
-    display: inline-block; font-size: 9px; background: rgba(74,214,197,0.15);
-    color: var(--accent); padding: 1px 5px; border-radius: 999px; margin-left: 4px;
-    font-weight: 800;
-  }
-  .tab .badge.active-trade { background: rgba(60,224,136,0.2); color: var(--green); }
+  .tick:last-child { border-right: none; }
+  .tick .sym { font-size: 9px; letter-spacing: 0.10em; color: var(--dim); font-weight: 700; }
+  .tick .px { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tick .px.up { color: var(--green); }
+  .tick .px.down { color: var(--red); }
+  .tick .px.flat { color: var(--text); }
 
-  /* ── Tab Content ─── */
-  .tab-content {
-    background: var(--bg); border: 1px solid var(--line); border-top: none;
-    border-radius: 0 0 6px 6px; padding: 12px; margin-bottom: 12px;
-    overflow-x: auto;
+  /* ── Open Positions — Main Focus ─── */
+  .positions-section {
+    margin-bottom: 16px;
   }
+  .section-title {
+    font-size: 11px; font-weight: 700; color: var(--dim); letter-spacing: 0.12em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .pos-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px;
+  }
+  .pos-card {
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 16px; box-shadow: 0 0 0 1px rgba(74,214,197,0.08), var(--shadow);
+  }
+  .pos-card .pc-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .pos-card .pc-tag { font-weight: 900; font-size: 15px; color: var(--accent); letter-spacing: 0.06em; }
+  .pos-card .pc-pnl { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .pos-card .pc-meta {
+    display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .pos-card .pc-pill {
+    font-size: 9px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid rgba(74,214,197,0.2); color: var(--accent);
+    background: rgba(74,214,197,0.05); letter-spacing: 0.06em; font-weight: 700;
+  }
+  .pos-card .pc-pill.trail { border-color: rgba(91,156,245,0.3); color: var(--blue); background: rgba(91,156,245,0.05); }
+  .pos-card .pc-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 12px; margin-bottom: 12px;
+  }
+  .pos-card .pc-grid .lbl { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
+  .pos-card .pc-grid .val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pos-card canvas { width: 100% !important; height: 80px !important; border-radius: 6px; }
+  .no-positions {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 40px; text-align: center; color: var(--dim); font-size: 13px;
+  }
+  .no-positions .big-icon { font-size: 32px; margin-bottom: 8px; opacity: 0.4; }
 
-  /* ── Engine Table ─── */
-  .engine-table {
-    width: 100%; border-collapse: collapse; font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
-  .engine-table th {
-    text-align: left; padding: 6px 8px; font-size: 9px; color: var(--dim);
-    letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--line);
-    font-weight: 600; white-space: nowrap; position: sticky; top: 0; background: var(--bg);
-  }
-  .engine-table td {
-    padding: 6px 8px; border-bottom: 1px solid rgba(30,39,56,0.4);
-    white-space: nowrap;
-  }
-  .engine-table tr:hover td { background: rgba(74,214,197,0.03); }
-  .engine-table tr.in-pos td { background: rgba(74,214,197,0.06); }
-  .engine-table tr.halted td { opacity: 0.5; }
-
-  .tag-cell { font-weight: 800; letter-spacing: 0.06em; font-size: 12px; color: #e8edf5; }
-  .pill {
-    display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 999px;
-    border: 1px solid; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700;
-  }
-  .pill.shadow { color: var(--amber); border-color: rgba(248,185,76,0.3); background: rgba(248,185,76,0.06); }
-  .pill.live   { color: var(--green); border-color: rgba(60,224,136,0.3); background: rgba(60,224,136,0.06); }
-  .pill.intrade{ color: #0a0e15; background: var(--accent); border-color: var(--accent); font-weight: 800; }
-  .pill.halted { color: var(--red); border-color: rgba(255,93,122,0.3); background: rgba(255,93,122,0.08); }
-  .mini-bar {
-    display: inline-block; height: 6px; border-radius: 3px;
-    background: rgba(74,214,197,0.2); min-width: 20px; max-width: 80px;
-    position: relative; overflow: hidden;
-  }
-  .mini-bar .fill {
-    position: absolute; top: 0; left: 0; height: 100%; border-radius: 3px;
-    background: var(--accent);
-  }
-
-  /* ── Momentum indicator ─── */
-  .mom-cell { font-weight: 700; font-size: 11px; }
-  .mom-cell.bullish { color: var(--green); }
-  .mom-cell.bearish { color: var(--red); }
-  .mom-cell.waiting { color: var(--dim); }
-  .countdown { font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
-
-  /* ── Open Positions Panel ─── */
-  .open-panel {
-    background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
-    padding: 12px; margin-bottom: 12px; box-shadow: 0 0 0 1px rgba(74,214,197,0.1);
-  }
-  .open-panel .panel-title {
-    font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.10em;
-    text-transform: uppercase; margin-bottom: 8px;
-  }
-  .open-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 8px;
-  }
-  .open-card {
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px;
-  }
-  .open-card .oc-header {
-    display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;
-  }
-  .open-card .oc-tag { font-weight: 800; font-size: 13px; color: var(--accent); letter-spacing: 0.06em; }
-  .open-card .oc-pnl { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .open-card .oc-details {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 10px; font-size: 11px;
-  }
-  .open-card .oc-details .lbl { color: var(--dim); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
-  .open-card .oc-details .val { font-weight: 700; font-variant-numeric: tabular-nums; }
-  .trail-indicator {
-    font-size: 9px; padding: 1px 6px; border-radius: 999px;
-    background: rgba(91,156,245,0.1); color: var(--blue); border: 1px solid rgba(91,156,245,0.25);
-  }
-
-  /* ── Market sparklines section ─── */
-  .market-section {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    padding: 12px; margin-bottom: 12px; box-shadow: var(--shadow);
-  }
-  .market-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 10px;
-  }
-  .market-card {
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px;
-  }
-  .market-card .mc-header {
-    display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
-  }
-  .market-card .mc-sym { font-weight: 800; font-size: 13px; letter-spacing: 0.06em; }
-  .market-card .mc-px { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .market-card .mc-change { font-size: 11px; font-weight: 700; }
-  .market-card canvas { width: 100% !important; height: 50px !important; }
-
-  /* ── Signal Log ─── */
-  .signal-log {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    padding: 12px; margin-bottom: 12px; box-shadow: var(--shadow);
-  }
-  .log-scroll {
-    max-height: 200px; overflow-y: auto; font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-    font-size: 11px; line-height: 1.6;
-  }
-  .log-scroll::-webkit-scrollbar { width: 5px; }
-  .log-scroll::-webkit-scrollbar-track { background: transparent; }
-  .log-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
-  .log-entry { padding: 1px 0; }
-  .log-entry .log-time { color: var(--dim); }
-  .log-entry .log-tag { color: var(--accent); font-weight: 700; }
-  .log-entry .log-msg { color: var(--text); }
-  .log-entry .log-bullish { color: var(--green); }
-  .log-entry .log-bearish { color: var(--red); }
-
-  /* ── Chart area ─── */
+  /* ── Charts Row ─── */
   .chart-row {
-    display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;
+    display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 16px;
   }
   @media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
   .chart-box {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    padding: 12px; box-shadow: var(--shadow);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; box-shadow: var(--shadow);
   }
   .chart-box .chart-title {
     font-size: 11px; font-weight: 700; color: var(--dim); letter-spacing: 0.08em;
-    text-transform: uppercase; margin-bottom: 8px;
+    text-transform: uppercase; margin-bottom: 10px;
   }
-  .chart-box canvas { width: 100% !important; height: 220px !important; }
+  .chart-box canvas { width: 100% !important; height: 200px !important; }
 
   /* ── Trade History ─── */
   .trades-section {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    padding: 12px; box-shadow: var(--shadow); margin-bottom: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; box-shadow: var(--shadow); margin-bottom: 16px;
   }
   .section-header {
-    display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;
   }
-  .section-title {
-    font-size: 11px; font-weight: 700; color: var(--dim); letter-spacing: 0.10em;
-    text-transform: uppercase;
-  }
-  .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
-  .filter-btn {
-    font-size: 10px; padding: 3px 10px; border-radius: 999px;
-    border: 1px solid var(--line); background: transparent; color: var(--dim);
-    cursor: pointer; letter-spacing: 0.06em; transition: all 0.15s;
-  }
-  .filter-btn:hover { border-color: var(--accent); color: var(--text); }
-  .filter-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(74,214,197,0.06); }
   .trades-table {
     width: 100%; border-collapse: collapse; font-size: 11px;
     font-variant-numeric: tabular-nums;
   }
   .trades-table th {
-    text-align: left; padding: 5px 6px; font-size: 9px; color: var(--dim);
+    text-align: left; padding: 6px 8px; font-size: 9px; color: var(--dim);
     letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--line);
     font-weight: 600; position: sticky; top: 0; background: var(--panel); white-space: nowrap;
   }
-  .trades-table td { padding: 4px 6px; border-bottom: 1px solid rgba(30,39,56,0.35); }
+  .trades-table td { padding: 5px 8px; border-bottom: 1px solid rgba(30,39,56,0.35); white-space: nowrap; }
   .trades-table tr:hover td { background: rgba(74,214,197,0.03); }
-  .trade-scroll { max-height: 300px; overflow-y: auto; }
+  .trade-scroll { max-height: 260px; overflow-y: auto; }
   .trade-scroll::-webkit-scrollbar { width: 5px; }
   .trade-scroll::-webkit-scrollbar-track { background: transparent; }
   .trade-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
   .no-trades { text-align: center; color: var(--dim); padding: 24px; font-size: 12px; }
+
+  /* ── Signal Readiness — compact ─── */
+  .signals-section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; box-shadow: var(--shadow); margin-bottom: 16px;
+  }
+  .signal-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px; max-height: 300px; overflow-y: auto;
+  }
+  .signal-grid::-webkit-scrollbar { width: 5px; }
+  .signal-grid::-webkit-scrollbar-track { background: transparent; }
+  .signal-grid::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  .sig-chip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; border-radius: 6px; font-size: 10px;
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .sig-chip .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .sig-chip .dot.bull { background: var(--green); }
+  .sig-chip .dot.bear { background: var(--red); }
+  .sig-chip .tag { font-weight: 700; color: var(--text); letter-spacing: 0.04em; }
+  .sig-chip .mom { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sig-chip .mom.pos { color: var(--green); }
+  .sig-chip .mom.neg { color: var(--red); }
+  .sig-chip .next { color: var(--dim); font-size: 9px; margin-left: auto; }
+
+  /* ── Collapsible toggle ─── */
+  .toggle-btn {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.06em; transition: all 0.15s;
+  }
+  .toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ── Footer ─── */
   footer {
     padding: 10px 0; border-top: 1px solid var(--line);
     display: flex; justify-content: space-between; font-size: 10px; color: var(--dim);
   }
-
-  /* ── Utility ─── */
   .hidden { display: none !important; }
   .mono { font-family: "SF Mono", "Fira Code", "Consolas", monospace; }
 </style>
@@ -303,7 +211,6 @@
 
 <header>
   <div class="logo">CHIMERA</div>
-  <span class="engine-count" id="engineCount">--- engines</span>
   <span class="version" id="buildVer">---</span>
   <div class="header-right">
     <span class="status-text mono" id="clockDisplay" style="color:var(--accent);font-weight:700;font-size:13px;">--:--:--</span>
@@ -311,43 +218,23 @@
     <span class="status-dot" id="statusDot"></span>
     <span class="status-text" id="statusText">Connecting...</span>
     <span id="bellIndicator" title="Click to enable trade alert sounds" style="cursor:pointer;font-size:16px;opacity:0.3;">&#128276;</span>
-    <button class="kill-btn" id="killAll" title="Flatten all paper positions and halt engines">Kill All</button>
+    <button class="kill-btn" id="killAll" title="Flatten all positions">Kill All</button>
   </div>
 </header>
 
+<!-- Summary Strip -->
+<div class="summary-strip" id="summaryStrip"></div>
+
+<!-- Ticker -->
 <div class="ticker" id="ticker"></div>
 
-<!-- Open Positions (only visible when positions exist) -->
-<div class="open-panel hidden" id="openPanel">
-  <div class="panel-title">Open Positions</div>
-  <div class="open-grid" id="openGrid"></div>
-</div>
-
-<!-- Summary Cards -->
-<div class="summary-row" id="summaryRow"></div>
-
-<!-- Signal Log -->
-<div class="signal-log">
-  <div class="section-header">
-    <div class="section-title">Signal Monitor</div>
-    <span class="status-text" id="signalCount">0 evaluations</span>
-  </div>
-  <div class="log-scroll" id="signalLog">
-    <div class="no-trades">Waiting for bar closes to evaluate signals...</div>
+<!-- Open Positions — PRIMARY FOCUS -->
+<div class="positions-section">
+  <div class="section-title">Open Positions</div>
+  <div id="positionsArea">
+    <div class="no-positions"><div class="big-icon">&#9203;</div>No open positions — waiting for signals at next bar close</div>
   </div>
 </div>
-
-<!-- Market Overview -->
-<div class="market-section">
-  <div class="section-header">
-    <div class="section-title">Market Overview — Price History (last 60 min)</div>
-  </div>
-  <div class="market-grid" id="marketGrid"></div>
-</div>
-
-<!-- Timeframe Tabs -->
-<div class="tab-bar" id="tabBar"></div>
-<div class="tab-content" id="tabContent"></div>
 
 <!-- Charts Row -->
 <div class="chart-row">
@@ -356,8 +243,8 @@
     <canvas id="equityChart"></canvas>
   </div>
   <div class="chart-box">
-    <div class="chart-title">P&L by Engine</div>
-    <canvas id="pnlByEngine"></canvas>
+    <div class="chart-title">Win / Loss Distribution</div>
+    <canvas id="winLossChart"></canvas>
   </div>
 </div>
 
@@ -365,32 +252,50 @@
 <div class="trades-section">
   <div class="section-header">
     <div class="section-title">Trade History</div>
-    <div class="filter-row" id="tradeFilters"></div>
+    <span class="status-text" id="tradeCount">0 trades</span>
   </div>
   <div class="trade-scroll" id="tradeScroll">
     <table class="trades-table">
       <thead>
         <tr>
-          <th>#</th><th>Date</th><th>Engine</th><th>Symbol</th><th>TF</th><th>Reason</th>
-          <th>Entry</th><th>Exit</th><th>Gross bp</th><th>Net bp</th><th>MFE bp</th><th>Duration</th>
+          <th>#</th><th>Date</th><th>Engine</th><th>Reason</th>
+          <th>Entry</th><th>Exit</th><th>Net bp</th><th>MFE bp</th><th>Duration</th>
         </tr>
       </thead>
       <tbody id="tradesBody">
-        <tr><td colspan="12" class="no-trades">No trades yet — waiting for first signal</td></tr>
+        <tr><td colspan="9" class="no-trades">No trades yet</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
+<!-- Signal Readiness — Bullish engines only (compact chips) -->
+<div class="signals-section">
+  <div class="section-header">
+    <div class="section-title">Bullish Signals — Ready to Enter</div>
+    <button class="toggle-btn" id="toggleAllEngines">Show All 285 Engines</button>
+  </div>
+  <div class="signal-grid" id="signalGrid"></div>
+</div>
+
+<!-- All Engines (hidden by default) -->
+<div class="signals-section hidden" id="allEnginesSection">
+  <div class="section-header">
+    <div class="section-title">All Engines</div>
+    <button class="toggle-btn" id="hideAllEngines">Hide</button>
+  </div>
+  <div class="signal-grid" id="allEnginesGrid" style="max-height:500px;"></div>
+</div>
+
 <footer>
-  <div id="footerLeft">Chimera Edge System</div>
+  <div>Chimera Edge System — Session 30</div>
   <div id="footerRight"></div>
 </footer>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════════
-// Chimera Dashboard v3 — 37 engines, diagnostics + signal monitor + sparklines
-// ═══════════════════════════════════════════════════════════════════════════════
+// Chimera Dashboard v4 — Simplified: focus on active trades + performance
+// ═══════════════════════════════════════════════════��═══════════════════════════
 
 const SYMBOLS = [
   { full: 'btcusdt',  short: 'BTC'  },
@@ -405,57 +310,50 @@ const SYMBOLS = [
   { full: 'suiusdt',  short: 'SUI'  },
   { full: 'aptusdt',  short: 'APT'  },
   { full: 'arbusdt',  short: 'ARB'  },
+  { full: 'pepeusdt', short: 'PEPE' },
+  { full: 'wifusdt',  short: 'WIF'  },
+  { full: 'fetusdt',  short: 'FET'  },
+  { full: 'ondousdt', short: 'ONDO' },
+  { full: 'tiausdt',  short: 'TIA'  },
 ];
 
-const TF_ORDER = ['D3', 'D2', 'D1', 'H16', 'H12', 'H8', 'H6', 'H4', 'H3', 'H2', 'H1'];
-const TF_LABELS = { 259200:'D3', 172800:'D2', 86400:'D1', 57600:'H16', 43200:'H12', 28800:'H8', 21600:'H6', 14400:'H4', 10800:'H3', 7200:'H2', 3600:'H1' };
-const TF_NAMES = { 'D3':'3 Day', 'D2':'2 Day', 'D1':'1 Day', 'H16':'16 Hour', 'H12':'12 Hour', 'H8':'8 Hour', 'H6':'6 Hour', 'H4':'4 Hour', 'H3':'3 Hour', 'H2':'2 Hour', 'H1':'1 Hour' };
-
+const TF_LABELS = { 604800:'W1', 259200:'D3', 172800:'D2', 86400:'D1', 57600:'H16', 43200:'H12', 28800:'H8', 21600:'H6', 14400:'H4', 10800:'H3', 7200:'H2', 3600:'H1' };
 const prevPx = Object.create(null);
 const $ = s => document.querySelector(s);
-let activeTab = 'ALL';
-let tradeFilterTag = 'ALL';
 let lastEngines = [];
 let lastTrades = [];
+let serverStartupTs = 0;
+let lastFetchOk = 0;
+let bellEnabled = false;
+let prevTradeCount = -1;
+let prevOpenPositions = new Set();
+let posCharts = {};
 
-// ── Price history for sparklines (last 60 minutes, sampled every 10s) ────────
+// Price history for position charts (last 30 min, sampled every 2s)
 const priceHistory = {};
-const HISTORY_MAX = 360;  // 360 samples * 10s = 60 min
+const HISTORY_MAX = 900;
 SYMBOLS.forEach(s => { priceHistory[s.full] = []; });
 
-// ── Signal log entries ───────────────────────────────────────────────────────
-const signalLogEntries = [];
-const SIGNAL_LOG_MAX = 200;
-let prevMomentumState = {};
-
-// ── Formatters ────────────────────────────────────────────────────────────────
+// ── Formatters ──────────────────────────────────────────────────────────────
 
 function fmtPx(v) {
   if (v == null || isNaN(v) || v <= 0) return '---';
-  if (v >= 1000) return v.toFixed(2);
-  if (v >= 1) return v.toFixed(4);
-  return v.toFixed(6);
+  if (v >= 1000)   return v.toFixed(2);
+  if (v >= 1)      return v.toFixed(4);
+  if (v >= 0.001)  return v.toFixed(6);
+  if (v >= 0.00001) return v.toFixed(8);
+  return v.toFixed(10);
 }
-
 function fmtBp(v) {
-  if (v == null || isNaN(v)) return '+0.0bp';
-  return (v >= 0 ? '+' : '') + v.toFixed(1) + 'bp';
+  if (v == null || isNaN(v)) return '+0.0';
+  return (v >= 0 ? '+' : '') + v.toFixed(1);
 }
-
-function fmtInt(v) { return (v != null && !isNaN(v)) ? String(v) : '---'; }
-
-function wrPct(wins, trades) {
-  if (!trades || trades <= 0) return '---';
-  return (100 * wins / trades).toFixed(0) + '%';
-}
-
 function fmtDate(ts) {
   if (!ts) return '---';
   const d = new Date(ts);
   return d.toLocaleDateString('en-GB', {day:'2-digit',month:'short'}) + ' ' +
          d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 }
-
 function fmtDuration(entry_ts, exit_ts) {
   if (!entry_ts || !exit_ts) return '---';
   let secs = Math.round((exit_ts - entry_ts) / 1000);
@@ -467,126 +365,35 @@ function fmtDuration(entry_ts, exit_ts) {
   if (h > 0) return h + 'h ' + m + 'm';
   return m + 'm';
 }
-
 function fmtCountdown(ms) {
   if (ms <= 0) return 'now';
   const secs = Math.floor(ms / 1000);
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
   if (h > 0) return h + 'h ' + m + 'm';
-  if (m > 0) return m + 'm ' + s + 's';
-  return s + 's';
+  return m + 'm';
 }
+function getTfLabel(tf_secs) { return TF_LABELS[tf_secs] || (tf_secs >= 86400 ? Math.round(tf_secs/86400)+'D' : Math.round(tf_secs/3600)+'H'); }
 
-function getTfLabel(tf_secs) { return TF_LABELS[tf_secs] || ('?' + tf_secs); }
-
-// ── Audio notifications (Web Audio API — no external files needed) ───────────
+// ── Audio ───────────────────────────────────────────────────────────────────
 
 let audioCtx = null;
-function getAudioCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  return audioCtx;
-}
-
-function playBellWin() {
+function getAudioCtx() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return audioCtx; }
+function playBell(freqs, dur) {
   try {
-    const ctx = getAudioCtx();
-    const now = ctx.currentTime;
-    // Two-tone rising chime for winning trade
-    [880, 1174.66].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.3, now + i * 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.6);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + i * 0.15);
-      osc.stop(now + i * 0.15 + 0.6);
+    const ctx = getAudioCtx(); const now = ctx.currentTime;
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.25, now + i*0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i*0.12 + dur);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now + i*0.12); osc.stop(now + i*0.12 + dur);
     });
   } catch(e) {}
 }
 
-function playBellLoss() {
-  try {
-    const ctx = getAudioCtx();
-    const now = ctx.currentTime;
-    // Single low tone for losing trade
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 440;
-    gain.gain.setValueAtTime(0.25, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.5);
-  } catch(e) {}
-}
-
-function playBellEntry() {
-  try {
-    const ctx = getAudioCtx();
-    const now = ctx.currentTime;
-    // Three quick ascending tones for position entry
-    [523.25, 659.25, 783.99].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.2, now + i * 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.3);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + i * 0.1);
-      osc.stop(now + i * 0.1 + 0.3);
-    });
-  } catch(e) {}
-}
-
-let prevTradeCount = -1;   // -1 = first load, don't bell on startup
-let prevOpenPositions = new Set();
-let bellEnabled = false;
-let serverStartupTs = 0;
-
-// ── Ticker ───────────────────────────────────────────────────────────────────
-
-function renderTicker(spot) {
-  return SYMBOLS.map(s => {
-    const px = spot[s.full];
-    const prev = prevPx[s.full];
-    let cls = 'flat';
-    if (px && prev && px > prev) cls = 'up';
-    else if (px && prev && px < prev) cls = 'down';
-    const displayPx = (px != null && !isNaN(px) && px > 0) ? fmtPx(px) : '---';
-
-    // Sparkline SVG from price history
-    const hist = priceHistory[s.full];
-    let sparkSvg = '';
-    if (hist.length > 2) {
-      const min = Math.min(...hist);
-      const max = Math.max(...hist);
-      const range = max - min || 1;
-      const w = 100, h = 20;
-      const pts = hist.map((v, i) => {
-        const x = (i / (hist.length - 1)) * w;
-        const y = h - ((v - min) / range) * h;
-        return x.toFixed(1) + ',' + y.toFixed(1);
-      }).join(' ');
-      const color = hist[hist.length-1] >= hist[0] ? 'var(--green)' : 'var(--red)';
-      sparkSvg = '<svg class="sparkline" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none">' +
-        '<polyline fill="none" stroke="'+color+'" stroke-width="1.5" points="'+pts+'"/></svg>';
-    }
-
-    return '<div class="tick"><div class="sym">' + s.short + '</div>' +
-      '<div class="px ' + cls + '">' + displayPx + '</div>' + sparkSvg + '</div>';
-  }).join('');
-}
-
-// ── Summary Cards ────────────────────────────────────────────────────────────
+// ── Summary Strip ────────���──────────────────────────────────────────────────
 
 function renderSummary(engines, trades) {
   const totalBp = trades.reduce((s,t) => s + (t.net_bp||0), 0);
@@ -595,420 +402,229 @@ function renderSummary(engines, trades) {
   const wr = totalTrades > 0 ? (100 * wins / totalTrades).toFixed(0) + '%' : '---';
   const grossWins = trades.filter(t=>t.net_bp>0).reduce((s,t)=>s+t.net_bp,0);
   const grossLosses = Math.abs(trades.filter(t=>t.net_bp<=0).reduce((s,t)=>s+t.net_bp,0));
-  const pf = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : (grossWins > 0 ? '999' : '---');
-
-  let peak = 0, mdd = 0, cum = 0;
-  const sorted = [...trades].sort((a,b) => (a.exit_ts||0) - (b.exit_ts||0));
-  sorted.forEach(t => { cum += (t.net_bp||0); if (cum>peak) peak=cum; const dd=peak-cum; if (dd>mdd) mdd=dd; });
-
+  const pf = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : (grossWins > 0 ? '∞' : '---');
   const inPos = engines.filter(e => e.in_position).length;
-  const activeCount = engines.filter(e => !e.halted).length;
-
-  // Count bullish signals across all engines
   const bullish = engines.filter(e => e.signal_ready && e.momentum_pct > 0).length;
-  const bearish = engines.filter(e => e.signal_ready && e.momentum_pct <= 0).length;
 
   const cards = [
-    { lbl: 'Net P&L', val: fmtBp(totalBp), cls: totalBp > 0 ? 'pos' : (totalBp < 0 ? 'neg' : 'neutral') },
+    { lbl: 'Net P&L', val: fmtBp(totalBp) + ' bp', cls: totalBp > 0 ? 'pos' : (totalBp < 0 ? 'neg' : 'neutral') },
     { lbl: 'Trades', val: String(totalTrades), cls: 'neutral' },
     { lbl: 'Win Rate', val: wr, cls: 'neutral' },
     { lbl: 'Profit Factor', val: pf, cls: 'neutral' },
-    { lbl: 'Max DD', val: mdd > 0 ? '-' + mdd.toFixed(1) + 'bp' : '---', cls: 'neg' },
-    { lbl: 'Active', val: activeCount + '/' + engines.length, cls: 'neutral' },
-    { lbl: 'In Position', val: String(inPos), cls: inPos > 0 ? 'pos' : 'neutral' },
-    { lbl: 'Momentum', val: bullish + ' Bull / ' + bearish + ' Bear', cls: bullish > bearish ? 'pos' : (bearish > bullish ? 'neg' : 'neutral') },
+    { lbl: 'Open', val: String(inPos), cls: inPos > 0 ? 'pos' : 'neutral' },
+    { lbl: 'Bullish Signals', val: String(bullish) + ' / ' + engines.length, cls: bullish > 0 ? 'pos' : 'neutral' },
   ];
-  return cards.map(c =>
-    '<div class="sum-card"><div class="lbl">' + c.lbl + '</div><div class="val ' + c.cls + '">' + c.val + '</div></div>'
+  $('#summaryStrip').innerHTML = cards.map(c =>
+    '<div class="stat-card"><div class="lbl">' + c.lbl + '</div><div class="val ' + c.cls + '">' + c.val + '</div></div>'
   ).join('');
 }
 
-// ── Open Positions Panel ──────────────────────────────────────────────────────
+// ── Ticker ──────────────────────────────────────────────────────────────────
 
-function renderOpenPositions(engines, spotPrices) {
-  const open = engines.filter(e => e.in_position);
-  const panel = $('#openPanel');
-  if (open.length === 0) { panel.classList.add('hidden'); return; }
-  panel.classList.remove('hidden');
-
-  $('#openGrid').innerHTML = open.map(e => {
-    const sym = (e.symbol || '').toLowerCase();
-    const spot = spotPrices[sym] || e.last_close || 0;
-    const unrealBp = (spot > 0 && e.entry_px > 0) ? ((spot - e.entry_px) / e.entry_px * 10000).toFixed(1) : '---';
-    const unrealCls = parseFloat(unrealBp) >= 0 ? 'pos' : 'neg';
-    const mfeBp = (e.mfe_bp != null) ? fmtBp(e.mfe_bp) : '---';
-    const trailInfo = e.trail_armed ? '<span class="trail-indicator">Trail Armed</span>' : '';
-    const barsHeld = e.bars_held != null ? e.bars_held + '/' + (e.hold_bars_cfg||'?') : '---';
-
-    return '<div class="open-card">' +
-      '<div class="oc-header">' +
-        '<span class="oc-tag">' + (e.tag||'---') + '</span>' +
-        '<span class="oc-pnl ' + unrealCls + '">' + (unrealBp !== '---' ? (parseFloat(unrealBp)>=0?'+':'') + unrealBp + 'bp' : '---') + '</span>' +
-      '</div>' +
-      '<div class="oc-details">' +
-        '<div><div class="lbl">Entry</div><div class="val">' + fmtPx(e.entry_px) + '</div></div>' +
-        '<div><div class="lbl">Spot</div><div class="val">' + fmtPx(spot) + '</div></div>' +
-        '<div><div class="lbl">Stop</div><div class="val neg">' + fmtPx(e.sl_px) + '</div></div>' +
-        '<div><div class="lbl">MFE</div><div class="val">' + mfeBp + '</div></div>' +
-        '<div><div class="lbl">Bars Held</div><div class="val">' + barsHeld + '</div></div>' +
-        '<div><div class="lbl">Trail</div><div class="val">' + (e.trail_stop_px > 0 ? fmtPx(e.trail_stop_px) : '---') + ' ' + trailInfo + '</div></div>' +
-      '</div></div>';
+function renderTicker(spot) {
+  $('#ticker').innerHTML = SYMBOLS.map(s => {
+    const px = spot[s.full];
+    const prev = prevPx[s.full];
+    let cls = 'flat';
+    if (px && prev && px > prev) cls = 'up';
+    else if (px && prev && px < prev) cls = 'down';
+    return '<div class="tick"><div class="sym">' + s.short + '</div><div class="px ' + cls + '">' + (px ? fmtPx(px) : '---') + '</div></div>';
   }).join('');
 }
 
-// ── Market Overview — Price Sparklines ───────────────────────────────────────
+// ── Open Positions — The Main Event ─────────────────────────────────────────
 
-let marketCharts = {};
+function renderPositions(engines, spotPrices) {
+  const open = engines.filter(e => e.in_position);
+  const area = $('#positionsArea');
 
-function renderMarketCards(spotPrices) {
-  const grid = $('#marketGrid');
-  if (grid.childElementCount > 0) {
-    // Update existing charts
-    SYMBOLS.forEach(s => {
-      const hist = priceHistory[s.full];
-      const chart = marketCharts[s.full];
-      if (!chart || hist.length < 2) return;
-      chart.data.labels = hist.map((_, i) => i);
-      chart.data.datasets[0].data = [...hist];
-      const lineColor = hist[hist.length-1] >= hist[0] ? '#3ce088' : '#ff5d7a';
-      const fillColor = hist[hist.length-1] >= hist[0] ? 'rgba(60,224,136,0.06)' : 'rgba(255,93,122,0.06)';
-      chart.data.datasets[0].borderColor = lineColor;
-      chart.data.datasets[0].backgroundColor = fillColor;
-      chart.update('none');
-
-      const card = document.getElementById('mc-' + s.full);
-      if (card) {
-        const pxEl = card.querySelector('.mc-px');
-        const chgEl = card.querySelector('.mc-change');
-        const px = spotPrices[s.full] || 0;
-        if (pxEl) pxEl.textContent = fmtPx(px);
-        if (chgEl && hist.length > 1) {
-          const pctChg = ((hist[hist.length-1] / hist[0]) - 1) * 100;
-          chgEl.textContent = (pctChg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%';
-          chgEl.className = 'mc-change ' + (pctChg >= 0 ? 'pos' : 'neg');
-        }
-      }
-    });
+  if (open.length === 0) {
+    area.innerHTML = '<div class="no-positions"><div class="big-icon">&#9203;</div>No open positions — waiting for signals at next bar close</div>';
     return;
   }
 
-  // First render — create cards and charts
-  grid.innerHTML = SYMBOLS.map(s => {
-    const px = spotPrices[s.full] || 0;
-    return '<div class="market-card" id="mc-' + s.full + '">' +
-      '<div class="mc-header">' +
-        '<span class="mc-sym">' + s.short + '</span>' +
-        '<span class="mc-px">' + fmtPx(px) + '</span>' +
-        '<span class="mc-change neutral">---</span>' +
-      '</div>' +
-      '<canvas id="spark-' + s.full + '"></canvas>' +
-    '</div>';
-  }).join('');
+  // Build cards
+  area.innerHTML = '<div class="pos-grid">' + open.map(e => {
+    const sym = (e.symbol || '').toLowerCase();
+    const spot = spotPrices[sym] || e.last_close || 0;
+    const unrealBp = (spot > 0 && e.entry_px > 0) ? ((spot - e.entry_px) / e.entry_px * 10000) : 0;
+    const unrealCls = unrealBp >= 0 ? 'pos' : 'neg';
+    const tf = getTfLabel(e.tf_secs);
+    const barsHeld = e.bars_held != null ? e.bars_held + '/' + (e.hold_bars_cfg||'?') : '---';
+    const trailPill = e.trail_armed ? '<span class="pc-pill trail">Trail Armed</span>' : '';
+    const riskBp = (e.entry_px > 0 && e.sl_px > 0) ? ((e.sl_px - e.entry_px) / e.entry_px * 10000).toFixed(0) : '---';
 
-  // Init charts
-  SYMBOLS.forEach(s => {
-    const ctx = document.getElementById('spark-' + s.full);
-    if (!ctx) return;
-    marketCharts[s.full] = new Chart(ctx, {
+    return '<div class="pos-card">' +
+      '<div class="pc-header">' +
+        '<span class="pc-tag">' + (e.tag||'---') + '</span>' +
+        '<span class="pc-pnl ' + unrealCls + '">' + fmtBp(unrealBp) + ' bp</span>' +
+      '</div>' +
+      '<div class="pc-meta">' +
+        '<span class="pc-pill">' + (e.strategy||'---') + '</span>' +
+        '<span class="pc-pill">' + tf + '</span>' +
+        '<span class="pc-pill">S' + (e.session||'?') + '</span>' +
+        trailPill +
+      '</div>' +
+      '<div class="pc-grid">' +
+        '<div><div class="lbl">Entry</div><div class="val">' + fmtPx(e.entry_px) + '</div></div>' +
+        '<div><div class="lbl">Spot</div><div class="val">' + fmtPx(spot) + '</div></div>' +
+        '<div><div class="lbl">Stop Loss</div><div class="val neg">' + fmtPx(e.sl_px) + '</div></div>' +
+        '<div><div class="lbl">Risk</div><div class="val neg">' + riskBp + ' bp</div></div>' +
+        '<div><div class="lbl">MFE</div><div class="val pos">+' + (e.mfe_bp||0).toFixed(1) + ' bp</div></div>' +
+        '<div><div class="lbl">Bars Held</div><div class="val">' + barsHeld + '</div></div>' +
+        '<div><div class="lbl">Trail Stop</div><div class="val">' + (e.trail_stop_px > 0 ? fmtPx(e.trail_stop_px) : '---') + '</div></div>' +
+        '<div><div class="lbl">OOS PF</div><div class="val">' + (e.oos_pf ? Number(e.oos_pf).toFixed(2) : '---') + '</div></div>' +
+      '</div>' +
+      '<canvas id="pos-chart-' + (e.tag||'').replace(/[^a-zA-Z0-9]/g,'_') + '"></canvas>' +
+    '</div>';
+  }).join('') + '</div>';
+
+  // Render mini price charts for each position
+  open.forEach(e => {
+    const sym = (e.symbol || '').toLowerCase();
+    const hist = priceHistory[sym];
+    const canvasId = 'pos-chart-' + (e.tag||'').replace(/[^a-zA-Z0-9]/g,'_');
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || hist.length < 3) return;
+
+    // Destroy old chart if exists
+    if (posCharts[canvasId]) { posCharts[canvasId].destroy(); }
+
+    const entryPx = e.entry_px || 0;
+    const slPx = e.sl_px || 0;
+
+    posCharts[canvasId] = new Chart(canvas, {
       type: 'line',
-      data: { labels: [], datasets: [{
-        data: [], borderColor: 'var(--dim)', backgroundColor: 'transparent',
-        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
-      }]},
+      data: {
+        labels: hist.map((_, i) => i),
+        datasets: [
+          {
+            data: [...hist],
+            borderColor: hist[hist.length-1] >= entryPx ? '#3ce088' : '#ff5d7a',
+            backgroundColor: 'transparent',
+            fill: false, tension: 0.2, pointRadius: 0, borderWidth: 1.5,
+          },
+          // Entry line
+          {
+            data: hist.map(() => entryPx),
+            borderColor: 'rgba(74,214,197,0.5)',
+            borderDash: [4, 3],
+            backgroundColor: 'transparent',
+            fill: false, pointRadius: 0, borderWidth: 1,
+          },
+          // Stop loss line
+          {
+            data: hist.map(() => slPx),
+            borderColor: 'rgba(255,93,122,0.4)',
+            borderDash: [4, 3],
+            backgroundColor: 'transparent',
+            fill: false, pointRadius: 0, borderWidth: 1,
+          }
+        ]
+      },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { display: false }, y: { display: false } },
+        scales: { x: { display: false }, y: { display: true, ticks: { color: '#6f7a8c', font: { size: 9 }, maxTicksLimit: 4 }, grid: { color: 'rgba(30,39,56,0.4)' } } },
         animation: false,
       }
     });
   });
 }
 
-// ── Signal Monitor — track momentum changes across bar closes ────────────────
+// ── Signal Readiness (bullish only — compact chips) ─────────────────────────
 
-function updateSignalLog(engines) {
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  let newEntries = 0;
+function renderSignals(engines) {
+  const now = Date.now();
+  const bullish = engines.filter(e => e.signal_ready && e.momentum_pct > 0 && !e.in_position && !e.halted)
+    .sort((a,b) => (b.momentum_pct||0) - (a.momentum_pct||0));
 
-  engines.forEach(e => {
-    if (!e.tag || !e.signal_ready) return;
-    const key = e.tag;
-    const momPct = e.momentum_pct || 0;
-    const prev = prevMomentumState[key];
-
-    // Log on first appearance or when momentum crosses zero
-    if (prev === undefined) {
-      const dir = momPct > 0 ? 'BULLISH' : 'BEARISH';
-      const cls = momPct > 0 ? 'log-bullish' : 'log-bearish';
-      signalLogEntries.unshift({
-        time: timeStr, tag: e.tag,
-        msg: 'Signal ready: ' + dir + ' (' + momPct.toFixed(2) + '%) — close=' + fmtPx(e.last_close) + ' vs lb_close=' + fmtPx(e.lookback_close),
-        cls: cls
-      });
-      newEntries++;
-    } else if ((prev > 0 && momPct <= 0) || (prev <= 0 && momPct > 0)) {
-      const dir = momPct > 0 ? 'FLIPPED BULLISH' : 'FLIPPED BEARISH';
-      const cls = momPct > 0 ? 'log-bullish' : 'log-bearish';
-      signalLogEntries.unshift({
-        time: timeStr, tag: e.tag,
-        msg: dir + ' (' + momPct.toFixed(2) + '%) — close=' + fmtPx(e.last_close) + ' vs lb_close=' + fmtPx(e.lookback_close),
-        cls: cls
-      });
-      newEntries++;
-    }
-
-    // Track position entries/exits
-    if (e.in_position && !prevMomentumState['pos_' + key]) {
-      signalLogEntries.unshift({
-        time: timeStr, tag: e.tag,
-        msg: 'ENTERED position @ ' + fmtPx(e.entry_px) + ' | SL=' + fmtPx(e.sl_px),
-        cls: 'log-bullish'
-      });
-      newEntries++;
-    }
-    if (!e.in_position && prevMomentumState['pos_' + key]) {
-      signalLogEntries.unshift({
-        time: timeStr, tag: e.tag,
-        msg: 'EXITED position | net=' + fmtBp(e.last_bp),
-        cls: e.last_bp >= 0 ? 'log-bullish' : 'log-bearish'
-      });
-      newEntries++;
-    }
-
-    prevMomentumState[key] = momPct;
-    prevMomentumState['pos_' + key] = e.in_position;
-  });
-
-  // Trim
-  while (signalLogEntries.length > SIGNAL_LOG_MAX) signalLogEntries.pop();
-
-  // Render
-  if (signalLogEntries.length === 0) return;
-  $('#signalCount').textContent = signalLogEntries.length + ' events';
-  $('#signalLog').innerHTML = signalLogEntries.map(e =>
-    '<div class="log-entry"><span class="log-time">' + e.time + '</span> ' +
-    '<span class="log-tag">' + e.tag + '</span> ' +
-    '<span class="log-msg ' + e.cls + '">' + e.msg + '</span></div>'
-  ).join('');
-}
-
-// ── Timeframe Tabs ────────────────────────────────────────────────────────────
-
-function groupByTf(engines) {
-  const groups = {};
-  TF_ORDER.forEach(tf => { groups[tf] = []; });
-  engines.forEach(e => {
-    const tf = getTfLabel(e.tf_secs);
-    if (!groups[tf]) groups[tf] = [];
-    groups[tf].push(e);
-  });
-  return groups;
-}
-
-function renderTabBar(engines) {
-  const groups = groupByTf(engines);
-  let html = '<div class="tab' + (activeTab==='ALL'?' active':'') + '" data-tf="ALL">All<span class="badge">' + engines.length + '</span></div>';
-
-  TF_ORDER.forEach(tf => {
-    const arr = groups[tf] || [];
-    if (arr.length === 0) return;
-    const inPos = arr.filter(e => e.in_position).length;
-    const bullish = arr.filter(e => e.signal_ready && e.momentum_pct > 0).length;
-    const badgeCls = inPos > 0 ? 'badge active-trade' : 'badge';
-    const extraInfo = bullish > 0 ? ' / ' + bullish + ' bull' : '';
-    html += '<div class="tab' + (activeTab===tf?' active':'') + '" data-tf="' + tf + '">' +
-      tf + '<span class="' + badgeCls + '">' + arr.length + (inPos > 0 ? ' / ' + inPos + ' open' : '') + extraInfo + '</span></div>';
-  });
-
-  $('#tabBar').innerHTML = html;
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      activeTab = tab.dataset.tf;
-      renderTabBar(lastEngines);
-      renderTabContent(lastEngines);
-    });
-  });
-}
-
-function renderTabContent(engines) {
-  const groups = groupByTf(engines);
-  let filtered = [];
-  if (activeTab === 'ALL') {
-    TF_ORDER.forEach(tf => { filtered = filtered.concat(groups[tf] || []); });
-  } else {
-    filtered = groups[activeTab] || [];
-  }
-
-  if (filtered.length === 0) {
-    $('#tabContent').innerHTML = '<div class="no-trades">No engines in this timeframe</div>';
+  if (bullish.length === 0) {
+    $('#signalGrid').innerHTML = '<div style="padding:12px;color:var(--dim);font-size:11px;">No bullish signals currently — all momentum is bearish or engines are warming up</div>';
     return;
   }
 
-  // Sort: in-position first, then by momentum_pct descending
-  filtered.sort((a,b) => {
+  $('#signalGrid').innerHTML = bullish.map(e => {
+    const mom = (e.momentum_pct||0).toFixed(1);
+    const nextMs = (e.next_bar_close_ms || 0) - now;
+    const nextStr = nextMs > 0 ? fmtCountdown(nextMs) : 'now';
+    return '<div class="sig-chip">' +
+      '<span class="dot bull"></span>' +
+      '<span class="tag">' + (e.tag||'---') + '</span>' +
+      '<span class="mom pos">+' + mom + '%</span>' +
+      '<span class="next">' + nextStr + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+// ── All Engines (hidden toggle) ─────────────────────────────────────────────
+
+function renderAllEngines(engines) {
+  const now = Date.now();
+  const sorted = [...engines].sort((a,b) => {
     if (a.in_position && !b.in_position) return -1;
     if (!a.in_position && b.in_position) return 1;
     return (b.momentum_pct||0) - (a.momentum_pct||0);
   });
 
-  const now = Date.now();
-
-  let html = '<table class="engine-table"><thead><tr>' +
-    '<th>Engine</th><th>Status</th><th>Momentum</th><th>Next Bar</th>' +
-    '<th>Bars</th><th>Trades</th><th>Win%</th><th>Net P&L</th><th>Last</th>' +
-    '<th>OOS PF</th><th>Sharpe</th><th>Nbr%</th><th>Params</th><th>Sess</th>' +
-    '</tr></thead><tbody>';
-
-  filtered.forEach(e => {
-    const inPos = !!e.in_position;
-    const halted = !!e.halted;
-    const rowCls = halted ? 'halted' : (inPos ? 'in-pos' : '');
-    const stateClass = halted ? 'halted' : (inPos ? 'intrade' : (e.shadow ? 'shadow' : 'live'));
-    const stateText  = halted ? 'Halted' : (inPos ? 'In Trade' : (e.shadow ? 'Shadow' : 'Live'));
-    const totalCls = (e.total_bp||0) > 0 ? 'pos' : ((e.total_bp||0) < 0 ? 'neg' : '');
-    const lastCls = (e.last_bp||0) > 0 ? 'pos' : ((e.last_bp||0) < 0 ? 'neg' : '');
-
-    // Momentum cell
-    let momHtml = '';
-    if (!e.signal_ready) {
-      const needed = (e.lookback||0) + 1;
-      const have = e.bars_in_buffer || 0;
-      momHtml = '<span class="mom-cell waiting">Warming ' + have + '/' + needed + '</span>';
-    } else {
-      const pct = (e.momentum_pct||0);
-      const cls = pct > 0 ? 'bullish' : 'bearish';
-      const arrow = pct > 0 ? '▲' : '▼';
-      momHtml = '<span class="mom-cell ' + cls + '">' + arrow + ' ' + pct.toFixed(2) + '%</span>';
-    }
-
-    // Next bar countdown
-    let nextBarHtml = '---';
-    if (e.next_bar_close_ms && e.next_bar_close_ms > 0) {
-      const remain = e.next_bar_close_ms - now;
-      nextBarHtml = '<span class="countdown">' + fmtCountdown(remain) + '</span>';
-    }
-
-    // Bars: show as fraction of max_history
-    const barsStr = (e.bars_in_buffer||0) + '/' + (e.lookback||'?');
-
-    // Neighbourhood stability bar
-    const nbr = e.oos_nbr || 0;
-    const nbrColor = nbr >= 90 ? 'var(--green)' : (nbr >= 70 ? 'var(--accent)' : (nbr >= 50 ? 'var(--amber)' : 'var(--red)'));
-
-    // Compact params
-    const params = 'LB=' + (e.lookback||'?') + ' HB=' + (e.hold_bars_cfg||'?') + ' SL=' + (e.sl_atr_mult||'?') + 'x';
-
-    html += '<tr class="' + rowCls + '">' +
-      '<td class="tag-cell">' + (e.tag||'---') + '</td>' +
-      '<td><span class="pill ' + stateClass + '">' + stateText + '</span></td>' +
-      '<td>' + momHtml + '</td>' +
-      '<td>' + nextBarHtml + '</td>' +
-      '<td>' + barsStr + '</td>' +
-      '<td>' + fmtInt(e.trades) + '</td>' +
-      '<td>' + wrPct(e.wins, e.trades) + '</td>' +
-      '<td class="' + totalCls + '">' + fmtBp(e.total_bp) + '</td>' +
-      '<td class="' + lastCls + '">' + fmtBp(e.last_bp) + '</td>' +
-      '<td>' + (e.oos_pf ? Number(e.oos_pf).toFixed(2) : '---') + '</td>' +
-      '<td>' + (e.oos_sharpe ? Number(e.oos_sharpe).toFixed(2) : '---') + '</td>' +
-      '<td><span style="color:' + nbrColor + '">' + nbr + '%</span> ' +
-        '<span class="mini-bar" title="Neighbourhood ' + nbr + '%"><span class="fill" style="width:' + nbr + '%;background:' + nbrColor + '"></span></span></td>' +
-      '<td>' + params + '</td>' +
-      '<td>S' + fmtInt(e.session) + '</td>' +
-      '</tr>';
-  });
-
-  html += '</tbody></table>';
-  $('#tabContent').innerHTML = html;
-}
-
-// ── Trade History ─────────────────────────────────────────────────────────────
-
-function renderTradeFilters(trades) {
-  const tags = new Set();
-  trades.forEach(t => { if (t.tag) tags.add(t.tag); });
-  const sorted = [...tags].sort();
-
-  let html = '<button class="filter-btn' + (tradeFilterTag==='ALL'?' active':'') + '" data-filter="ALL">All</button>';
-  sorted.forEach(tag => {
-    html += '<button class="filter-btn' + (tradeFilterTag===tag?' active':'') + '" data-filter="' + tag + '">' + tag + '</button>';
-  });
-  $('#tradeFilters').innerHTML = html;
-
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      tradeFilterTag = btn.dataset.filter;
-      renderTradeFilters(lastTrades);
-      renderTradesTable(lastTrades);
-    });
-  });
-}
-
-function renderTradesTable(trades) {
-  if (!trades || trades.length === 0) {
-    $('#tradesBody').innerHTML = '<tr><td colspan="12" class="no-trades">No trades yet — waiting for first signal</td></tr>';
-    return;
-  }
-
-  let filtered = trades;
-  if (tradeFilterTag !== 'ALL') {
-    filtered = trades.filter(t => t.tag === tradeFilterTag);
-  }
-
-  const sorted = [...filtered].sort((a,b) => (b.exit_ts||0) - (a.exit_ts||0));
-  if (sorted.length === 0) {
-    $('#tradesBody').innerHTML = '<tr><td colspan="12" class="no-trades">No trades for this engine</td></tr>';
-    return;
-  }
-
-  $('#tradesBody').innerHTML = sorted.map(t => {
-    const netCls = (t.net_bp||0) > 0 ? 'pos' : ((t.net_bp||0) < 0 ? 'neg' : '');
-    const grossCls = (t.gross_bp||0) > 0 ? 'pos' : ((t.gross_bp||0) < 0 ? 'neg' : '');
-    const sym = (t.symbol || '').toUpperCase().replace('USDT','');
-    const tf = t.tag ? t.tag.split('-').pop() : '---';
-    return '<tr>' +
-      '<td>' + (t.trade_num||'---') + '</td>' +
-      '<td>' + fmtDate(t.exit_ts) + '</td>' +
-      '<td class="tag-cell" style="font-size:11px">' + (t.tag||'---') + '</td>' +
-      '<td>' + sym + '</td>' +
-      '<td>' + tf + '</td>' +
-      '<td>' + (t.reason||'---') + '</td>' +
-      '<td>' + fmtPx(t.entry_px) + '</td>' +
-      '<td>' + fmtPx(t.exit_px) + '</td>' +
-      '<td class="' + grossCls + '">' + fmtBp(t.gross_bp) + '</td>' +
-      '<td class="' + netCls + '">' + fmtBp(t.net_bp) + '</td>' +
-      '<td>' + fmtBp(t.mfe_bp) + '</td>' +
-      '<td>' + fmtDuration(t.entry_ts, t.exit_ts) + '</td>' +
-      '</tr>';
+  $('#allEnginesGrid').innerHTML = sorted.map(e => {
+    const mom = (e.momentum_pct||0);
+    const isBull = mom > 0;
+    const dotCls = e.in_position ? 'bull' : (isBull ? 'bull' : 'bear');
+    const momStr = (isBull ? '+' : '') + mom.toFixed(1) + '%';
+    const momCls = isBull ? 'pos' : 'neg';
+    const nextMs = (e.next_bar_close_ms || 0) - now;
+    const nextStr = nextMs > 0 ? fmtCountdown(nextMs) : 'now';
+    return '<div class="sig-chip">' +
+      '<span class="dot ' + dotCls + '"></span>' +
+      '<span class="tag">' + (e.tag||'---') + '</span>' +
+      '<span class="mom ' + momCls + '">' + momStr + '</span>' +
+      '<span class="next">' + nextStr + '</span>' +
+    '</div>';
   }).join('');
 }
 
-// ── Charts ────────────────────────────────────────────────────────────────────
+// ── Trade History ───���───────────────────────────────────────────────────────
+
+function renderTrades(trades) {
+  if (!trades || trades.length === 0) {
+    $('#tradesBody').innerHTML = '<tr><td colspan="9" class="no-trades">No trades yet</td></tr>';
+    $('#tradeCount').textContent = '0 trades';
+    return;
+  }
+  const sorted = [...trades].sort((a,b) => (b.exit_ts||0) - (a.exit_ts||0));
+  $('#tradeCount').textContent = trades.length + ' trades';
+  $('#tradesBody').innerHTML = sorted.map(t => {
+    const netCls = (t.net_bp||0) > 0 ? 'pos' : ((t.net_bp||0) < 0 ? 'neg' : '');
+    return '<tr>' +
+      '<td>' + (t.trade_num||'---') + '</td>' +
+      '<td>' + fmtDate(t.exit_ts) + '</td>' +
+      '<td style="font-weight:700;color:var(--accent);">' + (t.tag||'---') + '</td>' +
+      '<td>' + (t.reason||'---') + '</td>' +
+      '<td>' + fmtPx(t.entry_px) + '</td>' +
+      '<td>' + fmtPx(t.exit_px) + '</td>' +
+      '<td class="' + netCls + '" style="font-weight:700">' + fmtBp(t.net_bp) + '</td>' +
+      '<td>' + fmtBp(t.mfe_bp) + '</td>' +
+      '<td>' + fmtDuration(t.entry_ts, t.exit_ts) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+// ── Charts ────���─────────────────────────────────────────────────────────────
 
 let equityChart = null;
-let pnlBarChart = null;
+let winLossChart = null;
 
 function initCharts() {
-  const ctx1 = document.getElementById('equityChart').getContext('2d');
-  equityChart = new Chart(ctx1, {
+  equityChart = new Chart($('#equityChart').getContext('2d'), {
     type: 'line',
-    data: { labels: [], datasets: [{
-      label: 'Cumulative Net (bp)',
-      data: [],
-      borderColor: '#4ad6c5',
-      backgroundColor: 'rgba(74,214,197,0.08)',
-      fill: true, tension: 0.2, pointRadius: 2,
-      pointBackgroundColor: '#4ad6c5', borderWidth: 1.5,
+    data: { labels: ['Start'], datasets: [{
+      data: [0], borderColor: '#4ad6c5', backgroundColor: 'rgba(74,214,197,0.06)',
+      fill: true, tension: 0.2, pointRadius: 2, pointBackgroundColor: '#4ad6c5', borderWidth: 1.5,
     }]},
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false },
-        tooltip: { backgroundColor: '#161e2c', titleColor: '#cfd5e1', bodyColor: '#cfd5e1',
-          borderColor: '#1e2738', borderWidth: 1,
-          callbacks: { label: ctx => 'Cum: ' + ctx.parsed.y.toFixed(1) + ' bp' }
-        }
-      },
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#161e2c', titleColor: '#cfd5e1', bodyColor: '#cfd5e1', borderColor: '#1e2738', borderWidth: 1 } },
       scales: {
         x: { ticks: { color: '#6f7a8c', font: { size: 9 }, maxRotation: 45 }, grid: { color: 'rgba(30,39,56,0.4)' } },
         y: { ticks: { color: '#6f7a8c', font: { size: 9 }, callback: v => v + 'bp' }, grid: { color: 'rgba(30,39,56,0.4)' } }
@@ -1016,104 +632,52 @@ function initCharts() {
     }
   });
 
-  const ctx2 = document.getElementById('pnlByEngine').getContext('2d');
-  pnlBarChart = new Chart(ctx2, {
+  winLossChart = new Chart($('#winLossChart').getContext('2d'), {
     type: 'bar',
     data: { labels: [], datasets: [{
-      data: [], backgroundColor: [],
-      borderColor: [], borderWidth: 1, borderRadius: 2,
+      data: [], backgroundColor: [], borderRadius: 3,
     }]},
     options: {
       responsive: true, maintainAspectRatio: false,
-      indexAxis: 'y',
-      plugins: { legend: { display: false },
-        tooltip: { backgroundColor: '#161e2c', titleColor: '#cfd5e1', bodyColor: '#cfd5e1',
-          borderColor: '#1e2738', borderWidth: 1,
-        }
-      },
+      plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { color: '#6f7a8c', font: { size: 9 }, callback: v => v + 'bp' }, grid: { color: 'rgba(30,39,56,0.4)' } },
-        y: { ticks: { color: '#cfd5e1', font: { size: 9 } }, grid: { display: false } }
+        x: { display: false },
+        y: { ticks: { color: '#6f7a8c', font: { size: 9 }, callback: v => v + 'bp' }, grid: { color: 'rgba(30,39,56,0.4)' } }
       }
     }
   });
 }
 
-function updateEquityChart(trades) {
-  if (!equityChart) return;
-  if (!trades || trades.length === 0) {
-    equityChart.data.labels = ['Start'];
-    equityChart.data.datasets[0].data = [0];
-    equityChart.update('none');
-    return;
-  }
+function updateCharts(trades) {
+  if (!trades || trades.length === 0) return;
+
+  // Equity curve
   const sorted = [...trades].sort((a,b) => (a.exit_ts||0) - (b.exit_ts||0));
   const labels = ['Start'];
   const data = [0];
   let cum = 0;
-  sorted.forEach((t, i) => {
-    cum += (t.net_bp||0);
-    labels.push('#' + (t.trade_num||(i+1)));
-    data.push(parseFloat(cum.toFixed(1)));
-  });
-
+  sorted.forEach((t, i) => { cum += (t.net_bp||0); labels.push('#' + (i+1)); data.push(parseFloat(cum.toFixed(1))); });
   const lastVal = data[data.length - 1];
-  const lineColor = lastVal >= 0 ? '#3ce088' : '#ff5d7a';
-  const fillColor = lastVal >= 0 ? 'rgba(60,224,136,0.06)' : 'rgba(255,93,122,0.06)';
-  equityChart.data.datasets[0].borderColor = lineColor;
-  equityChart.data.datasets[0].backgroundColor = fillColor;
-  equityChart.data.datasets[0].pointBackgroundColor = lineColor;
   equityChart.data.labels = labels;
   equityChart.data.datasets[0].data = data;
+  equityChart.data.datasets[0].borderColor = lastVal >= 0 ? '#3ce088' : '#ff5d7a';
+  equityChart.data.datasets[0].backgroundColor = lastVal >= 0 ? 'rgba(60,224,136,0.06)' : 'rgba(255,93,122,0.06)';
+  equityChart.data.datasets[0].pointBackgroundColor = lastVal >= 0 ? '#3ce088' : '#ff5d7a';
   equityChart.update('none');
+
+  // Win/Loss bar chart — each trade as a bar
+  const last20 = sorted.slice(-20);
+  winLossChart.data.labels = last20.map((t,i) => t.tag ? t.tag.split('-')[0] : '#'+(i+1));
+  winLossChart.data.datasets[0].data = last20.map(t => parseFloat((t.net_bp||0).toFixed(1)));
+  winLossChart.data.datasets[0].backgroundColor = last20.map(t => (t.net_bp||0) >= 0 ? 'rgba(60,224,136,0.6)' : 'rgba(255,93,122,0.6)');
+  winLossChart.update('none');
 }
 
-function updatePnlBarChart(engines) {
-  if (!pnlBarChart) return;
-  const sorted = [...engines].filter(e => e.trades > 0 || e.total_bp !== 0)
-    .sort((a,b) => (b.total_bp||0) - (a.total_bp||0));
+// ── Polling ──────────────────────────────���──────────────────────────────────
 
-  if (sorted.length === 0) {
-    pnlBarChart.data.labels = [];
-    pnlBarChart.data.datasets[0].data = [];
-    pnlBarChart.update('none');
-    return;
-  }
-
-  const labels = sorted.map(e => {
-    const parts = (e.tag||'').split('-');
-    return parts.length >= 3 ? parts[0] + '-' + parts[2] : (e.tag||'---');
-  });
-  const data = sorted.map(e => parseFloat((e.total_bp||0).toFixed(1)));
-  const bgColors = data.map(v => v >= 0 ? 'rgba(60,224,136,0.5)' : 'rgba(255,93,122,0.5)');
-  const borderColors = data.map(v => v >= 0 ? '#3ce088' : '#ff5d7a');
-
-  pnlBarChart.data.labels = labels;
-  pnlBarChart.data.datasets[0].data = data;
-  pnlBarChart.data.datasets[0].backgroundColor = bgColors;
-  pnlBarChart.data.datasets[0].borderColor = borderColors;
-  pnlBarChart.update('none');
-}
-
-// ── Polling ───────────────────────────────────────────────────────────────────
-
-let lastFetchOk = 0;
 let lastTradesJson = '';
 
-async function fetchTrades() {
-  try {
-    const r = await fetch('/api/trades', { cache: 'no-store' });
-    if (!r.ok) return null;
-    const text = await r.text();
-    if (text === lastTradesJson) return null;
-    lastTradesJson = text;
-    return JSON.parse(text);
-  } catch(e) { return null; }
-}
-
 async function refresh() {
-  const dot = $('#statusDot');
-  const txt = $('#statusText');
   try {
     const r = await fetch('/api/state2', { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1123,129 +687,105 @@ async function refresh() {
     const engines = j.engines || [];
     lastEngines = engines;
 
-    // Collect price history for sparklines (every refresh = ~1s)
+    // Price history
     SYMBOLS.forEach(s => {
       const px = spot[s.full];
       if (px != null && !isNaN(px) && px > 0) {
-        const hist = priceHistory[s.full];
-        hist.push(px);
-        while (hist.length > HISTORY_MAX) hist.shift();
+        priceHistory[s.full].push(px);
+        while (priceHistory[s.full].length > HISTORY_MAX) priceHistory[s.full].shift();
       }
     });
 
-    if (j.startup_ts) serverStartupTs = j.startup_ts;
+    if (j.startup_ts && Number(j.startup_ts) > 0) serverStartupTs = Number(j.startup_ts);
     $('#buildVer').textContent = 'build ' + (j.build || '---');
-    $('#engineCount').textContent = engines.length + ' engines';
-    $('#ticker').innerHTML = renderTicker(spot);
 
-    // Bell on new position entries
+    // Bell on new entries
     const currentOpen = new Set(engines.filter(e => e.in_position).map(e => e.tag));
     if (prevOpenPositions.size > 0 || prevTradeCount >= 0) {
-      currentOpen.forEach(tag => {
-        if (!prevOpenPositions.has(tag) && bellEnabled) playBellEntry();
-      });
+      currentOpen.forEach(tag => { if (!prevOpenPositions.has(tag) && bellEnabled) playBell([523.25, 659.25, 783.99], 0.3); });
     }
     prevOpenPositions = currentOpen;
 
-    renderOpenPositions(engines, spot);
-    renderTabBar(engines);
-    renderTabContent(engines);
-    renderMarketCards(spot);
-    updateSignalLog(engines);
-    updatePnlBarChart(engines);
+    renderTicker(spot);
+    renderPositions(engines, spot);
+    renderSignals(engines);
 
-    SYMBOLS.forEach(s => {
-      const px = spot[s.full];
-      if (px != null && !isNaN(px) && px > 0) prevPx[s.full] = px;
-    });
+    SYMBOLS.forEach(s => { const px = spot[s.full]; if (px) prevPx[s.full] = px; });
 
     lastFetchOk = Date.now();
-    dot.className = 'status-dot ok';
-    txt.textContent = 'Live';
-    $('#lastUpdated').textContent = new Date().toLocaleTimeString();
+    $('#statusDot').className = 'status-dot ok';
+    $('#statusText').textContent = 'Live';
   } catch (err) {
     const age = lastFetchOk ? Math.round((Date.now() - lastFetchOk) / 1000) : null;
-    if (age != null && age < 10) {
-      dot.className = 'status-dot stale';
-      txt.textContent = 'Stale (' + age + 's)';
-    } else {
-      dot.className = 'status-dot down';
-      txt.textContent = 'Disconnected';
-    }
+    if (age && age < 10) { $('#statusDot').className = 'status-dot stale'; $('#statusText').textContent = 'Stale'; }
+    else { $('#statusDot').className = 'status-dot down'; $('#statusText').textContent = 'Disconnected'; }
   }
 }
 
 async function refreshTrades() {
-  const trades = await fetchTrades();
-  if (trades !== null) {
-    // Bell on new completed trades (skip initial load)
+  try {
+    const r = await fetch('/api/trades', { cache: 'no-store' });
+    if (!r.ok) return;
+    const text = await r.text();
+    if (text === lastTradesJson) return;
+    lastTradesJson = text;
+    const trades = JSON.parse(text);
+
+    // Bell on new trades
     if (prevTradeCount >= 0 && trades.length > prevTradeCount) {
-      const newTrades = trades.slice(prevTradeCount);
-      newTrades.forEach(t => {
-        if (bellEnabled) {
-          if ((t.net_bp || 0) > 0) playBellWin();
-          else playBellLoss();
-        }
+      trades.slice(prevTradeCount).forEach(t => {
+        if (bellEnabled) playBell((t.net_bp||0) > 0 ? [880, 1174.66] : [440], 0.5);
       });
     }
     prevTradeCount = trades.length;
-
     lastTrades = trades;
-    $('#summaryRow').innerHTML = renderSummary(lastEngines, trades);
-    renderTradeFilters(trades);
-    renderTradesTable(trades);
-    updateEquityChart(trades);
-  }
+
+    renderSummary(lastEngines, trades);
+    renderTrades(trades);
+    updateCharts(trades);
+  } catch(e) {}
 }
 
-// ── Kill All ──────────────────────────────────────────────────────────────────
-
-$('#killAll').addEventListener('click', async () => {
-  if (!confirm('Kill all engines? This will flatten every open paper position and halt new entries.')) return;
-  try {
-    const r = await fetch('/api/kill', { method: 'POST' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    alert('Kill sent.');
-    refresh();
-  } catch (err) {
-    alert('Kill failed: ' + err.message);
-  }
-});
-
-// ── Clock & Uptime ───────────────────────────────────────────────────────────
+// ── Clock ───────────────────────────────────────────────────────────────────
 
 function updateClock() {
   const now = new Date();
-  const utc = now.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'UTC' });
-  $('#clockDisplay').textContent = utc + ' UTC';
-
+  $('#clockDisplay').textContent = now.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'UTC'}) + ' UTC';
   if (serverStartupTs > 0) {
     const elapsed = Math.floor((Date.now() - serverStartupTs) / 1000);
     const d = Math.floor(elapsed / 86400);
     const h = Math.floor((elapsed % 86400) / 3600);
     const m = Math.floor((elapsed % 3600) / 60);
-    const s = elapsed % 60;
-    let uptimeStr = '';
-    if (d > 0) uptimeStr = d + 'd ' + h + 'h ' + m + 'm';
-    else if (h > 0) uptimeStr = h + 'h ' + m + 'm ' + s + 's';
-    else uptimeStr = m + 'm ' + s + 's';
-    $('#uptimeDisplay').textContent = 'up ' + uptimeStr;
+    let str = '';
+    if (d > 0) str = d + 'd ' + h + 'h';
+    else if (h > 0) str = h + 'h ' + m + 'm';
+    else str = m + 'm';
+    $('#uptimeDisplay').textContent = 'up ' + str;
   }
 }
 
-// ── Bell Toggle ──────────────────────────────────────────────────────────────
+// ── Event Handlers ──────────────────────────────────────────────────────────
+
+$('#killAll').addEventListener('click', async () => {
+  if (!confirm('Kill all positions?')) return;
+  try { await fetch('/api/kill', { method: 'POST' }); refresh(); } catch(e) { alert('Failed: ' + e.message); }
+});
 
 $('#bellIndicator').addEventListener('click', () => {
   bellEnabled = !bellEnabled;
   $('#bellIndicator').style.opacity = bellEnabled ? '1' : '0.3';
-  $('#bellIndicator').title = bellEnabled ? 'Trade alerts ON — click to mute' : 'Click to enable trade alert sounds';
-  if (bellEnabled) {
-    try { getAudioCtx(); } catch(e) {}
-    playBellEntry();
-  }
+  if (bellEnabled) { try { getAudioCtx(); } catch(e) {} playBell([523.25, 659.25], 0.3); }
 });
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+$('#toggleAllEngines').addEventListener('click', () => {
+  $('#allEnginesSection').classList.remove('hidden');
+  renderAllEngines(lastEngines);
+});
+$('#hideAllEngines').addEventListener('click', () => {
+  $('#allEnginesSection').classList.add('hidden');
+});
+
+// ── Init ────────────────────────────────────────────────────────────────────
 
 initCharts();
 refresh();

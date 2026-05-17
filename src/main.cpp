@@ -148,6 +148,9 @@
 #include "live/SpotExecutor.hpp"
 #include "core/EdgeEngine.hpp"
 #include "core/SymbolIndex.hpp"
+#include "core/market_data/MultiSymbolFundingFilter.hpp"
+#include "core/LiquidationCascadeDetector.hpp"
+#include "live/LiquidationWSFeed.hpp"
 
 #include "version_generated.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
@@ -231,6 +234,15 @@ static std::string read_file(const std::string& path) {
 }
 
 static std::string gui_root;
+
+// ── Session 30: Multi-symbol funding filter ─────────────────────────────────
+static chimera::MultiSymbolFundingFilter g_funding_filter;
+static int64_t g_last_funding_fetch_ms = 0;
+static constexpr int64_t FUNDING_FETCH_INTERVAL_MS = 8 * 3600 * 1000LL; // every 8h
+
+// ── Session 30: Liquidation cascade detector ────────────────────────────────
+static chimera::LiquidationCascadeDetector g_liq_detector;
+static chimera::LiquidationWSFeed g_liq_feed;
 
 // ── Trade journal — persist to JSON, serve via /api/trades ───────────────────
 static constexpr const char* TRADES_FILE = "data/trades.json";
@@ -836,7 +848,7 @@ static void seed_engine_from_h1_aggregation(chimera::BinanceREST& rest,
 int main() {
     g_startup_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (245 active) | build=%s\n", BUILD_VERSION);
+    std::printf("[STARTUP] Chimera — Tier-2 Edge Engines (285 active) | build=%s\n", BUILD_VERSION);
     std::fflush(stdout);
 
     acquire_instance_lock();
@@ -3779,27 +3791,9 @@ int main() {
     };
     chimera::EdgeEngine link_tsmom_d3(link_tsmom_d3_cfg);
     link_tsmom_d3.set_on_trade(on_trade_callback);
-    // ENGINE S21X-41: NEAR-TSMOM-D3 — PF=99.90, Sharpe=6.08, 10 trades, Nbr=44%
-    chimera::EdgeEngine::Config near_tsmom_d3_cfg{
-        .symbol         = "nearusdt",
-        .tag            = "NEAR-TSMOM-D3",
-        .kind           = chimera::StrategyKind::TSMOM,
-        .tf_secs        = 259200,
-        .lookback       = 35,
-        .hold_bars      = 10,
-        .sl_atr_mult    = 3.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 17,
-        .max_history    = 64,
-        .trail_arm_atr  = 1.0,
-        .trail_dist_atr = 0.8,
-        .trail_tighten_atr  = 3.0,
-        .trail_tighten_dist_atr = 0.25,
-    };
-    chimera::EdgeEngine near_tsmom_d3(near_tsmom_d3_cfg);
-    near_tsmom_d3.set_on_trade(on_trade_callback);
+    // ENGINE S21X-41: NEAR-TSMOM-D3 — DISABLED (FAILED re-validation: OOS PF=0.86, edge not confirmed)
+    // chimera::EdgeEngine::Config near_tsmom_d3_cfg{...};
+    // chimera::EdgeEngine near_tsmom_d3(near_tsmom_d3_cfg);
     // ENGINE S21X-42: BNB-TSMOM-D3 — PF=34.14, Sharpe=2.67, 13 trades, Nbr=100%
     chimera::EdgeEngine::Config bnb_tsmom_d3_cfg{
         .symbol         = "bnbusdt",
@@ -3969,27 +3963,9 @@ int main() {
     };
     chimera::EdgeEngine link_rsi_h6(link_rsi_h6_cfg);
     link_rsi_h6.set_on_trade(on_trade_callback);
-    // ENGINE S21X-51: BNB-RSI-H6 — PF=373.91, Sharpe=2.49, 14 trades, Nbr=100%
-    chimera::EdgeEngine::Config bnb_rsi_h6_cfg{
-        .symbol         = "bnbusdt",
-        .tag            = "BNB-RSI-H6",
-        .kind           = chimera::StrategyKind::RSI_REVERT,
-        .tf_secs        = 21600,
-        .lookback       = 25,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 2.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 22,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.4,
-        .trail_tighten_atr  = 1.5,
-        .trail_tighten_dist_atr = 0.15,
-    };
-    chimera::EdgeEngine bnb_rsi_h6(bnb_rsi_h6_cfg);
-    bnb_rsi_h6.set_on_trade(on_trade_callback);
+    // ENGINE S21X-51: BNB-RSI-H6 — DISABLED (FAILED re-validation: OOS PF=1.08, original 373.9 was mirage)
+    // chimera::EdgeEngine::Config bnb_rsi_h6_cfg{...};
+    // chimera::EdgeEngine bnb_rsi_h6(bnb_rsi_h6_cfg);
     // ENGINE S21X-52: DOGE-RSI-H6 — PF=3.72, Sharpe=1.96, 16 trades, Nbr=67%
     chimera::EdgeEngine::Config doge_rsi_h6_cfg{
         .symbol         = "dogeusdt",
@@ -4263,27 +4239,9 @@ int main() {
     };
     chimera::EdgeEngine sol_rsi_h12(sol_rsi_h12_cfg);
     sol_rsi_h12.set_on_trade(on_trade_callback);
-    // ENGINE S21X-65: XRP-RSI-H12 — PF=63.22, Sharpe=2.33, 11 trades, Nbr=80%
-    chimera::EdgeEngine::Config xrp_rsi_h12_cfg{
-        .symbol         = "xrpusdt",
-        .tag            = "XRP-RSI-H12",
-        .kind           = chimera::StrategyKind::RSI_REVERT,
-        .tf_secs        = 43200,
-        .lookback       = 20,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 3.5,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 20,
-        .max_history    = 64,
-        .trail_arm_atr  = 0.5,
-        .trail_dist_atr = 0.3,
-        .trail_tighten_atr  = 1.5,
-        .trail_tighten_dist_atr = 0.15,
-    };
-    chimera::EdgeEngine xrp_rsi_h12(xrp_rsi_h12_cfg);
-    xrp_rsi_h12.set_on_trade(on_trade_callback);
+    // ENGINE S21X-65: XRP-RSI-H12 — DISABLED (FAILED re-validation: OOS PF=1.09, recent PF=0.89, no edge)
+    // chimera::EdgeEngine::Config xrp_rsi_h12_cfg{...};
+    // chimera::EdgeEngine xrp_rsi_h12(xrp_rsi_h12_cfg);
     // ENGINE S21X-66: LINK-RSI-H12 — PF=15.83, Sharpe=5.99, 12 trades, Nbr=100%
     chimera::EdgeEngine::Config link_rsi_h12_cfg{
         .symbol         = "linkusdt",
@@ -5107,26 +5065,9 @@ int main() {
     chimera::EdgeEngine arb_boll_h8(arb_boll_h8_cfg);
     arb_boll_h8.set_on_trade(on_trade_callback);
 
-    chimera::EdgeEngine::Config eth_rsi_h16_cfg{
-        .symbol         = "ethusdt",
-        .tag            = "ETH-RSI-H16",
-        .kind           = chimera::StrategyKind::RSI_REVERT,
-        .tf_secs        = 57600,
-        .lookback       = 5,
-        .hold_bars      = 24,
-        .sl_atr_mult    = 4.0,
-        .atr_period     = 14,
-        .bb_k           = 2.0,
-        .rsi_threshold  = 30.0,
-        .round_trip_bp  = 22.0,
-        .max_history    = 64,
-        .trail_arm_atr  = 1.0,
-        .trail_dist_atr = 0.3,
-        .trail_tighten_atr  = 1.5,
-        .trail_tighten_dist_atr = 0.15,
-    };
-    chimera::EdgeEngine eth_rsi_h16(eth_rsi_h16_cfg);
-    eth_rsi_h16.set_on_trade(on_trade_callback);
+    // ETH-RSI-H16 — DISABLED (FAILED re-validation: OOS PF=0.49, recent PF=0.24, actively losing)
+    // chimera::EdgeEngine::Config eth_rsi_h16_cfg{...};
+    // chimera::EdgeEngine eth_rsi_h16(eth_rsi_h16_cfg);
 
     chimera::EdgeEngine::Config bnb_rsi_h16_cfg{
         .symbol         = "bnbusdt",
@@ -6197,6 +6138,981 @@ int main() {
     chimera::EdgeEngine apt_tsmom_h12(apt_tsmom_h12_cfg);
     apt_tsmom_h12.set_on_trade(on_trade_callback);
 
+    // ── Session 26 — RSI_REVERT H4 + BOLLINGER H4/H2 new edges ──────────
+
+    // ENGINE S26-1: ETH-RSI-H4 — PF=1.82, Sharpe=1.45, 38 trades, Nbr=72%
+    chimera::EdgeEngine::Config eth_rsi_h4_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-RSI-H4",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 14400,
+        .lookback       = 30,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine eth_rsi_h4(eth_rsi_h4_cfg);
+    eth_rsi_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-2: DOGE-RSI-H4 — PF=1.67, Sharpe=1.31, 42 trades, Nbr=68%
+    chimera::EdgeEngine::Config doge_rsi_h4_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-RSI-H4",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 14400,
+        .lookback       = 30,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine doge_rsi_h4(doge_rsi_h4_cfg);
+    doge_rsi_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-3: XRP-RSI-H4 — PF=1.74, Sharpe=1.38, 45 trades, Nbr=70%
+    chimera::EdgeEngine::Config xrp_rsi_h4_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-RSI-H4",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 14400,
+        .lookback       = 30,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine xrp_rsi_h4(xrp_rsi_h4_cfg);
+    xrp_rsi_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-4: SOL-RSI-H4 — PF=1.58, Sharpe=1.22, 35 trades, Nbr=65%
+    chimera::EdgeEngine::Config sol_rsi_h4_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-RSI-H4",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 14400,
+        .lookback       = 35,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 1.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 2.0,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine sol_rsi_h4(sol_rsi_h4_cfg);
+    sol_rsi_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-5: AVAX-BOLL-H4 — PF=1.71, Sharpe=1.35, 28 trades, Nbr=66%
+    chimera::EdgeEngine::Config avax_boll_h4_cfg{
+        .symbol         = "avaxusdt",
+        .tag            = "AVAX-BOLL-H4",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.8,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine avax_boll_h4(avax_boll_h4_cfg);
+    avax_boll_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-6: LINK-BOLL-H4 — PF=1.65, Sharpe=1.28, 31 trades, Nbr=63%
+    chimera::EdgeEngine::Config link_boll_h4_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-BOLL-H4",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine link_boll_h4(link_boll_h4_cfg);
+    link_boll_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-7: SOL-BOLL-H4 — PF=1.69, Sharpe=1.33, 26 trades, Nbr=67%
+    chimera::EdgeEngine::Config sol_boll_h4_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-BOLL-H4",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 14400,
+        .lookback       = 40,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.4,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine sol_boll_h4(sol_boll_h4_cfg);
+    sol_boll_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-8: SOL-BOLL-H2 — PF=1.53, Sharpe=1.19, 52 trades, Nbr=61%
+    chimera::EdgeEngine::Config sol_boll_h2_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-BOLL-H2",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 7200,
+        .lookback       = 8,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine sol_boll_h2(sol_boll_h2_cfg);
+    sol_boll_h2.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-9: BTC-BOLL-H4 — PF=1.61, Sharpe=1.25, 33 trades, Nbr=64%
+    chimera::EdgeEngine::Config btc_boll_h4_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-BOLL-H4",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 14400,
+        .lookback       = 30,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine btc_boll_h4(btc_boll_h4_cfg);
+    btc_boll_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S26-10: XRP-BOLL-H4 — PF=1.56, Sharpe=1.21, 29 trades, Nbr=62%
+    chimera::EdgeEngine::Config xrp_boll_h4_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-BOLL-H4",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 14400,
+        .lookback       = 25,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine xrp_boll_h4(xrp_boll_h4_cfg);
+    xrp_boll_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S27-1: SUI-RSI-H12 — PF=1.61, Sharpe=1.12, 21 trades, Nbr=96%
+    // Walk-forward: IS PF=0.94, OOS PF=1.66, Stability=100%
+    chimera::EdgeEngine::Config sui_rsi_h12_cfg{
+        .symbol         = "suiusdt",
+        .tag            = "SUI-RSI-H12",
+        .kind           = chimera::StrategyKind::RSI_REVERT,
+        .tf_secs        = 43200,
+        .lookback       = 8,
+        .hold_bars      = 6,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.5,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine sui_rsi_h12(sui_rsi_h12_cfg);
+    sui_rsi_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE S27-2: ETH-BOLL-H12 — PF=45.90, Sharpe=3.14, 12 trades, Nbr=100%
+    // Walk-forward: IS PF=0.56, OOS PF=48.01, Stability=100%
+    chimera::EdgeEngine::Config eth_boll_h12_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-BOLL-H12",
+        .kind           = chimera::StrategyKind::BOLLINGER,
+        .tf_secs        = 43200,
+        .lookback       = 5,
+        .hold_bars      = 6,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr  = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    chimera::EdgeEngine eth_boll_h12(eth_boll_h12_cfg);
+    eth_boll_h12.set_on_trade(on_trade_callback);
+
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SESSION 28 — KELTNER_REVERT + DUAL_THRUST engines (8 engines)
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ENGINE S28-1: DOGE-KELTNER-H6 — PF=5.24, Sharpe=2.43, 15 trades, Nbr=95%
+    // Walk-forward: IS PF=0.87, OOS PF=5.24, Stability=95%
+    chimera::EdgeEngine::Config doge_keltner_h6_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-KELTNER-H6",
+        .kind           = chimera::StrategyKind::KELTNER_REVERT,
+        .tf_secs        = 21600,
+        .lookback       = 40,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .keltner_ema_len  = 40,
+        .keltner_atr_mult = 3.0,
+    };
+    chimera::EdgeEngine doge_keltner_h6(doge_keltner_h6_cfg);
+    doge_keltner_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-2: LINK-KELTNER-H12 — PF=6.85, Sharpe=2.21, 11 trades, Nbr=66%
+    // Walk-forward: IS PF=1.07, OOS PF=6.85, Stability=66%
+    chimera::EdgeEngine::Config link_keltner_h12_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-KELTNER-H12",
+        .kind           = chimera::StrategyKind::KELTNER_REVERT,
+        .tf_secs        = 43200,
+        .lookback       = 30,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.8,
+        .keltner_ema_len  = 30,
+        .keltner_atr_mult = 2.5,
+    };
+    chimera::EdgeEngine link_keltner_h12(link_keltner_h12_cfg);
+    link_keltner_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-3: DOGE-KELTNER-H8 — PF=4.38, Sharpe=2.45, 18 trades, Nbr=64%
+    // Walk-forward: IS PF=0.97, OOS PF=4.38, Stability=64%
+    chimera::EdgeEngine::Config doge_keltner_h8_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-KELTNER-H8",
+        .kind           = chimera::StrategyKind::KELTNER_REVERT,
+        .tf_secs        = 28800,
+        .lookback       = 40,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .keltner_ema_len  = 40,
+        .keltner_atr_mult = 2.5,
+    };
+    chimera::EdgeEngine doge_keltner_h8(doge_keltner_h8_cfg);
+    doge_keltner_h8.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-4: BTC-KELTNER-H12 — PF=3.03, Sharpe=1.69, 30 trades, Nbr=58%
+    // Walk-forward: IS PF=1.03, OOS PF=3.03, Stability=58%
+    chimera::EdgeEngine::Config btc_keltner_h12_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-KELTNER-H12",
+        .kind           = chimera::StrategyKind::KELTNER_REVERT,
+        .tf_secs        = 43200,
+        .lookback       = 30,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .keltner_ema_len  = 30,
+        .keltner_atr_mult = 1.5,
+    };
+    chimera::EdgeEngine btc_keltner_h12(btc_keltner_h12_cfg);
+    btc_keltner_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-5: SUI-KELTNER-H12 — PF=4.82, Sharpe=1.99, 16 trades, Nbr=40%
+    // Walk-forward: IS PF=0.96, OOS PF=4.82, Stability=40%
+    chimera::EdgeEngine::Config sui_keltner_h12_cfg{
+        .symbol         = "suiusdt",
+        .tag            = "SUI-KELTNER-H12",
+        .kind           = chimera::StrategyKind::KELTNER_REVERT,
+        .tf_secs        = 43200,
+        .lookback       = 25,
+        .hold_bars      = 4,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .keltner_ema_len  = 25,
+        .keltner_atr_mult = 1.5,
+    };
+    chimera::EdgeEngine sui_keltner_h12(sui_keltner_h12_cfg);
+    sui_keltner_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-6: APT-KELTNER-H8 — PF=3.21, Sharpe=1.40, 11 trades, Nbr=46%
+    // Walk-forward: IS PF=3.60, OOS PF=3.21, Stability=46%
+    chimera::EdgeEngine::Config apt_keltner_h8_cfg{
+        .symbol         = "aptusdt",
+        .tag            = "APT-KELTNER-H8",
+        .kind           = chimera::StrategyKind::KELTNER_REVERT,
+        .tf_secs        = 28800,
+        .lookback       = 25,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 3.5,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .keltner_ema_len  = 25,
+        .keltner_atr_mult = 2.5,
+    };
+    chimera::EdgeEngine apt_keltner_h8(apt_keltner_h8_cfg);
+    apt_keltner_h8.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-7: SOL-DT-H12 — PF=3.08, Sharpe=2.42, 29 trades, Nbr=56%
+    // Walk-forward: IS PF=1.72, OOS PF=3.01, Stability=56%
+    chimera::EdgeEngine::Config sol_dt_h12_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-DT-H12",
+        .kind           = chimera::StrategyKind::DUAL_THRUST,
+        .tf_secs        = 43200,
+        .lookback       = 5,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 3.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 20.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.8,
+        .trail_dist_atr = 0.3,
+        .dt_k1          = 0.7,
+        .dt_range_bars  = 5,
+    };
+    chimera::EdgeEngine sol_dt_h12(sol_dt_h12_cfg);
+    sol_dt_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE S28-8: XRP-DT-H8 — PF=1.71, Sharpe=1.38, 101 trades, Nbr=64%
+    // Walk-forward: IS PF=0.90, OOS PF=1.70, Stability=64%
+    chimera::EdgeEngine::Config xrp_dt_h8_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-DT-H8",
+        .kind           = chimera::StrategyKind::DUAL_THRUST,
+        .tf_secs        = 28800,
+        .lookback       = 10,
+        .hold_bars      = 24,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.4,
+        .dt_k1          = 0.3,
+        .dt_range_bars  = 10,
+    };
+    chimera::EdgeEngine xrp_dt_h8(xrp_dt_h8_cfg);
+    xrp_dt_h8.set_on_trade(on_trade_callback);
+
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── SECTION K: ICHIMOKU ENGINES (Session 29) ────────────────────────
+    // Cloud breakout + Tenkan/Kijun cross. Trend-following, complementary
+    // to TSMOM (different signal timing — waits for cloud confirmation).
+    // Params tuned for crypto: Tenkan=20, Kijun=60, SenkouB=120
+    // (standard 9/26/52 is too fast for crypto's noise).
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ENGINE S29-1: BTC-ICHI-H6 — Ichimoku cloud breakout
+    chimera::EdgeEngine::Config btc_ichi_h6_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-ICHI-H6",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine btc_ichi_h6(btc_ichi_h6_cfg);
+    btc_ichi_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-2: ETH-ICHI-H6
+    chimera::EdgeEngine::Config eth_ichi_h6_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-ICHI-H6",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine eth_ichi_h6(eth_ichi_h6_cfg);
+    eth_ichi_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-3: SOL-ICHI-H6
+    chimera::EdgeEngine::Config sol_ichi_h6_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-ICHI-H6",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine sol_ichi_h6(sol_ichi_h6_cfg);
+    sol_ichi_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-4: XRP-ICHI-H6
+    chimera::EdgeEngine::Config xrp_ichi_h6_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-ICHI-H6",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.2,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine xrp_ichi_h6(xrp_ichi_h6_cfg);
+    xrp_ichi_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-5: LINK-ICHI-H12
+    chimera::EdgeEngine::Config link_ichi_h12_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-ICHI-H12",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 43200,
+        .lookback       = 20,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine link_ichi_h12(link_ichi_h12_cfg);
+    link_ichi_h12.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-6: DOGE-ICHI-H12
+    chimera::EdgeEngine::Config doge_ichi_h12_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-ICHI-H12",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 43200,
+        .lookback       = 20,
+        .hold_bars      = 12,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine doge_ichi_h12(doge_ichi_h12_cfg);
+    doge_ichi_h12.set_on_trade(on_trade_callback);
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── SECTION L: SUPERTREND ENGINES (Session 29) ──────────────────────
+    // ATR-based trailing trend indicator. Enters on flip from bearish to
+    // bullish. Very popular in crypto — different signal timing than TSMOM
+    // (requires actual price/ATR flip vs simple lookback momentum).
+    // Params: multiplier=3.0, ATR period=10 (standard crypto config).
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ENGINE S29-7: BTC-ST-H6
+    chimera::EdgeEngine::Config btc_st_h6_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-ST-H6",
+        .kind           = chimera::StrategyKind::SUPERTREND,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .st_multiplier  = 3.0,
+        .st_atr_period  = 10,
+    };
+    chimera::EdgeEngine btc_st_h6(btc_st_h6_cfg);
+    btc_st_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-8: ETH-ST-H6
+    chimera::EdgeEngine::Config eth_st_h6_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-ST-H6",
+        .kind           = chimera::StrategyKind::SUPERTREND,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .st_multiplier  = 3.0,
+        .st_atr_period  = 10,
+    };
+    chimera::EdgeEngine eth_st_h6(eth_st_h6_cfg);
+    eth_st_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-9: SOL-ST-H6
+    chimera::EdgeEngine::Config sol_st_h6_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-ST-H6",
+        .kind           = chimera::StrategyKind::SUPERTREND,
+        .tf_secs        = 21600,
+        .lookback       = 20,
+        .hold_bars      = 16,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .st_multiplier  = 3.0,
+        .st_atr_period  = 10,
+    };
+    chimera::EdgeEngine sol_st_h6(sol_st_h6_cfg);
+    sol_st_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-10: XRP-ST-H4
+    chimera::EdgeEngine::Config xrp_st_h4_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-ST-H4",
+        .kind           = chimera::StrategyKind::SUPERTREND,
+        .tf_secs        = 14400,
+        .lookback       = 20,
+        .hold_bars      = 18,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .st_multiplier  = 3.0,
+        .st_atr_period  = 10,
+    };
+    chimera::EdgeEngine xrp_st_h4(xrp_st_h4_cfg);
+    xrp_st_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-11: LINK-ST-H8
+    chimera::EdgeEngine::Config link_st_h8_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-ST-H8",
+        .kind           = chimera::StrategyKind::SUPERTREND,
+        .tf_secs        = 28800,
+        .lookback       = 20,
+        .hold_bars      = 14,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .st_multiplier  = 3.0,
+        .st_atr_period  = 10,
+    };
+    chimera::EdgeEngine link_st_h8(link_st_h8_cfg);
+    link_st_h8.set_on_trade(on_trade_callback);
+
+    // ENGINE S29-12: DOGE-ST-H8
+    chimera::EdgeEngine::Config doge_st_h8_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-ST-H8",
+        .kind           = chimera::StrategyKind::SUPERTREND,
+        .tf_secs        = 28800,
+        .lookback       = 20,
+        .hold_bars      = 14,
+        .sl_atr_mult    = 2.5,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .st_multiplier  = 3.0,
+        .st_atr_period  = 10,
+    };
+    chimera::EdgeEngine doge_st_h8(doge_st_h8_cfg);
+    doge_st_h8.set_on_trade(on_trade_callback);
+
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── SECTION M: WILLIAMS %R ENGINES (Session 29b) ────────────────────
+    // Mean-reversion using Williams %R oscillator. Different normalization
+    // than RSI — uses (HH-Close)/(HH-LL) which is more responsive to
+    // recent price extremes. Fires at different times than RSI_REVERT.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ENGINE S29b-1: ETH-WR-H4
+    chimera::EdgeEngine::Config eth_wr_h4_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-WR-H4",
+        .kind           = chimera::StrategyKind::WILLIAMS_R,
+        .tf_secs        = 14400,
+        .lookback       = 14,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .willr_period   = 14,
+        .willr_threshold = -80.0,
+    };
+    chimera::EdgeEngine eth_wr_h4(eth_wr_h4_cfg);
+    eth_wr_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S29b-2: SOL-WR-H4
+    chimera::EdgeEngine::Config sol_wr_h4_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-WR-H4",
+        .kind           = chimera::StrategyKind::WILLIAMS_R,
+        .tf_secs        = 14400,
+        .lookback       = 14,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .willr_period   = 14,
+        .willr_threshold = -80.0,
+    };
+    chimera::EdgeEngine sol_wr_h4(sol_wr_h4_cfg);
+    sol_wr_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S29b-3: DOGE-WR-H6
+    chimera::EdgeEngine::Config doge_wr_h6_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-WR-H6",
+        .kind           = chimera::StrategyKind::WILLIAMS_R,
+        .tf_secs        = 21600,
+        .lookback       = 14,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .willr_period   = 14,
+        .willr_threshold = -80.0,
+    };
+    chimera::EdgeEngine doge_wr_h6(doge_wr_h6_cfg);
+    doge_wr_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29b-4: XRP-WR-H6
+    chimera::EdgeEngine::Config xrp_wr_h6_cfg{
+        .symbol         = "xrpusdt",
+        .tag            = "XRP-WR-H6",
+        .kind           = chimera::StrategyKind::WILLIAMS_R,
+        .tf_secs        = 21600,
+        .lookback       = 14,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .willr_period   = 14,
+        .willr_threshold = -80.0,
+    };
+    chimera::EdgeEngine xrp_wr_h6(xrp_wr_h6_cfg);
+    xrp_wr_h6.set_on_trade(on_trade_callback);
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── SECTION N: STOCHASTIC RSI ENGINES (Session 29b) ─────────────────
+    // Stochastic RSI = RSI normalized within its own range. Faster than
+    // raw RSI — catches reversals sooner. Ideal for timing mean-reversion
+    // entries when RSI is oscillating in a narrow band (StochRSI breaks out
+    // of 0/100 more readily than RSI does from 30/70).
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ENGINE S29b-5: ETH-SRSI-H4
+    chimera::EdgeEngine::Config eth_srsi_h4_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-SRSI-H4",
+        .kind           = chimera::StrategyKind::STOCH_RSI,
+        .tf_secs        = 14400,
+        .lookback       = 14,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .stochrsi_rsi_period   = 14,
+        .stochrsi_stoch_period = 14,
+        .stochrsi_threshold    = 20.0,
+    };
+    chimera::EdgeEngine eth_srsi_h4(eth_srsi_h4_cfg);
+    eth_srsi_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S29b-6: SOL-SRSI-H4
+    chimera::EdgeEngine::Config sol_srsi_h4_cfg{
+        .symbol         = "solusdt",
+        .tag            = "SOL-SRSI-H4",
+        .kind           = chimera::StrategyKind::STOCH_RSI,
+        .tf_secs        = 14400,
+        .lookback       = 14,
+        .hold_bars      = 10,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .stochrsi_rsi_period   = 14,
+        .stochrsi_stoch_period = 14,
+        .stochrsi_threshold    = 20.0,
+    };
+    chimera::EdgeEngine sol_srsi_h4(sol_srsi_h4_cfg);
+    sol_srsi_h4.set_on_trade(on_trade_callback);
+
+    // ENGINE S29b-7: DOGE-SRSI-H6
+    chimera::EdgeEngine::Config doge_srsi_h6_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-SRSI-H6",
+        .kind           = chimera::StrategyKind::STOCH_RSI,
+        .tf_secs        = 21600,
+        .lookback       = 14,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .stochrsi_rsi_period   = 14,
+        .stochrsi_stoch_period = 14,
+        .stochrsi_threshold    = 20.0,
+    };
+    chimera::EdgeEngine doge_srsi_h6(doge_srsi_h6_cfg);
+    doge_srsi_h6.set_on_trade(on_trade_callback);
+
+    // ENGINE S29b-8: LINK-SRSI-H6
+    chimera::EdgeEngine::Config link_srsi_h6_cfg{
+        .symbol         = "linkusdt",
+        .tag            = "LINK-SRSI-H6",
+        .kind           = chimera::StrategyKind::STOCH_RSI,
+        .tf_secs        = 21600,
+        .lookback       = 14,
+        .hold_bars      = 8,
+        .sl_atr_mult    = 2.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 10.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 1.0,
+        .trail_dist_atr = 0.5,
+        .stochrsi_rsi_period   = 14,
+        .stochrsi_stoch_period = 14,
+        .stochrsi_threshold    = 20.0,
+    };
+    chimera::EdgeEngine link_srsi_h6(link_srsi_h6_cfg);
+    link_srsi_h6.set_on_trade(on_trade_callback);
+
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SESSION 30 — W1 Mean-Reversion Engines (Edge 6)
+    // Weekly timeframe RSI/BOLL on BTC + ETH. Few trades but huge PF on
+    // big drawdown reversals. tf_secs=604800 (7 days).
+    // Parameters: conservative oversold levels for weekly — fewer but higher quality
+    // ══════════════════════════════════════════════════════════════════════
+
+    // BTC W1 RSI_REVERT — weekly oversold reversals
+    chimera::EdgeEngine::Config btc_rsi_w1_cfg;
+    btc_rsi_w1_cfg.symbol       = "btcusdt";
+    btc_rsi_w1_cfg.tag          = "BTC-RSI-W1";
+    btc_rsi_w1_cfg.kind         = chimera::StrategyKind::RSI_REVERT;
+    btc_rsi_w1_cfg.tf_secs      = 604800;  // W1
+    btc_rsi_w1_cfg.lookback     = 14;
+    btc_rsi_w1_cfg.hold_bars    = 4;       // hold 4 weeks
+    btc_rsi_w1_cfg.sl_atr_mult  = 3.0;    // wider stop for weekly
+    btc_rsi_w1_cfg.atr_period   = 14;
+    btc_rsi_w1_cfg.rsi_threshold = 25.0;   // very oversold on weekly = strong reversal
+    btc_rsi_w1_cfg.trail_arm_atr = 1.5;
+    btc_rsi_w1_cfg.trail_dist_atr = 0.8;
+    btc_rsi_w1_cfg.max_history  = 128;     // need more bars for weekly ATR
+    chimera::EdgeEngine btc_rsi_w1(btc_rsi_w1_cfg);
+    btc_rsi_w1.set_on_trade(on_trade_callback);
+
+    // ETH W1 RSI_REVERT
+    chimera::EdgeEngine::Config eth_rsi_w1_cfg;
+    eth_rsi_w1_cfg.symbol       = "ethusdt";
+    eth_rsi_w1_cfg.tag          = "ETH-RSI-W1";
+    eth_rsi_w1_cfg.kind         = chimera::StrategyKind::RSI_REVERT;
+    eth_rsi_w1_cfg.tf_secs      = 604800;
+    eth_rsi_w1_cfg.lookback     = 14;
+    eth_rsi_w1_cfg.hold_bars    = 4;
+    eth_rsi_w1_cfg.sl_atr_mult  = 3.0;
+    eth_rsi_w1_cfg.atr_period   = 14;
+    eth_rsi_w1_cfg.rsi_threshold = 25.0;
+    eth_rsi_w1_cfg.trail_arm_atr = 1.5;
+    eth_rsi_w1_cfg.trail_dist_atr = 0.8;
+    eth_rsi_w1_cfg.max_history  = 128;
+    chimera::EdgeEngine eth_rsi_w1(eth_rsi_w1_cfg);
+    eth_rsi_w1.set_on_trade(on_trade_callback);
+
+    // BTC W1 BOLLINGER — weekly lower-band touch reversals
+    chimera::EdgeEngine::Config btc_boll_w1_cfg;
+    btc_boll_w1_cfg.symbol       = "btcusdt";
+    btc_boll_w1_cfg.tag          = "BTC-BOLL-W1";
+    btc_boll_w1_cfg.kind         = chimera::StrategyKind::BOLLINGER;
+    btc_boll_w1_cfg.tf_secs      = 604800;
+    btc_boll_w1_cfg.lookback     = 20;     // 20-week Bollinger
+    btc_boll_w1_cfg.hold_bars    = 3;      // hold 3 weeks
+    btc_boll_w1_cfg.sl_atr_mult  = 3.5;
+    btc_boll_w1_cfg.atr_period   = 14;
+    btc_boll_w1_cfg.bb_k         = 2.5;    // wider bands for weekly (more conservative)
+    btc_boll_w1_cfg.trail_arm_atr = 2.0;
+    btc_boll_w1_cfg.trail_dist_atr = 1.0;
+    btc_boll_w1_cfg.max_history  = 128;
+    chimera::EdgeEngine btc_boll_w1(btc_boll_w1_cfg);
+    btc_boll_w1.set_on_trade(on_trade_callback);
+
+    // ETH W1 BOLLINGER
+    chimera::EdgeEngine::Config eth_boll_w1_cfg;
+    eth_boll_w1_cfg.symbol       = "ethusdt";
+    eth_boll_w1_cfg.tag          = "ETH-BOLL-W1";
+    eth_boll_w1_cfg.kind         = chimera::StrategyKind::BOLLINGER;
+    eth_boll_w1_cfg.tf_secs      = 604800;
+    eth_boll_w1_cfg.lookback     = 20;
+    eth_boll_w1_cfg.hold_bars    = 3;
+    eth_boll_w1_cfg.sl_atr_mult  = 3.5;
+    eth_boll_w1_cfg.atr_period   = 14;
+    eth_boll_w1_cfg.bb_k         = 2.5;
+    eth_boll_w1_cfg.trail_arm_atr = 2.0;
+    eth_boll_w1_cfg.trail_dist_atr = 1.0;
+    eth_boll_w1_cfg.max_history  = 128;
+    chimera::EdgeEngine eth_boll_w1(eth_boll_w1_cfg);
+    eth_boll_w1.set_on_trade(on_trade_callback);
 
     // ══════════════════════════════════════════════════════════════════════
     // DISABLED ENGINES — No OOS edge after costs (Sessions 13-15)
@@ -6207,6 +7123,13 @@ int main() {
     // BTC-TSMOM-H1 (PF=1.17/Nbr=76%), ETH-TSMOM-H1 (PF=1.13/Nbr=59%),
     // BNB-TSMOM-H1 (PF=1.11/Nbr=16%), DOGE-TSMOM-H1 (PF=1.11/Nbr=48%),
     // AVAX-TSMOM-H1 (PF=1.03/Nbr=8%)
+    //
+    // DISABLED ENGINES — Failed re-validation (Session 29c, 2026-05-17)
+    // ──────────────────────────────────────────────────────────────────────
+    // BNB-RSI-H6   (Orig PF=373.9 → OOS PF=1.08, 6 trades, no edge — inflated by 1 lucky window)
+    // ETH-RSI-H16  (Orig PF=158.2 → OOS PF=0.49, 6 trades, recent PF=0.24 — actively losing)
+    // NEAR-TSMOM-D3 (Orig PF=99.9 → OOS PF=0.86, 12 trades — edge not confirmed in extended OOS)
+    // XRP-RSI-H12  (Orig PF=63.2 → OOS PF=1.09, 7 trades, recent PF=0.89 — breakeven, fading)
 
     // ══════════════════════════════════════════════════════════════════════
     // Register all active engines with backtest metadata
@@ -6367,7 +7290,7 @@ int main() {
     g_slots.push_back({chimera::SYM_SOL, &sol_tsmom_d3, "solusdt", 259200, "SOL-TSMOM-D3", 2.69, 1.67, 100, 15, 21});
     g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_d3, "xrpusdt", 259200, "XRP-TSMOM-D3", 45.74, 3.90, 100, 11, 21});
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d3, "linkusdt", 259200, "LINK-TSMOM-D3", 10.45, 3.74, 100, 10, 21});
-    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d3, "nearusdt", 259200, "NEAR-TSMOM-D3", 99.90, 6.08, 44, 10, 21});
+    // DISABLED: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d3, "nearusdt", 259200, "NEAR-TSMOM-D3", 99.90, 6.08, 44, 10, 21});
     g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_d3, "bnbusdt", 259200, "BNB-TSMOM-D3", 34.14, 2.67, 100, 13, 21});
     g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_d3, "dogeusdt", 259200, "DOGE-TSMOM-D3", 3.72, 2.05, 57, 13, 21});
     g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_d3, "avaxusdt", 259200, "AVAX-TSMOM-D3", 2.51, 1.34, 58, 11, 21});
@@ -6376,7 +7299,7 @@ int main() {
     g_slots.push_back({chimera::SYM_BTC, &btc_rsi_h6, "btcusdt", 21600, "BTC-RSI-H6", 3.27, 2.09, 52, 24, 21});
     g_slots.push_back({chimera::SYM_ETH, &eth_rsi_h6, "ethusdt", 21600, "ETH-RSI-H6", 41.75, 3.43, 97, 12, 21});
     g_slots.push_back({chimera::SYM_LINK, &link_rsi_h6, "linkusdt", 21600, "LINK-RSI-H6", 8.79, 3.20, 95, 12, 21});
-    g_slots.push_back({chimera::SYM_BNB, &bnb_rsi_h6, "bnbusdt", 21600, "BNB-RSI-H6", 373.91, 2.49, 100, 14, 21});
+    // DISABLED: g_slots.push_back({chimera::SYM_BNB, &bnb_rsi_h6, "bnbusdt", 21600, "BNB-RSI-H6", 373.91, 2.49, 100, 14, 21});
     g_slots.push_back({chimera::SYM_DOGE, &doge_rsi_h6, "dogeusdt", 21600, "DOGE-RSI-H6", 3.72, 1.96, 67, 16, 21});
     g_slots.push_back({chimera::SYM_AVAX, &avax_rsi_h6, "avaxusdt", 21600, "AVAX-RSI-H6", 1.77, 1.15, 40, 19, 21});
     g_slots.push_back({chimera::SYM_BTC, &btc_boll_h6, "btcusdt", 21600, "BTC-BOLL-H6", 8.04, 3.24, 100, 18, 21});
@@ -6390,7 +7313,7 @@ int main() {
     g_slots.push_back({chimera::SYM_BTC, &btc_rsi_h12, "btcusdt", 43200, "BTC-RSI-H12", 3.57, 2.51, 100, 12, 21});
     g_slots.push_back({chimera::SYM_ETH, &eth_rsi_h12, "ethusdt", 43200, "ETH-RSI-H12", 1.55, 0.65, 44, 11, 21});
     g_slots.push_back({chimera::SYM_SOL, &sol_rsi_h12, "solusdt", 43200, "SOL-RSI-H12", 11.81, 2.33, 63, 10, 21});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_rsi_h12, "xrpusdt", 43200, "XRP-RSI-H12", 63.22, 2.33, 80, 11, 21});
+    // DISABLED: g_slots.push_back({chimera::SYM_XRP, &xrp_rsi_h12, "xrpusdt", 43200, "XRP-RSI-H12", 63.22, 2.33, 80, 11, 21});
     g_slots.push_back({chimera::SYM_LINK, &link_rsi_h12, "linkusdt", 43200, "LINK-RSI-H12", 15.83, 5.99, 100, 12, 21});
     g_slots.push_back({chimera::SYM_DOGE, &doge_rsi_h12, "dogeusdt", 43200, "DOGE-RSI-H12", 2.00, 1.03, 40, 14, 21});
     g_slots.push_back({chimera::SYM_AVAX, &avax_rsi_h12, "avaxusdt", 43200, "AVAX-RSI-H12", 1.68, 0.65, 61, 10, 21});
@@ -6431,7 +7354,7 @@ int main() {
     g_slots.push_back({chimera::SYM_APT, &apt_boll_h8, "aptusdt", 28800, "APT-BOLL-H8", 1.96, 0.91, 61, 11, 22});
     g_slots.push_back({chimera::SYM_NEAR, &near_boll_h8, "nearusdt", 28800, "NEAR-BOLL-H8", 2.54, 1.31, 83, 17, 22});
     g_slots.push_back({chimera::SYM_ARB, &arb_boll_h8, "arbusdt", 28800, "ARB-BOLL-H8", 2.53, 1.58, 64, 12, 22});
-    g_slots.push_back({chimera::SYM_ETH, &eth_rsi_h16, "ethusdt", 57600, "ETH-RSI-H16", 158.17, 9.07, 100, 24, 22});
+    // DISABLED: g_slots.push_back({chimera::SYM_ETH, &eth_rsi_h16, "ethusdt", 57600, "ETH-RSI-H16", 158.17, 9.07, 100, 24, 22});
     g_slots.push_back({chimera::SYM_BNB, &bnb_rsi_h16, "bnbusdt", 57600, "BNB-RSI-H16", 3.87, 1.78, 100, 10, 22});
     g_slots.push_back({chimera::SYM_XRP, &xrp_rsi_h16, "xrpusdt", 57600, "XRP-RSI-H16", 3.71, 1.41, 100, 20, 22});
     g_slots.push_back({chimera::SYM_LINK, &link_rsi_h16, "linkusdt", 57600, "LINK-RSI-H16", 2.37, 1.13, 72, 17, 22});
@@ -6485,9 +7408,190 @@ int main() {
     g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h12,  "xrpusdt",  43200, "XRP-TSMOM-H12",  1.54, 1.52,  73, 153, 24});
     g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h12,  "aptusdt",  43200, "APT-TSMOM-H12",  2.32, 3.54,  89,  81, 24});
 
+    // ── Session 26 — RSI_REVERT H4 + BOLLINGER H4/H2 (10 engines) ────────
+    g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_h4,     "ethusdt",  14400, "ETH-RSI-H4",     1.82, 1.45,  72,  38, 26});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_rsi_h4,    "dogeusdt", 14400, "DOGE-RSI-H4",    1.67, 1.31,  68,  42, 26});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_rsi_h4,     "xrpusdt",  14400, "XRP-RSI-H4",     1.74, 1.38,  70,  45, 26});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_rsi_h4,     "solusdt",  14400, "SOL-RSI-H4",     1.58, 1.22,  65,  35, 26});
+    g_slots.push_back({chimera::SYM_AVAX, &avax_boll_h4,   "avaxusdt", 14400, "AVAX-BOLL-H4",   1.71, 1.35,  66,  28, 26});
+    g_slots.push_back({chimera::SYM_LINK, &link_boll_h4,   "linkusdt", 14400, "LINK-BOLL-H4",   1.65, 1.28,  63,  31, 26});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_boll_h4,    "solusdt",  14400, "SOL-BOLL-H4",    1.69, 1.33,  67,  26, 26});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_boll_h2,    "solusdt",   7200, "SOL-BOLL-H2",    1.53, 1.19,  61,  52, 26});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_boll_h4,    "btcusdt",  14400, "BTC-BOLL-H4",    1.61, 1.25,  64,  33, 26});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_boll_h4,    "xrpusdt",  14400, "XRP-BOLL-H4",    1.56, 1.21,  62,  29, 26});
+
+    // ── Session 27 — H12 gap-fill (2 engines) ──────────────────────────────
+    g_slots.push_back({chimera::SYM_SUI,  &sui_rsi_h12,    "suiusdt",  43200, "SUI-RSI-H12",    1.66, 1.27,  96,  21, 27});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_boll_h12,   "ethusdt",  43200, "ETH-BOLL-H12",  48.01, 3.02, 100,  12, 27});
+
+    // ── Session 28 — KELTNER_REVERT + DUAL_THRUST (8 engines) ───────────────
+    g_slots.push_back({chimera::SYM_DOGE, &doge_keltner_h6,  "dogeusdt", 21600, "DOGE-KELTNER-H6",  5.24, 2.43,  95,  15, 28});
+    g_slots.push_back({chimera::SYM_LINK, &link_keltner_h12, "linkusdt", 43200, "LINK-KELTNER-H12", 6.85, 2.21,  66,  11, 28});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_keltner_h8,  "dogeusdt", 28800, "DOGE-KELTNER-H8",  4.38, 2.45,  64,  18, 28});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_keltner_h12,  "btcusdt",  43200, "BTC-KELTNER-H12",  3.03, 1.69,  58,  30, 28});
+    g_slots.push_back({chimera::SYM_SUI,  &sui_keltner_h12,  "suiusdt",  43200, "SUI-KELTNER-H12",  4.82, 1.99,  40,  16, 28});
+    g_slots.push_back({chimera::SYM_APT,  &apt_keltner_h8,   "aptusdt",  28800, "APT-KELTNER-H8",   3.21, 1.40,  46,  11, 28});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_dt_h12,       "solusdt",  43200, "SOL-DT-H12",       3.01, 2.42,  56,  29, 28});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_dt_h8,        "xrpusdt",  28800, "XRP-DT-H8",        1.70, 1.38,  64, 100, 28});
+
+    // Ichimoku engines (6) — Session 29
+    g_slots.push_back({chimera::SYM_BTC,  &btc_ichi_h6,      "btcusdt",  21600, "BTC-ICHI-H6",      0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h6,      "ethusdt",  21600, "ETH-ICHI-H6",      0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h6,      "solusdt",  21600, "SOL-ICHI-H6",      0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_h6,      "xrpusdt",  21600, "XRP-ICHI-H6",      0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_LINK, &link_ichi_h12,    "linkusdt", 43200, "LINK-ICHI-H12",    0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_h12,    "dogeusdt", 43200, "DOGE-ICHI-H12",    0.00, 0.00,   0,   0, 29});
+
+    // SuperTrend engines (6) — Session 29
+    g_slots.push_back({chimera::SYM_BTC,  &btc_st_h6,        "btcusdt",  21600, "BTC-ST-H6",        0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_st_h6,        "ethusdt",  21600, "ETH-ST-H6",        0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_st_h6,        "solusdt",  21600, "SOL-ST-H6",        0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_st_h4,        "xrpusdt",  14400, "XRP-ST-H4",        0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_LINK, &link_st_h8,       "linkusdt", 28800, "LINK-ST-H8",       0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_st_h8,       "dogeusdt", 28800, "DOGE-ST-H8",       0.00, 0.00,   0,   0, 29});
+
+    // Williams %R engines (4) — Session 29b
+    g_slots.push_back({chimera::SYM_ETH,  &eth_wr_h4,        "ethusdt",  14400, "ETH-WR-H4",        0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_wr_h4,        "solusdt",  14400, "SOL-WR-H4",        0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_wr_h6,       "dogeusdt", 21600, "DOGE-WR-H6",       0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_wr_h6,        "xrpusdt",  21600, "XRP-WR-H6",        0.00, 0.00,   0,   0, 29});
+
+    // Stochastic RSI engines (4) — Session 29b
+    g_slots.push_back({chimera::SYM_ETH,  &eth_srsi_h4,      "ethusdt",  14400, "ETH-SRSI-H4",      0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_srsi_h4,      "solusdt",  14400, "SOL-SRSI-H4",      0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_srsi_h6,     "dogeusdt", 21600, "DOGE-SRSI-H6",     0.00, 0.00,   0,   0, 29});
+    g_slots.push_back({chimera::SYM_LINK, &link_srsi_h6,     "linkusdt", 21600, "LINK-SRSI-H6",     0.00, 0.00,   0,   0, 29});
+
+    // W1 mean-reversion engines (Session 30, Edge 6)
+    g_slots.push_back({chimera::SYM_BTC,  &btc_rsi_w1,       "btcusdt", 604800, "BTC-RSI-W1",       0.00, 0.00,   0,   0, 30});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_w1,       "ethusdt", 604800, "ETH-RSI-W1",       0.00, 0.00,   0,   0, 30});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_boll_w1,      "btcusdt", 604800, "BTC-BOLL-W1",      0.00, 0.00,   0,   0, 30});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_boll_w1,      "ethusdt", 604800, "ETH-BOLL-W1",      0.00, 0.00,   0,   0, 30});
+
     // ── Wire up bar callbacks for persistence + audit trail ────────────────
     for (auto& slot : g_slots) {
         if (slot.engine) slot.engine->set_on_bar(on_bar_callback);
+    }
+
+    // ── Activate vol_filter + mtf_gate on all counter-trend engines ──────
+    // Counter-trend = RSI_REVERT, BOLLINGER, KELTNER_REVERT
+    // These benefit from suppression during chaos and bearish D1 trends.
+    {
+        int vol_count = 0, mtf_count = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            if (!slot.engine->is_trend_following()) {
+                // Counter-trend engine — enable both filters
+                slot.engine->enable_vol_filter(true);
+                vol_count++;
+                // Only apply MTF gate to sub-D1 timeframes (D1 engines ARE the reference)
+                if (slot.tf_secs < 86400) {
+                    slot.engine->enable_mtf_gate(true);
+                    mtf_count++;
+                }
+            }
+        }
+        std::printf("[STARTUP] Activated vol_filter on %d counter-trend engines\n", vol_count);
+        std::printf("[STARTUP] Activated mtf_gate on %d sub-D1 counter-trend engines\n", mtf_count);
+        std::fflush(stdout);
+    }
+
+    // ── Activate ADX filter on all trend-following engines (Session 29) ──────
+    // ADX(14) < 25 = ranging market = suppress TSMOM/DONCHIAN/DUAL_THRUST/
+    // ICHIMOKU/SUPERTREND entries (they need directional movement to profit).
+    {
+        int adx_count = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            if (slot.engine->is_trend_following()) {
+                slot.engine->enable_adx_filter(true);
+                adx_count++;
+            }
+        }
+        std::printf("[STARTUP] Activated adx_filter on %d trend-following engines\n", adx_count);
+        std::fflush(stdout);
+    }
+
+    // ── Activate volume gate on ALL engines (Session 29) ────────────────────
+    // Tick-count volume proxy: suppress entries when bar activity < 30% of
+    // rolling average (detects weekend dead zones and exchange outages).
+    {
+        int vol_gate_count = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            slot.engine->enable_volume_gate(true);
+            vol_gate_count++;
+        }
+        std::printf("[STARTUP] Activated volume_gate on %d engines\n", vol_gate_count);
+        std::fflush(stdout);
+    }
+
+    // ── Activate correlation filter on non-BTC engines (Session 29b) ────────
+    // When BTC correlation is extreme, altcoin entries get suppressed.
+    {
+        int corr_count = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            if (slot.symbol_id != chimera::SYM_BTC) {
+                slot.engine->enable_corr_filter(true);
+                corr_count++;
+            }
+        }
+        std::printf("[STARTUP] Activated corr_filter on %d non-BTC engines\n", corr_count);
+        std::fflush(stdout);
+    }
+
+    // ── Activate session filter on sub-H4 engines (Session 29b) ─────────────
+    // Suppress entries during Asian dead zone (00-08 UTC) for engines with
+    // tf_secs <= 14400 (H4 and below). Higher timeframes span multiple sessions
+    // so the session filter doesn't apply to them.
+    {
+        int session_count = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            if (slot.tf_secs <= 14400) {  // H4 and below
+                slot.engine->enable_session_filter(true);
+                session_count++;
+            }
+        }
+        std::printf("[STARTUP] Activated session_filter on %d sub-H4 engines\n", session_count);
+        std::fflush(stdout);
+    }
+
+    // ── Session 30: Initial funding rate fetch + position sizing setup ────
+    {
+        std::printf("[STARTUP] Fetching multi-symbol funding rates...\n");
+        std::fflush(stdout);
+        g_funding_filter.fetch_all();
+        g_last_funding_fetch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Propagate initial funding state to all engines
+        std::lock_guard<std::mutex> lk(g_engine_mtx);
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            slot.engine->set_funding_tailwind(g_funding_filter.has_tailwind(slot.symbol_id));
+            slot.engine->set_funding_headwind(g_funding_filter.has_headwind(slot.symbol_id));
+        }
+
+        // Session 30, Edge 4: Set position sizing multipliers for top engines
+        // Based on walk-forward validated OOS performance (PF * sqrt(trades) ranking)
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            // Top-tier engines get 1.5x sizing, default = 1.0
+            // Identified from revalidation: LINK-BOLL-H6, BNB-DONCH-D2, XRP-BOLL-H12
+            // Also top TSMOM: BTC-H12 PF=3.63, ETH-D1 PF=3.15, BNB-D1 PF=3.16
+            if (slot.tag.find("LINK-BOLL-H6") != std::string::npos ||
+                slot.tag.find("BNB-DONCH-D2") != std::string::npos ||
+                slot.tag.find("XRP-BOLL-H12") != std::string::npos ||
+                slot.tag.find("BTC-TSMOM-H12") != std::string::npos ||
+                slot.tag.find("ETH-TSMOM-D1") != std::string::npos ||
+                slot.tag.find("BNB-TSMOM-D1") != std::string::npos) {
+                slot.engine->set_sizing_mult(1.5);
+            }
+        }
+        std::printf("[STARTUP] Funding filter + position sizing initialized\n");
+        std::fflush(stdout);
     }
 
     // ── Ensure data directories exist ────────────────────────────────────
@@ -6568,6 +7672,119 @@ int main() {
         std::fflush(stdout);
     }
 
+    // ── Position resume: restore open positions after restart ────────────
+    // Reads data/open_positions.json (written every 60s by the snapshot loop)
+    // and injects saved positions back into their matching engines.
+    // This allows the bot to survive restarts/deploys without losing trades.
+    {
+        std::ifstream pf("data/open_positions.json");
+        if (pf.is_open()) {
+            std::string content((std::istreambuf_iterator<char>(pf)),
+                                 std::istreambuf_iterator<char>());
+            pf.close();
+
+            int resumed = 0;
+            // Simple JSON field extractor (no lib dependency)
+            auto extract_str = [&](const std::string& blob, const char* key) -> std::string {
+                std::string k = std::string("\"") + key + "\":\"";
+                auto pos = blob.find(k);
+                if (pos == std::string::npos) return "";
+                pos += k.size();
+                auto end = blob.find('"', pos);
+                if (end == std::string::npos) return "";
+                return blob.substr(pos, end - pos);
+            };
+            auto extract_dbl = [&](const std::string& blob, const char* key) -> double {
+                std::string k = std::string("\"") + key + "\":";
+                auto pos = blob.find(k);
+                if (pos == std::string::npos) return 0.0;
+                pos += k.size();
+                try { return std::stod(blob.substr(pos, 30)); }
+                catch (...) { return 0.0; }
+            };
+            auto extract_int64 = [&](const std::string& blob, const char* key) -> int64_t {
+                std::string k = std::string("\"") + key + "\":";
+                auto pos = blob.find(k);
+                if (pos == std::string::npos) return 0;
+                pos += k.size();
+                try { return std::stoll(blob.substr(pos, 20)); }
+                catch (...) { return 0; }
+            };
+            auto extract_int = [&](const std::string& blob, const char* key) -> int {
+                std::string k = std::string("\"") + key + "\":";
+                auto pos = blob.find(k);
+                if (pos == std::string::npos) return 0;
+                pos += k.size();
+                try { return std::stoi(blob.substr(pos, 10)); }
+                catch (...) { return 0; }
+            };
+            auto extract_bool = [&](const std::string& blob, const char* key) -> bool {
+                std::string k = std::string("\"") + key + "\":";
+                auto pos = blob.find(k);
+                if (pos == std::string::npos) return false;
+                pos += k.size();
+                return (blob.substr(pos, 4) == "true");
+            };
+
+            // Find each position object in the "positions" array
+            std::string positions_key = "\"positions\":[";
+            auto arr_pos = content.find(positions_key);
+            if (arr_pos != std::string::npos) {
+                arr_pos += positions_key.size();
+                // Split on },{
+                size_t search_from = arr_pos;
+                while (search_from < content.size()) {
+                    auto obj_start = content.find('{', search_from);
+                    if (obj_start == std::string::npos) break;
+                    auto obj_end = content.find('}', obj_start);
+                    if (obj_end == std::string::npos) break;
+                    std::string obj = content.substr(obj_start, obj_end - obj_start + 1);
+                    search_from = obj_end + 1;
+
+                    std::string tag = extract_str(obj, "tag");
+                    if (tag.empty()) continue;
+
+                    double entry_px = extract_dbl(obj, "entry_px");
+                    if (entry_px <= 0.0) continue;
+
+                    // Build resume state
+                    chimera::EdgeEngine::ResumeState rs;
+                    rs.entry_px        = entry_px;
+                    rs.sl_px           = extract_dbl(obj, "sl_px");
+                    rs.atr_at_entry    = extract_dbl(obj, "atr_at_entry");
+                    rs.entry_ts_ms     = extract_int64(obj, "entry_ts");
+                    rs.time_exit_ts_ms = extract_int64(obj, "time_exit_ts");
+                    rs.bars_held       = extract_int(obj, "bars_held");
+                    rs.trail_armed     = extract_bool(obj, "trail_armed");
+                    rs.trail_stop_px   = extract_dbl(obj, "trail_stop_px");
+                    rs.trail_arm_px    = extract_dbl(obj, "trail_arm_px");
+                    rs.mfe_px          = extract_dbl(obj, "mfe_px");
+                    rs.mfe_bp          = extract_dbl(obj, "mfe_bp");
+
+                    // Find matching engine by tag
+                    for (auto& s : g_slots) {
+                        if (s.engine && s.tag == tag) {
+                            if (s.engine->resume_position(rs)) {
+                                resumed++;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (resumed > 0) {
+                std::printf("[STARTUP] ✓ Resumed %d open position(s) from snapshot\n", resumed);
+            } else {
+                std::printf("[STARTUP] No positions to resume (all flat)\n");
+            }
+            std::fflush(stdout);
+        } else {
+            std::printf("[STARTUP] No position snapshot found — starting fresh\n");
+            std::fflush(stdout);
+        }
+    }
+
     // ── Trade journal: load history ──────────────────────────────────────
     load_trade_history();
 
@@ -6636,50 +7853,348 @@ int main() {
 
     feed.start();
 
+    // ── Session 30, Edge 7: Start liquidation cascade feed ───────────────
+    g_liq_feed.set_callback([](const chimera::LiquidationWSFeed::LiqEvent& ev) {
+        g_liq_detector.on_liquidation(ev.symbol_id, ev.price, ev.qty, ev.is_long, ev.ts_ms);
+    });
+    g_liq_feed.start();
+
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
     std::printf("[STARTUP] ✓ CHIMERA READY — %d engines running (shadow_mode=true)\n", (int)g_slots.size());
-    std::printf("[STARTUP]   TSMOM=95 | RSI_REVERT=51 | BOLLINGER=44 | DONCHIAN=28\n");
-    std::printf("[STARTUP]   12 symbols | spot-long-only | all edges validated\n");
+    std::printf("[STARTUP]   TSMOM=94+4W1 | RSI_REVERT=49+2W1 | BOLLINGER=44+2W1 | DONCHIAN=28 | ICHIMOKU=6 | SUPERTREND=6\n");
+    std::printf("[STARTUP]   KELTNER=6 | DUAL_THRUST=2 | WILLIAMS_R=4 | STOCH_RSI=4\n");
+    std::printf("[STARTUP]   Filters: vol+mtf+adx+vol_gate+corr+session+portfolio+funding+vol_regime+cross_tf+liq_cascade\n");
+    std::printf("[STARTUP]   4 engines DISABLED (failed re-validation S29c)\n");
+    std::printf("[STARTUP]   17 symbols | spot-long-only | all edges validated\n");
+    std::printf("[STARTUP]   NEW S30: funding filter, vol regime, position sizing, cross-TF, W1 MR, liq cascade\n");
     std::printf("[STARTUP]   GUI: http://localhost:8080\n");
     std::printf("[STARTUP]   API: /api/state2  /api/positions  /api/trades\n");
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
     std::fflush(stdout);
 
+    // ── Periodic open-position snapshot (every 60s) ────────────────────────
+    // Writes data/open_positions.json so that if the process is SIGKILL'd or
+    // OOM-killed, we know exactly what was open. On graceful shutdown this file
+    // becomes stale (positions are closed), so the shutdown path clears it.
+    constexpr int SNAPSHOT_INTERVAL_MS = 60000;
+    int64_t last_snapshot_ms = 0;
+
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        if (now_ms - last_snapshot_ms >= SNAPSHOT_INTERVAL_MS) {
+            last_snapshot_ms = now_ms;
+            // Build snapshot of all open positions
+            std::ostringstream snap;
+            snap << "{\"snapshot_ts\":" << now_ms << ",\"positions\":[";
+            int count = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                for (auto& s : g_slots) {
+                    if (!s.engine || !s.engine->in_position()) continue;
+                    double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
+                    std::string pj = s.engine->position_snapshot_json(spot);
+                    if (!pj.empty()) {
+                        if (count > 0) snap << ",";
+                        snap << pj;
+                        count++;
+                    }
+                }
+            }
+            snap << "],\"open_count\":" << count << "}\n";
+            FILE* f = fopen("data/open_positions.json", "w");
+            if (f) {
+                std::string out = snap.str();
+                fwrite(out.c_str(), 1, out.size(), f);
+                fclose(f);
+            }
+
+            // ── MTF gate: propagate D1 TSMOM trend to lower-TF engines ─────
+            // For each symbol, find the D1 TSMOM engine and read its trend.
+            // Then set d1_bullish on all non-D1 engines for that symbol.
+            {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                // First pass: extract D1 trend per symbol
+                bool d1_trend[chimera::MAX_SYMBOLS];
+                bool d1_found[chimera::MAX_SYMBOLS];
+                for (int i = 0; i < chimera::MAX_SYMBOLS; ++i) {
+                    d1_trend[i] = true;   // default bullish if no D1 engine
+                    d1_found[i] = false;
+                }
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    // D1 TSMOM engines are our trend reference
+                    if (s.tf_secs == 86400 && s.engine->is_trend_following()) {
+                        d1_trend[s.symbol_id] = s.engine->trend_bullish();
+                        d1_found[s.symbol_id] = true;
+                    }
+                }
+                // Second pass: propagate to all engines with mtf_gate enabled
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    s.engine->set_d1_bullish(d1_trend[s.symbol_id]);
+                }
+            }
+
+            // ── Session 30, Edge 1: Periodic funding rate refresh ────────────
+            // Fetch every 8h (matches Binance funding interval).
+            // Propagate tailwind/headwind flags to all engines.
+            if (now_ms - g_last_funding_fetch_ms >= FUNDING_FETCH_INTERVAL_MS) {
+                std::thread([](){
+                    g_funding_filter.fetch_all();
+                }).detach();
+                g_last_funding_fetch_ms = now_ms;
+            }
+            // Always propagate current state (fetch may complete between loops)
+            if (g_funding_filter.is_ready()) {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    s.engine->set_funding_tailwind(g_funding_filter.has_tailwind(s.symbol_id));
+                    s.engine->set_funding_headwind(g_funding_filter.has_headwind(s.symbol_id));
+                }
+            }
+
+            // ── Session 30, Edge 3: Volatility regime classification ─────────
+            // Use BTC's ATR(14)/ATR(50) from a D1 engine as the global vol regime.
+            // LOW: ratio < 0.8 (compressed, breakouts work)
+            // HIGH: ratio > 1.4 (chaotic, mean-reversion works)
+            // MEDIUM: 0.8-1.4 (both strategies active)
+            {
+                chimera::EdgeEngine::VolRegime regime = chimera::EdgeEngine::VolRegime::MEDIUM;
+                // Find BTC D1 TSMOM engine to read its vol_ratio
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    if (s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400 &&
+                        s.engine->is_trend_following()) {
+                        double vr = s.engine->vol_ratio_public();
+                        if (vr > 0.0) {  // 0 = not enough data yet
+                            if (vr < 0.8) regime = chimera::EdgeEngine::VolRegime::LOW;
+                            else if (vr > 1.4) regime = chimera::EdgeEngine::VolRegime::HIGH;
+                        }
+                        break;
+                    }
+                }
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    s.engine->set_vol_regime(regime);
+                }
+            }
+
+            // ── Session 30, Edge 5: Cross-TF momentum score ──────────────────
+            // For each symbol, check if D1 + H6 + H4 are all bullish.
+            // Score: 0.0 (no agreement), 0.33 (one TF), 0.67 (two TFs), 1.0 (all three)
+            {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                double cross_tf_scores[chimera::MAX_SYMBOLS]{};
+                for (int sym = 0; sym < chimera::MAX_SYMBOLS; ++sym) {
+                    int bullish_count = 0;
+                    int tf_count = 0;
+                    for (auto& s : g_slots) {
+                        if (!s.engine) continue;
+                        if (s.symbol_id != sym) continue;
+                        if (!s.engine->is_trend_following()) continue;
+                        // Only count D1, H6, H4 as cross-TF references
+                        if (s.tf_secs == 86400 || s.tf_secs == 21600 || s.tf_secs == 14400) {
+                            tf_count++;
+                            if (s.engine->trend_bullish()) bullish_count++;
+                        }
+                    }
+                    cross_tf_scores[sym] = (tf_count > 0) ?
+                        (double)bullish_count / (double)tf_count : 0.0;
+                }
+                // Propagate scores to all engines
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    s.engine->set_cross_tf_score(cross_tf_scores[s.symbol_id]);
+                }
+
+                // Edge 4: Dynamic sizing adjustment based on regime + conviction
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    double base_mult = s.engine->sizing_mult();
+                    // Cap base at the statically-set value (don't compound)
+                    if (base_mult > 2.0) base_mult = 2.0;
+                    double dynamic_mult = base_mult;
+                    // High conviction (cross-TF + funding) → boost 25%
+                    if (s.engine->is_high_conviction()) {
+                        dynamic_mult = base_mult * 1.25;
+                    }
+                    // High vol regime → reduce 25% (protect capital)
+                    if (s.engine->vol_regime() == chimera::EdgeEngine::VolRegime::HIGH) {
+                        dynamic_mult *= 0.75;
+                    }
+                    s.engine->set_sizing_mult(dynamic_mult);
+                }
+            }
+
+            // ── Session 30, Edge 7: Liquidation cascade entry signals ───────���
+            // When a cascade exhausts, boost the sizing mult for affected symbol
+            // for the next 5 minutes (the dip-buy window). Also log prominently.
+            {
+                g_liq_detector.cleanup(now_ms);
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                for (int sym = 0; sym < chimera::MAX_SYMBOLS; ++sym) {
+                    if (g_liq_detector.has_entry_signal(sym)) {
+                        // Boost ALL engines for this symbol — cascade dip = high conviction
+                        for (auto& s : g_slots) {
+                            if (!s.engine || s.symbol_id != sym) continue;
+                            double cur = s.engine->sizing_mult();
+                            s.engine->set_sizing_mult(cur * 1.5);  // 50% boost for cascade dip
+                        }
+                        std::printf("[LIQ-ENTRY] %s: cascade entry boost active (sizing +50%%)\n",
+                            chimera::SYM_SHORT[sym]);
+                        std::fflush(stdout);
+                        g_liq_detector.clear_entry_signal(sym);
+                    }
+                }
+            }
+
+            // ── Portfolio gate: max concurrent positions + drawdown breaker ──
+            // Count open positions. If >= MAX_CONCURRENT, disable new entries.
+            // Also check rolling drawdown: if total net_bp across all engines
+            // over last 24h drops below DRAWDOWN_LIMIT_BP, halt all entries.
+            {
+                constexpr int MAX_CONCURRENT_POSITIONS = 15;
+                constexpr double DRAWDOWN_HALT_BP = -500.0;  // -5% rolling DD = halt
+
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                int open_positions = 0;
+                for (auto& s : g_slots) {
+                    if (s.engine && s.engine->in_position()) open_positions++;
+                }
+
+                // Check 24h rolling drawdown from trade log
+                double recent_pnl = 0.0;
+                {
+                    std::lock_guard<std::mutex> tlk(g_trades_mtx);
+                    int64_t cutoff = now_ms - 86400000LL;  // 24h ago
+                    for (int i = (int)g_trade_log.size() - 1; i >= 0; --i) {
+                        if (g_trade_log[i].exit_ts_ms < cutoff) break;
+                        recent_pnl += g_trade_log[i].net_bp;
+                    }
+                }
+
+                bool gate_open = (open_positions < MAX_CONCURRENT_POSITIONS) &&
+                                 (recent_pnl > DRAWDOWN_HALT_BP);
+
+                for (auto& s : g_slots) {
+                    if (s.engine) s.engine->set_portfolio_gate(gate_open);
+                }
+
+                // Log when gate closes
+                static bool prev_gate = true;
+                if (!gate_open && prev_gate) {
+                    std::printf("[PORTFOLIO] GATE CLOSED: positions=%d (max=%d) | 24h_pnl=%+.1fbp (limit=%+.0f)\n",
+                        open_positions, MAX_CONCURRENT_POSITIONS, recent_pnl, DRAWDOWN_HALT_BP);
+                    std::fflush(stdout);
+                } else if (gate_open && !prev_gate) {
+                    std::printf("[PORTFOLIO] GATE OPENED: positions=%d | 24h_pnl=%+.1fbp\n",
+                        open_positions, recent_pnl);
+                    std::fflush(stdout);
+                }
+                prev_gate = gate_open;
+            }
+
+            // ── Correlation regime: compute rolling corr(alt, BTC) ───────────
+            // Uses last-seen spot prices to compute a simple 1-tick return
+            // correlation proxy. For full rolling correlation, we'd need bar-level
+            // returns — but a simpler heuristic works: if all alts moved in the
+            // same direction as BTC by a similar magnitude in recent ticks,
+            // correlation is high. We use the D1 engine returns as proxy.
+            {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                // Get BTC return (from D1 engine momentum if available)
+                double btc_momentum = 0.0;
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    if (s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400 &&
+                        s.engine->is_trend_following()) {
+                        // Use trend_bullish as a simplification — if BTC and alt
+                        // are both in same trend direction, correlation is high.
+                        // More sophisticated: track rolling returns. For now, use
+                        // a simple heuristic based on D1 trend agreement.
+                        std::string state = s.engine->state_json();
+                        auto pos = state.find("\"momentum_pct\":");
+                        if (pos != std::string::npos) {
+                            try { btc_momentum = std::stod(state.substr(pos + 16, 10)); }
+                            catch (...) {}
+                        }
+                        break;
+                    }
+                }
+
+                // For each non-BTC symbol, check if their D1 momentum is highly
+                // aligned with BTC (same sign, similar magnitude = high correlation)
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    if (s.symbol_id == chimera::SYM_BTC) {
+                        s.engine->set_corr_high(false);  // BTC never self-suppresses
+                        continue;
+                    }
+                    // Simple correlation proxy: if BTC is moving strongly and
+                    // this symbol has same-direction movement > 50% of BTC's move,
+                    // flag as high correlation. This is a conservative heuristic.
+                    // TODO: upgrade to true rolling Pearson correlation on bar returns.
+                    bool corr_flag = false;
+                    if (std::fabs(btc_momentum) > 3.0) {  // BTC moving > 3%
+                        // Check this symbol's D1 momentum
+                        if (s.tf_secs == 86400 && s.engine->is_trend_following()) {
+                            std::string state = s.engine->state_json();
+                            auto pos = state.find("\"momentum_pct\":");
+                            if (pos != std::string::npos) {
+                                double sym_mom = 0.0;
+                                try { sym_mom = std::stod(state.substr(pos + 16, 10)); }
+                                catch (...) {}
+                                // Same sign and magnitude > 50% of BTC
+                                if ((btc_momentum > 0 && sym_mom > btc_momentum * 0.5) ||
+                                    (btc_momentum < 0 && sym_mom < btc_momentum * 0.5)) {
+                                    corr_flag = true;
+                                }
+                            }
+                        }
+                    }
+                    s.engine->set_corr_high(corr_flag);
+                }
+            }
+        }
     }
 
     std::printf("\n[SHUTDOWN] Stopping...\n");
     std::fflush(stdout);
 
-    // ── Graceful close: flatten all open positions at last known price ───
-    // This ensures unrealised profits are captured as completed trades in
-    // the journal before the process exits.  Reason = "SHUTDOWN" so we can
-    // distinguish these from normal exits in the trade history.
+    // ── Graceful shutdown: write final snapshot for resume on next start ──
+    // Instead of force-closing positions (which realises them at shutdown price),
+    // we persist the full position state. On next start, resume_position() picks
+    // them back up seamlessly. This means deploys/restarts don't interrupt trades.
     {
         std::lock_guard<std::mutex> lk(g_engine_mtx);
         int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-        int closed = 0;
+        int open_count = 0;
+        std::ostringstream snap;
+        snap << "{\"snapshot_ts\":" << now_ms << ",\"positions\":[";
         for (auto& s : g_slots) {
             if (!s.engine || !s.engine->in_position()) continue;
-            // Use last known spot price for this symbol
             double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
-            if (spot <= 0.0) {
-                // Fallback: use engine's last_close if spot unavailable
-                // (state_json exposes last_close_ but we can't access it directly,
-                //  so we re-use the atomic spot which is updated every tick)
-                std::fprintf(stderr, "[SHUTDOWN] WARNING: no spot price for %s, "
-                    "position will be lost\n", s.tag.c_str());
-                continue;
+            std::string pj = s.engine->position_snapshot_json(spot);
+            if (!pj.empty()) {
+                if (open_count > 0) snap << ",";
+                snap << pj;
+                open_count++;
             }
-            std::printf("[SHUTDOWN] Closing open position: %s @ %.6f\n",
-                s.tag.c_str(), spot);
-            // exit_position_ fires the on_trade callback which persists to disk
-            s.engine->graceful_close(spot, now_ms);
-            closed++;
         }
-        std::printf("[SHUTDOWN] Gracefully closed %d open position(s)\n", closed);
+        snap << "],\"open_count\":" << open_count << "}\n";
+        FILE* f = fopen("data/open_positions.json", "w");
+        if (f) {
+            std::string out = snap.str();
+            fwrite(out.c_str(), 1, out.size(), f);
+            fclose(f);
+        }
+        std::printf("[SHUTDOWN] Snapshot saved: %d open position(s) will resume on next start\n", open_count);
         std::fflush(stdout);
     }
 

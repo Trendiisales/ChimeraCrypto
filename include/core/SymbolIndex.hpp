@@ -9,20 +9,24 @@ namespace chimera {
 //
 // BTC is always id=0 (the lead-lag leader).
 // All others are followers. Adding a new symbol = add entry here + main.cpp.
+//
+// Session 30: Added PEPE, WIF, FET, ONDO, TIA (5 new meme/AI/RWA symbols)
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 12;
+static constexpr int MAX_SYMBOLS = 17;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE",
-    "SUI", "APT", "NEAR", "ARB"
+    "SUI", "APT", "NEAR", "ARB",
+    "PEPE", "WIF", "FET", "ONDO", "TIA"
 };
 
 // Full Binance stream names (lowercase)
 static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt",
-    "suiusdt", "aptusdt", "nearusdt", "arbusdt"
+    "suiusdt", "aptusdt", "nearusdt", "arbusdt",
+    "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt"
 };
 
 inline const char* sym_short(int id) {
@@ -55,6 +59,11 @@ enum SymbolId : uint8_t {
     SYM_APT  = 9,
     SYM_NEAR = 10,
     SYM_ARB  = 11,
+    SYM_PEPE = 12,
+    SYM_WIF  = 13,
+    SYM_FET  = 14,
+    SYM_ONDO = 15,
+    SYM_TIA  = 16,
     SYM_COUNT = MAX_SYMBOLS
 };
 

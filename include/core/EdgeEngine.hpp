@@ -40,6 +40,26 @@
 //                Captures the documented overnight premium (21-23 UTC window).
 //   WEEKDAY    — buy on Monday D1 bar close when close > SMA(5).
 //                Captures the Monday effect (+0.51%/day avg).
+//
+// Session 28 additions (2026-05-17):
+//   KELTNER_REVERT — mean reversion using EMA + ATR bands (more robust than
+//                    Bollinger's std-dev bands for crypto's fat tails).
+//   DUAL_THRUST    — range breakout: enter when close > open + K * range
+//                    where range = max(HH-LC, HC-LL) over prior N bars.
+//   Volatility regime filter — ATR(14)/ATR(50) ratio gate that suppresses
+//                    counter-trend entries (RSI/BOLL/KELTNER) during chaos
+//                    (ratio > 1.6) and elevated vol (ratio > 1.2).
+//
+// Session 29 additions (2026-05-17):
+//   ADX regime filter — suppresses trend-following entries (TSMOM/DONCHIAN/
+//                    DUAL_THRUST) when ADX(14) < 25 (no directional trend).
+//                    Prevents whipsaw entries in ranging/choppy markets.
+//   Volume regime filter — counts ticks per bar as volume proxy. Suppresses
+//                    ALL entries when tick count < 30% of rolling average
+//                    (detects weekend dead zones and exchange outages).
+//   ICHIMOKU       — Cloud breakout + Tenkan/Kijun cross (trend-following).
+//   SUPERTREND     — ATR-based trailing trend indicator, enters on flip
+//                    from bearish to bullish.
 // ============================================================================
 #pragma once
 
@@ -57,22 +77,34 @@
 namespace chimera {
 
 enum class StrategyKind {
-    TSMOM,       // 20-bar return > 0
-    DONCHIAN,    // close > prior 20-bar high
-    BOLLINGER,   // bar pierces lower BB(20,2) then closes back above
-    RSI_REVERT,  // RSI(14) crosses up from <= 30
-    OVERNIGHT,   // H1 bar at 21:00 UTC + uptrend filter
-    WEEKDAY      // D1 bar on Monday + SMA(5) filter
+    TSMOM,          // 20-bar return > 0
+    DONCHIAN,       // close > prior 20-bar high
+    BOLLINGER,      // bar pierces lower BB(20,2) then closes back above
+    RSI_REVERT,     // RSI(14) crosses up from <= 30
+    OVERNIGHT,      // H1 bar at 21:00 UTC + uptrend filter
+    WEEKDAY,        // D1 bar on Monday + SMA(5) filter
+    KELTNER_REVERT, // bar pierces lower Keltner (EMA-ATR) band then closes above
+    DUAL_THRUST,    // range breakout: close > open + K * range(N)
+    ICHIMOKU,       // cloud breakout + Tenkan/Kijun cross (Session 29)
+    SUPERTREND,     // ATR-based trailing trend flip (Session 29)
+    WILLIAMS_R,     // Williams %R cross up from oversold (Session 29b)
+    STOCH_RSI       // Stochastic RSI cross up from oversold (Session 29b)
 };
 
 inline const char* strategy_name(StrategyKind k) {
     switch (k) {
-        case StrategyKind::TSMOM:      return "TSMOM";
-        case StrategyKind::DONCHIAN:   return "DONCHIAN";
-        case StrategyKind::BOLLINGER:  return "BOLLINGER";
-        case StrategyKind::RSI_REVERT: return "RSI_REVERT";
-        case StrategyKind::OVERNIGHT:  return "OVERNIGHT";
-        case StrategyKind::WEEKDAY:    return "WEEKDAY";
+        case StrategyKind::TSMOM:          return "TSMOM";
+        case StrategyKind::DONCHIAN:       return "DONCHIAN";
+        case StrategyKind::BOLLINGER:      return "BOLLINGER";
+        case StrategyKind::RSI_REVERT:     return "RSI_REVERT";
+        case StrategyKind::OVERNIGHT:      return "OVERNIGHT";
+        case StrategyKind::WEEKDAY:        return "WEEKDAY";
+        case StrategyKind::KELTNER_REVERT: return "KELTNER_REVERT";
+        case StrategyKind::DUAL_THRUST:    return "DUAL_THRUST";
+        case StrategyKind::ICHIMOKU:       return "ICHIMOKU";
+        case StrategyKind::SUPERTREND:     return "SUPERTREND";
+        case StrategyKind::WILLIAMS_R:     return "WILLIAMS_R";
+        case StrategyKind::STOCH_RSI:      return "STOCH_RSI";
     }
     return "UNK";
 }
@@ -124,6 +156,106 @@ public:
         int          entry_dow = 1;  // Monday
         // sma_len: SMA length for the momentum filter (close > SMA to enter)
         int          sma_len = 5;
+
+        // ── KELTNER_REVERT parameters (Session 28) ──────────────────────
+        // keltner_ema_len: EMA period for Keltner channel midline (default 20)
+        int          keltner_ema_len = 20;
+        // keltner_atr_mult: ATR multiplier for channel width (default 2.0)
+        double       keltner_atr_mult = 2.0;
+
+        // ── DUAL_THRUST parameters (Session 28) ─────────────────────────
+        // dt_k1: multiplier for range to compute upper trigger (default 0.5)
+        double       dt_k1 = 0.5;
+        // dt_range_bars: number of prior bars to compute the range (default 4)
+        int          dt_range_bars = 4;
+
+        // ── Volatility regime filter (Session 28) ────────────────────────
+        // When enabled, suppresses counter-trend entries (RSI/BOLL/KELTNER)
+        // during elevated volatility as measured by ATR(14)/ATR(50) ratio.
+        // Set vol_filter = false to disable (default for trend-following).
+        bool         vol_filter = false;
+        double       vol_chaos_threshold    = 1.6;  // ratio above this = suppress ALL
+        double       vol_elevated_threshold = 1.5;  // ratio above this = suppress counter-trend only (raised from 1.2 — S29 tuning)
+
+        // ── Multi-timeframe gate (Session 28) ────────────────────────────
+        // When enabled, suppresses counter-trend entries (RSI/BOLL/KELTNER)
+        // when the D1 TSMOM trend for this symbol is bearish. Prevents
+        // mean-reversion entries against a strong daily downtrend.
+        // The D1 state is fed externally via set_d1_bullish().
+        bool         mtf_gate = false;
+
+        // ── ADX regime filter (Session 29) ───────────────────────────────
+        // When enabled, suppresses TREND-FOLLOWING entries (TSMOM/DONCHIAN/
+        // DUAL_THRUST/ICHIMOKU/SUPERTREND) when ADX(14) < adx_threshold.
+        // Prevents whipsaw entries in ranging/choppy markets.
+        // Does NOT affect counter-trend strategies (they want low ADX).
+        bool         adx_filter = false;
+        int          adx_period = 14;
+        double       adx_threshold = 20.0;  // ADX must be >= this for trend entry (lowered from 25 — S29 tuning)
+
+        // ── Volume regime filter (Session 29) ────────────────────────────
+        // Counts ticks per bar as a volume proxy. If current bar's tick count
+        // is below vol_tick_ratio * rolling_avg(vol_tick_lookback bars), suppress
+        // ALL entries (detects weekend dead zones and exchange outages).
+        // Requires vol_tick_warmup bars of history before activation.
+        bool         volume_gate = false;
+        double       vol_tick_ratio = 0.30;       // suppress if ticks < 30% of avg
+        int          vol_tick_lookback = 10;      // rolling average over N bars
+        int          vol_tick_warmup = 5;         // don't activate until N bars seen
+
+        // ── BTC correlation regime filter (Session 29b) ───────────────────
+        // When enabled on non-BTC engines, suppresses ALL entries when the
+        // symbol's rolling correlation with BTC returns is above threshold.
+        // During extreme correlation (herding), individual alpha vanishes.
+        // State is fed externally via set_corr_high().
+        bool         corr_filter = false;
+        double       corr_threshold = 0.90;  // suppress when rolling corr > this
+
+        // ── Time-of-day session filter (Session 29b) ─────────────────────
+        // Suppresses entries during low-activity sessions. Default suppresses
+        // Asian session (00:00-08:00 UTC) for sub-H6 timeframes where the
+        // low-liquidity creates adverse fills and false breakouts.
+        bool         session_filter = false;
+        int          session_suppress_start = 0;   // UTC hour start (inclusive)
+        int          session_suppress_end   = 8;   // UTC hour end (exclusive)
+
+        // ── Portfolio-level gate (Session 29b) ───────────────────────────
+        // External gate set by main.cpp when max concurrent positions reached
+        // or drawdown circuit breaker triggered. Engine will not enter when false.
+        // This is NOT a config toggle — it's dynamic state managed externally.
+        // (Included in Config section for documentation only; actual state below)
+
+        // ── ICHIMOKU parameters (Session 29) ─────────────────────────────
+        // Tenkan-sen (conversion line): midpoint of highest high & lowest low
+        //   over tenkan_period bars (default 9 → mapped to crypto: 20)
+        // Kijun-sen (base line): midpoint over kijun_period bars (default 26 → 60)
+        // Senkou Span A: midpoint of Tenkan & Kijun (no displacement in our use)
+        // Senkou Span B: midpoint of highest/lowest over senkou_b_period (default 52 → 120)
+        // Signal: price closes above the cloud AND Tenkan > Kijun
+        int          ichi_tenkan_period  = 20;
+        int          ichi_kijun_period   = 60;
+        int          ichi_senkou_b_period = 120;
+
+        // ── SUPERTREND parameters (Session 29) ──────────────────────────
+        // SuperTrend is computed as: HL2 +/- multiplier * ATR(period).
+        // Signal fires when SuperTrend flips from bearish to bullish (price
+        // crosses above the upper band after being below).
+        double       st_multiplier = 3.0;
+        int          st_atr_period = 10;
+
+        // ── WILLIAMS_R parameters (Session 29b) ─────────────────────────
+        // Williams %R = (Highest High - Close) / (Highest High - Lowest Low) * -100
+        // Range: -100 (oversold) to 0 (overbought). Signal: cross up from below threshold.
+        int          willr_period = 14;
+        double       willr_threshold = -80.0;  // oversold level (buy when crosses up from here)
+
+        // ── STOCH_RSI parameters (Session 29b) ──────────────────────────
+        // Stochastic RSI = (RSI - minRSI(N)) / (maxRSI(N) - minRSI(N))
+        // Range: 0 to 100. Signal: crosses up from below threshold.
+        // Faster oscillator than raw RSI — catches reversals sooner.
+        int          stochrsi_rsi_period = 14;
+        int          stochrsi_stoch_period = 14;
+        double       stochrsi_threshold = 20.0;  // oversold level
     };
 
     // -----------------------------------------------------------------------
@@ -196,6 +328,20 @@ public:
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
         if (cfg_.max_history < cfg_.atr_period + 5) cfg_.max_history = cfg_.atr_period + 5;
         if (cfg_.max_history < cfg_.sma_len + 5)    cfg_.max_history = cfg_.sma_len + 5;
+        // Keltner needs EMA history
+        if (cfg_.max_history < cfg_.keltner_ema_len + 5) cfg_.max_history = cfg_.keltner_ema_len + 5;
+        // DUAL_THRUST needs range_bars + 1
+        if (cfg_.max_history < cfg_.dt_range_bars + 5) cfg_.max_history = cfg_.dt_range_bars + 5;
+        // Vol filter needs ATR(50) which needs 51 bars
+        if (cfg_.vol_filter && cfg_.max_history < 56) cfg_.max_history = 56;
+        // ADX filter needs adx_period + 2 bars
+        if (cfg_.adx_filter && cfg_.max_history < cfg_.adx_period + 5) cfg_.max_history = cfg_.adx_period + 5;
+        // Ichimoku needs senkou_b_period + 1 bars
+        if (cfg_.kind == StrategyKind::ICHIMOKU && cfg_.max_history < cfg_.ichi_senkou_b_period + 5)
+            cfg_.max_history = cfg_.ichi_senkou_b_period + 5;
+        // SuperTrend needs st_atr_period + 2
+        if (cfg_.kind == StrategyKind::SUPERTREND && cfg_.max_history < cfg_.st_atr_period + 5)
+            cfg_.max_history = cfg_.st_atr_period + 5;
         std::printf("[%s] ARMED  symbol=%s strat=%s tf=%llds lookback=%d hold=%d sl=%.2f*atr trail_arm=%.1f*atr trail_dist=%.1f*atr  shadow=%d\n",
             cfg_.tag.c_str(), cfg_.symbol.c_str(),
             strategy_name(cfg_.kind),
@@ -226,6 +372,9 @@ public:
             lows_.push_back(b.l);
             closes_.push_back(b.c);
             bar_ts_ms_.push_back(b.open_ts_ms);
+            // Seed bars get a synthetic tick count (use average = 100 so volume
+            // gate doesn't suppress on startup)
+            tick_counts_.push_back(100);
         }
 
         // Trim to max_history (drop oldest first).
@@ -235,6 +384,7 @@ public:
             lows_.pop_front();
             closes_.pop_front();
             bar_ts_ms_.pop_front();
+            tick_counts_.pop_front();
         }
 
         if (!closes_.empty()) {
@@ -275,6 +425,7 @@ public:
             cur_bar_id_ = bar_id;
             cur_open_ = cur_high_ = cur_low_ = cur_close_ = price;
             cur_open_ts_ms_ = bar_id * cfg_.tf_secs * 1000;
+            cur_tick_count_ = 1;
         } else if (bar_id != cur_bar_id_) {
             // Bar boundary crossed — close out the previous bar then open new ones
             // for every full bar gap (in case of feed silence).
@@ -286,15 +437,18 @@ public:
                 cur_bar_id_ += 1;
                 cur_open_ts_ms_ = cur_bar_id_ * cfg_.tf_secs * 1000;
                 cur_open_ = cur_high_ = cur_low_ = cur_close_ = last_close_;
+                cur_tick_count_ = 0;  // zero-tick filler bar
                 close_bar_();
             }
             cur_bar_id_ = bar_id;
             cur_open_ts_ms_ = bar_id * cfg_.tf_secs * 1000;
             cur_open_ = cur_high_ = cur_low_ = cur_close_ = price;
+            cur_tick_count_ = 1;
         } else {
             if (price > cur_high_) cur_high_ = price;
             if (price < cur_low_)  cur_low_  = price;
             cur_close_ = price;
+            cur_tick_count_++;
         }
 
         // Intra-bar exit check (so we don't miss the stop until the next bar boundary)
@@ -317,6 +471,81 @@ public:
         if (in_position_ && price > 0.0) {
             exit_position_(price, ts_ms, "SHUTDOWN");
         }
+    }
+
+    // ── Position resume (Session 28) ────────────────────────────────────────
+    // Injects a previously-saved position back into the engine after restart.
+    // Called from main.cpp after reading data/open_positions.json.
+    // The engine then manages the trade (trail, SL, time-exit) as if it was
+    // never interrupted.
+    struct ResumeState {
+        double  entry_px        = 0.0;
+        double  sl_px           = 0.0;
+        double  atr_at_entry    = 0.0;
+        int64_t entry_ts_ms     = 0;
+        int64_t time_exit_ts_ms = 0;
+        int     bars_held       = 0;
+        bool    trail_armed     = false;
+        double  trail_stop_px   = 0.0;
+        double  trail_arm_px    = 0.0;
+        double  mfe_px          = 0.0;
+        double  mfe_bp          = 0.0;
+    };
+
+    bool resume_position(const ResumeState& rs) {
+        if (in_position_) return false;  // already in a trade somehow
+        if (rs.entry_px <= 0.0) return false;
+
+        in_position_     = true;
+        entry_px_        = rs.entry_px;
+        sl_px_           = rs.sl_px;
+        atr_at_entry_    = rs.atr_at_entry;
+        entry_ts_ms_     = rs.entry_ts_ms;
+        time_exit_ts_ms_ = rs.time_exit_ts_ms;
+        bars_held_       = rs.bars_held;
+        trail_armed_     = rs.trail_armed;
+        trail_stop_px_   = rs.trail_stop_px;
+        trail_arm_px_    = rs.trail_arm_px;
+        mfe_px_          = rs.mfe_px;
+        mfe_bp_          = rs.mfe_bp;
+
+        std::printf("[%s] RESUME  entry=%.6f  sl=%.6f  trail_armed=%d  trail_stop=%.6f  bars_held=%d  mfe=+%.1fbp\n",
+            cfg_.tag.c_str(), entry_px_, sl_px_, (int)trail_armed_,
+            trail_stop_px_, bars_held_, mfe_bp_);
+        return true;
+    }
+
+    // Returns a JSON object string describing the open position, or "" if flat.
+    // Contains ALL fields needed for resume_position() after crash recovery.
+    std::string position_snapshot_json(double spot_px) const {
+        if (!in_position_) return "";
+        double unreal_bp = (spot_px > 0.0 && entry_px_ > 0.0)
+            ? (spot_px / entry_px_ - 1.0) * 1e4
+            : 0.0;
+        std::ostringstream js;
+        js << std::fixed;
+        js << "{";
+        js << "\"tag\":\"" << cfg_.tag << "\",";
+        js << "\"symbol\":\"" << cfg_.symbol << "\",";
+        js << "\"strategy\":\"" << strategy_name(cfg_.kind) << "\",";
+        js << std::setprecision(8);
+        js << "\"entry_px\":" << entry_px_ << ",";
+        js << "\"sl_px\":" << sl_px_ << ",";
+        js << "\"atr_at_entry\":" << atr_at_entry_ << ",";
+        js << "\"spot_px\":" << spot_px << ",";
+        js << std::setprecision(2);
+        js << "\"unreal_bp\":" << unreal_bp << ",";
+        js << "\"mfe_bp\":" << mfe_bp_ << ",";
+        js << "\"entry_ts\":" << entry_ts_ms_ << ",";
+        js << "\"time_exit_ts\":" << time_exit_ts_ms_ << ",";
+        js << "\"bars_held\":" << bars_held_ << ",";
+        js << "\"trail_armed\":" << (trail_armed_ ? "true" : "false") << ",";
+        js << std::setprecision(8);
+        js << "\"trail_stop_px\":" << trail_stop_px_ << ",";
+        js << "\"trail_arm_px\":" << trail_arm_px_ << ",";
+        js << "\"mfe_px\":" << mfe_px_;
+        js << "}";
+        return js.str();
     }
 
     // JSON state line for /api/state (one object per engine; main.cpp wraps in array).
@@ -348,6 +577,14 @@ public:
         js << "\"mfe_bp\":" << (in_position_ ? mfe_bp_ : 0.0) << ",";
         js << std::setprecision(6);
         js << "\"trail_stop_px\":" << (trail_armed_ ? trail_stop_px_ : 0.0) << ",";
+
+        // ── Session 29 filter state for diagnostics ─────────────────────
+        js << "\"adx_filter\":" << (cfg_.adx_filter ? "true" : "false") << ",";
+        js << std::setprecision(1);
+        js << "\"adx_value\":" << adx_(cfg_.adx_period) << ",";
+        js << "\"volume_gate\":" << (cfg_.volume_gate ? "true" : "false") << ",";
+        js << "\"cur_tick_count\":" << cur_tick_count_ << ",";
+        js << "\"avg_tick_count\":" << avg_tick_count_() << ",";
 
         // ── Diagnostic fields (read-only, no effect on trading logic) ────
         js << "\"lookback\":" << cfg_.lookback << ",";
@@ -390,6 +627,94 @@ public:
     bool in_position() const { return in_position_; }
     int bars_in_buffer() const { return (int)closes_.size(); }
 
+    // Runtime filter activation (can be called after construction)
+    void enable_vol_filter(bool b) { cfg_.vol_filter = b; }
+    void enable_mtf_gate(bool b)   { cfg_.mtf_gate = b; }
+    void enable_adx_filter(bool b) { cfg_.adx_filter = b; }
+    void enable_volume_gate(bool b) { cfg_.volume_gate = b; }
+    void enable_corr_filter(bool b) { cfg_.corr_filter = b; }
+    void enable_session_filter(bool b) { cfg_.session_filter = b; }
+
+    // Correlation regime: set by main.cpp when rolling corr(symbol, BTC) > threshold
+    void set_corr_high(bool b) { corr_high_ = b; }
+    bool corr_high() const { return corr_high_; }
+
+    // Portfolio gate: set by main.cpp when max positions reached or drawdown breaker fires
+    void set_portfolio_gate(bool allowed) { portfolio_entry_allowed_ = allowed; }
+    bool portfolio_entry_allowed() const { return portfolio_entry_allowed_; }
+
+    // MTF gate: called externally when D1 TSMOM trend state changes.
+    // true = D1 bullish (allow all entries), false = D1 bearish (suppress counter-trend).
+    // Session 29 refinement: tracks bearish streak. MTF gate only suppresses
+    // after 3 consecutive bearish D1 readings (prevents single-bar whipsaw blocks).
+    void set_d1_bullish(bool b) {
+        if (!b) {
+            d1_bearish_streak_++;
+        } else {
+            d1_bearish_streak_ = 0;
+        }
+        d1_bullish_ = b;
+    }
+    bool d1_bullish() const { return d1_bullish_; }
+    int d1_bearish_streak() const { return d1_bearish_streak_; }
+
+    // Returns whether this engine's strategy is trend-following (for MTF gate logic in main.cpp)
+    bool is_trend_following() const {
+        return cfg_.kind == StrategyKind::TSMOM || cfg_.kind == StrategyKind::DONCHIAN ||
+               cfg_.kind == StrategyKind::DUAL_THRUST || cfg_.kind == StrategyKind::ICHIMOKU ||
+               cfg_.kind == StrategyKind::SUPERTREND;
+    }
+
+    // Returns the TSMOM trend direction: true = bullish (close > close[lookback]).
+    // Used by main.cpp to extract D1 trend state from D1 TSMOM engines.
+    bool trend_bullish() const {
+        if ((int)closes_.size() < cfg_.lookback + 1) return true; // default bullish if insufficient data
+        return closes_.back() > closes_[closes_.size() - 1 - cfg_.lookback];
+    }
+
+    // ── Session 30: Funding rate tailwind (Edge 1) ──────────────────────────
+    // When negative funding detected (shorts paying longs), spot-long has carry edge.
+    // Effect: lowers ADX threshold by 5 and vol_elevated threshold by 0.1 when true.
+    // Also flags entry as "high conviction" for position sizing (Edge 4).
+    void set_funding_tailwind(bool b) { funding_tailwind_ = b; }
+    bool funding_tailwind() const { return funding_tailwind_; }
+
+    // When positive funding is extreme (longs paying heavily), suppress entries.
+    void set_funding_headwind(bool b) { funding_headwind_ = b; }
+    bool funding_headwind() const { return funding_headwind_; }
+
+    // ── Session 30: Volatility regime (Edge 3) ──��───────────────────────────
+    // 3-state regime: LOW=0, MEDIUM=1, HIGH=2
+    // LOW → only trend/breakout engines active
+    // HIGH → only counter-trend engines active
+    // MEDIUM → all active
+    // Set externally by main.cpp based on ATR(14)/ATR(50) of BTC D1.
+    enum class VolRegime : uint8_t { LOW = 0, MEDIUM = 1, HIGH = 2 };
+    void set_vol_regime(VolRegime r) { vol_regime_ = r; }
+    VolRegime vol_regime() const { return vol_regime_; }
+
+    // ── Session 30: Position sizing multiplier (Edge 4) ─────────────────────
+    // Base = 1.0. Engines with strong backtest stats get sizing_mult > 1.0.
+    // Reduced during high vol, boosted during funding tailwind.
+    // Applied by main.cpp at execution time (not inside engine signal logic).
+    void set_sizing_mult(double m) { sizing_mult_ = m; }
+    double sizing_mult() const { return sizing_mult_; }
+
+    // ── Session 30: Cross-TF momentum score (Edge 5) ────────────────────────
+    // Normalized momentum score from D1+H6+H4 agreement.
+    // Range: 0.0 (no agreement) to 1.0 (all TFs strongly bullish).
+    // When > 0.7, engine is "high conviction" → sizing boost.
+    void set_cross_tf_score(double s) { cross_tf_score_ = s; }
+    double cross_tf_score() const { return cross_tf_score_; }
+
+    // Returns true if this entry is "high conviction" (funding tailwind + cross-TF alignment)
+    bool is_high_conviction() const {
+        return (funding_tailwind_ && cross_tf_score_ > 0.5) || cross_tf_score_ > 0.7;
+    }
+
+    // Public accessor for vol_ratio (used by main.cpp for regime classification)
+    double vol_ratio_public() const { return vol_ratio_(); }
+
 private:
     Config cfg_;
 
@@ -399,12 +724,45 @@ private:
     double  cur_open_  = 0.0, cur_high_ = 0.0, cur_low_ = 0.0, cur_close_ = 0.0;
     double  last_close_ = 0.0;
 
+    // Tick counter for volume proxy (Session 29)
+    int     cur_tick_count_ = 0;
+
     // Closed-bar history (back is most recent)
     std::deque<double> opens_;
     std::deque<double> highs_;
     std::deque<double> lows_;
     std::deque<double> closes_;
     std::deque<int64_t> bar_ts_ms_;
+    std::deque<int>    tick_counts_;   // tick count per bar (volume proxy)
+
+    // MTF gate state
+    bool    d1_bullish_  = true;    // default true = allow all entries
+    int     d1_bearish_streak_ = 0; // consecutive bearish D1 readings (S29: need 3+ to suppress)
+
+    // Correlation filter state (fed by main.cpp)
+    bool    corr_high_ = false;     // true = extreme BTC correlation, suppress altcoin entries
+
+    // Portfolio gate state (fed by main.cpp)
+    bool    portfolio_entry_allowed_ = true;  // false = max positions or drawdown breaker active
+
+    // Session 30: Funding filter state
+    bool    funding_tailwind_ = false;  // negative funding = carry edge for longs
+    bool    funding_headwind_ = false;  // extreme positive funding = suppress
+
+    // Session 30: Volatility regime state
+    VolRegime vol_regime_ = VolRegime::MEDIUM;
+
+    // Session 30: Position sizing multiplier (base=1.0)
+    double  sizing_mult_ = 1.0;
+
+    // Session 30: Cross-TF momentum score (0.0-1.0)
+    double  cross_tf_score_ = 0.0;
+
+    // SuperTrend state (persists across bars)
+    bool    st_bullish_      = true;   // current SuperTrend direction
+    bool    st_prev_bullish_ = true;   // previous bar's direction (for flip detection)
+    double  st_upper_band_   = 0.0;
+    double  st_lower_band_   = 0.0;
 
     // Position state
     bool    in_position_ = false;
@@ -465,6 +823,239 @@ private:
         return sum / (double)n;
     }
 
+    // ── Exponential Moving Average of last n closes ─────────────────────────
+    double ema_(int n) const {
+        if ((int)closes_.size() < n) return 0.0;
+        double alpha = 2.0 / (n + 1.0);
+        double result = closes_[0];
+        for (int i = 1; i < (int)closes_.size(); ++i) {
+            result = alpha * closes_[i] + (1.0 - alpha) * result;
+        }
+        return result;
+    }
+
+    // ── Average tick count over last N bars (volume proxy) ──────────────────
+    double avg_tick_count_() const {
+        int n = cfg_.vol_tick_lookback;
+        if ((int)tick_counts_.size() < n) {
+            if (tick_counts_.empty()) return 100.0;
+            n = (int)tick_counts_.size();
+        }
+        double sum = 0.0;
+        const int sz = (int)tick_counts_.size();
+        for (int i = sz - n; i < sz; ++i) sum += tick_counts_[i];
+        return sum / (double)n;
+    }
+
+    // ── ADX (Average Directional Index) ─────────────────────────────────────
+    // Simplified ADX: average of DX values over N bars.
+    // DX = |+DI - -DI| / (+DI + -DI) * 100
+    // where +DI and -DI are computed per-bar from directional movement / TR.
+    // Returns 25.0 (neutral) if insufficient data.
+    double adx_(int n) const {
+        // Need n+1 bars to compute n DX values (each DX needs current + prior bar)
+        if ((int)closes_.size() < n + 2) return 25.0;
+        const int sz = (int)closes_.size();
+
+        // Compute average DX over last n bars
+        double sum_dx = 0.0;
+        int valid = 0;
+        for (int i = sz - n; i < sz; ++i) {
+            double hi     = highs_[i];
+            double lo     = lows_[i];
+            double prev_hi = highs_[i - 1];
+            double prev_lo = lows_[i - 1];
+            double prev_c  = closes_[i - 1];
+
+            double plus_dm  = hi - prev_hi;
+            double minus_dm = prev_lo - lo;
+
+            if (plus_dm < 0.0) plus_dm = 0.0;
+            if (minus_dm < 0.0) minus_dm = 0.0;
+
+            // Only the larger DM survives
+            if (plus_dm > minus_dm) { minus_dm = 0.0; }
+            else if (minus_dm > plus_dm) { plus_dm = 0.0; }
+            else { plus_dm = 0.0; minus_dm = 0.0; }
+
+            double tr = std::max({hi - lo,
+                                  std::fabs(hi - prev_c),
+                                  std::fabs(lo - prev_c)});
+            if (tr <= 0.0) continue;
+
+            double plus_di  = plus_dm / tr;
+            double minus_di = minus_dm / tr;
+            double di_sum   = plus_di + minus_di;
+            double dx = (di_sum > 0.0) ? (std::fabs(plus_di - minus_di) / di_sum * 100.0) : 0.0;
+            sum_dx += dx;
+            valid++;
+        }
+        if (valid == 0) return 25.0;
+        return sum_dx / (double)valid;
+    }
+
+    // ── Williams %R (Session 29b) ──────────────────────────────────────────
+    // %R = (Highest High(N) - Close) / (Highest High(N) - Lowest Low(N)) * -100
+    // Range: -100 (oversold) to 0 (overbought)
+    double williams_r_(int n) const {
+        if ((int)highs_.size() < n) return -50.0;
+        const int sz = (int)highs_.size();
+        double hh = 0.0, ll = 1e18;
+        for (int i = sz - n; i < sz; ++i) {
+            if (highs_[i] > hh) hh = highs_[i];
+            if (lows_[i] < ll)  ll = lows_[i];
+        }
+        double range = hh - ll;
+        if (range <= 0.0) return -50.0;
+        return (hh - closes_.back()) / range * -100.0;
+    }
+
+    // Williams %R at one bar back (for cross-up detection)
+    double williams_r_prev_(int n) const {
+        if ((int)highs_.size() < n + 1) return -50.0;
+        const int sz = (int)highs_.size() - 1;  // exclude last bar
+        double hh = 0.0, ll = 1e18;
+        for (int i = sz - n; i < sz; ++i) {
+            if (highs_[i] > hh) hh = highs_[i];
+            if (lows_[i] < ll)  ll = lows_[i];
+        }
+        double range = hh - ll;
+        if (range <= 0.0) return -50.0;
+        return (hh - closes_[sz - 1]) / range * -100.0;
+    }
+
+    // ── Stochastic RSI (Session 29b) ────────────────────────────────────────
+    // StochRSI = (RSI - min(RSI, N)) / (max(RSI, N) - min(RSI, N)) * 100
+    // We compute RSI for the last stoch_period bars, then find min/max of those RSI values.
+    double stoch_rsi_(int rsi_period, int stoch_period) const {
+        // Need enough bars to compute stoch_period RSI values
+        if ((int)closes_.size() < rsi_period + stoch_period + 2) return 50.0;
+        const int sz = (int)closes_.size();
+
+        // Compute RSI values for the last stoch_period bars
+        // Using a sliding window approach
+        double min_rsi = 1e18, max_rsi = -1e18;
+        double cur_rsi = 0.0;
+
+        for (int offset = 0; offset < stoch_period; ++offset) {
+            // Compute RSI at position (sz - stoch_period + offset)
+            int end_pos = sz - stoch_period + offset + 1;
+            double avg_up = 0.0, avg_dn = 0.0;
+            const double alpha = 1.0 / (double)rsi_period;
+            for (int i = 1; i < end_pos; ++i) {
+                double d = closes_[i] - closes_[i - 1];
+                double u = d > 0 ? d : 0.0;
+                double dn = d < 0 ? -d : 0.0;
+                if (i == 1) { avg_up = u; avg_dn = dn; }
+                else { avg_up = (1 - alpha) * avg_up + alpha * u;
+                       avg_dn = (1 - alpha) * avg_dn + alpha * dn; }
+            }
+            double rsi_val = (avg_dn == 0.0) ? 100.0 : (100.0 - 100.0 / (1.0 + avg_up / avg_dn));
+
+            if (rsi_val < min_rsi) min_rsi = rsi_val;
+            if (rsi_val > max_rsi) max_rsi = rsi_val;
+            if (offset == stoch_period - 1) cur_rsi = rsi_val;
+        }
+
+        double range = max_rsi - min_rsi;
+        if (range <= 0.0) return 50.0;
+        return (cur_rsi - min_rsi) / range * 100.0;
+    }
+
+    // Stochastic RSI at one bar back (for cross-up detection)
+    double stoch_rsi_prev_(int rsi_period, int stoch_period) const {
+        if ((int)closes_.size() < rsi_period + stoch_period + 3) return 50.0;
+        const int sz = (int)closes_.size() - 1;  // pretend last bar doesn't exist
+
+        double min_rsi = 1e18, max_rsi = -1e18;
+        double cur_rsi = 0.0;
+
+        for (int offset = 0; offset < stoch_period; ++offset) {
+            int end_pos = sz - stoch_period + offset + 1;
+            double avg_up = 0.0, avg_dn = 0.0;
+            const double alpha = 1.0 / (double)rsi_period;
+            for (int i = 1; i < end_pos; ++i) {
+                double d = closes_[i] - closes_[i - 1];
+                double u = d > 0 ? d : 0.0;
+                double dn = d < 0 ? -d : 0.0;
+                if (i == 1) { avg_up = u; avg_dn = dn; }
+                else { avg_up = (1 - alpha) * avg_up + alpha * u;
+                       avg_dn = (1 - alpha) * avg_dn + alpha * dn; }
+            }
+            double rsi_val = (avg_dn == 0.0) ? 100.0 : (100.0 - 100.0 / (1.0 + avg_up / avg_dn));
+
+            if (rsi_val < min_rsi) min_rsi = rsi_val;
+            if (rsi_val > max_rsi) max_rsi = rsi_val;
+            if (offset == stoch_period - 1) cur_rsi = rsi_val;
+        }
+
+        double range = max_rsi - min_rsi;
+        if (range <= 0.0) return 50.0;
+        return (cur_rsi - min_rsi) / range * 100.0;
+    }
+
+    // ── Ichimoku Cloud components (Session 29) ──────────────────────────────
+    // Midpoint of highest high and lowest low over N bars
+    double ichi_midpoint_(int period) const {
+        if ((int)highs_.size() < period) return 0.0;
+        const int sz = (int)highs_.size();
+        double hh = 0.0, ll = 1e18;
+        for (int i = sz - period; i < sz; ++i) {
+            if (highs_[i] > hh) hh = highs_[i];
+            if (lows_[i] < ll)  ll = lows_[i];
+        }
+        return (hh + ll) / 2.0;
+    }
+
+    // ── SuperTrend computation (Session 29) ─────────────────────────────────
+    // Updates st_bullish_ state and returns whether a bullish flip just occurred.
+    // Must be called once per bar close (in close_bar_ flow).
+    bool supertrend_update_() {
+        if ((int)closes_.size() < cfg_.st_atr_period + 2) return false;
+
+        double a = atr_(cfg_.st_atr_period);
+        if (a <= 0.0) return false;
+
+        double hl2 = (highs_.back() + lows_.back()) / 2.0;
+        double basic_upper = hl2 + cfg_.st_multiplier * a;
+        double basic_lower = hl2 - cfg_.st_multiplier * a;
+
+        // SuperTrend band logic: bands can only move in the trend direction
+        double final_upper = basic_upper;
+        double final_lower = basic_lower;
+
+        // Upper band: can only go DOWN (tighten) during bearish trend
+        if (st_upper_band_ > 0.0 && basic_upper > st_upper_band_ && closes_.size() >= 2) {
+            double prev_close = closes_[closes_.size() - 2];
+            if (prev_close <= st_upper_band_) {
+                final_upper = std::min(basic_upper, st_upper_band_);
+            }
+        }
+        // Lower band: can only go UP (tighten) during bullish trend
+        if (st_lower_band_ > 0.0 && basic_lower < st_lower_band_ && closes_.size() >= 2) {
+            double prev_close = closes_[closes_.size() - 2];
+            if (prev_close >= st_lower_band_) {
+                final_lower = std::max(basic_lower, st_lower_band_);
+            }
+        }
+
+        st_upper_band_ = final_upper;
+        st_lower_band_ = final_lower;
+
+        // Determine direction
+        st_prev_bullish_ = st_bullish_;
+        double close = closes_.back();
+        if (close > st_upper_band_) {
+            st_bullish_ = true;
+        } else if (close < st_lower_band_) {
+            st_bullish_ = false;
+        }
+        // else: keep previous direction
+
+        // Return true if just flipped to bullish (entry signal)
+        return (st_bullish_ && !st_prev_bullish_);
+    }
+
     // ── Bar close ────────────────────────────────────────────────────────────
     void close_bar_() {
         opens_.push_back(cur_open_);
@@ -472,11 +1063,19 @@ private:
         lows_.push_back(cur_low_);
         closes_.push_back(cur_close_);
         bar_ts_ms_.push_back(cur_open_ts_ms_);
+        tick_counts_.push_back(cur_tick_count_);
         while ((int)closes_.size() > cfg_.max_history) {
             opens_.pop_front(); highs_.pop_front(); lows_.pop_front();
-            closes_.pop_front(); bar_ts_ms_.pop_front();
+            closes_.pop_front(); bar_ts_ms_.pop_front(); tick_counts_.pop_front();
         }
         last_close_ = cur_close_;
+        cur_tick_count_ = 0;  // reset for next bar
+
+        // Update SuperTrend state (must happen before signal evaluation)
+        bool st_flip = false;
+        if (cfg_.kind == StrategyKind::SUPERTREND) {
+            st_flip = supertrend_update_();
+        }
 
         // First, check if a time-based exit just landed on this bar boundary.
         if (in_position_ && cur_open_ts_ms_ + cfg_.tf_secs * 1000 > time_exit_ts_ms_) {
@@ -487,7 +1086,7 @@ private:
         // Then, evaluate a new signal (only if flat and not halted).
         bool was_flat = !in_position_;
         if (!in_position_ && !halted_) {
-            evaluate_signal_();
+            evaluate_signal_(st_flip);
         }
         bool signal_fired = was_flat && in_position_;  // we just entered
 
@@ -588,6 +1187,22 @@ private:
         return mean - k * std::sqrt(var);
     }
 
+    // ── Keltner lower band: EMA(n) - mult * ATR(atr_period) ─────────────────
+    double keltner_lower_() const {
+        double e = ema_(cfg_.keltner_ema_len);
+        double a = atr_(cfg_.atr_period);
+        if (e <= 0.0 || a <= 0.0) return 0.0;
+        return e - cfg_.keltner_atr_mult * a;
+    }
+
+    // ── Volatility regime ratio: ATR(14) / ATR(50) ──────────────────────────
+    double vol_ratio_() const {
+        double a14 = atr_(14);
+        double a50 = atr_(50);
+        if (a50 <= 0.0) return 1.0;
+        return a14 / a50;
+    }
+
     // ── Signal evaluation on the just-closed bar ─────────────────────────────
     bool signal_tsmom_() const {
         if ((int)closes_.size() < cfg_.lookback + 1) return false;
@@ -621,28 +1236,107 @@ private:
         return (r_prev <= cfg_.rsi_threshold) && (r_now > cfg_.rsi_threshold);
     }
 
+    // ── KELTNER_REVERT: bar pierces lower Keltner band, closes back above ───
+    bool signal_keltner_revert_() const {
+        if ((int)closes_.size() < std::max(cfg_.keltner_ema_len, cfg_.atr_period) + 1)
+            return false;
+        double lower = keltner_lower_();
+        if (lower <= 0.0) return false;
+        return (lows_.back() <= lower) && (closes_.back() > lower);
+    }
+
+    // ── DUAL_THRUST: range breakout entry ───────────────────────────────────
+    bool signal_dual_thrust_() const {
+        int n = cfg_.dt_range_bars;
+        if ((int)closes_.size() < n + 1) return false;
+        if ((int)opens_.size() < n + 1)  return false;
+
+        const int sz = (int)closes_.size();
+        double HH = 0.0, LC = 1e18, HC = 0.0, LL = 1e18;
+        for (int i = sz - n - 1; i < sz - 1; ++i) {
+            if (highs_[i] > HH) HH = highs_[i];
+            if (lows_[i] < LL)  LL = lows_[i];
+            if (closes_[i] > HC) HC = closes_[i];
+            if (closes_[i] < LC) LC = closes_[i];
+        }
+
+        double range = std::max(HH - LC, HC - LL);
+        double upper_trigger = opens_.back() + cfg_.dt_k1 * range;
+
+        return closes_.back() > upper_trigger;
+    }
+
+    // ── ICHIMOKU: Cloud breakout + Tenkan/Kijun cross (Session 29) ─────────
+    // Entry signal fires when:
+    //   1. Price closes above both Senkou Span A and Senkou Span B (above cloud)
+    //   2. Tenkan-sen > Kijun-sen (short-term momentum confirms)
+    //   3. Close > Kijun-sen (price is above base line)
+    bool signal_ichimoku_() const {
+        if ((int)highs_.size() < cfg_.ichi_senkou_b_period) return false;
+
+        double tenkan  = ichi_midpoint_(cfg_.ichi_tenkan_period);
+        double kijun   = ichi_midpoint_(cfg_.ichi_kijun_period);
+        double span_a  = (tenkan + kijun) / 2.0;
+        double span_b  = ichi_midpoint_(cfg_.ichi_senkou_b_period);
+
+        if (tenkan <= 0.0 || kijun <= 0.0 || span_a <= 0.0 || span_b <= 0.0)
+            return false;
+
+        double close = closes_.back();
+        double cloud_top = std::max(span_a, span_b);
+
+        // All three conditions must be met
+        bool above_cloud   = (close > cloud_top);
+        bool tenkan_cross  = (tenkan > kijun);
+        bool above_kijun   = (close > kijun);
+
+        return above_cloud && tenkan_cross && above_kijun;
+    }
+
+    // ── SUPERTREND: signal is the bullish flip (computed in close_bar_) ─────
+    // The actual computation happens in supertrend_update_() which is called
+    // before evaluate_signal_(). The flip result is passed in as a parameter.
+    bool signal_supertrend_(bool st_flip) const {
+        return st_flip;
+    }
+
+    // ── WILLIAMS_R: cross up from oversold (Session 29b) ────────────────────
+    // Signal fires when Williams %R crosses up from below threshold.
+    // Different timing than RSI: %R uses highest high/lowest low range
+    // normalization which makes it more responsive to recent extremes.
+    bool signal_williams_r_() const {
+        if ((int)closes_.size() < cfg_.willr_period + 2) return false;
+        double r_now  = williams_r_(cfg_.willr_period);
+        double r_prev = williams_r_prev_(cfg_.willr_period);
+        // Cross up: was at/below threshold, now above
+        return (r_prev <= cfg_.willr_threshold) && (r_now > cfg_.willr_threshold);
+    }
+
+    // ── STOCH_RSI: cross up from oversold (Session 29b) ─────────────────────
+    // Signal fires when Stochastic RSI crosses up from below threshold.
+    // Faster than raw RSI — catches reversals sooner because it normalizes
+    // RSI within its own range. Ideal for mean-reversion timing.
+    bool signal_stoch_rsi_() const {
+        if ((int)closes_.size() < cfg_.stochrsi_rsi_period + cfg_.stochrsi_stoch_period + 3)
+            return false;
+        double sr_now  = stoch_rsi_(cfg_.stochrsi_rsi_period, cfg_.stochrsi_stoch_period);
+        double sr_prev = stoch_rsi_prev_(cfg_.stochrsi_rsi_period, cfg_.stochrsi_stoch_period);
+        // Cross up from below threshold
+        return (sr_prev <= cfg_.stochrsi_threshold) && (sr_now > cfg_.stochrsi_threshold);
+    }
+
     // ── OVERNIGHT: buy at the entry_hour_utc H1 bar close when trend is up ──
-    // Time gate: only fires when the just-closed bar's open hour matches
-    //   cfg_.entry_hour_utc (default 21 = the 21:00-22:00 UTC bar).
-    // Trend filter: TSMOM over lookback bars (close > close[lookback] ago).
-    //   This prevents buying in downtrends where the overnight premium is
-    //   consumed by the larger bearish drift.
-    // Bullish bar filter: the bar itself must be green (close > open) to
-    //   confirm buying pressure is present in the session window.
     bool signal_overnight_() const {
         if ((int)closes_.size() < cfg_.lookback + 1) return false;
 
-        // Time gate: check UTC hour of the just-closed bar
         int64_t bar_open_ms = bar_ts_ms_.back();
         int bar_hour = utc_hour_from_ms_(bar_open_ms);
         if (bar_hour != cfg_.entry_hour_utc) return false;
 
-        // Trend filter: 20-bar TSMOM must be positive
         double now = closes_.back();
         double ref = closes_[closes_.size() - 1 - cfg_.lookback];
         if (now <= ref) return false;
 
-        // Bullish bar: this bar's close > open
         if (closes_.back() <= opens_.back()) return false;
 
         std::printf("[%s] OVERNIGHT signal | bar_hour=%d(UTC) | trend_ret=+%.1fbp | bar_ret=+%.1fbp\n",
@@ -655,19 +1349,13 @@ private:
     }
 
     // ── WEEKDAY: buy on Monday D1 bar close when close > SMA(sma_len) ───────
-    // Time gate: only fires when the just-closed D1 bar falls on entry_dow
-    //   (default 1 = Monday).
-    // Momentum filter: close must be above SMA(sma_len) to confirm the
-    //   underlying trend supports the Monday premium.
     bool signal_weekday_() const {
         if ((int)closes_.size() < cfg_.sma_len) return false;
 
-        // Time gate: check day-of-week of the just-closed bar
         int64_t bar_open_ms = bar_ts_ms_.back();
         int bar_dow = utc_dow_from_ms_(bar_open_ms);
         if (bar_dow != cfg_.entry_dow) return false;
 
-        // Momentum filter: close > SMA
         double sma = sma_(cfg_.sma_len);
         if (sma <= 0.0) return false;
         if (closes_.back() <= sma) return false;
@@ -679,17 +1367,176 @@ private:
         return true;
     }
 
-    void evaluate_signal_() {
+    void evaluate_signal_(bool st_flip = false) {
         bool fire = false;
         switch (cfg_.kind) {
-            case StrategyKind::TSMOM:      fire = signal_tsmom_();      break;
-            case StrategyKind::DONCHIAN:   fire = signal_donchian_();   break;
-            case StrategyKind::BOLLINGER:  fire = signal_bollinger_();  break;
-            case StrategyKind::RSI_REVERT: fire = signal_rsi_revert_(); break;
-            case StrategyKind::OVERNIGHT:  fire = signal_overnight_();  break;
-            case StrategyKind::WEEKDAY:    fire = signal_weekday_();    break;
+            case StrategyKind::TSMOM:          fire = signal_tsmom_();          break;
+            case StrategyKind::DONCHIAN:       fire = signal_donchian_();       break;
+            case StrategyKind::BOLLINGER:      fire = signal_bollinger_();      break;
+            case StrategyKind::RSI_REVERT:     fire = signal_rsi_revert_();     break;
+            case StrategyKind::OVERNIGHT:      fire = signal_overnight_();      break;
+            case StrategyKind::WEEKDAY:        fire = signal_weekday_();        break;
+            case StrategyKind::KELTNER_REVERT: fire = signal_keltner_revert_(); break;
+            case StrategyKind::DUAL_THRUST:    fire = signal_dual_thrust_();    break;
+            case StrategyKind::ICHIMOKU:       fire = signal_ichimoku_();       break;
+            case StrategyKind::SUPERTREND:     fire = signal_supertrend_(st_flip); break;
+            case StrategyKind::WILLIAMS_R:     fire = signal_williams_r_();        break;
+            case StrategyKind::STOCH_RSI:      fire = signal_stoch_rsi_();         break;
         }
         if (!fire) return;
+
+        // ── Portfolio gate (Session 29b) ────────────────────────────────────
+        // If main.cpp has disabled entries (max positions or drawdown breaker),
+        // suppress immediately. Cheapest check — do first.
+        if (!portfolio_entry_allowed_) {
+            std::printf("[%s] PORTFOLIO_GATE: entries disabled — signal SUPPRESSED\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+
+        // ── Funding headwind filter (Session 30, Edge 1) ────────────────────
+        // When funding is extremely positive (longs paying >10bp/8h), the crowd
+        // is already long-heavy. Suppress new long entries — fade the crowd.
+        if (funding_headwind_) {
+            std::printf("[%s] FUNDING_HEADWIND: extreme positive funding — signal SUPPRESSED\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+
+        // ── Volatility regime gate (Session 30, Edge 3) ─────────────────────
+        // LOW vol → suppress counter-trend (they need vol expansion to profit)
+        // HIGH vol → suppress trend-following (whipsaws kill momentum entries)
+        // MEDIUM → all allowed
+        if (vol_regime_ == VolRegime::LOW && !is_trend_following()) {
+            std::printf("[%s] VOL_REGIME: LOW vol — counter-trend SUPPRESSED (need vol for reversals)\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+        if (vol_regime_ == VolRegime::HIGH && is_trend_following()) {
+            std::printf("[%s] VOL_REGIME: HIGH vol — trend-following SUPPRESSED (whipsaw risk)\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+
+        // ── BTC correlation regime filter (Session 29b) ─────────────────────
+        // When correlation with BTC is extreme, altcoin alpha vanishes (herding).
+        // Only applies to non-BTC engines. State fed by main.cpp.
+        if (cfg_.corr_filter && corr_high_) {
+            std::printf("[%s] CORR_FILTER: BTC correlation extreme — signal SUPPRESSED\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+
+        // ── Time-of-day session filter (Session 29b) ────────────────────────
+        // Suppress entries during low-activity sessions (e.g. Asian 00-08 UTC).
+        // Only for sub-H6 engines where low liquidity causes false signals.
+        if (cfg_.session_filter) {
+            int64_t bar_open_ms = bar_ts_ms_.back();
+            int bar_hour = utc_hour_from_ms_(bar_open_ms);
+            bool in_suppressed = false;
+            if (cfg_.session_suppress_start < cfg_.session_suppress_end) {
+                in_suppressed = (bar_hour >= cfg_.session_suppress_start &&
+                                 bar_hour < cfg_.session_suppress_end);
+            } else {
+                // Wrap-around (e.g. 22-06 = suppress late night through early morning)
+                in_suppressed = (bar_hour >= cfg_.session_suppress_start ||
+                                 bar_hour < cfg_.session_suppress_end);
+            }
+            if (in_suppressed) {
+                std::printf("[%s] SESSION_FILTER: bar_hour=%d in suppressed zone [%d-%d) — signal SUPPRESSED\n",
+                    cfg_.tag.c_str(), bar_hour,
+                    cfg_.session_suppress_start, cfg_.session_suppress_end);
+                std::fflush(stdout);
+                return;
+            }
+        }
+
+        // ── Volume regime filter (Session 29) ──────────────────────────────
+        // If enabled and we have enough bar history, suppress ALL entries when
+        // the just-closed bar's tick count is below vol_tick_ratio * average.
+        // This catches weekend dead zones and exchange outage periods.
+        if (cfg_.volume_gate) {
+            int bars_seen = (int)tick_counts_.size();
+            if (bars_seen >= cfg_.vol_tick_warmup) {
+                double avg = avg_tick_count_();
+                // Use the PREVIOUS bar's tick count (last element in tick_counts_
+                // is the bar we just closed — which is the one we're evaluating)
+                int last_tick_count = tick_counts_.back();
+                double threshold = cfg_.vol_tick_ratio * avg;
+                if (last_tick_count < (int)threshold) {
+                    std::printf("[%s] VOLUME_GATE: low activity (ticks=%d < %.0f=%.0f%%*avg_%.0f) — signal SUPPRESSED\n",
+                        cfg_.tag.c_str(), last_tick_count, threshold,
+                        cfg_.vol_tick_ratio * 100.0, avg);
+                    std::fflush(stdout);
+                    return;
+                }
+            }
+        }
+
+        // ── Volatility regime filter (Session 28) ───────────────────────────
+        // When vol_filter is enabled, check ATR(14)/ATR(50) ratio to suppress
+        // counter-trend entries during chaotic or elevated-vol conditions.
+        if (cfg_.vol_filter) {
+            double vr = vol_ratio_();
+            bool is_counter_trend = (cfg_.kind == StrategyKind::RSI_REVERT ||
+                                     cfg_.kind == StrategyKind::BOLLINGER ||
+                                     cfg_.kind == StrategyKind::KELTNER_REVERT);
+            if (vr > cfg_.vol_chaos_threshold) {
+                // Chaos regime — suppress ALL entries
+                std::printf("[%s] VOL_FILTER: CHAOS regime (ratio=%.2f > %.2f) — signal SUPPRESSED\n",
+                    cfg_.tag.c_str(), vr, cfg_.vol_chaos_threshold);
+                std::fflush(stdout);
+                return;
+            }
+            if (vr > cfg_.vol_elevated_threshold && is_counter_trend) {
+                // Elevated vol — suppress counter-trend only
+                std::printf("[%s] VOL_FILTER: ELEVATED vol (ratio=%.2f > %.2f) — counter-trend SUPPRESSED\n",
+                    cfg_.tag.c_str(), vr, cfg_.vol_elevated_threshold);
+                std::fflush(stdout);
+                return;
+            }
+        }
+
+        // ── Multi-timeframe gate (Session 28, refined Session 29) ────────────
+        // When mtf_gate is enabled and D1 trend has been bearish for 3+ consecutive
+        // readings, suppress counter-trend entries. Single-bar bearish dips no
+        // longer block mean-reversion (those are actually ideal entry conditions).
+        if (cfg_.mtf_gate && !d1_bullish_ && d1_bearish_streak_ >= 3) {
+            bool is_counter_trend = (cfg_.kind == StrategyKind::RSI_REVERT ||
+                                     cfg_.kind == StrategyKind::BOLLINGER ||
+                                     cfg_.kind == StrategyKind::KELTNER_REVERT);
+            if (is_counter_trend) {
+                std::printf("[%s] MTF_GATE: D1 bearish (streak=%d) — counter-trend signal SUPPRESSED\n",
+                    cfg_.tag.c_str(), d1_bearish_streak_);
+                std::fflush(stdout);
+                return;
+            }
+        }
+
+        // ── ADX regime filter (Session 29, refined Session 30) ────────────────
+        // When adx_filter is enabled, suppress TREND-FOLLOWING entries when
+        // ADX < threshold (market is ranging/choppy, no directional edge).
+        // Session 30 refinement: funding tailwind lowers threshold by 5
+        // (carry edge makes marginal setups viable).
+        if (cfg_.adx_filter) {
+            double adx_val = adx_(cfg_.adx_period);
+            double effective_threshold = cfg_.adx_threshold;
+            if (funding_tailwind_) {
+                effective_threshold -= 5.0;  // carry edge relaxes the bar
+            }
+            if (adx_val < effective_threshold) {
+                std::printf("[%s] ADX_FILTER: ADX=%.1f < %.1f%s — trend signal SUPPRESSED\n",
+                    cfg_.tag.c_str(), adx_val, effective_threshold,
+                    funding_tailwind_ ? " (tailwind-adjusted)" : "");
+                std::fflush(stdout);
+                return;
+            }
+        }
 
         double a = atr_(cfg_.atr_period);
         if (a <= 0.0) return;
@@ -717,10 +1564,13 @@ private:
         mfe_bp_        = 0.0;
 
         double arm_bp = (trail_arm_px_ / entry_px_ - 1.0) * 1e4;
-        std::printf("[%s] ENTRY  px=%.6f  sl=%.6f  atr=%.6f  hold=%dbars  trail_arm=%.6f(+%.0fbp)  shadow=%d\n",
+        std::printf("[%s] ENTRY  px=%.6f  sl=%.6f  atr=%.6f  hold=%dbars  trail_arm=%.6f(+%.0fbp)  shadow=%d  funding=%s  conviction=%s  sizing=%.2f\n",
             cfg_.tag.c_str(), entry_px_, sl_px_, a, cfg_.hold_bars,
             trail_arm_px_, arm_bp,
-            shadow_mode ? 1 : 0);
+            shadow_mode ? 1 : 0,
+            funding_tailwind_ ? "TAILWIND" : "neutral",
+            is_high_conviction() ? "HIGH" : "normal",
+            sizing_mult_);
         std::fflush(stdout);
     }
 

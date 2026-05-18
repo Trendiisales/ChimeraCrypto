@@ -146,6 +146,25 @@ public:
         double       trail_tighten_atr      = 0.0;   // 0 = disabled; e.g. 3.0
         double       trail_tighten_dist_atr = 0.3;   // tighter trail once threshold hit
 
+        // ── BE-Lock (Session 31) ────────────────────────────────────────
+        // When trail arms, the trail stop is GUARANTEED to be at or above
+        // breakeven (entry_px + round_trip_bp). This prevents parameter
+        // combos where trail_dist > trail_arm from leaving the trail below
+        // entry. A winner can NEVER become a loser once the trail arms.
+        // Always on — no toggle needed. Uses round_trip_bp for the BE level.
+
+        // ── Smart Pyramid (Session 31) ──────────────────────────────────
+        // Adds to position ONLY after trail is armed (BE locked) and profit
+        // exceeds pyramid_arm_atr. Each add is pyramid_size_mult * base size.
+        // Subsequent adds fire every pyramid_step_atr above the previous add.
+        // All pyramid adds exit with the base trade (shared trail stop).
+        // Pyramid P&L is tracked separately and reported on exit.
+        bool         pyramid_enabled   = false;    // master switch
+        double       pyramid_arm_atr   = 2.5;      // first add at +2.5 ATR profit
+        double       pyramid_step_atr  = 1.5;      // subsequent adds every +1.5 ATR after
+        double       pyramid_size_mult = 0.5;      // 50% of base size per add
+        int          pyramid_max_adds  = 2;         // max pyramid additions per trade
+
         // ── OVERNIGHT strategy parameters ────────────────────────────────
         // entry_hour_utc: the UTC hour at which the H1 bar must close for
         //   signal to fire. Default 21 = the 21:00-22:00 bar close.
@@ -290,9 +309,17 @@ public:
         double      mfe_bp       = 0.0;  // max favourable excursion
         int         trade_num    = 0;    // sequential trade number
         bool        shadow       = true;
+        // Pyramid P&L (Session 31) — combined result of all pyramid adds
+        int         pyramid_adds = 0;    // how many pyramid adds were executed
+        double      pyramid_bp   = 0.0;  // combined net P&L from all pyramid adds
+        double      total_net_bp = 0.0;  // base net_bp + pyramid_bp (full trade result)
     };
 
     using TradeCallback = std::function<void(const TradeRecord&)>;
+
+    // Pyramid callback — fired when a pyramid add should be executed.
+    // main.cpp receives (tag, price, size_mult, add_number) and places the order.
+    using PyramidCallback = std::function<void(const std::string& tag, double price, double size_mult, int add_num)>;
 
     // -----------------------------------------------------------------------
     // BarRecord — emitted via on_bar callback after every completed bar.
@@ -323,6 +350,9 @@ public:
 
     // Set a callback to receive bar records on each bar close.
     void set_on_bar(BarCallback cb) { on_bar_ = std::move(cb); }
+
+    // Set a callback for pyramid add events (main.cpp executes additional buy).
+    void set_on_pyramid(PyramidCallback cb) { on_pyramid_ = std::move(cb); }
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
@@ -490,6 +520,10 @@ public:
         double  trail_arm_px    = 0.0;
         double  mfe_px          = 0.0;
         double  mfe_bp          = 0.0;
+        // Pyramid resume (Session 31)
+        int     pyramid_count   = 0;
+        double  pyramid_next_atr = 0.0;
+        std::vector<std::pair<double, double>> pyramid_entries;  // {entry_px, size_mult}
     };
 
     bool resume_position(const ResumeState& rs) {
@@ -509,9 +543,20 @@ public:
         mfe_px_          = rs.mfe_px;
         mfe_bp_          = rs.mfe_bp;
 
-        std::printf("[%s] RESUME  entry=%.6f  sl=%.6f  trail_armed=%d  trail_stop=%.6f  bars_held=%d  mfe=+%.1fbp\n",
+        // Resume pyramid state (Session 31)
+        pyramid_count_    = rs.pyramid_count;
+        pyramid_next_atr_ = rs.pyramid_next_atr;
+        pyramid_adds_.clear();
+        for (const auto& pe : rs.pyramid_entries) {
+            PyramidAdd pa;
+            pa.entry_px  = pe.first;
+            pa.size_mult = pe.second;
+            pyramid_adds_.push_back(pa);
+        }
+
+        std::printf("[%s] RESUME  entry=%.6f  sl=%.6f  trail_armed=%d  trail_stop=%.6f  bars_held=%d  mfe=+%.1fbp  pyramids=%d\n",
             cfg_.tag.c_str(), entry_px_, sl_px_, (int)trail_armed_,
-            trail_stop_px_, bars_held_, mfe_bp_);
+            trail_stop_px_, bars_held_, mfe_bp_, pyramid_count_);
         return true;
     }
 
@@ -543,7 +588,19 @@ public:
         js << std::setprecision(8);
         js << "\"trail_stop_px\":" << trail_stop_px_ << ",";
         js << "\"trail_arm_px\":" << trail_arm_px_ << ",";
-        js << "\"mfe_px\":" << mfe_px_;
+        js << "\"mfe_px\":" << mfe_px_ << ",";
+        // Pyramid state (Session 31)
+        js << "\"pyramid_count\":" << pyramid_count_ << ",";
+        js << std::setprecision(2);
+        js << "\"pyramid_next_atr\":" << pyramid_next_atr_ << ",";
+        js << "\"pyramid_adds\":[";
+        for (int i = 0; i < (int)pyramid_adds_.size(); ++i) {
+            if (i > 0) js << ",";
+            js << std::setprecision(8);
+            js << "{\"entry_px\":" << pyramid_adds_[i].entry_px;
+            js << ",\"size_mult\":" << std::setprecision(2) << pyramid_adds_[i].size_mult << "}";
+        }
+        js << "]";
         js << "}";
         return js.str();
     }
@@ -595,6 +652,10 @@ public:
         js << "\"trail_dist_atr\":" << std::setprecision(1) << cfg_.trail_dist_atr << ",";
         js << "\"trail_tighten_atr\":" << std::setprecision(1) << cfg_.trail_tighten_atr << ",";
         js << "\"trail_tighten_dist_atr\":" << std::setprecision(1) << cfg_.trail_tighten_dist_atr << ",";
+        // Pyramid state (Session 31)
+        js << "\"pyramid_enabled\":" << (cfg_.pyramid_enabled ? "true" : "false") << ",";
+        js << "\"pyramid_count\":" << pyramid_count_ << ",";
+        js << "\"pyramid_max_adds\":" << cfg_.pyramid_max_adds << ",";
 
         // Momentum: close[now] vs close[now - lookback]
         bool signal_ready = ((int)closes_.size() >= cfg_.lookback + 1);
@@ -626,6 +687,7 @@ public:
     double total_bp() const { return total_bp_; }
     bool in_position() const { return in_position_; }
     int bars_in_buffer() const { return (int)closes_.size(); }
+    int max_history_needed() const { return cfg_.max_history; }
 
     // Runtime filter activation (can be called after construction)
     void enable_vol_filter(bool b) { cfg_.vol_filter = b; }
@@ -780,6 +842,15 @@ private:
     double  mfe_px_         = 0.0;  // max favourable excursion (highest price seen)
     double  mfe_bp_         = 0.0;  // MFE in basis points from entry
 
+    // ── Pyramid state (Session 31) ──────────────────────────────────────
+    struct PyramidAdd {
+        double entry_px  = 0.0;     // price at which this add was executed
+        double size_mult = 0.0;     // fraction of base position size
+    };
+    int     pyramid_count_    = 0;        // number of adds executed this trade
+    double  pyramid_next_atr_ = 0.0;      // ATR profit level for next pyramid add
+    std::vector<PyramidAdd> pyramid_adds_; // history of adds for P&L calc
+
     // Stats
     int    trades_ = 0;
     int    wins_   = 0;
@@ -791,6 +862,8 @@ private:
     TradeCallback on_trade_;
     // Bar callback (set by main.cpp for bar persistence + warm-start)
     BarCallback on_bar_;
+    // Pyramid callback (set by main.cpp for pyramid order execution)
+    PyramidCallback on_pyramid_;
 
     // ── Effective stop: max(hard_sl, trail_stop) ─────────────────────────────
     double effective_stop_() const {
@@ -1463,17 +1536,25 @@ private:
         if (cfg_.volume_gate) {
             int bars_seen = (int)tick_counts_.size();
             if (bars_seen >= cfg_.vol_tick_warmup) {
-                double avg = avg_tick_count_();
                 // Use the PREVIOUS bar's tick count (last element in tick_counts_
                 // is the bar we just closed — which is the one we're evaluating)
                 int last_tick_count = tick_counts_.back();
-                double threshold = cfg_.vol_tick_ratio * avg;
-                if (last_tick_count < (int)threshold) {
-                    std::printf("[%s] VOLUME_GATE: low activity (ticks=%d < %.0f=%.0f%%*avg_%.0f) — signal SUPPRESSED\n",
-                        cfg_.tag.c_str(), last_tick_count, threshold,
-                        cfg_.vol_tick_ratio * 100.0, avg);
-                    std::fflush(stdout);
-                    return;
+
+                // Skip filler bars (tick_count == 0) — these are synthetic bars
+                // created when multiple bar boundaries are crossed at once. They
+                // do NOT indicate a dead zone, just a seeding/startup artifact.
+                if (last_tick_count == 0) {
+                    // Not a real bar — don't suppress, don't count against avg
+                } else {
+                    double avg = avg_tick_count_();
+                    double threshold = cfg_.vol_tick_ratio * avg;
+                    if (last_tick_count < (int)threshold) {
+                        std::printf("[%s] VOLUME_GATE: low activity (ticks=%d < %.0f=%.0f%%*avg_%.0f) — signal SUPPRESSED\n",
+                            cfg_.tag.c_str(), last_tick_count, threshold,
+                            cfg_.vol_tick_ratio * 100.0, avg);
+                        std::fflush(stdout);
+                        return;
+                    }
                 }
             }
         }
@@ -1563,14 +1644,20 @@ private:
         mfe_px_        = entry_px_;
         mfe_bp_        = 0.0;
 
+        // Initialise pyramid state (Session 31)
+        pyramid_count_    = 0;
+        pyramid_next_atr_ = cfg_.pyramid_arm_atr;  // first add level (used once trail arms)
+        pyramid_adds_.clear();
+
         double arm_bp = (trail_arm_px_ / entry_px_ - 1.0) * 1e4;
-        std::printf("[%s] ENTRY  px=%.6f  sl=%.6f  atr=%.6f  hold=%dbars  trail_arm=%.6f(+%.0fbp)  shadow=%d  funding=%s  conviction=%s  sizing=%.2f\n",
+        std::printf("[%s] ENTRY  px=%.6f  sl=%.6f  atr=%.6f  hold=%dbars  trail_arm=%.6f(+%.0fbp)  shadow=%d  funding=%s  conviction=%s  sizing=%.2f  pyramid=%s\n",
             cfg_.tag.c_str(), entry_px_, sl_px_, a, cfg_.hold_bars,
             trail_arm_px_, arm_bp,
             shadow_mode ? 1 : 0,
             funding_tailwind_ ? "TAILWIND" : "neutral",
             is_high_conviction() ? "HIGH" : "normal",
-            sizing_mult_);
+            sizing_mult_,
+            cfg_.pyramid_enabled ? "ON" : "off");
         std::fflush(stdout);
     }
 
@@ -1583,17 +1670,31 @@ private:
             mfe_bp_ = (price / entry_px_ - 1.0) * 1e4;
         }
 
+        // ── BE-lock price: entry + round-trip fees (Session 31) ─────────
+        // This is the floor for the trail stop once armed. A winner can
+        // NEVER become a loser after the trail arms.
+        double be_px = entry_px_ * (1.0 + cfg_.round_trip_bp / 1e4);
+
         // Trailing stop logic: arm when price reaches the arm level,
         // then ratchet the trail stop up as price makes new highs.
         if (!trail_armed_) {
             if (price >= trail_arm_px_) {
                 trail_armed_ = true;
                 trail_stop_px_ = mfe_px_ - cfg_.trail_dist_atr * atr_at_entry_;
+                // ── BE-LOCK: ensure trail is at or above breakeven ──────
+                if (trail_stop_px_ < be_px) {
+                    trail_stop_px_ = be_px;
+                }
                 double trail_bp = (trail_stop_px_ / entry_px_ - 1.0) * 1e4;
-                std::printf("[%s] TRAIL_ARM  px=%.6f  mfe=%.6f(+%.1fbp)  trail_stop=%.6f(+%.1fbp)\n",
+                std::printf("[%s] TRAIL_ARM+BE_LOCK  px=%.6f  mfe=%.6f(+%.1fbp)  trail_stop=%.6f(+%.1fbp)  be=%.6f\n",
                     cfg_.tag.c_str(), price, mfe_px_, mfe_bp_,
-                    trail_stop_px_, trail_bp);
+                    trail_stop_px_, trail_bp, be_px);
                 std::fflush(stdout);
+
+                // ── Initialise pyramid trigger level (Session 31) ───────
+                if (cfg_.pyramid_enabled) {
+                    pyramid_next_atr_ = cfg_.pyramid_arm_atr;
+                }
             }
         } else {
             // Ratchet: if price made a new high, update the trail stop.
@@ -1604,8 +1705,38 @@ private:
                 dist = cfg_.trail_tighten_dist_atr;
             }
             double new_trail = mfe_px_ - dist * atr_at_entry_;
+            // ── BE-LOCK: trail can never go below breakeven (Session 31) ─
+            if (new_trail < be_px) new_trail = be_px;
             if (new_trail > trail_stop_px_) {
                 trail_stop_px_ = new_trail;
+            }
+
+            // ── Smart Pyramid: add size when profit deep enough (Session 31) ─
+            if (cfg_.pyramid_enabled && pyramid_count_ < cfg_.pyramid_max_adds) {
+                double live_profit_atr = (price - entry_px_) / atr_at_entry_;
+                if (live_profit_atr >= pyramid_next_atr_) {
+                    PyramidAdd pa;
+                    pa.entry_px  = price;
+                    pa.size_mult = cfg_.pyramid_size_mult;
+                    pyramid_adds_.push_back(pa);
+                    pyramid_count_++;
+                    // Next pyramid triggers step_atr higher
+                    pyramid_next_atr_ = live_profit_atr + cfg_.pyramid_step_atr;
+
+                    double add_bp = (price / entry_px_ - 1.0) * 1e4;
+                    std::printf("[%s] PYRAMID_ADD #%d  px=%.6f  profit=+%.1f*ATR(+%.0fbp)  "
+                                "size=%.0f%%  trail_at=%.6f  next_add=%.1f*ATR\n",
+                        cfg_.tag.c_str(), pyramid_count_, price,
+                        live_profit_atr, add_bp,
+                        pa.size_mult * 100.0,
+                        trail_stop_px_, pyramid_next_atr_);
+                    std::fflush(stdout);
+
+                    // Fire pyramid callback for main.cpp to execute the buy order
+                    if (on_pyramid_) {
+                        on_pyramid_(cfg_.tag, price, pa.size_mult, pyramid_count_);
+                    }
+                }
             }
         }
 
@@ -1627,15 +1758,34 @@ private:
         if (!in_position_) return;
         double gross_bp = (exit_px / entry_px_ - 1.0) * 1e4;
         double net_bp   = gross_bp - cfg_.round_trip_bp;
-        trades_++;
-        if (net_bp > 0) wins_++;
-        total_bp_      += net_bp;
-        last_trade_bp_  = net_bp;
 
-        std::printf("[%s] EXIT   reason=%s  px=%.6f  gross=%+8.2fbp  net=%+8.2fbp  "
-                    "mfe=%+.1fbp  trades=%d wins=%d total=%+8.1fbp\n",
-            cfg_.tag.c_str(), reason, exit_px, gross_bp, net_bp,
-            mfe_bp_, trades_, wins_, total_bp_);
+        // ── Pyramid P&L: each add exits at the same price (Session 31) ──
+        double pyramid_bp = 0.0;
+        for (const auto& pa : pyramid_adds_) {
+            // Each pyramid add's P&L is weighted by its size_mult
+            double pa_gross = (exit_px / pa.entry_px - 1.0) * 1e4;
+            double pa_net   = pa_gross - cfg_.round_trip_bp;  // each add pays its own fees
+            pyramid_bp += pa_net * pa.size_mult;  // weighted by size fraction
+        }
+        // Total trade result: base net + weighted pyramid net
+        double total_net_bp = net_bp + pyramid_bp;
+
+        trades_++;
+        if (total_net_bp > 0) wins_++;
+        total_bp_      += total_net_bp;
+        last_trade_bp_  = total_net_bp;
+
+        if (pyramid_count_ > 0) {
+            std::printf("[%s] EXIT   reason=%s  px=%.6f  base=%+.1fbp  pyramid=%+.1fbp(%d adds)  "
+                        "TOTAL=%+.1fbp  mfe=%+.1fbp  trades=%d wins=%d cumulative=%+.1fbp\n",
+                cfg_.tag.c_str(), reason, exit_px, net_bp, pyramid_bp, pyramid_count_,
+                total_net_bp, mfe_bp_, trades_, wins_, total_bp_);
+        } else {
+            std::printf("[%s] EXIT   reason=%s  px=%.6f  gross=%+8.2fbp  net=%+8.2fbp  "
+                        "mfe=%+.1fbp  trades=%d wins=%d total=%+8.1fbp\n",
+                cfg_.tag.c_str(), reason, exit_px, gross_bp, net_bp,
+                mfe_bp_, trades_, wins_, total_bp_);
+        }
         std::fflush(stdout);
 
         // Fire trade callback for persistence
@@ -1655,6 +1805,10 @@ private:
             rec.mfe_bp      = mfe_bp_;
             rec.trade_num   = trades_;
             rec.shadow      = shadow_mode;
+            // Pyramid fields (Session 31)
+            rec.pyramid_adds = pyramid_count_;
+            rec.pyramid_bp   = pyramid_bp;
+            rec.total_net_bp = total_net_bp;
             on_trade_(rec);
         }
 
@@ -1672,6 +1826,11 @@ private:
         trail_arm_px_   = 0.0;
         mfe_px_         = 0.0;
         mfe_bp_         = 0.0;
+
+        // Reset pyramid state (Session 31)
+        pyramid_count_    = 0;
+        pyramid_next_atr_ = 0.0;
+        pyramid_adds_.clear();
     }
 };
 

@@ -66,7 +66,7 @@ struct TradingConfig {
     //   Unit 2: 60bp trail from P+40   → moderate winner, tighter protection
     //   Combined: higher avg profit on winners, minimal extra risk (tight trail)
     //
-    static constexpr bool   PYRAMID_ENABLED            = true;
+    static constexpr bool   PYRAMID_ENABLED            = false;  // TOP-5 LOCKDOWN: disabled until base strategies prove profitable
     static constexpr double PYRAMID_ARM_BP             = 30.0;  // profit needed before adding unit 2
     static constexpr double PYRAMID_UNIT2_SIZE_MULT    = 0.50;  // unit 2 = 50% of unit 1 size
     static constexpr double PYRAMID_TRAIL_ARM_BP       = 8.0;   // arm trail on unit 2 immediately
@@ -377,10 +377,10 @@ struct TradingConfig {
     static constexpr int SESSION_DEAD_START_UTC       = 20;
     static constexpr int SESSION_DEAD_END_UTC         = 23;
     static constexpr double DEAD_ZONE_IMBAL_MULT      = 1.5;
-    static constexpr int    DEAD_ZONE_MAX_POS         = 1;
+    static constexpr int    DEAD_ZONE_MAX_POS         = 2;   // TOP-5 LOCKDOWN: reduced from 10
     static constexpr int    KILL_WINDOW_START_UTC     = 2;
     static constexpr int    KILL_WINDOW_END_UTC       = 7;
-    static constexpr int    MAX_CONCURRENT_POSITIONS  = 5;
+    static constexpr int    MAX_CONCURRENT_POSITIONS  = 5;   // TOP-5 LOCKDOWN: only 5 engines active
     static constexpr int    LEADLAG_PRIME_START_UTC   = 7;   // EU open — full active session
     static constexpr int    LEADLAG_PRIME_END_UTC     = 22;  // NY close
     static constexpr double LEADLAG_OFFPEAK_SIZE_MULT = 0.5;  // Wintermute 2025: altcoin rallies shorter, stay with 0.5x off-peak

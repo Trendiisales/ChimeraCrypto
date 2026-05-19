@@ -58,6 +58,8 @@ add_dependencies(chimera gen_version)
 set_property(SOURCE ${CMAKE_SOURCE_DIR}/src/main.cpp
     APPEND PROPERTY OBJECT_DEPENDS ${VERSION_HEADER})
 
+link_directories(${LWS_LIBRARY_DIRS})
+
 target_link_libraries(chimera
     OpenSSL::SSL
     OpenSSL::Crypto
@@ -65,6 +67,7 @@ target_link_libraries(chimera
     ${LWS_LIBRARIES}
     pthread
 )
+target_link_directories(chimera PRIVATE ${LWS_LIBRARY_DIRS})
 
 target_compile_options(chimera PRIVATE
     -O3

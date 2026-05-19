@@ -343,6 +343,19 @@ public:
 
     using BarCallback = std::function<void(const BarRecord&)>;
 
+    // OrderIntentRecord — emitted on entry and exit transitions so main.cpp
+    // can mirror intents into SpotExecutor for shadow-mode paper broker
+    // behavior. Fires BEFORE on_trade_ (which only fires on exit).
+    struct OrderIntentRecord {
+        std::string tag;
+        std::string symbol;
+        bool        is_buy = true;
+        double      ref_px = 0.0;
+        int64_t     ts_ms  = 0;
+    };
+
+    using OrderIntentCallback = std::function<void(const OrderIntentRecord&)>;
+
     bool shadow_mode = true;  // public for main.cpp init parity with old engines
 
     // Set a callback to receive trade records on each exit.
@@ -353,6 +366,9 @@ public:
 
     // Set a callback for pyramid add events (main.cpp executes additional buy).
     void set_on_pyramid(PyramidCallback cb) { on_pyramid_ = std::move(cb); }
+
+    // Set a callback for entry/exit order intents (paper broker mirror).
+    void set_on_order_intent(OrderIntentCallback cb) { on_order_intent_ = std::move(cb); }
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
@@ -864,6 +880,8 @@ private:
     BarCallback on_bar_;
     // Pyramid callback (set by main.cpp for pyramid order execution)
     PyramidCallback on_pyramid_;
+    // Order intent callback (set by main.cpp to mirror into SpotExecutor)
+    OrderIntentCallback on_order_intent_;
 
     // ── Effective stop: max(hard_sl, trail_stop) ─────────────────────────────
     double effective_stop_() const {
@@ -1659,6 +1677,16 @@ private:
             sizing_mult_,
             cfg_.pyramid_enabled ? "ON" : "off");
         std::fflush(stdout);
+
+        if (on_order_intent_) {
+            OrderIntentRecord intent;
+            intent.tag    = cfg_.tag;
+            intent.symbol = cfg_.symbol;
+            intent.is_buy = true;
+            intent.ref_px = entry_px_;
+            intent.ts_ms  = entry_ts_ms_;
+            on_order_intent_(intent);
+        }
     }
 
     void check_exits_(double price, int64_t ts_ms) {
@@ -1787,6 +1815,17 @@ private:
                 mfe_bp_, trades_, wins_, total_bp_);
         }
         std::fflush(stdout);
+
+        // Fire order intent (SELL) for paper broker mirror BEFORE trade record.
+        if (on_order_intent_) {
+            OrderIntentRecord intent;
+            intent.tag    = cfg_.tag;
+            intent.symbol = cfg_.symbol;
+            intent.is_buy = false;
+            intent.ref_px = exit_px;
+            intent.ts_ms  = ts_ms;
+            on_order_intent_(intent);
+        }
 
         // Fire trade callback for persistence
         if (on_trade_) {

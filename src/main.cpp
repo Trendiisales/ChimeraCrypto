@@ -1046,6 +1046,37 @@ int main() {
                         intent.tag.c_str(), intent.symbol.c_str(), result.error.c_str());
                 }
             });
+        // ── Smart Pyramid callback: only fires after BE-lock armed + profit >= pyramid_arm_atr ─
+        // EdgeEngine guarantees base trail_stop floors at entry+round_trip_bp before any add.
+        // Pyramid add size = base_size * size_mult (default 50%). Shared trail stop covers all legs.
+        engine.set_on_pyramid(
+            [&](const std::string& tag, double price, double size_mult, int add_num) {
+                if (!exec_ok || !executor.is_ready()) {
+                    std::fprintf(stderr,
+                        "[PYRAMID] executor not ready tag=%s add=%d px=%.8f\n",
+                        tag.c_str(), add_num, price);
+                    return;
+                }
+                if (price <= 0.0 || runtime_cfg.max_position_usd <= 0.0 || size_mult <= 0.0) {
+                    std::fprintf(stderr,
+                        "[PYRAMID] invalid sizing tag=%s px=%.8f size_mult=%.2f\n",
+                        tag.c_str(), price, size_mult);
+                    return;
+                }
+                double add_usd = runtime_cfg.max_position_usd * size_mult;
+                double qty = add_usd / price;
+                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% add_usd=%.2f qty=%.8f px=%.4f\n",
+                    tag.c_str(), add_num, size_mult * 100.0, add_usd, qty, price);
+                std::fflush(stdout);
+                // Pyramid uses engine's symbol context; resolve via tag prefix is non-trivial,
+                // so use engine.symbol field captured at config time.
+                auto result = executor.execute(engine.cfg().symbol, true, qty, price);
+                if (!result.ok) {
+                    std::fprintf(stderr,
+                        "[PYRAMID] execute failed tag=%s err=%s\n",
+                        tag.c_str(), result.error.c_str());
+                }
+            });
     };
 
     // ══════════════════════════════════════════════════════════════════════
@@ -4670,6 +4701,8 @@ int main() {
         .trail_dist_atr = 0.3,
         .trail_tighten_atr  = 1.5,
         .trail_tighten_dist_atr = 0.15,
+        // Pyramid disabled: backtest showed only +1-2% CAGR lift (avg 0.04 adds/trade) — trail
+        // tightens before profit reaches arm threshold. SUI exits too fast to extend.
     };
     chimera::EdgeEngine sui_donch_h6(sui_donch_h6_cfg);
     wire_engine(sui_donch_h6);
@@ -5648,6 +5681,8 @@ int main() {
         .trail_dist_atr = 0.4,
         .trail_tighten_atr  = 1.5,
         .trail_tighten_dist_atr = 0.15,
+        // Pyramid disabled: backtest 2021-2026 showed +3% CAGR lift (avg 0.27 adds/trade),
+        // not worth the operational complexity. Trail tightens at 1.5 ATR before adds trigger.
     };
     chimera::EdgeEngine bnb_donch_h16(bnb_donch_h16_cfg);
     wire_engine(bnb_donch_h16);
@@ -5669,6 +5704,7 @@ int main() {
         .trail_dist_atr = 0.3,
         .trail_tighten_atr  = 1.5,
         .trail_tighten_dist_atr = 0.15,
+        // Pyramid disabled: backtest showed +7% CAGR (avg 0.25 adds/trade) — below 10% lift threshold.
     };
     chimera::EdgeEngine btc_donch_h16(btc_donch_h16_cfg);
     wire_engine(btc_donch_h16);
@@ -7428,7 +7464,7 @@ int main() {
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ARB, &arb_boll_h6, "arbusdt", 21600, "ARB-BOLL-H6", 3.95, 2.39, 71, 11, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ARB, &arb_boll_h3, "arbusdt", 10800, "ARB-BOLL-H3", 1.44, 0.97, 64, 24, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_APT, &apt_boll_h6, "aptusdt", 21600, "APT-BOLL-H6", 1.75, 0.91, 54, 14, 21});
-    // DISABLED-TOP5: g_slots.push_back({chimera::SYM_SUI, &sui_boll_h6, "suiusdt", 21600, "SUI-BOLL-H6", 6.72, 2.96, 51, 14, 21});
+    g_slots.push_back({chimera::SYM_SUI, &sui_boll_h6, "suiusdt", 21600, "SUI-BOLL-H6", 1.54, 1.05, 86, 146, 31});  // tier-A re-validated 5yr Binance
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_SUI, &sui_boll_h4, "suiusdt", 14400, "SUI-BOLL-H4", 1.78, 1.37, 48, 29, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ARB, &arb_boll_h2, "arbusdt", 7200, "ARB-BOLL-H2", 1.27, 0.78, 40, 45, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ARB, &arb_boll_h4, "arbusdt", 14400, "ARB-BOLL-H4", 2.50, 2.00, 40, 16, 21});
@@ -7484,7 +7520,7 @@ int main() {
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ETH, &eth_rsi_h6, "ethusdt", 21600, "ETH-RSI-H6", 41.75, 3.43, 97, 12, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_LINK, &link_rsi_h6, "linkusdt", 21600, "LINK-RSI-H6", 8.79, 3.20, 95, 12, 21});
     // DISABLED: g_slots.push_back({chimera::SYM_BNB, &bnb_rsi_h6, "bnbusdt", 21600, "BNB-RSI-H6", 373.91, 2.49, 100, 14, 21});
-    // DISABLED-TOP5: g_slots.push_back({chimera::SYM_DOGE, &doge_rsi_h6, "dogeusdt", 21600, "DOGE-RSI-H6", 3.72, 1.96, 67, 16, 21});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_rsi_h6, "dogeusdt", 21600, "DOGE-RSI-H6", 2.25, 1.10, 65, 108, 31});  // tier-A re-validated 5yr Binance
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_AVAX, &avax_rsi_h6, "avaxusdt", 21600, "AVAX-RSI-H6", 1.77, 1.15, 40, 19, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_BTC, &btc_boll_h6, "btcusdt", 21600, "BTC-BOLL-H6", 8.04, 3.24, 100, 18, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ETH, &eth_boll_h6, "ethusdt", 21600, "ETH-BOLL-H6", 4.87, 2.38, 99, 10, 21});
@@ -7508,7 +7544,7 @@ int main() {
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_DOGE, &doge_boll_h12, "dogeusdt", 43200, "DOGE-BOLL-H12", 5.08, 1.89, 100, 11, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_BTC, &btc_rsi_h8, "btcusdt", 28800, "BTC-RSI-H8", 1.79, 0.87, 69, 16, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_NEAR, &near_donch_h6, "nearusdt", 21600, "NEAR-DONCH-H6", 1.37, 0.80, 70, 45, 21});
-    // DISABLED-TOP5: g_slots.push_back({chimera::SYM_SUI, &sui_donch_h6, "suiusdt", 21600, "SUI-DONCH-H6", 1.83, 1.23, 46, 15, 21});
+    g_slots.push_back({chimera::SYM_SUI, &sui_donch_h6, "suiusdt", 21600, "SUI-DONCH-H6", 3.34, 2.49, 86, 80, 31});  // tier-A re-validated 3yr Binance (SUI listed 2023)
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_APT, &apt_donch_h4, "aptusdt", 14400, "APT-DONCH-H4", 2.26, 1.91, 81, 26, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_APT, &apt_donch_h6, "aptusdt", 21600, "APT-DONCH-H6", 1.73, 1.22, 45, 23, 21});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ARB, &arb_donch_h6, "arbusdt", 21600, "ARB-DONCH-H6", 1.28, 0.47, 40, 13, 21});
@@ -7557,8 +7593,8 @@ int main() {
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_BTC, &btc_donch_h8, "btcusdt", 28800, "BTC-DONCH-H8", 1.48, 0.78, 44, 61, 22});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_ARB, &arb_donch_h8, "arbusdt", 28800, "ARB-DONCH-H8", 2.00, 1.22, 51, 10, 22});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_XRP, &xrp_donch_h16, "xrpusdt", 57600, "XRP-DONCH-H16", 4.88, 1.88, 100, 19, 22});
-    // DISABLED-TOP5: g_slots.push_back({chimera::SYM_BNB, &bnb_donch_h16, "bnbusdt", 57600, "BNB-DONCH-H16", 9.25, 2.99, 65, 16, 22});
-    // DISABLED-TOP5: g_slots.push_back({chimera::SYM_BTC, &btc_donch_h16, "btcusdt", 57600, "BTC-DONCH-H16", 2.48, 1.27, 67, 28, 22});
+    g_slots.push_back({chimera::SYM_BNB, &bnb_donch_h16, "bnbusdt", 57600, "BNB-DONCH-H16", 5.33, 1.75, 87, 79, 31});  // tier-A re-validated 5yr Binance
+    g_slots.push_back({chimera::SYM_BTC, &btc_donch_h16, "btcusdt", 57600, "BTC-DONCH-H16", 2.31, 1.11, 88, 76, 31});  // tier-A re-validated 5yr Binance
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_LINK, &link_donch_h16, "linkusdt", 57600, "LINK-DONCH-H16", 2.69, 1.03, 71, 18, 22});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_SUI, &sui_donch_h16, "suiusdt", 57600, "SUI-DONCH-H16", 3.68, 1.86, 67, 10, 22});
     // DISABLED-TOP5: g_slots.push_back({chimera::SYM_NEAR, &near_donch_h16, "nearusdt", 57600, "NEAR-DONCH-H16", 1.87, 1.36, 58, 29, 22});

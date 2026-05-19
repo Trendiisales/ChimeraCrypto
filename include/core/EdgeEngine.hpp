@@ -370,6 +370,9 @@ public:
     // Set a callback for entry/exit order intents (paper broker mirror).
     void set_on_order_intent(OrderIntentCallback cb) { on_order_intent_ = std::move(cb); }
 
+    // Read-only access to the engine's config (used by main.cpp pyramid callback).
+    const Config& cfg() const { return cfg_; }
+
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
         if (cfg_.max_history < cfg_.atr_period + 5) cfg_.max_history = cfg_.atr_period + 5;

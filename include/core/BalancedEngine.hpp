@@ -808,7 +808,7 @@ public:
         int max_pos = dead_zone ? TradingConfig::DEAD_ZONE_MAX_POS : TradingConfig::MAX_CONCURRENT_POSITIONS;
         if (shadow_mode) {
             // Shadow research mode: do not throttle opportunity discovery too hard.
-            max_pos = std::max(max_pos, 4);
+            max_pos = std::max(max_pos, 15);  // raised from 4 — shadow tuning: need full trade flow for PnL validation
         }
         if (open_positions_ >= max_pos) return;
         

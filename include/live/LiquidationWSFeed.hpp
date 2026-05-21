@@ -85,15 +85,21 @@ private:
     std::thread thread_;
 
     void run_loop_() {
-        // Reconnecting loop using wscat/websocat or curl
-        // In production this uses libwebsockets like BinanceWSFeed.
-        // Simplified implementation: shell out to websocat and parse stdout.
-        // If websocat is not available, fall back to periodic REST polling.
+        // Check if websocat is available before attempting WS connection
+        int which_ret = ::system("which websocat > /dev/null 2>&1");
+        if (which_ret != 0) {
+            std::printf("[LIQ-FEED] websocat not installed — using REST polling (every 10s)\n");
+            std::fflush(stdout);
+            rest_poll_loop_();
+            return;
+        }
+
+        // Reconnecting loop using websocat
+        int consecutive_failures = 0;
         while (running_) {
-            std::printf("[LIQ-FEED] Connecting to liquidation stream...\n");
+            std::printf("[LIQ-FEED] Connecting to liquidation stream via websocat...\n");
             std::fflush(stdout);
 
-            // Try websocat first (common on Ubuntu)
             FILE* pipe = popen(
                 "websocat -t --ping-interval 20 "
                 "'wss://fstream.binance.com/ws/!forceOrder@arr' 2>/dev/null",
@@ -101,24 +107,40 @@ private:
             );
 
             if (!pipe) {
-                // Fallback: use REST polling every 5s
-                std::printf("[LIQ-FEED] websocat not available, falling back to REST polling\n");
+                std::printf("[LIQ-FEED] popen failed — falling back to REST polling\n");
                 std::fflush(stdout);
                 rest_poll_loop_();
                 return;
             }
 
             char buf[4096];
+            bool got_data = false;
             while (running_ && fgets(buf, sizeof(buf), pipe)) {
                 parse_event_(buf);
+                got_data = true;
+                consecutive_failures = 0;
             }
 
             pclose(pipe);
 
+            if (!got_data) {
+                consecutive_failures++;
+                if (consecutive_failures >= 3) {
+                    std::printf("[LIQ-FEED] 3 consecutive connection failures — "
+                               "falling back to REST polling\n");
+                    std::fflush(stdout);
+                    rest_poll_loop_();
+                    return;
+                }
+            }
+
             if (running_) {
-                std::printf("[LIQ-FEED] Disconnected, reconnecting in 5s...\n");
+                int backoff = 5 * consecutive_failures;
+                if (backoff < 5) backoff = 5;
+                if (backoff > 60) backoff = 60;
+                std::printf("[LIQ-FEED] Disconnected, reconnecting in %ds...\n", backoff);
                 std::fflush(stdout);
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+                std::this_thread::sleep_for(std::chrono::seconds(backoff));
             }
         }
     }

@@ -1,7 +1,7 @@
 // ============================================================================
 // optimizer_general.cpp — Multi-symbol/strategy parameter optimizer
 //
-// General-purpose optimizer that sweeps 5 parameters with neighbourhood
+// General-purpose optimizer that sweeps 5+ parameters with neighbourhood
 // stability scoring. Supports any symbol + strategy + timeframe combination.
 //
 // Build:
@@ -12,9 +12,8 @@
 //
 // Examples:
 //   ./optimizer_general ethusdt TSMOM D1 17
-//   ./optimizer_general linkusdt TSMOM D1 22
-//   ./optimizer_general solusdt TSMOM D1 20
-//   ./optimizer_general ethusdt TSMOM H6 17
+//   ./optimizer_general linkusdt KELTNER_REVERT H12 22
+//   ./optimizer_general dogeusdt DUAL_THRUST H12 22
 //   ./optimizer_general solusdt DONCHIAN H6 20
 // ============================================================================
 
@@ -186,6 +185,7 @@ struct OptResult {
     double sl_atr_mult;
     double trail_arm_atr;
     double trail_dist_atr;
+    double signal_mult;   // strategy-specific: keltner_atr_mult or dt_k1
     int    trades;
     int    wins;
     double total_bp;
@@ -206,6 +206,7 @@ static OptResult run_single(const std::vector<Kline>& klines,
                              int64_t tf_secs,
                              int lookback, int hold_bars, double sl_atr,
                              double trail_arm, double trail_dist,
+                             double signal_mult,
                              double cost_bp) {
     OptResult r{};
     r.lookback       = lookback;
@@ -213,6 +214,11 @@ static OptResult run_single(const std::vector<Kline>& klines,
     r.sl_atr_mult    = sl_atr;
     r.trail_arm_atr  = trail_arm;
     r.trail_dist_atr = trail_dist;
+    r.signal_mult    = signal_mult;
+
+    int max_hist = std::max(lookback + 5, 19);
+    // Ensure enough history for ATR(14) used by keltner/vol
+    if (max_hist < 56) max_hist = 56;
 
     chimera::EdgeEngine::Config cfg{
         .symbol         = symbol,
@@ -226,10 +232,21 @@ static OptResult run_single(const std::vector<Kline>& klines,
         .bb_k           = 2.0,
         .rsi_threshold  = 30.0,
         .round_trip_bp  = cost_bp,
-        .max_history    = std::max(lookback + 5, 19),
+        .max_history    = max_hist,
         .trail_arm_atr  = trail_arm,
         .trail_dist_atr = trail_dist,
     };
+
+    // Strategy-specific config overrides
+    if (kind == chimera::StrategyKind::KELTNER_REVERT) {
+        cfg.keltner_ema_len  = lookback;       // lookback IS the EMA period
+        cfg.keltner_atr_mult = signal_mult;    // signal_mult IS channel width
+        cfg.max_history = std::max(cfg.max_history, lookback + 5);
+    } else if (kind == chimera::StrategyKind::DUAL_THRUST) {
+        cfg.dt_range_bars = lookback;          // lookback IS the range window
+        cfg.dt_k1         = signal_mult;       // signal_mult IS breakout multiplier
+        cfg.max_history = std::max(cfg.max_history, lookback + 5);
+    }
 
     // Suppress printf
     fflush(stdout);
@@ -318,9 +335,9 @@ static OptResult run_single(const std::vector<Kline>& klines,
 int main(int argc, char* argv[]) {
     if (argc < 5) {
         std::fprintf(stderr, "Usage: %s <symbol> <strategy> <tf> <cost_bp>\n", argv[0]);
-        std::fprintf(stderr, "  symbol:   btcusdt, ethusdt, solusdt, xrpusdt, linkusdt\n");
-        std::fprintf(stderr, "  strategy: TSMOM, DONCHIAN, BOLLINGER, RSI_REVERT\n");
-        std::fprintf(stderr, "  tf:       D1, H12, H6, H4, H3, H2, H1\n");
+        std::fprintf(stderr, "  symbol:   btcusdt, ethusdt, solusdt, xrpusdt, linkusdt, dogeusdt, etc.\n");
+        std::fprintf(stderr, "  strategy: TSMOM, DONCHIAN, BOLLINGER, RSI_REVERT, KELTNER_REVERT, DUAL_THRUST\n");
+        std::fprintf(stderr, "  tf:       D1, H12, H8, H6, H4, H3, H2, H1\n");
         std::fprintf(stderr, "  cost_bp:  17, 20, 22, etc.\n");
         return 1;
     }
@@ -332,10 +349,12 @@ int main(int argc, char* argv[]) {
 
     // Parse strategy
     chimera::StrategyKind kind;
-    if      (strat_s == "TSMOM")      kind = chimera::StrategyKind::TSMOM;
-    else if (strat_s == "DONCHIAN")   kind = chimera::StrategyKind::DONCHIAN;
-    else if (strat_s == "BOLLINGER")  kind = chimera::StrategyKind::BOLLINGER;
-    else if (strat_s == "RSI_REVERT") kind = chimera::StrategyKind::RSI_REVERT;
+    if      (strat_s == "TSMOM")          kind = chimera::StrategyKind::TSMOM;
+    else if (strat_s == "DONCHIAN")       kind = chimera::StrategyKind::DONCHIAN;
+    else if (strat_s == "BOLLINGER")      kind = chimera::StrategyKind::BOLLINGER;
+    else if (strat_s == "RSI_REVERT")     kind = chimera::StrategyKind::RSI_REVERT;
+    else if (strat_s == "KELTNER_REVERT") kind = chimera::StrategyKind::KELTNER_REVERT;
+    else if (strat_s == "DUAL_THRUST")    kind = chimera::StrategyKind::DUAL_THRUST;
     else {
         std::fprintf(stderr, "Unknown strategy: %s\n", strat_s.c_str());
         return 1;
@@ -421,37 +440,54 @@ int main(int argc, char* argv[]) {
         seeds.push_back(sb);
     }
 
-    // ── Parameter grid ──────────────────────────────────────────────────
-    std::vector<int>    lookbacks   = {5, 8, 10, 15, 20, 25, 30, 35, 40};
+    // ── Parameter grids (strategy-specific) ─────────────────────────────
+    std::vector<int>    lookbacks;
     std::vector<int>    hold_bars_v = {4, 6, 8, 10, 12, 16, 20, 24};
     std::vector<double> sl_atrs     = {1.5, 2.0, 2.5, 3.0, 3.5, 4.0};
     std::vector<double> trail_arms  = {0.5, 0.8, 1.0, 1.2, 1.5, 2.0};
     std::vector<double> trail_dists = {0.3, 0.4, 0.5, 0.6, 0.8, 1.0};
+    std::vector<double> signal_mults;  // strategy-specific signal multiplier
 
-    int combos = (int)(lookbacks.size() * hold_bars_v.size() * sl_atrs.size() *
-                       trail_arms.size() * trail_dists.size());
+    if (kind == chimera::StrategyKind::KELTNER_REVERT) {
+        // lookback = keltner_ema_len, signal_mult = keltner_atr_mult
+        lookbacks   = {10, 15, 20, 25, 30, 40};
+        signal_mults = {1.5, 2.0, 2.5, 3.0};
+    } else if (kind == chimera::StrategyKind::DUAL_THRUST) {
+        // lookback = dt_range_bars, signal_mult = dt_k1
+        lookbacks   = {3, 4, 5, 6, 8, 10};
+        signal_mults = {0.3, 0.4, 0.5, 0.6, 0.7, 0.8};
+    } else {
+        // TSMOM, DONCHIAN, BOLLINGER, RSI_REVERT — original grid
+        lookbacks   = {5, 8, 10, 15, 20, 25, 30, 35, 40};
+        signal_mults = {0.0};  // placeholder, not used
+    }
+
+    int combos = (int)(lookbacks.size() * signal_mults.size() * hold_bars_v.size() *
+                       sl_atrs.size() * trail_arms.size() * trail_dists.size());
     std::printf("[SWEEP] %d combinations to test (cost=%.0fbp)\n\n", combos, cost_bp);
 
     std::vector<OptResult> all_results;
     all_results.reserve(combos);
 
     int done = 0;
-    for (int lb : lookbacks) {
-        for (int hb : hold_bars_v) {
-            for (double sl : sl_atrs) {
-                for (double ta : trail_arms) {
-                    for (double td : trail_dists) {
-                        if (td >= ta) continue;
+    for (double sm : signal_mults) {
+        for (int lb : lookbacks) {
+            for (int hb : hold_bars_v) {
+                for (double sl : sl_atrs) {
+                    for (double ta : trail_arms) {
+                        for (double td : trail_dists) {
+                            if (td >= ta) continue;
 
-                        OptResult r = run_single(klines, seeds, seed_count,
-                                                  symbol, kind, tf_secs,
-                                                  lb, hb, sl, ta, td, cost_bp);
-                        all_results.push_back(r);
-                        done++;
+                            OptResult r = run_single(klines, seeds, seed_count,
+                                                      symbol, kind, tf_secs,
+                                                      lb, hb, sl, ta, td, sm, cost_bp);
+                            all_results.push_back(r);
+                            done++;
 
-                        if (done % 500 == 0) {
-                            std::fprintf(stderr, "\r  [%d / %d] ...", done, combos);
-                            fflush(stderr);
+                            if (done % 500 == 0) {
+                                std::fprintf(stderr, "\r  [%d / %d] ...", done, combos);
+                                fflush(stderr);
+                            }
                         }
                     }
                 }
@@ -461,8 +497,11 @@ int main(int argc, char* argv[]) {
     std::fprintf(stderr, "\r  [%d / %d] done.    \n", done, combos);
 
     // ── Neighbourhood scoring ───────────────────────────────────────────
-    using ParamKey = std::tuple<int,int,int,int,int>;
-    std::map<ParamKey, double> pf_map;
+    // For strategies with signal_mult, use 6D neighbourhood; for others, 5D
+    bool has_signal_mult = (signal_mults.size() > 1);
+
+    using ParamKey6 = std::tuple<int,int,int,int,int,int>;
+    std::map<ParamKey6, double> pf_map;
 
     auto find_idx = [](const std::vector<int>& v, int val) -> int {
         for (int i = 0; i < (int)v.size(); ++i) if (v[i] == val) return i;
@@ -474,15 +513,17 @@ int main(int argc, char* argv[]) {
     };
 
     for (auto& r : all_results) {
+        int mi = find_idx_d(signal_mults, r.signal_mult);
         int li = find_idx(lookbacks, r.lookback);
         int hi = find_idx(hold_bars_v, r.hold_bars);
         int si = find_idx_d(sl_atrs, r.sl_atr_mult);
         int ai = find_idx_d(trail_arms, r.trail_arm_atr);
         int di = find_idx_d(trail_dists, r.trail_dist_atr);
-        pf_map[{li, hi, si, ai, di}] = r.pf;
+        pf_map[{mi, li, hi, si, ai, di}] = r.pf;
     }
 
     for (auto& r : all_results) {
+        int mi = find_idx_d(signal_mults, r.signal_mult);
         int li = find_idx(lookbacks, r.lookback);
         int hi = find_idx(hold_bars_v, r.hold_bars);
         int si = find_idx_d(sl_atrs, r.sl_atr_mult);
@@ -490,22 +531,26 @@ int main(int argc, char* argv[]) {
         int di = find_idx_d(trail_dists, r.trail_dist_atr);
 
         int score = 0, checked = 0;
-        for (int dl = -1; dl <= 1; ++dl) {
-            for (int dh = -1; dh <= 1; ++dh) {
-                for (int ds = -1; ds <= 1; ++ds) {
-                    for (int da = -1; da <= 1; ++da) {
-                        for (int dd = -1; dd <= 1; ++dd) {
-                            if (dl == 0 && dh == 0 && ds == 0 && da == 0 && dd == 0) continue;
-                            int ni = li+dl, nh = hi+dh, ns = si+ds, na = ai+da, nd = di+dd;
-                            if (ni < 0 || ni >= (int)lookbacks.size()) continue;
-                            if (nh < 0 || nh >= (int)hold_bars_v.size()) continue;
-                            if (ns < 0 || ns >= (int)sl_atrs.size()) continue;
-                            if (na < 0 || na >= (int)trail_arms.size()) continue;
-                            if (nd < 0 || nd >= (int)trail_dists.size()) continue;
-                            auto it = pf_map.find({ni, nh, ns, na, nd});
-                            if (it != pf_map.end()) {
-                                checked++;
-                                if (it->second > 1.0) score++;
+        int m_range = has_signal_mult ? 1 : 0;  // search ±1 on signal_mult if it exists
+        for (int dm = -m_range; dm <= m_range; ++dm) {
+            for (int dl = -1; dl <= 1; ++dl) {
+                for (int dh = -1; dh <= 1; ++dh) {
+                    for (int ds = -1; ds <= 1; ++ds) {
+                        for (int da = -1; da <= 1; ++da) {
+                            for (int dd = -1; dd <= 1; ++dd) {
+                                if (dm == 0 && dl == 0 && dh == 0 && ds == 0 && da == 0 && dd == 0) continue;
+                                int nm = mi+dm, ni = li+dl, nh = hi+dh, ns = si+ds, na = ai+da, nd = di+dd;
+                                if (nm < 0 || nm >= (int)signal_mults.size()) continue;
+                                if (ni < 0 || ni >= (int)lookbacks.size()) continue;
+                                if (nh < 0 || nh >= (int)hold_bars_v.size()) continue;
+                                if (ns < 0 || ns >= (int)sl_atrs.size()) continue;
+                                if (na < 0 || na >= (int)trail_arms.size()) continue;
+                                if (nd < 0 || nd >= (int)trail_dists.size()) continue;
+                                auto it = pf_map.find({nm, ni, nh, ns, na, nd});
+                                if (it != pf_map.end()) {
+                                    checked++;
+                                    if (it->second > 1.0) score++;
+                                }
                             }
                         }
                     }
@@ -534,16 +579,39 @@ int main(int argc, char* argv[]) {
     else if (symbol == "solusdt") sym_upper = "SOL";
     else if (symbol == "xrpusdt") sym_upper = "XRP";
     else if (symbol == "linkusdt") sym_upper = "LINK";
+    else if (symbol == "dogeusdt") sym_upper = "DOGE";
+    else if (symbol == "bnbusdt") sym_upper = "BNB";
+    else if (symbol == "suiusdt") sym_upper = "SUI";
+    else if (symbol == "aptusdt") sym_upper = "APT";
+    else if (symbol == "arbusdt") sym_upper = "ARB";
+    else if (symbol == "nearusdt") sym_upper = "NEAR";
     else sym_upper = symbol;
 
     std::string engine_tag = sym_upper + "-" + strat_s + "-" + tf_s;
 
+    // Determine LB column label based on strategy
+    const char* lb_label = "LB";
+    const char* sm_label = "SM";
+    if (kind == chimera::StrategyKind::KELTNER_REVERT) {
+        lb_label = "EMA";
+        sm_label = "AMult";
+    } else if (kind == chimera::StrategyKind::DUAL_THRUST) {
+        lb_label = "RNG";
+        sm_label = "K1";
+    }
+
     std::printf("\n");
-    std::printf("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
-    std::printf("║  %s OPTIMIZER — Top 30 by OOS Profit Factor (cost = %.0fbp)                                           ║\n", engine_tag.c_str(), cost_bp);
-    std::printf("╠═════╦════╦════╦═════╦══════╦══════╦══════╦════╦═════════╦══════╦══════╦══════════╦════════╦═══════════════════════════╣\n");
-    std::printf("║  LB ║ HB ║ SL ║ T_A ║ T_D  ║ Trds ║ Wins ║ WR ║ Net(bp) ║  PF  ║ Shrp ║ MaxDD bp ║ Nbr%%   ║ Assessment              ║\n");
-    std::printf("╠═════╬════╬════╬═════╬══════╬══════╬══════╬════╬═════════╬══════╬══════╬══════════╬════════╬═══════════════════════════╣\n");
+    std::printf("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
+    std::printf("║  %s OPTIMIZER — Top 30 by OOS Profit Factor (cost = %.0fbp)                                                    ║\n", engine_tag.c_str(), cost_bp);
+    std::printf("╠═════╦═════╦════╦════╦═════╦══════╦══════╦══════╦════╦═════════╦══════╦══════╦══════════╦════════╦═══════════════════════════════╣\n");
+
+    if (has_signal_mult) {
+        std::printf("║ %3s ║%4s ║ HB ║ SL ║ T_A ║ T_D  ║ Trds ║ Wins ║ WR ║ Net(bp) ║  PF  ║ Shrp ║ MaxDD bp ║ Nbr%%   ║ Assessment                    ║\n",
+            lb_label, sm_label);
+    } else {
+        std::printf("║  LB ║     ║ HB ║ SL ║ T_A ║ T_D  ║ Trds ║ Wins ║ WR ║ Net(bp) ║  PF  ║ Shrp ║ MaxDD bp ║ Nbr%%   ║ Assessment                    ║\n");
+    }
+    std::printf("╠═════╬═════╬════╬════╬═════╬══════╬══════╬══════╬════╬═════════╬══════╬══════╬══════════╬════════╬═══════════════════════════════╣\n");
 
     int show = std::min(30, (int)filtered.size());
     for (int i = 0; i < show; ++i) {
@@ -560,14 +628,23 @@ int main(int argc, char* argv[]) {
         else
             assessment = "NO EDGE";
 
-        std::printf("║ %3d ║ %2d ║%3.1f ║ %3.1f ║ %4.1f ║ %4d ║ %4d ║%3.0f ║ %+7.0f ║ %4.2f ║ %4.2f ║ %8.0f ║  %3d%%   ║ %-25s ║\n",
-            r.lookback, r.hold_bars, r.sl_atr_mult,
-            r.trail_arm_atr, r.trail_dist_atr,
-            r.trades, r.wins, r.win_rate,
-            r.total_bp, r.pf, r.sharpe, r.max_dd_bp,
-            r.neighbour_score, assessment);
+        if (has_signal_mult) {
+            std::printf("║ %3d ║ %3.1f ║ %2d ║%3.1f ║ %3.1f ║ %4.1f ║ %4d ║ %4d ║%3.0f ║ %+7.0f ║ %4.2f ║ %4.2f ║ %8.0f ║  %3d%%   ║ %-29s ║\n",
+                r.lookback, r.signal_mult, r.hold_bars, r.sl_atr_mult,
+                r.trail_arm_atr, r.trail_dist_atr,
+                r.trades, r.wins, r.win_rate,
+                r.total_bp, r.pf, r.sharpe, r.max_dd_bp,
+                r.neighbour_score, assessment);
+        } else {
+            std::printf("║ %3d ║     ║ %2d ║%3.1f ║ %3.1f ║ %4.1f ║ %4d ║ %4d ║%3.0f ║ %+7.0f ║ %4.2f ║ %4.2f ║ %8.0f ║  %3d%%   ║ %-29s ║\n",
+                r.lookback, r.hold_bars, r.sl_atr_mult,
+                r.trail_arm_atr, r.trail_dist_atr,
+                r.trades, r.wins, r.win_rate,
+                r.total_bp, r.pf, r.sharpe, r.max_dd_bp,
+                r.neighbour_score, assessment);
+        }
     }
-    std::printf("╚═════╩════╩════╩═════╩══════╩══════╩══════╩════╩═════════╩══════╩══════╩══════════╩════════╩═══════════════════════════╝\n");
+    std::printf("╚═════╩═════╩════╩════╩═════╩══════╩══════╩══════╩════╩═════════╩══════╩══════╩══════════╩════════╩═══════════════════════════════╝\n");
 
     // ── Summary ─────────────────────────────────────────────────────────
     int profitable = 0;
@@ -602,6 +679,15 @@ int main(int argc, char* argv[]) {
     if (best) {
         std::printf("═══ RECOMMENDED CONFIG FOR %s ════════════════════════════\n", engine_tag.c_str());
         std::printf("  lookback       = %d\n", best->lookback);
+        if (has_signal_mult) {
+            if (kind == chimera::StrategyKind::KELTNER_REVERT) {
+                std::printf("  keltner_ema_len  = %d\n", best->lookback);
+                std::printf("  keltner_atr_mult = %.1f\n", best->signal_mult);
+            } else if (kind == chimera::StrategyKind::DUAL_THRUST) {
+                std::printf("  dt_range_bars  = %d\n", best->lookback);
+                std::printf("  dt_k1          = %.2f\n", best->signal_mult);
+            }
+        }
         std::printf("  hold_bars      = %d\n", best->hold_bars);
         std::printf("  sl_atr_mult    = %.1f\n", best->sl_atr_mult);
         std::printf("  trail_arm_atr  = %.1f\n", best->trail_arm_atr);

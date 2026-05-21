@@ -9,7 +9,9 @@ User=jo
 WorkingDirectory=/home/jo/ChimeraCrypto
 ExecStart=/home/jo/ChimeraCrypto/build/chimera
 ExecStop=/bin/kill -SIGINT $MAINPID
-Restart=no
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 

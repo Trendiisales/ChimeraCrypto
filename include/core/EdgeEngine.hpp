@@ -153,6 +153,31 @@ public:
         // entry. A winner can NEVER become a loser once the trail arms.
         // Always on — no toggle needed. Uses round_trip_bp for the BE level.
 
+        // ── BP-based staged ratchet (Session 32b — tighter profit lock) ────
+        // Three-stage profit-protection runs in parallel with ATR trail.
+        // Whichever stop is tighter wins. Stages:
+        //
+        // 1. HARD FLOOR (mfe < ratchet_start_bp):
+        //    sl = max(atr_sl, entry * (1 + hard_floor_bp/1e4))
+        //
+        // 2. EARLY RAMP (ratchet_start_bp <= mfe < be_arm_bp):
+        //    Linear ramp from -50bp to 0bp (BE) as MFE traverses
+        //    [ratchet_start_bp, be_arm_bp]. Rescues "almost made it" trades
+        //    that previously died at -100 floor.
+        //
+        // 3. FULL LOCK (mfe >= be_arm_bp):
+        //    locked_bp = round_trip_bp + (mfe - be_arm_bp) * ratchet_lock_pct
+        //
+        // PLUS first-bar reversal kill (independent of stage): if MFE
+        // never crossed early_kill_mfe AND unrealised < early_kill_bp,
+        // exit immediately (catches dead-on-arrival dumps).
+        double       hard_floor_bp     = -100.0;  // absolute per-position loss cap
+        double       ratchet_start_bp  = 15.0;    // earliest partial protection (Stage 2 begins)
+        double       be_arm_bp         = 50.0;    // BE lock threshold (Stage 3 begins)
+        double       ratchet_lock_pct  = 0.75;    // fraction of MFE-above-arm to lock (was 0.5)
+        double       early_kill_bp     = -50.0;   // exit if unrealised < this AND mfe < early_kill_mfe
+        double       early_kill_mfe    = 10.0;    // MFE threshold below which early-kill arms
+
         // ── Smart Pyramid (Session 31) ──────────────────────────────────
         // Adds to position ONLY after trail is armed (BE locked) and profit
         // exceeds pyramid_arm_atr. Each add is pyramid_size_mult * base size.
@@ -706,6 +731,15 @@ public:
     double total_bp() const { return total_bp_; }
     bool in_position() const { return in_position_; }
     int bars_in_buffer() const { return (int)closes_.size(); }
+
+    // Unrealised P&L (bp) at given spot price. Returns 0 if flat.
+    // Used by main.cpp aggregate drawdown circuit (Session 32).
+    double unrealised_bp(double spot_px) const {
+        if (!in_position_ || entry_px_ <= 0.0 || spot_px <= 0.0) return 0.0;
+        return (spot_px / entry_px_ - 1.0) * 1e4;
+    }
+    double entry_px() const { return entry_px_; }
+    double last_close() const { return last_close_; }
     int max_history_needed() const { return cfg_.max_history; }
 
     // Runtime filter activation (can be called after construction)
@@ -1653,6 +1687,16 @@ private:
         entry_px_     = last_close_;
         atr_at_entry_ = a;
         sl_px_        = entry_px_ - cfg_.sl_atr_mult * a;
+        // ── HARD FLOOR (Session 32) — never lose more than hard_floor_bp ──
+        if (cfg_.hard_floor_bp < 0.0) {
+            double floor_px = entry_px_ * (1.0 + cfg_.hard_floor_bp / 1e4);
+            if (sl_px_ < floor_px) {
+                std::printf("[%s] HARD_FLOOR  atr_sl=%.6f  floor=%.6f(%.0fbp)  -> tighten\n",
+                    cfg_.tag.c_str(), sl_px_, floor_px, cfg_.hard_floor_bp);
+                std::fflush(stdout);
+                sl_px_ = floor_px;
+            }
+        }
         entry_ts_ms_  = cur_open_ts_ms_ + cfg_.tf_secs * 1000;
         time_exit_ts_ms_ = entry_ts_ms_ + (int64_t)cfg_.hold_bars * cfg_.tf_secs * 1000;
         in_position_  = true;
@@ -1705,6 +1749,53 @@ private:
         // This is the floor for the trail stop once armed. A winner can
         // NEVER become a loser after the trail arms.
         double be_px = entry_px_ * (1.0 + cfg_.round_trip_bp / 1e4);
+
+        // ── STAGED BP RATCHET (Session 32b) ─────────────────────────────
+        // Stage 2 (mfe in [ratchet_start_bp, be_arm_bp]): linear ramp from
+        //   -50bp lock to 0bp (BE) lock. Rescues "almost made it" trades.
+        // Stage 3 (mfe >= be_arm_bp): lock = round_trip_bp + (mfe-be_arm_bp)
+        //   * ratchet_lock_pct. Captures more profit on winners.
+        if (cfg_.ratchet_start_bp > 0.0 && mfe_bp_ >= cfg_.ratchet_start_bp) {
+            double locked_bp;
+            if (mfe_bp_ < cfg_.be_arm_bp) {
+                // Stage 2: ramp -50bp -> 0bp linearly between start and arm
+                double range = cfg_.be_arm_bp - cfg_.ratchet_start_bp;
+                if (range > 0.0) {
+                    locked_bp = -50.0 + (mfe_bp_ - cfg_.ratchet_start_bp) / range * 50.0;
+                } else {
+                    locked_bp = 0.0;
+                }
+            } else {
+                // Stage 3: BE + ratchet_lock_pct of every bp past arm
+                locked_bp = cfg_.round_trip_bp + (mfe_bp_ - cfg_.be_arm_bp) * cfg_.ratchet_lock_pct;
+            }
+            double ratchet_sl = entry_px_ * (1.0 + locked_bp / 1e4);
+            if (ratchet_sl > sl_px_) {
+                double prev = sl_px_;
+                sl_px_ = ratchet_sl;
+                std::printf("[%s] STAGED_RATCHET  mfe=+%.1fbp  locked=%+.1fbp  sl: %.6f -> %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, locked_bp, prev, sl_px_);
+                std::fflush(stdout);
+            }
+            if (trail_armed_ && ratchet_sl > trail_stop_px_) {
+                trail_stop_px_ = ratchet_sl;
+            }
+        }
+
+        // ── EARLY-KILL: dead-on-arrival dump exit (Session 32b) ─────────
+        // If MFE never crossed early_kill_mfe AND price is currently deeper
+        // than early_kill_bp, exit before the full hard floor kicks in.
+        // Catches trades that enter at local top and dump immediately.
+        if (cfg_.early_kill_bp < 0.0 && mfe_bp_ < cfg_.early_kill_mfe) {
+            double unreal_bp = (price / entry_px_ - 1.0) * 1e4;
+            if (unreal_bp <= cfg_.early_kill_bp) {
+                std::printf("[%s] EARLY_KILL  mfe=+%.1fbp(<%.0f)  unreal=%+.1fbp  exit @ %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, cfg_.early_kill_mfe, unreal_bp, price);
+                std::fflush(stdout);
+                exit_position_(price, ts_ms, "EARLY_KILL");
+                return;
+            }
+        }
 
         // Trailing stop logic: arm when price reaches the arm level,
         // then ratchet the trail stop up as price makes new highs.

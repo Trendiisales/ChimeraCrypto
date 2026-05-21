@@ -4403,10 +4403,11 @@ int main() {
             if (!slot.engine) continue;
             if (slot.engine->is_trend_following()) {
                 slot.engine->enable_adx_filter(true);
+                slot.engine->set_adx_threshold(25.0);  // S32d: raised from 12 (was too lax). Real Wilder ADX min for trend = 25.
                 adx_count++;
             }
         }
-        std::printf("[STARTUP] Activated adx_filter on %d trend-following engines\n", adx_count);
+        std::printf("[STARTUP] Activated adx_filter (threshold=25) on %d trend-following engines\n", adx_count);
         std::fflush(stdout);
     }
 
@@ -5007,6 +5008,11 @@ int main() {
                 constexpr int MAX_CONCURRENT_POSITIONS = 25;     // widened from 5 (TOP-5 LOCKDOWN). 127-engine roster needs more headroom.
                 constexpr double DRAWDOWN_HALT_BP = -500.0;      // 24h closed-trade rolling DD halt (loosened from -200)
                 constexpr double AGG_KILL_BP = -2000.0;          // SESSION 32: force kill_all when summed open unrealised < this
+                // S32d-B: losing-streak circuit
+                constexpr int    STREAK_LOOKBACK = 10;           // examine last N closed trades
+                constexpr double STREAK_HALT_BP  = -300.0;       // if sum of last N < this, halt new entries
+                constexpr int64_t STREAK_HALT_MS = 4LL * 3600LL * 1000LL;  // halt for 4 hours
+                static int64_t streak_halt_until_ms = 0;
 
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
                 int open_positions = 0;
@@ -5057,9 +5063,35 @@ int main() {
                     std::fflush(stdout);
                 }
 
+                // ── LOSING-STREAK CIRCUIT (S32d-B) ───────────────────────
+                // Sum last N closed trades. If < halt threshold, lock gate
+                // for STREAK_HALT_MS. Lets the system wait out chop periods.
+                bool streak_halted = (now_ms < streak_halt_until_ms);
+                if (!streak_halted) {
+                    double streak_sum = 0.0;
+                    int streak_n = 0;
+                    {
+                        std::lock_guard<std::mutex> tlk(g_trades_mtx);
+                        for (int i = (int)g_trade_log.size() - 1; i >= 0 && streak_n < STREAK_LOOKBACK; --i) {
+                            if (g_trade_log[i].reason == "SHUTDOWN") continue;
+                            streak_sum += g_trade_log[i].net_bp;
+                            streak_n++;
+                        }
+                    }
+                    if (streak_n >= STREAK_LOOKBACK && streak_sum < STREAK_HALT_BP) {
+                        streak_halt_until_ms = now_ms + STREAK_HALT_MS;
+                        streak_halted = true;
+                        std::printf("[PORTFOLIO] STREAK_HALT TRIPPED: last %d trades sum=%+.1fbp < %.0f -> halt for %lldh\n",
+                            streak_n, streak_sum, STREAK_HALT_BP,
+                            (long long)(STREAK_HALT_MS / 3600000LL));
+                        std::fflush(stdout);
+                    }
+                }
+
                 bool gate_open = (open_positions < MAX_CONCURRENT_POSITIONS) &&
                                  (recent_pnl > DRAWDOWN_HALT_BP) &&
-                                 (total_unrealized_bp > UNREALIZED_HALT_BP);
+                                 (total_unrealized_bp > UNREALIZED_HALT_BP) &&
+                                 (!streak_halted);
 
                 for (auto& s : g_slots) {
                     if (s.engine) s.engine->set_portfolio_gate(gate_open);

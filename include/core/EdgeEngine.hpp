@@ -767,6 +767,7 @@ public:
     void enable_vol_filter(bool b) { cfg_.vol_filter = b; }
     void enable_mtf_gate(bool b)   { cfg_.mtf_gate = b; }
     void enable_adx_filter(bool b) { cfg_.adx_filter = b; }
+    void set_adx_threshold(double t) { cfg_.adx_threshold = t; }
     void enable_volume_gate(bool b) { cfg_.volume_gate = b; }
     void enable_corr_filter(bool b) { cfg_.corr_filter = b; }
     void enable_session_filter(bool b) { cfg_.session_filter = b; }
@@ -997,50 +998,45 @@ private:
     }
 
     // ── ADX (Average Directional Index) ─────────────────────────────────────
-    // Simplified ADX: average of DX values over N bars.
-    // DX = |+DI - -DI| / (+DI + -DI) * 100
-    // where +DI and -DI are computed per-bar from directional movement / TR.
+    // FIXED Session 32d: prior version zeroed the smaller DM before computing
+    // DX, which forced per-bar DX to always be 0 or 100. Real ADX keeps both
+    // DMs and uses smoothed sums. We use simple averaging over n bars (not
+    // full Wilder smoothing) but keep both DMs — gives a useful 0-100 range.
     // Returns 25.0 (neutral) if insufficient data.
     double adx_(int n) const {
-        // Need n+1 bars to compute n DX values (each DX needs current + prior bar)
         if ((int)closes_.size() < n + 2) return 25.0;
         const int sz = (int)closes_.size();
 
-        // Compute average DX over last n bars
-        double sum_dx = 0.0;
-        int valid = 0;
+        // Accumulate +DM, -DM, TR over the window; compute DX from the sums.
+        double sum_plus_dm = 0.0, sum_minus_dm = 0.0, sum_tr = 0.0;
         for (int i = sz - n; i < sz; ++i) {
-            double hi     = highs_[i];
-            double lo     = lows_[i];
+            double hi      = highs_[i];
+            double lo      = lows_[i];
             double prev_hi = highs_[i - 1];
             double prev_lo = lows_[i - 1];
             double prev_c  = closes_[i - 1];
 
-            double plus_dm  = hi - prev_hi;
-            double minus_dm = prev_lo - lo;
+            double up_move   = hi - prev_hi;
+            double down_move = prev_lo - lo;
 
-            if (plus_dm < 0.0) plus_dm = 0.0;
-            if (minus_dm < 0.0) minus_dm = 0.0;
-
-            // Only the larger DM survives
-            if (plus_dm > minus_dm) { minus_dm = 0.0; }
-            else if (minus_dm > plus_dm) { plus_dm = 0.0; }
-            else { plus_dm = 0.0; minus_dm = 0.0; }
+            double plus_dm  = (up_move > down_move && up_move > 0.0)   ? up_move   : 0.0;
+            double minus_dm = (down_move > up_move && down_move > 0.0) ? down_move : 0.0;
 
             double tr = std::max({hi - lo,
                                   std::fabs(hi - prev_c),
                                   std::fabs(lo - prev_c)});
-            if (tr <= 0.0) continue;
 
-            double plus_di  = plus_dm / tr;
-            double minus_di = minus_dm / tr;
-            double di_sum   = plus_di + minus_di;
-            double dx = (di_sum > 0.0) ? (std::fabs(plus_di - minus_di) / di_sum * 100.0) : 0.0;
-            sum_dx += dx;
-            valid++;
+            sum_plus_dm  += plus_dm;
+            sum_minus_dm += minus_dm;
+            sum_tr       += tr;
         }
-        if (valid == 0) return 25.0;
-        return sum_dx / (double)valid;
+        if (sum_tr <= 0.0) return 25.0;
+
+        double plus_di  = (sum_plus_dm  / sum_tr) * 100.0;
+        double minus_di = (sum_minus_dm / sum_tr) * 100.0;
+        double di_sum   = plus_di + minus_di;
+        if (di_sum <= 0.0) return 0.0;
+        return std::fabs(plus_di - minus_di) / di_sum * 100.0;
     }
 
     // ── Williams %R (Session 29b) ──────────────────────────────────────────

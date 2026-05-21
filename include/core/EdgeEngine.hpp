@@ -174,9 +174,30 @@ public:
         double       hard_floor_bp     = -100.0;  // absolute per-position loss cap
         double       ratchet_start_bp  = 15.0;    // earliest partial protection (Stage 2 begins)
         double       be_arm_bp         = 50.0;    // BE lock threshold (Stage 3 begins)
-        double       ratchet_lock_pct  = 0.75;    // fraction of MFE-above-arm to lock (was 0.5)
+        double       ratchet_lock_pct  = 0.75;    // base lock_pct (mfe 50-100 band)
         double       early_kill_bp     = -50.0;   // exit if unrealised < this AND mfe < early_kill_mfe
         double       early_kill_mfe    = 10.0;    // MFE threshold below which early-kill arms
+
+        // ── BIG WINNER PROTECTION (Session 32c) ─────────────────────────
+        // Two extra layers stacked on top of staged ratchet, protecting
+        // trades that reach big MFE from giving back too much.
+        //
+        // A. PROGRESSIVE LOCK_PCT — lock fraction grows with MFE.
+        //    mfe band   lock_pct
+        //    50-100     ratchet_lock_pct (base, default 0.75)
+        //    100-200    prog_lock_pct_2 (default 0.85)
+        //    200-300    prog_lock_pct_3 (default 0.90)
+        //    300+       prog_lock_pct_4 (default 0.95)
+        double       prog_lock_pct_2 = 0.85;  // mfe 100-200 lock fraction
+        double       prog_lock_pct_3 = 0.90;  // mfe 200-300 lock fraction
+        double       prog_lock_pct_4 = 0.95;  // mfe 300+    lock fraction
+        //
+        // B. GIVEBACK CAP — once MFE crosses giveback_arm_bp, force exit
+        //    when current unrealised drops by giveback_pct * peak_mfe.
+        //    Catches sharp reversals that ratchet doesn't keep up with.
+        //    Set giveback_arm_bp = 0 to disable.
+        double       giveback_arm_bp = 100.0;  // arm at peak MFE >= 100bp
+        double       giveback_pct    = 0.30;   // exit if pullback >= 30% of peak
 
         // ── Smart Pyramid (Session 31) ──────────────────────────────────
         // Adds to position ONLY after trail is armed (BE locked) and profit
@@ -1750,11 +1771,14 @@ private:
         // NEVER become a loser after the trail arms.
         double be_px = entry_px_ * (1.0 + cfg_.round_trip_bp / 1e4);
 
-        // ── STAGED BP RATCHET (Session 32b) ─────────────────────────────
-        // Stage 2 (mfe in [ratchet_start_bp, be_arm_bp]): linear ramp from
-        //   -50bp lock to 0bp (BE) lock. Rescues "almost made it" trades.
-        // Stage 3 (mfe >= be_arm_bp): lock = round_trip_bp + (mfe-be_arm_bp)
-        //   * ratchet_lock_pct. Captures more profit on winners.
+        // ── STAGED BP RATCHET + PROGRESSIVE LOCK (Session 32b/c) ────────
+        // Stage 2 (mfe in [ratchet_start_bp, be_arm_bp]): linear ramp -50bp -> 0bp.
+        // Stage 3 (mfe >= be_arm_bp): lock = round_trip + (mfe-arm) * lock_pct
+        //   where lock_pct grows progressively with MFE:
+        //     50-100: ratchet_lock_pct (0.75)
+        //     100-200: prog_lock_pct_2 (0.85)
+        //     200-300: prog_lock_pct_3 (0.90)
+        //     300+:    prog_lock_pct_4 (0.95)
         if (cfg_.ratchet_start_bp > 0.0 && mfe_bp_ >= cfg_.ratchet_start_bp) {
             double locked_bp;
             if (mfe_bp_ < cfg_.be_arm_bp) {
@@ -1766,8 +1790,13 @@ private:
                     locked_bp = 0.0;
                 }
             } else {
-                // Stage 3: BE + ratchet_lock_pct of every bp past arm
-                locked_bp = cfg_.round_trip_bp + (mfe_bp_ - cfg_.be_arm_bp) * cfg_.ratchet_lock_pct;
+                // Stage 3: progressive lock_pct grows with MFE
+                double lock_pct;
+                if      (mfe_bp_ < 100.0) lock_pct = cfg_.ratchet_lock_pct;
+                else if (mfe_bp_ < 200.0) lock_pct = cfg_.prog_lock_pct_2;
+                else if (mfe_bp_ < 300.0) lock_pct = cfg_.prog_lock_pct_3;
+                else                       lock_pct = cfg_.prog_lock_pct_4;
+                locked_bp = cfg_.round_trip_bp + (mfe_bp_ - cfg_.be_arm_bp) * lock_pct;
             }
             double ratchet_sl = entry_px_ * (1.0 + locked_bp / 1e4);
             if (ratchet_sl > sl_px_) {
@@ -1785,7 +1814,6 @@ private:
         // ── EARLY-KILL: dead-on-arrival dump exit (Session 32b) ─────────
         // If MFE never crossed early_kill_mfe AND price is currently deeper
         // than early_kill_bp, exit before the full hard floor kicks in.
-        // Catches trades that enter at local top and dump immediately.
         if (cfg_.early_kill_bp < 0.0 && mfe_bp_ < cfg_.early_kill_mfe) {
             double unreal_bp = (price / entry_px_ - 1.0) * 1e4;
             if (unreal_bp <= cfg_.early_kill_bp) {
@@ -1793,6 +1821,24 @@ private:
                     cfg_.tag.c_str(), mfe_bp_, cfg_.early_kill_mfe, unreal_bp, price);
                 std::fflush(stdout);
                 exit_position_(price, ts_ms, "EARLY_KILL");
+                return;
+            }
+        }
+
+        // ── GIVEBACK CAP (Session 32c) ──────────────────────────────────
+        // Once MFE crosses giveback_arm_bp, force exit when current
+        // unrealised drops by giveback_pct of the peak. Catches sharp
+        // reversals that the ratchet's incremental updates miss.
+        // Example: peak +200bp, giveback_pct=0.30 -> exit if cur <= +140bp.
+        if (cfg_.giveback_arm_bp > 0.0 && mfe_bp_ >= cfg_.giveback_arm_bp) {
+            double cur_bp = (price / entry_px_ - 1.0) * 1e4;
+            double giveback_bp = mfe_bp_ - cur_bp;
+            if (giveback_bp >= mfe_bp_ * cfg_.giveback_pct) {
+                std::printf("[%s] GIVEBACK_CAP  peak_mfe=+%.1fbp  cur=%+.1fbp  giveback=%.1fbp(>=%.0f%%)  exit @ %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, cur_bp, giveback_bp,
+                    cfg_.giveback_pct * 100.0, price);
+                std::fflush(stdout);
+                exit_position_(price, ts_ms, "GIVEBACK");
                 return;
             }
         }

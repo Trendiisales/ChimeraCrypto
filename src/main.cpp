@@ -5093,8 +5093,27 @@ int main() {
                                  (total_unrealized_bp > UNREALIZED_HALT_BP) &&
                                  (!streak_halted);
 
+                // ── PER-SYMBOL CONCURRENT CAP (S32e) ─────────────────────
+                // Caps simultaneous open positions on a single symbol to
+                // prevent correlated whipsaw clusters (e.g. 14 NEAR engines
+                // all firing same bar -> all stopping out same reversal).
+                constexpr int MAX_PER_SYMBOL = 3;
+                int per_sym_open[chimera::MAX_SYMBOLS] = {0};
                 for (auto& s : g_slots) {
-                    if (s.engine) s.engine->set_portfolio_gate(gate_open);
+                    if (!s.engine || !s.engine->in_position()) continue;
+                    if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS) {
+                        per_sym_open[s.symbol_id]++;
+                    }
+                }
+
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    bool sym_ok = true;
+                    if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS &&
+                        per_sym_open[s.symbol_id] >= MAX_PER_SYMBOL) {
+                        sym_ok = false;  // already at cap for this symbol
+                    }
+                    s.engine->set_portfolio_gate(gate_open && sym_ok);
                 }
 
                 // Log when gate closes

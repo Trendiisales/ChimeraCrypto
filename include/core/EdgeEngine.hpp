@@ -772,6 +772,71 @@ public:
     void enable_corr_filter(bool b) { cfg_.corr_filter = b; }
     void enable_session_filter(bool b) { cfg_.session_filter = b; }
 
+    // ── S34: uniform safety preset ──────────────────────────────────────
+    // Force-applies tight protection across all active engines so each one
+    // has identical: hard floor, BE lock, tight trail, giveback cap,
+    // early-kill. Used by main.cpp at startup to override bespoke per-engine
+    // configs that may have been wider than wanted.
+    //
+    // Spot-only constraint: this codebase only buys (long). No short path
+    // exists in maybe_enter_/exit_position_/SpotExecutor.
+    // ── S34: PROTECTION-ONLY preset (elite engines, PF >= 2.0) ──────────
+    // Keep this engine's bespoke trail_arm/trail_dist/trail_tighten config
+    // (those drove the validated PF). Override ONLY the per-trade loss
+    // caps + BE lock + giveback so a winner can't turn into a loser and
+    // a deadweight trade can't bleed.
+    void apply_protection_only_preset() {
+        // Per-trade loss caps
+        cfg_.hard_floor_bp     = -50.0;
+        cfg_.early_kill_bp     = -25.0;
+        cfg_.early_kill_mfe    = 15.0;
+
+        // BE ratchet tied to engine's round_trip
+        double rt = cfg_.round_trip_bp;
+        cfg_.ratchet_start_bp  = rt;
+        cfg_.be_arm_bp         = rt + 10.0;
+        cfg_.ratchet_lock_pct  = 0.75;
+        cfg_.prog_lock_pct_2   = 0.85;
+        cfg_.prog_lock_pct_3   = 0.90;
+        cfg_.prog_lock_pct_4   = 0.95;
+
+        // Giveback cap — exit on reversal
+        cfg_.giveback_arm_bp   = rt + 20.0;
+        cfg_.giveback_pct      = 0.20;
+
+        // INTENTIONALLY NOT touched: trail_arm_atr, trail_dist_atr,
+        // trail_tighten_atr, trail_tighten_dist_atr — preserve bespoke.
+    }
+
+    void apply_safety_preset() {
+        // Per-trade loss caps — tight. If a trade goes negative, cull it fast.
+        // Hard floor only matters in 0 -> +ratchet_start MFE phase.
+        cfg_.hard_floor_bp     = -50.0;    // max single-trade loss
+        cfg_.early_kill_bp     = -25.0;    // DOA cut
+        cfg_.early_kill_mfe    = 15.0;     // arm early-kill while MFE < +15bp
+
+        // ── Staged BE ratchet — tied to each engine's round_trip cost ───
+        // Real BE = round_trip_bp (typically 10-22bp). Start protecting at
+        // BE MFE, lock at BE+10 MFE. Once locked, never lose.
+        double rt = cfg_.round_trip_bp;
+        cfg_.ratchet_start_bp  = rt;          // start ramp at BE MFE
+        cfg_.be_arm_bp         = rt + 10.0;   // full BE lock at BE+10 MFE
+        cfg_.ratchet_lock_pct  = 0.75;        // base lock %
+        cfg_.prog_lock_pct_2   = 0.85;        // 100-200bp band
+        cfg_.prog_lock_pct_3   = 0.90;        // 200-300bp band
+        cfg_.prog_lock_pct_4   = 0.95;        // 300+bp band
+
+        // ── Giveback cap — exit on price reversal (tight) ───────────────
+        cfg_.giveback_arm_bp   = rt + 20.0;   // arm right after BE lock
+        cfg_.giveback_pct      = 0.20;        // exit on 20% pullback from peak
+
+        // ── Trail — tight from arm, tighten sooner ──────────────────────
+        cfg_.trail_arm_atr          = 0.7;    // arm trail sooner (was 1.0)
+        cfg_.trail_dist_atr         = 0.4;    // tighter trail (was 0.5)
+        cfg_.trail_tighten_atr      = 1.5;    // tighten earlier (was 3.0)
+        cfg_.trail_tighten_dist_atr = 0.25;   // very tight trail when in profit
+    }
+
     // Correlation regime: set by main.cpp when rolling corr(symbol, BTC) > threshold
     void set_corr_high(bool b) { corr_high_ = b; }
     bool corr_high() const { return corr_high_; }

@@ -135,6 +135,7 @@
 #include <string>
 #include <mutex>
 #include <vector>
+#include <map>
 #include <fstream>
 #include <sys/file.h>
 #include <fcntl.h>
@@ -202,6 +203,12 @@ struct EngineSlot {
     int     oos_nbr   = 0;
     int     oos_trades = 0;
     int     session   = 0;           // session that discovered this engine
+    // ── S34: live PF gate ───────────────────────────────────────────────
+    // Refreshed PF from data/batch_validate_results.csv at startup. When
+    // bt_pf < MIN_PF, engine is permanently blocked via portfolio_gate.
+    double  bt_pf     = 0.0;         // PF from batch validation CSV
+    int     bt_trades = 0;           // sample size from batch CSV
+    bool    pf_blocked = false;      // true = blocked by PF filter
 };
 
 static std::vector<EngineSlot>  g_slots;
@@ -240,6 +247,31 @@ static std::string gui_root;
 static chimera::MultiSymbolFundingFilter g_funding_filter;
 static int64_t g_last_funding_fetch_ms = 0;
 static constexpr int64_t FUNDING_FETCH_INTERVAL_MS = 8 * 3600 * 1000LL; // every 8h
+
+// ── S33: Portfolio gate state exposed to /api/state2 + GUI banner ────────
+// Updated each gate evaluation in the portfolio-gate block. Read by
+// build_state_json() to surface lock reasons to the dashboard.
+static std::atomic<bool>    g_gate_open{true};
+static std::atomic<bool>    g_ratchet_locked{false};
+static std::atomic<bool>    g_streak_halted{false};
+static std::atomic<uint64_t> g_session_cum_bp_bits{0};
+static std::atomic<uint64_t> g_session_peak_bp_bits{0};
+static std::atomic<uint64_t> g_recent_pnl_bp_bits{0};       // rolling 4h DD
+static std::atomic<uint64_t> g_unrealized_bp_bits{0};
+static std::atomic<int>     g_open_positions_count{0};
+static std::atomic<int64_t> g_last_trade_exit_ms{0};
+
+// ── S34: Multi-tier protection state (PERSISTED across restarts) ─────────
+// PER anchored to all-time trade_log cumulative, not process start.
+// Daily loss kill, regime gate (TREND/CHOP/CRASH), DD-throttled size,
+// per-strategy concurrent cap.
+static std::atomic<uint64_t> g_all_time_peak_bp_bits{0};    // persisted
+static std::atomic<uint64_t> g_all_time_cum_bp_bits{0};     // recomputed each loop
+static std::atomic<int64_t>  g_daily_kill_until_ms{0};      // persisted; halt entries until this ts
+static std::atomic<uint64_t> g_daily_pnl_bp_bits{0};        // rolling 24h pnl
+static std::atomic<int>      g_regime{2};                    // 0=CRASH, 1=CHOP, 2=TREND
+static std::atomic<uint64_t> g_size_throttle_bits{0};        // current sizing multiplier (0..1)
+static std::atomic<int>      g_tsmom_open_count{0};          // concurrent open TSMOM positions
 
 // ── Session 30: Liquidation cascade detector ────────────────────────────────
 static chimera::LiquidationCascadeDetector g_liq_detector;
@@ -288,6 +320,121 @@ static void persist_trade(const chimera::EdgeEngine::TradeRecord& t) {
     fclose(f);
     std::printf("[JOURNAL] Trade #%d persisted: %s %s %+.1fbp\n",
         t.trade_num, t.tag.c_str(), t.reason.c_str(), t.net_bp);
+    std::fflush(stdout);
+}
+
+// ── S34: Multi-tier protection state persistence ───────────────────────────
+// Persists g_all_time_peak_bp, g_all_time_cum_bp, g_daily_kill_until_ms so
+// protections survive process restarts. Without this PER (Peak Equity Ratchet)
+// resets every deploy and lets the bot rebuild and bleed a peak repeatedly.
+static constexpr const char* PROTECTION_FILE = "data/protection_state.json";
+
+static void save_protection_state() {
+    FILE* f = fopen(PROTECTION_FILE, "w");
+    if (!f) {
+        std::fprintf(stderr, "[PROTECTION] Failed to open %s for write\n", PROTECTION_FILE);
+        return;
+    }
+    std::fprintf(f, "{\"all_time_peak_bp\":%.4f,\"all_time_cum_bp\":%.4f,\"daily_kill_until_ms\":%lld}\n",
+        load_dbl_atomic(g_all_time_peak_bp_bits),
+        load_dbl_atomic(g_all_time_cum_bp_bits),
+        (long long)g_daily_kill_until_ms.load(std::memory_order_relaxed));
+    fclose(f);
+}
+
+static void load_protection_state() {
+    // Default sizing throttle = 1.0x
+    store_dbl_atomic(g_size_throttle_bits, 1.0);
+
+    FILE* f = fopen(PROTECTION_FILE, "r");
+    if (!f) {
+        std::printf("[PROTECTION] No state file — fresh start\n");
+        std::fflush(stdout);
+        return;
+    }
+    char buf[1024] = {};
+    size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    if (got == 0) return;
+
+    std::string s(buf, got);
+    auto extract_num = [&](const char* key) -> double {
+        auto p = s.find(std::string("\"") + key + "\":");
+        if (p == std::string::npos) return 0.0;
+        p += strlen(key) + 3;
+        try { return std::stod(s.substr(p)); } catch (...) { return 0.0; }
+    };
+    double peak = extract_num("all_time_peak_bp");
+    double cum  = extract_num("all_time_cum_bp");
+    int64_t kill_until = (int64_t)extract_num("daily_kill_until_ms");
+
+    store_dbl_atomic(g_all_time_peak_bp_bits, peak);
+    store_dbl_atomic(g_all_time_cum_bp_bits,  cum);
+    g_daily_kill_until_ms.store(kill_until, std::memory_order_relaxed);
+
+    std::printf("[PROTECTION] Loaded: all_time_peak=%+.1fbp  all_time_cum=%+.1fbp  daily_kill_until_ms=%lld\n",
+        peak, cum, (long long)kill_until);
+    std::fflush(stdout);
+}
+
+// ── S34: PF filter — load batch validation CSV at startup ──────────────────
+// Reads data/batch_validate_results.csv, populates slot.bt_pf and slot.bt_trades
+// per tag, marks slot.pf_blocked = true when bt_pf < S34_MIN_PF.
+// Sim shows simple PF >= 1.3 filter on existing trades would have flipped
+// 153 trades from -40.8bp to +1864bp over the last 3 days.
+static constexpr double S34_MIN_PF = 1.3;
+static constexpr int    S34_MIN_PF_SAMPLE = 20;  // ignore PF if sample too small
+
+static void load_pf_data_into_slots() {
+    FILE* f = fopen("data/batch_validate_results.csv", "r");
+    if (!f) {
+        std::fprintf(stderr, "[PF_FILTER] No batch_validate_results.csv — PF filter disabled\n");
+        return;
+    }
+    char line[2048];
+    if (!fgets(line, sizeof(line), f)) { fclose(f); return; }  // skip header
+    // Build tag -> (pf, trades) map
+    std::map<std::string, std::pair<double,int>> pf_map;
+    while (fgets(line, sizeof(line), f)) {
+        std::string s(line);
+        // CSV: tag,symbol,kind,tf,trades,pf,...
+        auto next_field = [&](size_t& pos) -> std::string {
+            auto end = s.find(',', pos);
+            std::string r = s.substr(pos, end - pos);
+            pos = (end == std::string::npos) ? s.size() : end + 1;
+            return r;
+        };
+        size_t pos = 0;
+        std::string tag    = next_field(pos);
+        next_field(pos);  // symbol
+        next_field(pos);  // kind
+        next_field(pos);  // tf
+        std::string trades = next_field(pos);
+        std::string pf     = next_field(pos);
+        try {
+            double p = std::stod(pf);
+            int    n = std::stoi(trades);
+            pf_map[tag] = {p, n};
+        } catch (...) {}
+    }
+    fclose(f);
+
+    int blocked = 0, kept = 0, no_data = 0;
+    for (auto& s : g_slots) {
+        auto it = pf_map.find(s.tag);
+        if (it == pf_map.end()) { no_data++; continue; }
+        s.bt_pf     = it->second.first;
+        s.bt_trades = it->second.second;
+        if (s.bt_pf < S34_MIN_PF && s.bt_trades >= S34_MIN_PF_SAMPLE) {
+            s.pf_blocked = true;
+            blocked++;
+            std::printf("[PF_FILTER] BLOCK %-26s  PF=%.2f  n=%d\n", s.tag.c_str(), s.bt_pf, s.bt_trades);
+        } else {
+            kept++;
+        }
+    }
+    std::printf("[PF_FILTER] loaded %d entries from CSV. Kept=%d  Blocked=%d  NoData=%d  (MIN_PF=%.2f, min_sample=%d)\n",
+        (int)pf_map.size(), kept, blocked, no_data, S34_MIN_PF, S34_MIN_PF_SAMPLE);
     std::fflush(stdout);
 }
 
@@ -378,6 +525,17 @@ static void on_trade_callback(const chimera::EdgeEngine::TradeRecord& rec) {
         g_trade_log.push_back(rec);
     }
     persist_trade(rec);
+
+    // S34: refresh persisted all-time cumulative + peak so PER survives
+    // process restarts. Without this the peak resets to 0 on every deploy.
+    if (rec.reason != "SHUTDOWN") {
+        double cur_cum = load_dbl_atomic(g_all_time_cum_bp_bits) + rec.net_bp;
+        double cur_peak = load_dbl_atomic(g_all_time_peak_bp_bits);
+        if (cur_cum > cur_peak) cur_peak = cur_cum;
+        store_dbl_atomic(g_all_time_cum_bp_bits, cur_cum);
+        store_dbl_atomic(g_all_time_peak_bp_bits, cur_peak);
+        save_protection_state();
+    }
 }
 
 // ── Bar journal — persist completed bars for warm-start + audit trail ────────
@@ -487,6 +645,50 @@ static std::string build_state_json() {
     js << "\"startup_ts\":" << g_startup_ts_ms << ",";
     js << "\"engine_count\":" << g_slots.size() << ",";
 
+    // ── S33: portfolio gate state (drives GUI banner) ────────────────────
+    js << "\"portfolio_gate\":{";
+    js << "\"gate_open\":" << (g_gate_open.load() ? "true" : "false") << ",";
+    js << "\"ratchet_locked\":" << (g_ratchet_locked.load() ? "true" : "false") << ",";
+    js << "\"streak_halted\":" << (g_streak_halted.load() ? "true" : "false") << ",";
+    js << std::fixed << std::setprecision(1);
+    js << "\"session_cum_bp\":" << load_dbl_atomic(g_session_cum_bp_bits) << ",";
+    js << "\"session_peak_bp\":" << load_dbl_atomic(g_session_peak_bp_bits) << ",";
+    js << "\"recent_pnl_bp\":" << load_dbl_atomic(g_recent_pnl_bp_bits) << ",";
+    js << "\"unrealized_bp\":" << load_dbl_atomic(g_unrealized_bp_bits) << ",";
+    js << "\"open_positions\":" << g_open_positions_count.load() << ",";
+    js << "\"last_trade_exit_ms\":" << g_last_trade_exit_ms.load() << ",";
+    // S34: multi-tier protection state
+    js << "\"all_time_peak_bp\":" << load_dbl_atomic(g_all_time_peak_bp_bits) << ",";
+    js << "\"all_time_cum_bp\":" << load_dbl_atomic(g_all_time_cum_bp_bits) << ",";
+    js << "\"daily_pnl_bp\":" << load_dbl_atomic(g_daily_pnl_bp_bits) << ",";
+    js << "\"daily_kill_until_ms\":" << g_daily_kill_until_ms.load() << ",";
+    js << std::setprecision(2);
+    js << "\"size_throttle\":" << load_dbl_atomic(g_size_throttle_bits) << ",";
+    js << std::setprecision(1);
+    js << "\"tsmom_open\":" << g_tsmom_open_count.load() << ",";
+    // S34: PF filter counts + tier breakdown
+    {
+        int blocked = 0, active = 0, elite = 0;
+        for (auto& s : g_slots) {
+            if (s.pf_blocked) blocked++;
+            else if (s.bt_pf >= 2.0 && s.bt_trades >= 30) { active++; elite++; }
+            else if (s.bt_pf >= S34_MIN_PF) active++;
+        }
+        js << "\"pf_min\":" << S34_MIN_PF << ",";
+        js << "\"pf_blocked_count\":" << blocked << ",";
+        js << "\"pf_active_count\":" << active << ",";
+        js << "\"pf_elite_count\":" << elite << ",";
+    }
+    {
+        int r = g_regime.load();
+        const char* rs = (r == 0) ? "CRASH"
+                       : (r == 1) ? "BEAR"
+                       : (r == 2) ? "BULL_CHOP"
+                       : "BULL_TREND";
+        js << "\"regime\":\"" << rs << "\"";
+    }
+    js << "},";
+
     // ── spot_prices ─────────────────────────────────────────────────────────
     js << "\"spot_prices\":{";
     js << std::fixed << std::setprecision(8);
@@ -513,6 +715,10 @@ static std::string build_state_json() {
                 m << ",\"oos_nbr\":" << g_slots[i].oos_nbr;
                 m << ",\"oos_trades\":" << g_slots[i].oos_trades;
                 m << ",\"session\":" << g_slots[i].session;
+                // S34: live PF filter state
+                m << ",\"bt_pf\":" << g_slots[i].bt_pf;
+                m << ",\"bt_trades\":" << g_slots[i].bt_trades;
+                m << ",\"pf_blocked\":" << (g_slots[i].pf_blocked ? "true" : "false");
                 meta = m.str();
             }
             // Insert before final '}'
@@ -658,6 +864,31 @@ static void http_server_thread(int port) {
                 double px = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
                 s.engine->kill_all(px, now_ms);
             }
+            body = "{\"ok\":true}";
+        } else if (strstr(req, "POST /api/ratchet_reset")) {
+            // S34: manual peak reset. Sets all_time_peak = all_time_cum,
+            // unlocks ratchet, clears daily_kill. Use after absorbing a DD
+            // to allow the bot to start fresh. PER will re-arm on new gains.
+            double cum = load_dbl_atomic(g_all_time_cum_bp_bits);
+            double old_peak = load_dbl_atomic(g_all_time_peak_bp_bits);
+            store_dbl_atomic(g_all_time_peak_bp_bits, cum);
+            g_daily_kill_until_ms.store(0, std::memory_order_relaxed);
+            save_protection_state();
+            std::printf("[PROTECTION] MANUAL RESET via /api/ratchet_reset: peak %.1fbp -> %.1fbp; daily_kill cleared\n",
+                old_peak, cum);
+            std::fflush(stdout);
+            std::ostringstream rj;
+            rj << "{\"ok\":true,\"old_peak_bp\":" << old_peak
+               << ",\"new_peak_bp\":" << cum
+               << ",\"all_time_cum_bp\":" << cum << "}";
+            body = rj.str();
+        } else if (strstr(req, "POST /api/daily_kill_clear")) {
+            // S34: clear just the 24h daily-loss halt (keep PER active)
+            int64_t old = g_daily_kill_until_ms.load(std::memory_order_relaxed);
+            g_daily_kill_until_ms.store(0, std::memory_order_relaxed);
+            save_protection_state();
+            std::printf("[PROTECTION] daily_kill cleared via API (was until %lld)\n", (long long)old);
+            std::fflush(stdout);
             body = "{\"ok\":true}";
         } else if (strstr(req, "GET /api/state2") || strstr(req, "GET /api/state")) {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
@@ -4366,6 +4597,41 @@ int main() {
 
     // W1 mean-reversion engines (Session 30, Edge 6)
 
+    // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
+    load_pf_data_into_slots();
+
+    // ── S34 SAFETY PRESET — TIERED ────────────────────────────────────────
+    // Three tiers:
+    //   ELITE (bt_pf >= 2.0 AND bt_trades >= 30):
+    //     apply_protection_only_preset — keep bespoke trail config, override
+    //     only loss caps + BE lock + giveback. Run "as specified" with
+    //     profit-protection overlay.
+    //   ACCEPTABLE (1.3 <= bt_pf < 2.0):
+    //     apply_safety_preset — full tight preset incl. trail overrides.
+    //   BLOCKED (bt_pf < 1.3 OR no data):
+    //     pf_blocked already set by load_pf_data_into_slots(); still apply
+    //     full safety preset as belt-and-suspenders (in case unblocked later).
+    {
+        int elite = 0, tight = 0, blocked_tight = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            if (slot.pf_blocked) {
+                slot.engine->apply_safety_preset();
+                blocked_tight++;
+            } else if (slot.bt_pf >= 2.0 && slot.bt_trades >= 30) {
+                slot.engine->apply_protection_only_preset();
+                elite++;
+            } else {
+                slot.engine->apply_safety_preset();
+                tight++;
+            }
+        }
+        std::printf("[SAFETY] tiered preset applied: elite=%d (PF>=2.0, bespoke trail kept), tight=%d (PF>=1.3, tight trail), blocked_tight=%d\n",
+            elite, tight, blocked_tight);
+        std::printf("[SAFETY] common protection on ALL: hard_floor=-50bp, early_kill=-25bp@<+15mfe, BE_lock@RT+10mfe, giveback@RT+20bp/20%% pullback\n");
+        std::fflush(stdout);
+    }
+
     // ── Wire up bar callbacks for persistence + audit trail ────────────────
     for (auto& slot : g_slots) {
         if (slot.engine) slot.engine->set_on_bar(on_bar_callback);
@@ -4729,6 +4995,34 @@ int main() {
     // ── Trade journal: load history ──────────────────────────────────────
     load_trade_history();
 
+    // ── S34: Multi-tier protection state — load persisted PER + daily kill ─
+    load_protection_state();
+
+    // S34: If protection_state.json is missing or older than trade_log,
+    // reconstruct all-time cum + peak by replaying trade_log so PER anchors
+    // to the true all-time high even on first deploy.
+    {
+        std::lock_guard<std::mutex> tlk(g_trades_mtx);
+        double cum = 0.0;
+        double peak = load_dbl_atomic(g_all_time_peak_bp_bits);
+        for (auto& tr : g_trade_log) {
+            if (tr.reason == "SHUTDOWN") continue;
+            cum += tr.net_bp;
+            if (cum > peak) peak = cum;
+        }
+        // Use replayed values if they are larger than what was persisted
+        // (catches the case where protection_state.json was deleted/wiped).
+        double persisted_cum = load_dbl_atomic(g_all_time_cum_bp_bits);
+        if (std::fabs(cum - persisted_cum) > 1.0) {
+            std::printf("[PROTECTION] Rebuilt from trade_log: cum=%+.1fbp peak=%+.1fbp (persisted cum=%+.1fbp)\n",
+                cum, peak, persisted_cum);
+            std::fflush(stdout);
+            store_dbl_atomic(g_all_time_cum_bp_bits, cum);
+            store_dbl_atomic(g_all_time_peak_bp_bits, peak);
+            save_protection_state();
+        }
+    }
+
     // GUI root
     {
         char exe[4096] = {};
@@ -4859,17 +5153,14 @@ int main() {
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
                 // First pass: extract D1 trend per symbol
                 bool d1_trend[chimera::MAX_SYMBOLS];
-                bool d1_found[chimera::MAX_SYMBOLS];
                 for (int i = 0; i < chimera::MAX_SYMBOLS; ++i) {
                     d1_trend[i] = true;   // default bullish if no D1 engine
-                    d1_found[i] = false;
                 }
                 for (auto& s : g_slots) {
                     if (!s.engine) continue;
                     // D1 TSMOM engines are our trend reference
                     if (s.tf_secs == 86400 && s.engine->is_trend_following()) {
                         d1_trend[s.symbol_id] = s.engine->trend_bullish();
-                        d1_found[s.symbol_id] = true;
                     }
                 }
                 // Second pass: propagate to all engines with mtf_gate enabled
@@ -4996,47 +5287,63 @@ int main() {
                 }
             }
 
-            // ── Portfolio gate: max concurrent positions + drawdown breaker ──
-            // Count open positions. If >= MAX_CONCURRENT, disable new entries.
-            // Also check rolling drawdown: if total net_bp across all engines
-            // over last 24h drops below DRAWDOWN_LIMIT_BP, halt all entries.
-            //
-            // Session 32 (risk-protect upgrade): widened from TOP-5 LOCKDOWN
-            // values to fit 127-engine roster. Added AGG_KILL_BP — hard
-            // kill_all trigger when summed unrealised loss exceeds threshold.
+            // ── S34: MULTI-TIER PORTFOLIO PROTECTION ───────────────────────
+            // Tier 0: persistent PER (all-time anchored) + daily loss kill
+            // Tier 1: BTC regime gate (TREND/CHOP/CRASH)
+            // Tier 2: progressive size throttle (DD-based)
+            // Tier 3: conviction filter (deep DD = only high-conviction entries)
+            // Tier 4: per-strategy concurrent cap (TSMOM mono-culture defence)
+            // PLUS preserved: agg_kill, streak halt, per-symbol cap, 4h DD
             {
-                constexpr int MAX_CONCURRENT_POSITIONS = 25;     // widened from 5 (TOP-5 LOCKDOWN). 127-engine roster needs more headroom.
-                constexpr double DRAWDOWN_HALT_BP = -500.0;      // 24h closed-trade rolling DD halt (loosened from -200)
-                constexpr double AGG_KILL_BP = -2000.0;          // SESSION 32: force kill_all when summed open unrealised < this
-                // S32d-B: losing-streak circuit
-                constexpr int    STREAK_LOOKBACK = 10;           // examine last N closed trades
-                constexpr double STREAK_HALT_BP  = -300.0;       // if sum of last N < this, halt new entries
-                constexpr int64_t STREAK_HALT_MS = 4LL * 3600LL * 1000LL;  // halt for 4 hours
+                constexpr int MAX_CONCURRENT_POSITIONS = 25;
+                constexpr int64_t DRAWDOWN_LOOKBACK_MS = 4LL * 3600LL * 1000LL;
+                constexpr double DRAWDOWN_HALT_BP = -1500.0;
+                constexpr double AGG_KILL_BP = -2000.0;
+                constexpr int    STREAK_LOOKBACK = 20;
+                constexpr double STREAK_HALT_BP  = -5000.0;
+                constexpr int64_t STREAK_HALT_MS = 1LL * 3600LL * 1000LL;
                 static int64_t streak_halt_until_ms = 0;
+
+                // ── S34 TIER 0: tightened PER + daily kill thresholds ────
+                constexpr double RATCHET_ARM_BP       = 150.0;   // was 500
+                constexpr double RATCHET_GIVEBACK_BP  = 100.0;   // was 300
+                constexpr double RATCHET_GIVEBACK_PCT = 0.15;    // was 0.25
+                constexpr double RATCHET_REARM_BP     = 50.0;    // was 200
+                constexpr double DAILY_LOSS_KILL_BP   = -400.0;
+                constexpr int64_t DAILY_HALT_MS       = 24LL * 3600LL * 1000LL;
+                constexpr int64_t DAILY_WINDOW_MS     = 24LL * 3600LL * 1000LL;
 
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
                 int open_positions = 0;
+                int tsmom_open = 0;
+                int per_sym_open[chimera::MAX_SYMBOLS] = {0};
                 for (auto& s : g_slots) {
-                    if (s.engine && s.engine->in_position()) open_positions++;
+                    if (!s.engine || !s.engine->in_position()) continue;
+                    open_positions++;
+                    if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS) {
+                        per_sym_open[s.symbol_id]++;
+                    }
+                    // Strategy family from tag like "BTC-TSMOM-D1"
+                    if (s.tag.find("-TSMOM-") != std::string::npos) tsmom_open++;
                 }
 
-                // Check 24h rolling drawdown from trade log
-                // IMPORTANT: Skip SHUTDOWN trades — these are bookkeeping from
-                // service restarts, not real trading losses.
+                // 4h rolling DD + 24h daily P&L
                 double recent_pnl = 0.0;
+                double daily_pnl  = 0.0;
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
-                    int64_t cutoff = now_ms - 86400000LL;  // 24h ago
+                    int64_t cutoff4h  = now_ms - DRAWDOWN_LOOKBACK_MS;
+                    int64_t cutoff24h = now_ms - DAILY_WINDOW_MS;
                     for (int i = (int)g_trade_log.size() - 1; i >= 0; --i) {
-                        if (g_trade_log[i].exit_ts_ms < cutoff) break;
-                        if (g_trade_log[i].reason == "SHUTDOWN") continue;
-                        recent_pnl += g_trade_log[i].net_bp;
+                        const auto& tr = g_trade_log[i];
+                        if (tr.exit_ts_ms < cutoff24h) break;
+                        if (tr.reason == "SHUTDOWN") continue;
+                        daily_pnl += tr.net_bp;
+                        if (tr.exit_ts_ms >= cutoff4h) recent_pnl += tr.net_bp;
                     }
                 }
 
-                // Session 32 — uses public unrealised_bp() accessor instead of
-                // parsing JSON. Loosened halt threshold to fit 127-engine roster.
-                constexpr double UNREALIZED_HALT_BP = -500.0;  // halt new entries if total open loss > 500bp
+                constexpr double UNREALIZED_HALT_BP = -500.0;
                 double total_unrealized_bp = 0.0;
                 for (auto& s : g_slots) {
                     if (!s.engine || !s.engine->in_position()) continue;
@@ -5046,11 +5353,9 @@ int main() {
                     }
                 }
 
-                // ── AGGREGATE KILL CIRCUIT (Session 32 — risk-protect) ─────
-                // If summed open unrealised loss exceeds AGG_KILL_BP, force
-                // kill_all on every in-position engine. Catastrophe brake.
+                // AGG_KILL — catastrophe brake on open unrealised loss
                 if (total_unrealized_bp < AGG_KILL_BP) {
-                    std::printf("[PORTFOLIO] AGG_KILL TRIPPED: total_unrealized=%+.1fbp < %.0fbp -> kill_all on all open positions\n",
+                    std::printf("[PORTFOLIO] AGG_KILL TRIPPED: total_unrealized=%+.1fbp < %.0fbp -> kill_all\n",
                         total_unrealized_bp, AGG_KILL_BP);
                     std::fflush(stdout);
                     int killed = 0;
@@ -5063,9 +5368,45 @@ int main() {
                     std::fflush(stdout);
                 }
 
-                // ── LOSING-STREAK CIRCUIT (S32d-B) ───────────────────────
-                // Sum last N closed trades. If < halt threshold, lock gate
-                // for STREAK_HALT_MS. Lets the system wait out chop periods.
+                // ── S34 TIER 0: DAILY LOSS KILL ──────────────────────────
+                // If trailing-24h realised P&L drops below DAILY_LOSS_KILL_BP,
+                // flatten ALL open positions and halt entries for 24h.
+                // Edge-triggered: only fires when daily_pnl FIRST drops below
+                // threshold. Once daily_pnl recovers above threshold, re-arms.
+                // This prevents re-firing while old losses linger in 24h window.
+                int64_t daily_kill_until = g_daily_kill_until_ms.load(std::memory_order_relaxed);
+                static bool daily_below_threshold = false;
+                // Seed from persisted state on first iteration: if a kill is
+                // still active OR was recent (within 48h), assume we're still
+                // in the same trigger window — don't re-fire.
+                static bool daily_seed_done = false;
+                if (!daily_seed_done) {
+                    daily_below_threshold = (daily_kill_until > now_ms) ||
+                                            (daily_pnl < DAILY_LOSS_KILL_BP);
+                    daily_seed_done = true;
+                }
+                bool now_below = (daily_pnl < DAILY_LOSS_KILL_BP);
+                bool fresh_trigger = (!daily_below_threshold && now_below);
+                daily_below_threshold = now_below;
+                if (fresh_trigger && now_ms >= daily_kill_until) {
+                    daily_kill_until = now_ms + DAILY_HALT_MS;
+                    g_daily_kill_until_ms.store(daily_kill_until, std::memory_order_relaxed);
+                    save_protection_state();
+                    std::printf("[PORTFOLIO] DAILY_KILL TRIPPED: 24h_pnl=%+.1fbp < %.0fbp -> flatten + halt 24h\n",
+                        daily_pnl, DAILY_LOSS_KILL_BP);
+                    std::fflush(stdout);
+                    int killed = 0;
+                    for (auto& s : g_slots) {
+                        if (!s.engine || !s.engine->in_position()) continue;
+                        double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
+                        if (spot > 0.0) { s.engine->kill_all(spot, now_ms); killed++; }
+                    }
+                    std::printf("[PORTFOLIO] DAILY_KILL flattened %d positions\n", killed);
+                    std::fflush(stdout);
+                }
+                bool daily_halted = (now_ms < daily_kill_until);
+
+                // Streak halt (kept, neutralised by default thresholds)
                 bool streak_halted = (now_ms < streak_halt_until_ms);
                 if (!streak_halted) {
                     double streak_sum = 0.0;
@@ -5081,51 +5422,225 @@ int main() {
                     if (streak_n >= STREAK_LOOKBACK && streak_sum < STREAK_HALT_BP) {
                         streak_halt_until_ms = now_ms + STREAK_HALT_MS;
                         streak_halted = true;
-                        std::printf("[PORTFOLIO] STREAK_HALT TRIPPED: last %d trades sum=%+.1fbp < %.0f -> halt for %lldh\n",
-                            streak_n, streak_sum, STREAK_HALT_BP,
-                            (long long)(STREAK_HALT_MS / 3600000LL));
+                        std::printf("[PORTFOLIO] STREAK_HALT TRIPPED: last %d trades sum=%+.1fbp\n",
+                            streak_n, streak_sum);
                         std::fflush(stdout);
                     }
                 }
 
+                // ── S34 TIER 0: PERSISTENT PER (anchored to all-time cum) ─
+                // all_time_cum is refreshed in on_trade_callback. Recompute
+                // here from trade_log as a safety net (handles bookkeeping
+                // updates outside the callback). all_time_peak ratchets up.
+                double all_time_cum = 0.0;
+                {
+                    std::lock_guard<std::mutex> tlk(g_trades_mtx);
+                    for (auto& tr : g_trade_log) {
+                        if (tr.reason == "SHUTDOWN") continue;
+                        all_time_cum += tr.net_bp;
+                    }
+                }
+                double all_time_peak = load_dbl_atomic(g_all_time_peak_bp_bits);
+                if (all_time_cum > all_time_peak) all_time_peak = all_time_cum;
+
+                // S34 anti-deadlock: if DD from peak exceeds CLAMP, the peak
+                // is no longer meaningful — loss already absorbed, peak is
+                // historical noise. Reset peak to current cum so ratchet
+                // rearms only on NEW gains from here. Prevents permanent
+                // lockdown after a catastrophic past bleed.
+                constexpr double MAX_TOLERATED_DD_BP = 800.0;
+                if ((all_time_peak - all_time_cum) > MAX_TOLERATED_DD_BP) {
+                    std::printf("[PROTECTION] PEAK_CLAMP: peak %.1fbp - cum %.1fbp = %.1fbp DD > %.0fbp -> reset peak to cum\n",
+                        all_time_peak, all_time_cum,
+                        all_time_peak - all_time_cum, MAX_TOLERATED_DD_BP);
+                    std::fflush(stdout);
+                    all_time_peak = all_time_cum;
+                    save_protection_state();
+                }
+
+                store_dbl_atomic(g_all_time_cum_bp_bits,  all_time_cum);
+                store_dbl_atomic(g_all_time_peak_bp_bits, all_time_peak);
+
+                static bool ratchet_locked = false;
+                static int64_t lock_start_ms = 0;
+
+                // ── S34 Variant C: PEAK DECAY WHILE LOCKED ───────────────
+                // Sim showed this captures +283bp more than fixed-rearm
+                // while keeping giveback to 40bp. Peak slowly decays toward
+                // cum at PEAK_DECAY_PER_DAY. After ~1 day locked, peak has
+                // dropped 10% so giveback shrinks below REARM naturally.
+                // Self-healing — no manual reset needed for routine chop.
+                constexpr double PEAK_DECAY_PER_DAY = 0.10;
+                if (ratchet_locked && lock_start_ms > 0 && all_time_peak > all_time_cum) {
+                    double days_locked = (double)(now_ms - lock_start_ms) / (24.0 * 3600.0 * 1000.0);
+                    if (days_locked > 0.0) {
+                        double decay_bp = all_time_peak * PEAK_DECAY_PER_DAY * days_locked;
+                        double new_peak = std::max(all_time_cum, all_time_peak - decay_bp);
+                        if (new_peak < all_time_peak) {
+                            all_time_peak = new_peak;
+                            store_dbl_atomic(g_all_time_peak_bp_bits, all_time_peak);
+                            save_protection_state();
+                        }
+                        lock_start_ms = now_ms;  // anchor for next iter incremental decay
+                    }
+                }
+
+                if (all_time_peak >= RATCHET_ARM_BP) {
+                    double giveback = all_time_peak - all_time_cum;
+                    bool abs_trip = giveback > RATCHET_GIVEBACK_BP;
+                    bool pct_trip = (all_time_peak > 0.0) &&
+                                    ((giveback / all_time_peak) > RATCHET_GIVEBACK_PCT);
+                    if (abs_trip || pct_trip) {
+                        if (!ratchet_locked) {
+                            std::printf("[RATCHET] LOCKED: peak=%+.1fbp cum=%+.1fbp giveback=%.1fbp (%.1f%%) -> halt entries\n",
+                                all_time_peak, all_time_cum, giveback,
+                                100.0 * giveback / std::max(all_time_peak, 1.0));
+                            std::fflush(stdout);
+                            ratchet_locked = true;
+                            lock_start_ms = now_ms;
+                        }
+                    } else if (ratchet_locked && giveback < RATCHET_REARM_BP) {
+                        std::printf("[RATCHET] UNLOCKED: peak=%+.1fbp cum=%+.1fbp giveback=%.1fbp -> resume\n",
+                            all_time_peak, all_time_cum, giveback);
+                        std::fflush(stdout);
+                        ratchet_locked = false;
+                        lock_start_ms = 0;
+                    }
+                }
+
+                // ── S34 TIER 1: SPOT-AWARE BTC regime classifier ─────────
+                // Spot-only constraint: we can ONLY make money in bullish or
+                // bullish-sideways conditions. In bear, mean-revert = knife
+                // catching. So bear-trend = halt ALL entries (not just TSMOM).
+                //
+                // Reads BTC D1 TSMOM engine state: vol_ratio + trend_bullish.
+                //   0 CRASH      vol spike OR confirmed bear -> halt all
+                //   1 BEAR       BTC bearish trend -> halt all entries
+                //   2 BULL_CHOP  BTC bullish + low vol -> mean-revert ok, TSMOM off
+                //   3 BULL_TREND BTC bullish + normal vol -> all engines on
+                int regime = 3;  // default BULL_TREND
+                double btc_vol_ratio = 1.0;
+                bool   btc_d1_bullish = true;
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    if (s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400 &&
+                        s.tag.find("-TSMOM-") != std::string::npos) {
+                        btc_vol_ratio  = s.engine->vol_ratio_public();
+                        btc_d1_bullish = s.engine->trend_bullish();
+                        break;
+                    }
+                }
+                if (btc_vol_ratio > 2.0) {
+                    regime = 0;  // CRASH — vol spike
+                } else if (!btc_d1_bullish) {
+                    regime = 1;  // BEAR — halt all (spot-only)
+                } else if (btc_vol_ratio < 0.7 || btc_vol_ratio > 1.3) {
+                    regime = 2;  // BULL_CHOP — only mean-revert
+                } else {
+                    regime = 3;  // BULL_TREND — all engines
+                }
+                g_regime.store(regime, std::memory_order_relaxed);
+
+                // ── S34 TIER 2: progressive size throttle ────────────────
+                // Size scaled by all-time DD from peak.
+                //   DD<=100bp  -> 1.0x
+                //   100-300bp  -> 0.5x
+                //   300-500bp  -> 0.25x
+                //   >500bp     -> 0.0x (halt; ratchet should already be locked)
+                double dd_from_peak = all_time_peak - all_time_cum;
+                double size_throttle = 1.0;
+                if      (dd_from_peak >= 500.0) size_throttle = 0.0;
+                else if (dd_from_peak >= 300.0) size_throttle = 0.25;
+                else if (dd_from_peak >= 100.0) size_throttle = 0.5;
+                else                            size_throttle = 1.0;
+                // CRASH regime overrides to 0 (no entries)
+                // CRASH or BEAR -> no entries
+                if (regime == 0 || regime == 1) size_throttle = 0.0;
+                store_dbl_atomic(g_size_throttle_bits, size_throttle);
+
+                // ── S34 TIER 4: per-strategy concurrent cap ──────────────
+                // Mono-culture defence. TSMOM = 62% of engine roster.
+                // Cap concurrent open TSMOMs to prevent N engines firing
+                // same direction same bar then all stopping out same reversal.
+                constexpr int MAX_TSMOM_CONCURRENT = 6;
+                g_tsmom_open_count.store(tsmom_open, std::memory_order_relaxed);
+
                 bool gate_open = (open_positions < MAX_CONCURRENT_POSITIONS) &&
                                  (recent_pnl > DRAWDOWN_HALT_BP) &&
                                  (total_unrealized_bp > UNREALIZED_HALT_BP) &&
-                                 (!streak_halted);
+                                 (!streak_halted) &&
+                                 (!ratchet_locked) &&
+                                 (!daily_halted) &&
+                                 (regime != 0) && (regime != 1) &&  // CRASH/BEAR = no entries
+                                 (size_throttle > 0.0);
 
-                // ── PER-SYMBOL CONCURRENT CAP (S32e) ─────────────────────
-                // Caps simultaneous open positions on a single symbol to
-                // prevent correlated whipsaw clusters (e.g. 14 NEAR engines
-                // all firing same bar -> all stopping out same reversal).
-                constexpr int MAX_PER_SYMBOL = 3;
-                int per_sym_open[chimera::MAX_SYMBOLS] = {0};
-                for (auto& s : g_slots) {
-                    if (!s.engine || !s.engine->in_position()) continue;
-                    if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS) {
-                        per_sym_open[s.symbol_id]++;
+                // Publish gate state to globals for /api/state2 + GUI banner
+                g_gate_open.store(gate_open, std::memory_order_relaxed);
+                g_ratchet_locked.store(ratchet_locked, std::memory_order_relaxed);
+                g_streak_halted.store(streak_halted, std::memory_order_relaxed);
+                store_dbl_atomic(g_session_cum_bp_bits, all_time_cum);
+                store_dbl_atomic(g_session_peak_bp_bits, all_time_peak);
+                store_dbl_atomic(g_recent_pnl_bp_bits, recent_pnl);
+                store_dbl_atomic(g_unrealized_bp_bits, total_unrealized_bp);
+                store_dbl_atomic(g_daily_pnl_bp_bits, daily_pnl);
+                g_open_positions_count.store(open_positions, std::memory_order_relaxed);
+                {
+                    std::lock_guard<std::mutex> tlk(g_trades_mtx);
+                    for (int i = (int)g_trade_log.size() - 1; i >= 0; --i) {
+                        if (g_trade_log[i].reason == "SHUTDOWN") continue;
+                        g_last_trade_exit_ms.store(g_trade_log[i].exit_ts_ms, std::memory_order_relaxed);
+                        break;
                     }
                 }
 
+                // ── Per-engine apply: gate + sizing + strategy/symbol cap + conviction ─
+                // S34 TIER 3 conviction filter: when DD from peak > 200bp,
+                // only allow entries flagged is_high_conviction(). Existing
+                // accessor checks funding tailwind + cross-TF score.
+                bool conviction_only = (dd_from_peak >= 200.0);
+                constexpr int MAX_PER_SYMBOL = 3;
                 for (auto& s : g_slots) {
                     if (!s.engine) continue;
+
                     bool sym_ok = true;
                     if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS &&
                         per_sym_open[s.symbol_id] >= MAX_PER_SYMBOL) {
-                        sym_ok = false;  // already at cap for this symbol
+                        sym_ok = false;
                     }
-                    s.engine->set_portfolio_gate(gate_open && sym_ok);
+
+                    bool is_tsmom = (s.tag.find("-TSMOM-") != std::string::npos);
+                    bool strat_ok = true;
+                    if (is_tsmom && tsmom_open >= MAX_TSMOM_CONCURRENT) strat_ok = false;
+                    // CHOP regime: disable trend-following families
+                    // BULL_CHOP (2): trend-following disabled, mean-revert OK
+                    if (regime == 2 && s.engine->is_trend_following()) strat_ok = false;
+
+                    bool conv_ok = true;
+                    if (conviction_only && !s.engine->is_high_conviction()) conv_ok = false;
+
+                    // S34 PF filter: bleed engines stay permanently off
+                    bool pf_ok = !s.pf_blocked;
+                    s.engine->set_portfolio_gate(gate_open && sym_ok && strat_ok && conv_ok && pf_ok);
+                    // Apply DD-based size throttle (preserves per-engine boost from base sizing)
+                    s.engine->set_sizing_mult(size_throttle);
                 }
 
-                // Log when gate closes
                 static bool prev_gate = true;
                 if (!gate_open && prev_gate) {
-                    std::printf("[PORTFOLIO] GATE CLOSED: positions=%d (max=%d) | 24h_pnl=%+.1fbp (limit=%+.0f) | unrealized=%+.1fbp (limit=%+.0f)\n",
-                        open_positions, MAX_CONCURRENT_POSITIONS, recent_pnl, DRAWDOWN_HALT_BP,
-                        total_unrealized_bp, UNREALIZED_HALT_BP);
+                    const char* rs = (regime == 0) ? "CRASH"
+                                   : (regime == 1) ? "BEAR"
+                                   : (regime == 2) ? "BULL_CHOP"
+                                   : "BULL_TREND";
+                    std::printf("[PORTFOLIO] GATE CLOSED: pos=%d/%d | 4h=%+.1f | 24h=%+.1f | unreal=%+.1f | cum=%+.1f peak=%+.1f dd=%.1f | ratchet=%s daily=%s regime=%s throttle=%.2fx tsmom_open=%d\n",
+                        open_positions, MAX_CONCURRENT_POSITIONS, recent_pnl, daily_pnl,
+                        total_unrealized_bp, all_time_cum, all_time_peak, dd_from_peak,
+                        ratchet_locked ? "1" : "0",
+                        daily_halted ? "1" : "0",
+                        rs, size_throttle, tsmom_open);
                     std::fflush(stdout);
                 } else if (gate_open && !prev_gate) {
-                    std::printf("[PORTFOLIO] GATE OPENED: positions=%d | 24h_pnl=%+.1fbp | unrealized=%+.1fbp\n",
-                        open_positions, recent_pnl, total_unrealized_bp);
+                    std::printf("[PORTFOLIO] GATE OPENED: cum=%+.1f peak=%+.1f throttle=%.2fx\n",
+                        all_time_cum, all_time_peak, size_throttle);
                     std::fflush(stdout);
                 }
                 prev_gate = gate_open;

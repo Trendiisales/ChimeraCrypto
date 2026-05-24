@@ -206,6 +206,12 @@ public:
         // All pyramid adds exit with the base trade (shared trail stop).
         // Pyramid P&L is tracked separately and reported on exit.
         bool         pyramid_enabled   = false;    // master switch
+
+        // ── S34: confirmation bar gate ──────────────────────────────────────
+        // Number of consecutive bars with signal required before entering.
+        // 1 = no confirmation (legacy). 2 = wait 1 extra bar for follow-through.
+        // Filters DOA setups (signal fires on noise spike then reverts).
+        int          signal_confirm_bars = 1;
         double       pyramid_arm_atr   = 2.5;      // first add at +2.5 ATR profit
         double       pyramid_step_atr  = 1.5;      // subsequent adds every +1.5 ATR after
         double       pyramid_size_mult = 0.5;      // 50% of base size per add
@@ -790,6 +796,8 @@ public:
         cfg_.hard_floor_bp     = -50.0;
         cfg_.early_kill_bp     = -25.0;
         cfg_.early_kill_mfe    = 15.0;
+        // S34: confirmation bar — require 2 consecutive bar signals
+        cfg_.signal_confirm_bars = 2;
 
         // BE ratchet tied to engine's round_trip
         double rt = cfg_.round_trip_bp;
@@ -814,6 +822,8 @@ public:
         cfg_.hard_floor_bp     = -50.0;    // max single-trade loss
         cfg_.early_kill_bp     = -25.0;    // DOA cut
         cfg_.early_kill_mfe    = 15.0;     // arm early-kill while MFE < +15bp
+        // S34: confirmation bar — require 2 consecutive bar signals
+        cfg_.signal_confirm_bars = 2;
 
         // ── Staged BE ratchet — tied to each engine's round_trip cost ───
         // Real BE = round_trip_bp (typically 10-22bp). Start protecting at
@@ -1414,22 +1424,39 @@ private:
     }
 
     // ── Signal evaluation on the just-closed bar ─────────────────────────────
-    bool signal_tsmom_() const {
-        if ((int)closes_.size() < cfg_.lookback + 1) return false;
-        double now = closes_.back();
-        double ref = closes_[closes_.size() - 1 - cfg_.lookback];
+    bool signal_tsmom_() const { return signal_tsmom_at_(0); }
+    bool signal_donchian_() const { return signal_donchian_at_(0); }
+
+    // S34: signal at bar `back` bars ago (0 = current). Used by confirmation
+    // gate to look backward through history (no time wait needed).
+    bool signal_tsmom_at_(int back) const {
+        int sz = (int)closes_.size();
+        if (sz < cfg_.lookback + 1 + back) return false;
+        double now = closes_[sz - 1 - back];
+        double ref = closes_[sz - 1 - back - cfg_.lookback];
         return now > ref;
     }
 
-    bool signal_donchian_() const {
-        // Long breakout: close > rolling N-bar PRIOR high (excludes current bar)
-        if ((int)highs_.size() < cfg_.lookback + 1) return false;
-        const int sz = (int)highs_.size();
+    bool signal_donchian_at_(int back) const {
+        int sz = (int)highs_.size();
+        if (sz < cfg_.lookback + 1 + back) return false;
         double prior_high = 0.0;
-        for (int i = sz - cfg_.lookback - 1; i < sz - 1; ++i) {
+        int start = sz - back - cfg_.lookback - 1;
+        int end   = sz - back - 1;
+        for (int i = start; i < end; ++i) {
             if (highs_[i] > prior_high) prior_high = highs_[i];
         }
-        return closes_.back() > prior_high;
+        return closes_[sz - 1 - back] > prior_high;
+    }
+
+    // S34: dispatcher for backward signal check on supported strategies.
+    // Returns -1 if strategy doesn't support back-check (caller falls back).
+    int signal_at_back(int back) const {
+        switch (cfg_.kind) {
+            case StrategyKind::TSMOM:    return signal_tsmom_at_(back) ? 1 : 0;
+            case StrategyKind::DONCHIAN: return signal_donchian_at_(back) ? 1 : 0;
+            default: return -1;  // unsupported -> caller skips confirm check
+        }
     }
 
     bool signal_bollinger_() const {
@@ -1603,6 +1630,32 @@ private:
                 cfg_.tag.c_str());
             std::fflush(stdout);
             return;
+        }
+
+        // ── S34: CONFIRMATION BAR (backward look — no time wait) ───────────
+        // Require signal_confirm_bars consecutive bars with signal direction.
+        // Looks BACKWARD through history rather than forward-waiting — if
+        // the prior (N-1) bars already showed signal, enter NOW.
+        // Filters DOA setups where 1-bar signal didn't follow through.
+        if (cfg_.signal_confirm_bars > 1) {
+            int needed = cfg_.signal_confirm_bars - 1;
+            int prior_ok = 0;
+            int prior_unknown = 0;
+            for (int k = 1; k <= needed; k++) {
+                int r = signal_at_back(k);
+                if (r == 1) prior_ok++;
+                else if (r == -1) prior_unknown++;
+                else break;  // r == 0 -> broke confirmation
+            }
+            // If strategy doesn't support back-check (mean-revert kinds),
+            // skip confirmation entirely — single-bar signal is fine for them.
+            bool unsupported = (prior_unknown == needed);
+            if (!unsupported && prior_ok < needed) {
+                std::printf("[%s] CONFIRMATION_BAR: prior_ok=%d/%d — wait\n",
+                    cfg_.tag.c_str(), prior_ok, needed);
+                std::fflush(stdout);
+                return;
+            }
         }
 
         // ── Funding headwind filter (Session 30, Edge 1) ────────────────────

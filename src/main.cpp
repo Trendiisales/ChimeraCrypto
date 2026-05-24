@@ -136,6 +136,7 @@
 #include <mutex>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <fstream>
 #include <sys/file.h>
 #include <fcntl.h>
@@ -272,6 +273,30 @@ static std::atomic<uint64_t> g_daily_pnl_bp_bits{0};        // rolling 24h pnl
 static std::atomic<int>      g_regime{2};                    // 0=CRASH, 1=CHOP, 2=TREND
 static std::atomic<uint64_t> g_size_throttle_bits{0};        // current sizing multiplier (0..1)
 static std::atomic<int>      g_tsmom_open_count{0};          // concurrent open TSMOM positions
+static std::atomic<uint64_t> g_btc_short_ret_bits{0};        // recent BTC % move (rally detector)
+// S34: BTC spot history for live chart (last ~1h of ~5s ticks)
+static constexpr int BTC_CHART_N = 200;
+static std::atomic<uint64_t> g_btc_chart_px[BTC_CHART_N]{};
+static std::atomic<int>      g_btc_chart_idx{0};
+static std::atomic<int>      g_btc_chart_filled{0};
+
+// S34: rally-detector buffer (lifted from function-static so REST seed can fill)
+static constexpr int BTC_RALLY_BUF = 120;
+static std::atomic<uint64_t> g_btc_rally_px[BTC_RALLY_BUF]{};
+static std::atomic<int>      g_btc_rally_idx{0};
+static std::atomic<int>      g_btc_rally_filled{0};
+static std::atomic<int64_t>  g_btc_rally_last_ms{0};
+
+// S34-r8: per-symbol regime — each tradable symbol gets its own rally
+// detector + regime classification. Lets alts trade when they have edge
+// even if BTC is flat. Indexed by chimera::SymbolId.
+static constexpr int SYM_RALLY_BUF = 120;
+static std::atomic<uint64_t> g_sym_rally_px[chimera::MAX_SYMBOLS][SYM_RALLY_BUF]{};
+static std::atomic<int>      g_sym_rally_idx[chimera::MAX_SYMBOLS]{};
+static std::atomic<int>      g_sym_rally_filled[chimera::MAX_SYMBOLS]{};
+static std::atomic<int64_t>  g_sym_rally_last_ms[chimera::MAX_SYMBOLS]{};
+static std::atomic<int>      g_sym_regime[chimera::MAX_SYMBOLS]{};   // 0..3 per symbol
+static std::atomic<uint64_t> g_sym_short_ret[chimera::MAX_SYMBOLS]{}; // recent % move per symbol
 
 // ── Session 30: Liquidation cascade detector ────────────────────────────────
 static chimera::LiquidationCascadeDetector g_liq_detector;
@@ -666,6 +691,9 @@ static std::string build_state_json() {
     js << "\"size_throttle\":" << load_dbl_atomic(g_size_throttle_bits) << ",";
     js << std::setprecision(1);
     js << "\"tsmom_open\":" << g_tsmom_open_count.load() << ",";
+    js << std::setprecision(2);
+    js << "\"btc_short_ret_pct\":" << load_dbl_atomic(g_btc_short_ret_bits) << ",";
+    js << std::setprecision(1);
     // S34: PF filter counts + tier breakdown
     {
         int blocked = 0, active = 0, elite = 0;
@@ -719,6 +747,13 @@ static std::string build_state_json() {
                 m << ",\"bt_pf\":" << g_slots[i].bt_pf;
                 m << ",\"bt_trades\":" << g_slots[i].bt_trades;
                 m << ",\"pf_blocked\":" << (g_slots[i].pf_blocked ? "true" : "false");
+                // S34-r8: per-symbol regime + recent return
+                if (g_slots[i].symbol_id >= 0 && g_slots[i].symbol_id < chimera::MAX_SYMBOLS) {
+                    int sr = g_sym_regime[g_slots[i].symbol_id].load();
+                    const char* srs = (sr == 0) ? "CRASH" : (sr == 1) ? "BEAR" : (sr == 2) ? "BULL_CHOP" : "BULL_TREND";
+                    m << ",\"sym_regime\":\"" << srs << "\"";
+                    m << ",\"sym_short_ret_pct\":" << load_dbl_atomic(g_sym_short_ret[g_slots[i].symbol_id]);
+                }
                 meta = m.str();
             }
             // Insert before final '}'
@@ -882,6 +917,24 @@ static void http_server_thread(int port) {
                << ",\"new_peak_bp\":" << cum
                << ",\"all_time_cum_bp\":" << cum << "}";
             body = rj.str();
+        } else if (strstr(req, "GET /api/btc_chart")) {
+            // S34: BTC tick history for live dashboard chart
+            std::ostringstream cj;
+            cj << std::fixed << std::setprecision(2);
+            cj << "{\"prices\":[";
+            int filled = g_btc_chart_filled.load();
+            int idx = g_btc_chart_idx.load();
+            int start = (filled < BTC_CHART_N) ? 0 : idx;
+            bool first = true;
+            for (int k = 0; k < filled; k++) {
+                int i = (start + k) % BTC_CHART_N;
+                double px = load_dbl_atomic(g_btc_chart_px[i]);
+                if (!first) cj << ",";
+                cj << px;
+                first = false;
+            }
+            cj << "]}";
+            body = cj.str();
         } else if (strstr(req, "POST /api/daily_kill_clear")) {
             // S34: clear just the 24h daily-loss halt (keep PER active)
             int64_t old = g_daily_kill_until_ms.load(std::memory_order_relaxed);
@@ -4600,6 +4653,15 @@ int main() {
     // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
     load_pf_data_into_slots();
 
+    // ── S34: sort g_slots so highest-PF engines evaluated first per symbol ─
+    // Combined with MAX_PER_SYMBOL=1, this ensures the BEST engine for a
+    // symbol wins the singleton slot when multiple signal same bar.
+    std::sort(g_slots.begin(), g_slots.end(), [](const EngineSlot& a, const EngineSlot& b){
+        return a.bt_pf > b.bt_pf;
+    });
+    std::printf("[STARTUP] g_slots sorted by bt_pf desc — top-PF engines win singleton slots\n");
+    std::fflush(stdout);
+
     // ── S34 SAFETY PRESET — TIERED ────────────────────────────────────────
     // Three tiers:
     //   ELITE (bt_pf >= 2.0 AND bt_trades >= 30):
@@ -4856,6 +4918,79 @@ int main() {
             seeded_rest, seeded_agg, seeded_saved, cold);
         std::fflush(stdout);
 
+        // ── S34-r8: seed per-symbol rally buffers from 1m klines ─────────
+        // So per-symbol regime detector works from first second after restart.
+        {
+            const char* sym_binance_names[] = {
+                "btcusdt","ethusdt","solusdt","bnbusdt","dogeusdt","xrpusdt",
+                "linkusdt","avaxusdt","nearusdt","suiusdt","aptusdt","arbusdt"
+            };
+            const int sym_ids[] = {
+                chimera::SYM_BTC, chimera::SYM_ETH, chimera::SYM_SOL, chimera::SYM_BNB,
+                chimera::SYM_DOGE, chimera::SYM_XRP, chimera::SYM_LINK, chimera::SYM_AVAX,
+                chimera::SYM_NEAR, chimera::SYM_SUI, chimera::SYM_APT, chimera::SYM_ARB
+            };
+            int sym_seeded = 0;
+            for (size_t si = 0; si < sizeof(sym_ids)/sizeof(sym_ids[0]); si++) {
+                int sid = sym_ids[si];
+                if (sid < 0 || sid >= chimera::MAX_SYMBOLS) continue;
+                auto kl = seed_rest.fetch_klines(sym_binance_names[si], "1m", 60);
+                if (kl.empty()) continue;
+                int n = (int)kl.size();
+                int rally_n = std::min(n, SYM_RALLY_BUF);
+                for (int i = n - rally_n; i < n; i++) {
+                    int idx = g_sym_rally_idx[sid].load();
+                    store_dbl_atomic(g_sym_rally_px[sid][idx], kl[i].c);
+                    g_sym_rally_idx[sid].store((idx + 1) % SYM_RALLY_BUF);
+                    int filled = g_sym_rally_filled[sid].load();
+                    if (filled < SYM_RALLY_BUF) g_sym_rally_filled[sid].store(filled + 1);
+                }
+                if (n >= 2) {
+                    double ret = (kl.back().c / kl.front().c - 1.0) * 100.0;
+                    store_dbl_atomic(g_sym_short_ret[sid], ret);
+                }
+                sym_seeded++;
+            }
+            std::printf("[STARTUP] Per-symbol rally buffers: seeded %d symbols (60min each)\n", sym_seeded);
+            std::fflush(stdout);
+        }
+
+        // ── S34: seed BTC rally + chart buffers from 1m klines ───────────
+        // Without seed, buffers are empty after restart -> no rally signal
+        // for ~10min. Seed with last 1m closes so detection works instantly.
+        {
+            auto kl = seed_rest.fetch_klines("btcusdt", "1m", 60);
+            if (!kl.empty()) {
+                int n = (int)kl.size();
+                std::printf("[STARTUP] BTC buffers: seeded %d 1m closes\n", n);
+                std::fflush(stdout);
+                // Fill rally detector buffer (file-scope global)
+                int rally_n = std::min(n, BTC_RALLY_BUF);
+                for (int i = n - rally_n; i < n; i++) {
+                    int idx = g_btc_rally_idx.load(std::memory_order_relaxed);
+                    store_dbl_atomic(g_btc_rally_px[idx], kl[i].c);
+                    g_btc_rally_idx.store((idx + 1) % BTC_RALLY_BUF, std::memory_order_relaxed);
+                    int filled = g_btc_rally_filled.load(std::memory_order_relaxed);
+                    if (filled < BTC_RALLY_BUF) g_btc_rally_filled.store(filled + 1, std::memory_order_relaxed);
+                }
+                // Fill chart buffer
+                int chart_n = std::min(n, BTC_CHART_N);
+                for (int i = n - chart_n; i < n; i++) {
+                    int idx = g_btc_chart_idx.load(std::memory_order_relaxed);
+                    store_dbl_atomic(g_btc_chart_px[idx], kl[i].c);
+                    g_btc_chart_idx.store((idx + 1) % BTC_CHART_N, std::memory_order_relaxed);
+                    int filled = g_btc_chart_filled.load(std::memory_order_relaxed);
+                    if (filled < BTC_CHART_N) g_btc_chart_filled.store(filled + 1, std::memory_order_relaxed);
+                }
+                if (n >= 2) {
+                    double ret_pct = (kl.back().c / kl.front().c - 1.0) * 100.0;
+                    store_dbl_atomic(g_btc_short_ret_bits, ret_pct);
+                    std::printf("[STARTUP] BTC seeded short-ret over %dmin: %+.2f%%\n", n, ret_pct);
+                    std::fflush(stdout);
+                }
+            }
+        }
+
         // ── Post-seed audit: warn about under-seeded engines ──────────
         int under_seeded = 0;
         for (const auto& slot : g_slots) {
@@ -5055,6 +5190,16 @@ int main() {
         if (mid <= 0.0) return;
 
         store_dbl_atomic(g_last_spot_px_bits[id], mid);
+
+        // S34: log BTC ticks into rolling chart buffer (~last 1000 ticks)
+        if (id == chimera::SYM_BTC) {
+            int idx = g_btc_chart_idx.load(std::memory_order_relaxed);
+            store_dbl_atomic(g_btc_chart_px[idx], mid);
+            int next_idx = (idx + 1) % BTC_CHART_N;
+            g_btc_chart_idx.store(next_idx, std::memory_order_relaxed);
+            int filled = g_btc_chart_filled.load(std::memory_order_relaxed);
+            if (filled < BTC_CHART_N) g_btc_chart_filled.store(filled + 1, std::memory_order_relaxed);
+        }
 
         auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -5310,7 +5455,11 @@ int main() {
                 constexpr double RATCHET_GIVEBACK_PCT = 0.15;    // was 0.25
                 constexpr double RATCHET_REARM_BP     = 50.0;    // was 200
                 constexpr double DAILY_LOSS_KILL_BP   = -400.0;
-                constexpr int64_t DAILY_HALT_MS       = 24LL * 3600LL * 1000LL;
+                // Halt = 2h cooldown after flush (was 24h). 24h locked user out
+                // even after conditions recovered. Edge-trigger ensures we
+                // don't re-fire on lingering window losses; 2h gives enough
+                // breathing room then resumes.
+                constexpr int64_t DAILY_HALT_MS       = 2LL * 3600LL * 1000LL;
                 constexpr int64_t DAILY_WINDOW_MS     = 24LL * 3600LL * 1000LL;
 
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
@@ -5521,25 +5670,110 @@ int main() {
                 int regime = 3;  // default BULL_TREND
                 double btc_vol_ratio = 1.0;
                 bool   btc_d1_bullish = true;
-                for (auto& s : g_slots) {
-                    if (!s.engine) continue;
-                    if (s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400 &&
-                        s.tag.find("-TSMOM-") != std::string::npos) {
-                        btc_vol_ratio  = s.engine->vol_ratio_public();
-                        btc_d1_bullish = s.engine->trend_bullish();
-                        break;
+                bool   btc_h4_bullish = true;
+                // S34: short-term rally detector — current spot vs spot N
+                // samples ago. Uses file-scope buffer so REST seed at startup
+                // can pre-fill it (otherwise no rally signal until ~10min after
+                // every restart). Sample rate capped at 5s/sample.
+                double btc_spot_now = load_dbl_atomic(g_last_spot_px_bits[chimera::SYM_BTC]);
+                int64_t btc_last_sample_ms = g_btc_rally_last_ms.load(std::memory_order_relaxed);
+                if (btc_spot_now > 0.0 && (now_ms - btc_last_sample_ms) >= 5000) {
+                    int idx = g_btc_rally_idx.load(std::memory_order_relaxed);
+                    store_dbl_atomic(g_btc_rally_px[idx], btc_spot_now);
+                    g_btc_rally_idx.store((idx + 1) % BTC_RALLY_BUF, std::memory_order_relaxed);
+                    int filled = g_btc_rally_filled.load(std::memory_order_relaxed);
+                    if (filled < BTC_RALLY_BUF) g_btc_rally_filled.store(filled + 1, std::memory_order_relaxed);
+                    g_btc_rally_last_ms.store(now_ms, std::memory_order_relaxed);
+                }
+                double btc_short_ret_pct = 0.0;
+                int filled_now = g_btc_rally_filled.load(std::memory_order_relaxed);
+                int idx_now = g_btc_rally_idx.load(std::memory_order_relaxed);
+                if (filled_now >= 4 && btc_spot_now > 0.0) {
+                    int back_idx = (idx_now - filled_now + BTC_RALLY_BUF) % BTC_RALLY_BUF;
+                    double oldest = load_dbl_atomic(g_btc_rally_px[back_idx]);
+                    if (oldest > 0.0) {
+                        btc_short_ret_pct = (btc_spot_now / oldest - 1.0) * 100.0;
                     }
                 }
+                // +0.2% over recent samples = rally override
+                bool short_rally = (btc_short_ret_pct > 0.2);
+
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    if (s.symbol_id == chimera::SYM_BTC && s.tag.find("-TSMOM-") != std::string::npos) {
+                        if (s.tf_secs == 86400) {
+                            btc_vol_ratio  = s.engine->vol_ratio_public();
+                            btc_d1_bullish = s.engine->trend_bullish();
+                        } else if (s.tf_secs == 14400) {  // H4
+                            btc_h4_bullish = s.engine->trend_bullish();
+                        }
+                    }
+                }
+                // S34-r7: BEAR only triggers on confirmed crash (recent < -0.5%).
+                // Otherwise mean-revert engines may earn in chop. Spot-only
+                // needs SOME tradeable regime when not bullish.
                 if (btc_vol_ratio > 2.0) {
-                    regime = 0;  // CRASH — vol spike
-                } else if (!btc_d1_bullish) {
-                    regime = 1;  // BEAR — halt all (spot-only)
-                } else if (btc_vol_ratio < 0.7 || btc_vol_ratio > 1.3) {
-                    regime = 2;  // BULL_CHOP — only mean-revert
+                    regime = 0;  // CRASH — halt all
+                } else if (!btc_d1_bullish && !btc_h4_bullish && !short_rally && btc_short_ret_pct < -0.5) {
+                    regime = 1;  // BEAR — confirmed dump, halt all
+                } else if (!btc_d1_bullish || btc_vol_ratio < 0.7 || btc_vol_ratio > 1.3 || short_rally) {
+                    regime = 2;  // BULL_CHOP — mean-revert allowed, TSMOM off
                 } else {
                     regime = 3;  // BULL_TREND — all engines
                 }
+
+                // ── S34-r8: PER-SYMBOL regime classification ─────────────
+                // Each symbol gets own short-rally + D1/H4 bullish read.
+                // Lets alts trade when they have edge even if BTC flat.
+                // Engine entry gate uses the SYMBOL's regime, not global.
+                for (int sym = 0; sym < chimera::MAX_SYMBOLS; sym++) {
+                    double sym_spot = load_dbl_atomic(g_last_spot_px_bits[sym]);
+                    if (sym_spot <= 0.0) {
+                        g_sym_regime[sym].store(1, std::memory_order_relaxed);  // unknown = BEAR-safe
+                        continue;
+                    }
+                    int64_t sym_last_ms = g_sym_rally_last_ms[sym].load(std::memory_order_relaxed);
+                    if ((now_ms - sym_last_ms) >= 5000) {
+                        int sidx = g_sym_rally_idx[sym].load(std::memory_order_relaxed);
+                        store_dbl_atomic(g_sym_rally_px[sym][sidx], sym_spot);
+                        g_sym_rally_idx[sym].store((sidx + 1) % SYM_RALLY_BUF, std::memory_order_relaxed);
+                        int sfilled = g_sym_rally_filled[sym].load(std::memory_order_relaxed);
+                        if (sfilled < SYM_RALLY_BUF) g_sym_rally_filled[sym].store(sfilled + 1, std::memory_order_relaxed);
+                        g_sym_rally_last_ms[sym].store(now_ms, std::memory_order_relaxed);
+                    }
+                    double sym_ret_pct = 0.0;
+                    int sf = g_sym_rally_filled[sym].load(std::memory_order_relaxed);
+                    int si = g_sym_rally_idx[sym].load(std::memory_order_relaxed);
+                    if (sf >= 4) {
+                        int back = (si - sf + SYM_RALLY_BUF) % SYM_RALLY_BUF;
+                        double oldest = load_dbl_atomic(g_sym_rally_px[sym][back]);
+                        if (oldest > 0.0) sym_ret_pct = (sym_spot / oldest - 1.0) * 100.0;
+                    }
+                    store_dbl_atomic(g_sym_short_ret[sym], sym_ret_pct);
+
+                    // Read symbol's D1 + H4 trend
+                    bool sym_d1_bull = true, sym_h4_bull = true;
+                    double sym_vol_ratio = 1.0;
+                    for (auto& s : g_slots) {
+                        if (!s.engine || s.symbol_id != sym) continue;
+                        if (s.tag.find("-TSMOM-") == std::string::npos) continue;
+                        if (s.tf_secs == 86400) {
+                            sym_d1_bull = s.engine->trend_bullish();
+                            sym_vol_ratio = s.engine->vol_ratio_public();
+                        } else if (s.tf_secs == 14400) {
+                            sym_h4_bull = s.engine->trend_bullish();
+                        }
+                    }
+                    bool sym_short_rally = (sym_ret_pct > 0.2);
+                    int sym_reg = 3;
+                    if (sym_vol_ratio > 2.0) sym_reg = 0;
+                    else if (!sym_d1_bull && !sym_h4_bull && !sym_short_rally && sym_ret_pct < -0.5) sym_reg = 1;
+                    else if (!sym_d1_bull || sym_vol_ratio < 0.7 || sym_vol_ratio > 1.3 || sym_short_rally) sym_reg = 2;
+                    else sym_reg = 3;
+                    g_sym_regime[sym].store(sym_reg, std::memory_order_relaxed);
+                }
                 g_regime.store(regime, std::memory_order_relaxed);
+                store_dbl_atomic(g_btc_short_ret_bits, btc_short_ret_pct);
 
                 // ── S34 TIER 2: progressive size throttle ────────────────
                 // Size scaled by all-time DD from peak.
@@ -5598,7 +5832,10 @@ int main() {
                 // only allow entries flagged is_high_conviction(). Existing
                 // accessor checks funding tailwind + cross-TF score.
                 bool conviction_only = (dd_from_peak >= 200.0);
-                constexpr int MAX_PER_SYMBOL = 3;
+                // S34: singleton per symbol — only 1 concurrent position per symbol.
+                // Prevents correlated cluster losses across multiple engines on
+                // same symbol firing same bar.
+                constexpr int MAX_PER_SYMBOL = 1;
                 for (auto& s : g_slots) {
                     if (!s.engine) continue;
 
@@ -5611,9 +5848,14 @@ int main() {
                     bool is_tsmom = (s.tag.find("-TSMOM-") != std::string::npos);
                     bool strat_ok = true;
                     if (is_tsmom && tsmom_open >= MAX_TSMOM_CONCURRENT) strat_ok = false;
-                    // CHOP regime: disable trend-following families
-                    // BULL_CHOP (2): trend-following disabled, mean-revert OK
-                    if (regime == 2 && s.engine->is_trend_following()) strat_ok = false;
+                    // ── S34-r8: per-symbol regime overrides global ──────
+                    // Use the SYMBOL's own regime, not BTC's. Lets alts trade
+                    // when they have edge even if BTC is flat/bear.
+                    int sym_reg = (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS)
+                                ? g_sym_regime[s.symbol_id].load(std::memory_order_relaxed)
+                                : regime;
+                    if (sym_reg == 0 || sym_reg == 1) strat_ok = false;
+                    else if (sym_reg == 2 && s.engine->is_trend_following()) strat_ok = false;
 
                     bool conv_ok = true;
                     if (conviction_only && !s.engine->is_high_conviction()) conv_ok = false;

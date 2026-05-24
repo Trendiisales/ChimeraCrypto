@@ -240,6 +240,18 @@
   </div>
 </header>
 
+<!-- S33: Portfolio gate banner (only visible when locked) -->
+<div id="gateBanner" class="gate-banner" style="display:none;">
+  <div class="gate-banner-row">
+    <span class="gate-banner-icon">&#128683;</span>
+    <span class="gate-banner-title" id="gateBannerTitle">TRADING HALTED</span>
+    <span class="gate-banner-reason" id="gateBannerReason"></span>
+  </div>
+  <div class="gate-banner-row gate-banner-meta">
+    <span id="gateBannerStats"></span>
+  </div>
+</div>
+
 <!-- Summary Strip -->
 <div class="summary-strip" id="summaryStrip"></div>
 
@@ -251,6 +263,14 @@
   <div class="section-title">Open Positions</div>
   <div id="positionsArea">
     <div class="no-positions"><div class="big-icon">&#9203;</div>No open positions — waiting for signals at next bar close</div>
+  </div>
+</div>
+
+<!-- BTC live price chart -->
+<div class="chart-row">
+  <div class="chart-box" style="grid-column: 1 / -1;">
+    <div class="chart-title">BTC Live (last <span id="btcChartLen">~</span> ticks) — <span id="btcChartPrice">--</span> <span id="btcChartRet"></span></div>
+    <canvas id="btcChart" height="120"></canvas>
   </div>
 </div>
 
@@ -291,7 +311,7 @@
 <div class="signals-section">
   <div class="section-header">
     <div class="section-title">Bullish Signals — Ready to Enter</div>
-    <button class="toggle-btn" id="toggleAllEngines">Show All 5 Engines</button>
+    <button class="toggle-btn" id="toggleAllEngines">Show All Engines</button>
   </div>
   <div class="signal-grid" id="signalGrid"></div>
 </div>
@@ -306,7 +326,7 @@
 </div>
 
 <footer>
-  <div>Chimera Edge System — Session 31</div>
+  <div id="footerLeft">Chimera Edge System</div>
   <div id="footerRight"></div>
 </footer>
 
@@ -745,6 +765,23 @@ async function refresh() {
     if (j.startup_ts && Number(j.startup_ts) > 0) serverStartupTs = Number(j.startup_ts);
     $('#buildVer').textContent = 'build ' + (j.build || '---');
 
+    // S34: surface tier counts on toggle button + protection state in footer
+    const pg = j.portfolio_gate || {};
+    const active = pg.pf_active_count || 0;
+    const elite = pg.pf_elite_count || 0;
+    const blocked = pg.pf_blocked_count || 0;
+    const btn = $('#toggleAllEngines');
+    if (btn) btn.textContent = `Show All ${j.engine_count || 0} Engines (${active} active, ${elite} elite, ${blocked} blocked)`;
+
+    const fl = $('#footerLeft');
+    if (fl) {
+      const regime = pg.regime || '?';
+      const ratchet = pg.ratchet_locked ? 'LOCKED' : 'OK';
+      const peakBp = (pg.all_time_peak_bp || 0).toFixed(1);
+      const cumBp = (pg.all_time_cum_bp || 0).toFixed(1);
+      fl.textContent = `Chimera ${j.build} | regime: ${regime} | peak: ${peakBp}bp | cum: ${cumBp}bp | ratchet: ${ratchet}`;
+    }
+
     // Bell on new entries
     const currentOpen = new Set(engines.filter(e => e.in_position).map(e => e.tag));
     if (prevOpenPositions.size > 0 || prevTradeCount >= 0) {
@@ -756,6 +793,12 @@ async function refresh() {
     renderPositions(engines, spot);
     renderSignals(engines);
 
+    // S34: capture BTC for live chart
+    if (spot.btcusdt && typeof pushBtcPrice === 'function') {
+      pushBtcPrice(spot.btcusdt);
+      drawBtcChart();
+    }
+
     SYMBOLS.forEach(s => { const px = spot[s.full]; if (px) prevPx[s.full] = px; });
 
     lastFetchOk = Date.now();
@@ -764,7 +807,11 @@ async function refresh() {
   } catch (err) {
     const age = lastFetchOk ? Math.round((Date.now() - lastFetchOk) / 1000) : null;
     if (age && age < 10) { $('#statusDot').className = 'status-dot stale'; $('#statusText').textContent = 'Stale'; }
-    else { $('#statusDot').className = 'status-dot down'; $('#statusText').textContent = 'Disconnected'; }
+    else {
+      $('#statusDot').className = 'status-dot down';
+      $('#statusText').textContent = 'Disconnected: ' + (err.message || 'fetch failed');
+    }
+    console.error('[Chimera] state2 fetch failed:', err);
   }
 }
 
@@ -834,8 +881,95 @@ $('#hideAllEngines').addEventListener('click', () => {
 // ── Init ────────────────────────────────────────────────────────────────────
 
 initCharts();
+// ── S34: BTC live chart — JS-side rolling history + Binance REST seed ───
+let btcChart = null;
+const btcHistory = [];  // {ts, price}
+const BTC_HISTORY_MAX = 360;  // ~30min of 5s polls + seed klines
+
+// Seed chart from Binance 1m klines (last 60 = 1h history)
+async function seedBtcHistory() {
+  try {
+    const r = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60');
+    if (!r.ok) return;
+    const k = await r.json();
+    for (const bar of k) {
+      btcHistory.push({ ts: bar[0], price: parseFloat(bar[4]) });
+    }
+    drawBtcChart();
+  } catch(e) { console.error('[Chimera] btc seed failed:', e); }
+}
+
+function pushBtcPrice(price) {
+  if (!price || price <= 0) return;
+  const last = btcHistory[btcHistory.length - 1];
+  const ts = Date.now();
+  // Skip duplicates within 1s
+  if (last && ts - last.ts < 1000 && Math.abs(last.price - price) < 0.01) return;
+  btcHistory.push({ ts, price });
+  while (btcHistory.length > BTC_HISTORY_MAX) btcHistory.shift();
+}
+
+function drawBtcChart() {
+  if (btcHistory.length < 2) return;
+  const prices = btcHistory.map(p => p.price);
+  const labels = btcHistory.map((p,i) => i);
+  const cur = prices[prices.length - 1];
+  const first = prices[0];
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const retPct = ((cur / first - 1) * 100);
+
+  $('#btcChartLen').textContent = btcHistory.length + ' samples';
+  $('#btcChartPrice').textContent = '$' + cur.toLocaleString(undefined,{maximumFractionDigits:2});
+  const ret = $('#btcChartRet');
+  if (ret) {
+    ret.textContent = ' (' + (retPct >= 0 ? '+' : '') + retPct.toFixed(2) + '% over ' + Math.round(btcHistory.length / 12) + 'min)';
+    ret.style.color = retPct >= 0 ? '#3ecf8e' : '#e8505b';
+  }
+
+  // Tight Y bounds — 0.05% padding either side
+  const pad = (maxP - minP) * 0.05 || cur * 0.0005;
+  const yMin = minP - pad;
+  const yMax = maxP + pad;
+
+  if (!btcChart) {
+    btcChart = new Chart($('#btcChart').getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{
+        data: prices,
+        borderColor: '#3ecf8e',
+        backgroundColor: 'rgba(62,207,142,0.08)',
+        borderWidth: 2, fill: true, pointRadius: 0, tension: 0.25
+      }]},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        scales: {
+          x: { display: false },
+          y: {
+            min: yMin, max: yMax,
+            ticks: { color: '#888', font: { size: 11 }, callback: v => '$' + Math.round(v).toLocaleString() },
+            grid: { color: '#1e2738' }
+          }
+        }
+      }
+    });
+  } else {
+    btcChart.data.labels = labels;
+    btcChart.data.datasets[0].data = prices;
+    btcChart.data.datasets[0].borderColor = retPct >= 0 ? '#3ecf8e' : '#e8505b';
+    btcChart.data.datasets[0].backgroundColor = retPct >= 0 ? 'rgba(62,207,142,0.08)' : 'rgba(232,80,91,0.08)';
+    btcChart.options.scales.y.min = yMin;
+    btcChart.options.scales.y.max = yMax;
+    btcChart.update('none');
+  }
+}
+
 refresh();
 refreshTrades();
+seedBtcHistory();
 setInterval(refresh, 2000);
 setInterval(refreshTrades, 5000);
 setInterval(updateClock, 1000);

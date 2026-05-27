@@ -202,11 +202,27 @@
   .sig-chip .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .sig-chip .dot.bull { background: var(--green); }
   .sig-chip .dot.bear { background: var(--red); }
+  .sig-chip .dot.blocked { background: var(--amber); }
+  .sig-chip.blocked { opacity: 0.55; border-style: dashed; }
+  .sig-chip.blocked .mom.pos { color: var(--amber); }
   .sig-chip .tag { font-weight: 700; color: var(--text); letter-spacing: 0.04em; }
   .sig-chip .mom { font-weight: 600; font-variant-numeric: tabular-nums; }
   .sig-chip .mom.pos { color: var(--green); }
   .sig-chip .mom.neg { color: var(--red); }
   .sig-chip .next { color: var(--dim); font-size: 9px; margin-left: auto; }
+  .sig-chip .badge {
+    font-size: 8px; font-weight: 800; letter-spacing: 0.08em;
+    padding: 1px 5px; border-radius: 3px; text-transform: uppercase;
+  }
+  .sig-chip .badge.blowoff { background: rgba(245,158,11,0.15); color: var(--amber); border: 1px solid rgba(245,158,11,0.4); }
+  .signal-subhead {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--dim); text-transform: uppercase;
+    margin: 10px 0 6px 0; padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .signal-subhead:first-child { margin-top: 0; }
+  .signal-subhead .count { color: var(--text); font-weight: 600; margin-left: 6px; }
 
   /* ── Collapsible toggle ─── */
   .toggle-btn {
@@ -335,6 +351,26 @@
 // Chimera Dashboard v4 — Simplified: focus on active trades + performance
 // ═══════════════════════════════════════════════════��═══════════════════════════
 
+// Mirror of backend blowoff_threshold_for_tf (main.cpp:~336).
+// Per-TF blowoff thresholds — engines above mom threshold have portfolio_gate
+// force-closed even though signal_ready is true.
+//   D2+    (>= 172800s) : 80%
+//   D1     (>= 86400s)  : 120%
+//   H4-H16 (>= 14400s)  : 150%
+//   H1-H3  (< 14400s)   : 200%
+function blowoffThresholdForTf(tf_secs) {
+  if (tf_secs >= 172800) return 80.0;
+  if (tf_secs >= 86400)  return 120.0;
+  if (tf_secs >= 14400)  return 150.0;
+  return 200.0;
+}
+function isBlowoffBlocked(e) {
+  if (!e || e.in_position) return false;
+  return e.momentum_pct > blowoffThresholdForTf(e.tf_secs || 0);
+}
+// Kept for any legacy reference; new code should call isBlowoffBlocked().
+const BLOWOFF_THRESHOLD_PCT = 80.0;
+
 const SYMBOLS = [
   { full: 'btcusdt',  short: 'BTC'  },
   { full: 'ethusdt',  short: 'ETH'  },
@@ -444,7 +480,12 @@ function renderSummary(engines, trades) {
   const grossLosses = Math.abs(trades.filter(t=>t.net_bp<=0).reduce((s,t)=>s+t.net_bp,0));
   const pf = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : (grossWins > 0 ? '∞' : '---');
   const inPos = engines.filter(e => e.in_position).length;
-  const bullish = engines.filter(e => e.signal_ready && e.momentum_pct > 0).length;
+  // Only count engines that will actually fire — exclude blowoff-blocked (per-TF).
+  const bullish = engines.filter(e => e.signal_ready && e.momentum_pct > 0
+                                       && !isBlowoffBlocked(e)
+                                       && !e.in_position && !e.halted).length;
+  const blocked = engines.filter(e => e.signal_ready && isBlowoffBlocked(e)
+                                       && !e.in_position && !e.halted).length;
 
   const cards = [
     { lbl: 'Net P&L', val: fmtBp(totalBp) + ' bp', cls: totalBp > 0 ? 'pos' : (totalBp < 0 ? 'neg' : 'neutral') },
@@ -452,7 +493,9 @@ function renderSummary(engines, trades) {
     { lbl: 'Win Rate', val: wr, cls: 'neutral' },
     { lbl: 'Profit Factor', val: pf, cls: 'neutral' },
     { lbl: 'Open', val: String(inPos), cls: inPos > 0 ? 'pos' : 'neutral' },
-    { lbl: 'Bullish Signals', val: String(bullish) + ' / ' + engines.length, cls: bullish > 0 ? 'pos' : 'neutral' },
+    { lbl: 'Bullish Signals', val: String(bullish) + ' / ' + engines.length
+                                  + (blocked > 0 ? ' (' + blocked + ' blowoff)' : ''),
+      cls: bullish > 0 ? 'pos' : 'neutral' },
   ];
   $('#summaryStrip').innerHTML = cards.map(c =>
     '<div class="stat-card"><div class="lbl">' + c.lbl + '</div><div class="val ' + c.cls + '">' + c.val + '</div></div>'
@@ -602,15 +645,22 @@ function renderPositions(engines, spotPrices) {
 
 function renderSignals(engines) {
   const now = Date.now();
-  const bullish = engines.filter(e => e.signal_ready && e.momentum_pct > 0 && !e.in_position && !e.halted)
-    .sort((a,b) => (b.momentum_pct||0) - (a.momentum_pct||0));
+  // Bullish + blowoff-aware partition.
+  // Tradeable = mom > 0 AND mom <= 80% (mirrors backend BLOWOFF_THRESHOLD_PCT).
+  // Blocked   = mom > 80% (signal exists but portfolio_gate slammed shut).
+  const candidates = engines.filter(e => e.signal_ready && e.momentum_pct > 0
+                                          && !e.in_position && !e.halted);
+  const tradeable = candidates.filter(e => !isBlowoffBlocked(e))
+                              .sort((a,b) => (b.momentum_pct||0) - (a.momentum_pct||0));
+  const blocked   = candidates.filter(e => isBlowoffBlocked(e))
+                              .sort((a,b) => (b.momentum_pct||0) - (a.momentum_pct||0));
 
-  if (bullish.length === 0) {
+  if (tradeable.length === 0 && blocked.length === 0) {
     $('#signalGrid').innerHTML = '<div style="padding:12px;color:var(--dim);font-size:11px;">No bullish signals currently — all momentum is bearish or engines are warming up</div>';
     return;
   }
 
-  $('#signalGrid').innerHTML = bullish.map(e => {
+  const tradeableChip = e => {
     const mom = (e.momentum_pct||0).toFixed(1);
     const nextMs = (e.next_bar_close_ms || 0) - now;
     const nextStr = nextMs > 0 ? fmtCountdown(nextMs) : 'now';
@@ -620,7 +670,37 @@ function renderSignals(engines) {
       '<span class="mom pos">+' + mom + '%</span>' +
       '<span class="next">' + nextStr + '</span>' +
     '</div>';
-  }).join('');
+  };
+
+  const blockedChip = e => {
+    const mom = (e.momentum_pct||0).toFixed(1);
+    const nextMs = (e.next_bar_close_ms || 0) - now;
+    const nextStr = nextMs > 0 ? fmtCountdown(nextMs) : 'now';
+    const thr = blowoffThresholdForTf(e.tf_secs || 0);
+    return '<div class="sig-chip blocked" title="Blocked by blowoff guard: momentum > ' + thr + '%">' +
+      '<span class="dot blocked"></span>' +
+      '<span class="tag">' + (e.tag||'---') + '</span>' +
+      '<span class="mom pos">+' + mom + '%</span>' +
+      '<span class="badge blowoff">Blowoff</span>' +
+      '<span class="next">' + nextStr + '</span>' +
+    '</div>';
+  };
+
+  // Outer #signalGrid is normally display:grid. When we group by subhead,
+  // switch it to block so the inner grids lay out under their headings.
+  const grid = $('#signalGrid');
+  grid.style.display = 'block';
+  grid.style.maxHeight = 'none';
+  let html = '';
+  if (tradeable.length > 0) {
+    html += '<div class="signal-subhead">Tradeable <span class="count">' + tradeable.length + '</span></div>';
+    html += '<div class="signal-grid" style="max-height:none;">' + tradeable.map(tradeableChip).join('') + '</div>';
+  }
+  if (blocked.length > 0) {
+    html += '<div class="signal-subhead">Blocked by blowoff guard (per-TF threshold) <span class="count">' + blocked.length + '</span></div>';
+    html += '<div class="signal-grid" style="max-height:none;">' + blocked.map(blockedChip).join('') + '</div>';
+  }
+  grid.innerHTML = html;
 }
 
 // ── All Engines (hidden toggle) ─────────────────────────────────────────────
@@ -636,15 +716,21 @@ function renderAllEngines(engines) {
   $('#allEnginesGrid').innerHTML = sorted.map(e => {
     const mom = (e.momentum_pct||0);
     const isBull = mom > 0;
-    const dotCls = e.in_position ? 'bull' : (isBull ? 'bull' : 'bear');
+    const blowoff = isBull && isBlowoffBlocked(e);
+    const dotCls = e.in_position ? 'bull' : (blowoff ? 'blocked' : (isBull ? 'bull' : 'bear'));
     const momStr = (isBull ? '+' : '') + mom.toFixed(1) + '%';
     const momCls = isBull ? 'pos' : 'neg';
     const nextMs = (e.next_bar_close_ms || 0) - now;
     const nextStr = nextMs > 0 ? fmtCountdown(nextMs) : 'now';
-    return '<div class="sig-chip">' +
+    const chipCls = 'sig-chip' + (blowoff ? ' blocked' : '');
+    const thr = blowoffThresholdForTf(e.tf_secs || 0);
+    const blowoffBadge = blowoff ? '<span class="badge blowoff">Blowoff</span>' : '';
+    const titleAttr = blowoff ? ' title="Blocked by blowoff guard: momentum > ' + thr + '%"' : '';
+    return '<div class="' + chipCls + '"' + titleAttr + '>' +
       '<span class="dot ' + dotCls + '"></span>' +
       '<span class="tag">' + (e.tag||'---') + '</span>' +
       '<span class="mom ' + momCls + '">' + momStr + '</span>' +
+      blowoffBadge +
       '<span class="next">' + nextStr + '</span>' +
     '</div>';
   }).join('');
@@ -770,8 +856,16 @@ async function refresh() {
     const active = pg.pf_active_count || 0;
     const elite = pg.pf_elite_count || 0;
     const blocked = pg.pf_blocked_count || 0;
+    // Count engines suppressed by blowoff guard (per-TF threshold).
+    const blowoffN = engines.filter(e => e.signal_ready && isBlowoffBlocked(e)
+                                           && !e.in_position && !e.halted).length;
     const btn = $('#toggleAllEngines');
-    if (btn) btn.textContent = `Show All ${j.engine_count || 0} Engines (${active} active, ${elite} elite, ${blocked} blocked)`;
+    if (btn) {
+      let lbl = `Show All ${j.engine_count || 0} Engines (${active} active, ${elite} elite, ${blocked} blocked`;
+      if (blowoffN > 0) lbl += `, ${blowoffN} blowoff`;
+      lbl += ')';
+      btn.textContent = lbl;
+    }
 
     const fl = $('#footerLeft');
     if (fl) {

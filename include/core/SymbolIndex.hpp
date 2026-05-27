@@ -11,22 +11,25 @@ namespace chimera {
 // All others are followers. Adding a new symbol = add entry here + main.cpp.
 //
 // Session 30: Added PEPE, WIF, FET, ONDO, TIA (5 new meme/AI/RWA symbols)
+// Session 35 (AUDIT-2026-S35): Added HBAR, INJ, ADA, TRX, SEI (5 L1/DeFi)
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 17;
+static constexpr int MAX_SYMBOLS = 22;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE",
     "SUI", "APT", "NEAR", "ARB",
-    "PEPE", "WIF", "FET", "ONDO", "TIA"
+    "PEPE", "WIF", "FET", "ONDO", "TIA",
+    "HBAR", "INJ", "ADA", "TRX", "SEI"
 };
 
 // Full Binance stream names (lowercase)
 static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt",
     "suiusdt", "aptusdt", "nearusdt", "arbusdt",
-    "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt"
+    "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt",
+    "hbarusdt", "injusdt", "adausdt", "trxusdt", "seiusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -64,6 +67,11 @@ enum SymbolId : uint8_t {
     SYM_FET  = 14,
     SYM_ONDO = 15,
     SYM_TIA  = 16,
+    SYM_HBAR = 17,
+    SYM_INJ  = 18,
+    SYM_ADA  = 19,
+    SYM_TRX  = 20,
+    SYM_SEI  = 21,
     SYM_COUNT = MAX_SYMBOLS
 };
 

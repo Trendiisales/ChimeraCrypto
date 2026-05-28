@@ -5427,9 +5427,8 @@ int main() {
     g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
     g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
 
-#include "engines_s38_new.cpp"
-#include "engines_s39_new.cpp"
-#include "engines_s40_new.cpp"
+// S41: S38/S39/S40 superseded by consolidated patch (PF>=2.0 across all 4 WF windows).
+#include "engines_s41_consolidated.cpp"
 
     // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
     load_pf_data_into_slots();

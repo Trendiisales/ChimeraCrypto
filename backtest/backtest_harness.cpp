@@ -659,7 +659,7 @@ int main(int argc, char* argv[]) {
             "hbarusdt","injusdt","adausdt","trxusdt","seiusdt",
             "opusdt","maticusdt","atomusdt","filusdt","aaveusdt","uniusdt",
             "ldousdt","enausdt","jupusdt",
-            "tonusdt","dotusdt","icpusdt","rndrusdt","pythusdt","grtusdt",
+            "tonusdt","dotusdt","icpusdt","renderusdt","pythusdt","grtusdt",
             "sandusdt","manausdt","crvusdt","compusdt","mkrusdt","imxusdt",
             "stxusdt","arkmusdt","maskusdt"
         };

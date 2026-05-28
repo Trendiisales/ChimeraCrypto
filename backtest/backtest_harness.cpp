@@ -530,6 +530,23 @@ static void apply_preset_named(chimera::EdgeEngine::Config& c, const std::string
     if (p == "no_early_kill")        { apply_prod_tiered(c, hpf); c.early_kill_bp = 0.0; c.early_kill_mfe = 0.0; return; }
     if (p == "no_signal_confirm")    { apply_prod_tiered(c, hpf); c.signal_confirm_bars = 1; return; }
     if (p == "no_hard_floor")        { apply_prod_tiered(c, hpf); c.hard_floor_bp = 0.0; return; }
+    if (p == "prod_tiered_with_ek")  {
+        // S36 baseline + re-enable early_kill (old behavior on dead-on-arrival)
+        apply_prod_tiered(c, hpf);
+        c.early_kill_bp           = -25.0;
+        c.early_kill_mfe          =  15.0;
+        c.early_kill_min_hold_ms  =  0;
+        return;
+    }
+    if (p == "prod_tiered_with_ek_hf") {
+        // S36 baseline + early_kill + hard_floor (closer to old prod behavior)
+        apply_prod_tiered(c, hpf);
+        c.early_kill_bp           = -25.0;
+        c.early_kill_mfe          =  15.0;
+        c.early_kill_min_hold_ms  =  0;
+        c.hard_floor_bp           = -50.0;
+        return;
+    }
 }
 
 int main(int argc, char* argv[]) {

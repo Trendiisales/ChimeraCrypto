@@ -23,7 +23,7 @@ static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "PEPE", "WIF", "FET", "ONDO", "TIA",
     "HBAR", "INJ", "ADA", "TRX", "SEI",
     "OP", "MATIC", "ATOM", "FIL", "AAVE", "UNI", "LDO", "ENA", "JUP",
-    "TON", "DOT", "ICP", "RNDR", "PYTH", "GRT", "SAND", "MANA",
+    "TON", "DOT", "ICP", "RENDER", "PYTH", "GRT", "SAND", "MANA",
     "CRV", "COMP", "MKR", "IMX", "STX", "ARKM", "MASK"
 };
 
@@ -35,7 +35,7 @@ static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "hbarusdt", "injusdt", "adausdt", "trxusdt", "seiusdt",
     "opusdt", "maticusdt", "atomusdt", "filusdt", "aaveusdt", "uniusdt",
     "ldousdt", "enausdt", "jupusdt",
-    "tonusdt", "dotusdt", "icpusdt", "rndrusdt", "pythusdt", "grtusdt", "sandusdt", "manausdt",
+    "tonusdt", "dotusdt", "icpusdt", "renderusdt", "pythusdt", "grtusdt", "sandusdt", "manausdt",
     "crvusdt", "compusdt", "mkrusdt", "imxusdt", "stxusdt", "arkmusdt", "maskusdt"
 };
 
@@ -91,7 +91,7 @@ enum SymbolId : uint8_t {
     SYM_TON   = 31,
     SYM_DOT   = 32,
     SYM_ICP   = 33,
-    SYM_RNDR  = 34,
+    SYM_RENDER = 34,
     SYM_PYTH  = 35,
     SYM_GRT   = 36,
     SYM_SAND  = 37,

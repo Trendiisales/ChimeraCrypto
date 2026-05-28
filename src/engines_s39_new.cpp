@@ -362,16 +362,6 @@ chimera::EdgeEngine::Config s39_opusdt_tsmom_h2_cfg{
 chimera::EdgeEngine s39_opusdt_tsmom_h2(s39_opusdt_tsmom_h2_cfg);
 wire_engine(s39_opusdt_tsmom_h2);
 
-// 145688|maticusdt,H3,TSMOM,60,5,1.0|min PF=1.90|134d 2.16 n=255|180d 1.90|365d 2.24|730d 2.25
-chimera::EdgeEngine::Config s39_maticusdt_tsmom_h3_cfg{
-    .symbol="maticusdt", .tag="MATIC-TSMOM-H3", .kind=chimera::StrategyKind::TSMOM,
-    .tf_secs=10800, .lookback=60, .hold_bars=5, .sl_atr_mult=1.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_tsmom_h3(s39_maticusdt_tsmom_h3_cfg);
-wire_engine(s39_maticusdt_tsmom_h3);
-
 // 144524|hbarusdt,H2,TSMOM,60,3,1.0|min PF=1.56|134d 1.71 n=429|180d 1.56|365d 1.74|730d 1.96
 chimera::EdgeEngine::Config s39_hbarusdt_tsmom_h2_cfg{
     .symbol="hbarusdt", .tag="HBAR-TSMOM-H2", .kind=chimera::StrategyKind::TSMOM,
@@ -511,16 +501,6 @@ chimera::EdgeEngine::Config s39_ldousdt_tsmom_h12_cfg{
 };
 chimera::EdgeEngine s39_ldousdt_tsmom_h12(s39_ldousdt_tsmom_h12_cfg);
 wire_engine(s39_ldousdt_tsmom_h12);
-
-// 131915|maticusdt,H4,TSMOM,45,5,1.0|min PF=2.10|134d 2.34 n=183|180d 2.30|365d 2.54|730d 2.10
-chimera::EdgeEngine::Config s39_maticusdt_tsmom_h4_cfg{
-    .symbol="maticusdt", .tag="MATIC-TSMOM-H4", .kind=chimera::StrategyKind::TSMOM,
-    .tf_secs=14400, .lookback=45, .hold_bars=5, .sl_atr_mult=1.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_tsmom_h4(s39_maticusdt_tsmom_h4_cfg);
-wire_engine(s39_maticusdt_tsmom_h4);
 
 // 131106|aptusdt,H2,TSMOM,60,8,1.0|min PF=1.52|134d 1.52 n=448|180d 1.52|365d 1.70|730d 1.72
 chimera::EdgeEngine::Config s39_aptusdt_tsmom_h2_cfg{
@@ -682,16 +662,6 @@ chimera::EdgeEngine::Config s39_opusdt_tsmom_h4_cfg{
 chimera::EdgeEngine s39_opusdt_tsmom_h4(s39_opusdt_tsmom_h4_cfg);
 wire_engine(s39_opusdt_tsmom_h4);
 
-// 112859|maticusdt,H8,TSMOM,60,5,1.0|min PF=1.98|134d 2.23 n=82|180d 1.98|365d 3.12|730d 2.91
-chimera::EdgeEngine::Config s39_maticusdt_tsmom_h8_cfg{
-    .symbol="maticusdt", .tag="MATIC-TSMOM-H8", .kind=chimera::StrategyKind::TSMOM,
-    .tf_secs=28800, .lookback=60, .hold_bars=5, .sl_atr_mult=1.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_tsmom_h8(s39_maticusdt_tsmom_h8_cfg);
-wire_engine(s39_maticusdt_tsmom_h8);
-
 // 112813|aptusdt,H3,TSMOM,45,3,1.0|min PF=1.55|134d 1.55 n=323|180d 1.71|365d 1.64|730d 1.74
 chimera::EdgeEngine::Config s39_aptusdt_tsmom_h3_cfg{
     .symbol="aptusdt", .tag="APT-TSMOM-H3", .kind=chimera::StrategyKind::TSMOM,
@@ -741,16 +711,6 @@ chimera::EdgeEngine::Config s39_atomusdt_tsmom_h3_cfg{
 };
 chimera::EdgeEngine s39_atomusdt_tsmom_h3(s39_atomusdt_tsmom_h3_cfg);
 wire_engine(s39_atomusdt_tsmom_h3);
-
-// 102229|maticusdt,H6,TSMOM,30,3,1.0|min PF=2.01|134d 2.01 n=132|180d 2.15|365d 2.31|730d 2.11
-chimera::EdgeEngine::Config s39_maticusdt_tsmom_h6_cfg{
-    .symbol="maticusdt", .tag="MATIC-TSMOM-H6", .kind=chimera::StrategyKind::TSMOM,
-    .tf_secs=21600, .lookback=30, .hold_bars=3, .sl_atr_mult=1.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_tsmom_h6(s39_maticusdt_tsmom_h6_cfg);
-wire_engine(s39_maticusdt_tsmom_h6);
 
 // 101525|uniusdt,H2,TSMOM,12,24,3.0|min PF=1.51|134d 1.51 n=304|180d 1.60|365d 1.64|730d 1.54
 chimera::EdgeEngine::Config s39_uniusdt_tsmom_h2_cfg{
@@ -1062,16 +1022,6 @@ chimera::EdgeEngine::Config s39_atomusdt_tsmom_h6_cfg{
 chimera::EdgeEngine s39_atomusdt_tsmom_h6(s39_atomusdt_tsmom_h6_cfg);
 wire_engine(s39_atomusdt_tsmom_h6);
 
-// 84305|maticusdt,H12,TSMOM,45,5,1.0|min PF=2.30|134d 2.93 n=46|180d 3.48|365d 2.30|730d 2.69
-chimera::EdgeEngine::Config s39_maticusdt_tsmom_h12_cfg{
-    .symbol="maticusdt", .tag="MATIC-TSMOM-H12", .kind=chimera::StrategyKind::TSMOM,
-    .tf_secs=43200, .lookback=45, .hold_bars=5, .sl_atr_mult=1.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_tsmom_h12(s39_maticusdt_tsmom_h12_cfg);
-wire_engine(s39_maticusdt_tsmom_h12);
-
 // 84020|wifusdt,H2,ICHIMOKU,30,18,4.0|min PF=1.50|134d 1.50 n=86|180d 1.89|365d 1.55|730d 1.95
 chimera::EdgeEngine::Config s39_wifusdt_ichi_h2_cfg{
     .symbol="wifusdt", .tag="WIF-ICHI-H2", .kind=chimera::StrategyKind::ICHIMOKU,
@@ -1292,16 +1242,6 @@ chimera::EdgeEngine::Config s39_dogeusdt_ichi_h3_cfg{
 chimera::EdgeEngine s39_dogeusdt_ichi_h3(s39_dogeusdt_ichi_h3_cfg);
 wire_engine(s39_dogeusdt_ichi_h3);
 
-// 68377|maticusdt,H3,ICHIMOKU,18,5,3.0|min PF=1.65|134d 1.78 n=112|180d 1.65|365d 1.98|730d 2.25
-chimera::EdgeEngine::Config s39_maticusdt_ichi_h3_cfg{
-    .symbol="maticusdt", .tag="MATIC-ICHI-H3", .kind=chimera::StrategyKind::ICHIMOKU,
-    .tf_secs=10800, .lookback=18, .hold_bars=5, .sl_atr_mult=3.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_ichi_h3(s39_maticusdt_ichi_h3_cfg);
-wire_engine(s39_maticusdt_ichi_h3);
-
 // 68198|pepeusdt,D2,TSMOM,18,3,1.0|min PF=2.52|134d 4.18 n=23|180d 4.99|365d 4.45|730d 2.52
 chimera::EdgeEngine::Config s39_pepeusdt_tsmom_d2_cfg{
     .symbol="pepeusdt", .tag="PEPE-TSMOM-D2", .kind=chimera::StrategyKind::TSMOM,
@@ -1321,16 +1261,6 @@ chimera::EdgeEngine::Config s39_seiusdt_ichi_h4_cfg{
 };
 chimera::EdgeEngine s39_seiusdt_ichi_h4(s39_seiusdt_ichi_h4_cfg);
 wire_engine(s39_seiusdt_ichi_h4);
-
-// 66150|maticusdt,D1,TSMOM,6,5,1.0|min PF=2.39|134d 5.08 n=37|180d 5.00|365d 2.39|730d 2.40
-chimera::EdgeEngine::Config s39_maticusdt_tsmom_d1_cfg{
-    .symbol="maticusdt", .tag="MATIC-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
-    .tf_secs=86400, .lookback=6, .hold_bars=5, .sl_atr_mult=1.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_tsmom_d1(s39_maticusdt_tsmom_d1_cfg);
-wire_engine(s39_maticusdt_tsmom_d1);
 
 // 65439|jupusdt,H4,ICHIMOKU,12,12,1.0|min PF=1.82|134d 1.82 n=110|180d 1.95|365d 1.82|730d 1.86
 chimera::EdgeEngine::Config s39_jupusdt_ichi_h4_cfg{
@@ -1361,16 +1291,6 @@ chimera::EdgeEngine::Config s39_suiusdt_ichi_h6_cfg{
 };
 chimera::EdgeEngine s39_suiusdt_ichi_h6(s39_suiusdt_ichi_h6_cfg);
 wire_engine(s39_suiusdt_ichi_h6);
-
-// 62461|maticusdt,H4,ICHIMOKU,30,24,4.0|min PF=1.99|134d 1.99 n=81|180d 2.23|365d 3.46|730d 2.32
-chimera::EdgeEngine::Config s39_maticusdt_ichi_h4_cfg{
-    .symbol="maticusdt", .tag="MATIC-ICHI-H4", .kind=chimera::StrategyKind::ICHIMOKU,
-    .tf_secs=14400, .lookback=30, .hold_bars=24, .sl_atr_mult=4.0, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine s39_maticusdt_ichi_h4(s39_maticusdt_ichi_h4_cfg);
-wire_engine(s39_maticusdt_ichi_h4);
 
 // 61775|uniusdt,H2,ICHIMOKU,45,5,4.0|min PF=1.51|134d 1.51 n=132|180d 1.54|365d 1.52|730d 1.68
 chimera::EdgeEngine::Config s39_uniusdt_ichi_h2_cfg{
@@ -2219,7 +2139,6 @@ g_slots.push_back({chimera::SYM_AAVE, &s39_aaveusdt_tsmom_h3, "aaveusdt", 10800,
 g_slots.push_back({chimera::SYM_AAVE, &s39_aaveusdt_tsmom_h2, "aaveusdt", 7200, "AAVE-TSMOM-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_LDO, &s39_ldousdt_tsmom_h4, "ldousdt", 14400, "LDO-TSMOM-H4", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_OP, &s39_opusdt_tsmom_h2, "opusdt", 7200, "OP-TSMOM-H2", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_tsmom_h3, "maticusdt", 10800, "MATIC-TSMOM-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_HBAR, &s39_hbarusdt_tsmom_h2, "hbarusdt", 7200, "HBAR-TSMOM-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_LDO, &s39_ldousdt_tsmom_h3, "ldousdt", 10800, "LDO-TSMOM-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_UNI, &s39_uniusdt_tsmom_h3, "uniusdt", 10800, "UNI-TSMOM-H3", 0.00, 0.0, 100, 730, 39});
@@ -2234,7 +2153,6 @@ g_slots.push_back({chimera::SYM_OP, &s39_opusdt_tsmom_h3, "opusdt", 10800, "OP-T
 g_slots.push_back({chimera::SYM_ENA, &s39_enausdt_ichi_h2, "enausdt", 7200, "ENA-ICHI-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_OP, &s39_opusdt_tsmom_h1, "opusdt", 3600, "OP-TSMOM-H1", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_LDO, &s39_ldousdt_tsmom_h12, "ldousdt", 43200, "LDO-TSMOM-H12", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_tsmom_h4, "maticusdt", 14400, "MATIC-TSMOM-H4", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_APT, &s39_aptusdt_tsmom_h2, "aptusdt", 7200, "APT-TSMOM-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_ENA, &s39_enausdt_tsmom_h12, "enausdt", 43200, "ENA-TSMOM-H12", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_UNI, &s39_uniusdt_tsmom_h12, "uniusdt", 43200, "UNI-TSMOM-H12", 0.00, 0.0, 100, 730, 39});
@@ -2251,13 +2169,11 @@ g_slots.push_back({chimera::SYM_SUI, &s39_suiusdt_ichi_h3, "suiusdt", 10800, "SU
 g_slots.push_back({chimera::SYM_JUP, &s39_jupusdt_ichi_h1, "jupusdt", 3600, "JUP-ICHI-H1", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_FIL, &s39_filusdt_tsmom_h2, "filusdt", 7200, "FIL-TSMOM-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_OP, &s39_opusdt_tsmom_h4, "opusdt", 14400, "OP-TSMOM-H4", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_tsmom_h8, "maticusdt", 28800, "MATIC-TSMOM-H8", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_APT, &s39_aptusdt_tsmom_h3, "aptusdt", 10800, "APT-TSMOM-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_AAVE, &s39_aaveusdt_tsmom_h8, "aaveusdt", 28800, "AAVE-TSMOM-H8", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_ENA, &s39_enausdt_ichi_h3, "enausdt", 10800, "ENA-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_PEPE, &s39_pepeusdt_ichi_h3, "pepeusdt", 10800, "PEPE-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_ATOM, &s39_atomusdt_tsmom_h3, "atomusdt", 10800, "ATOM-TSMOM-H3", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_tsmom_h6, "maticusdt", 21600, "MATIC-TSMOM-H6", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_UNI, &s39_uniusdt_tsmom_h2, "uniusdt", 7200, "UNI-TSMOM-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_INJ, &s39_injusdt_ichi_h3, "injusdt", 10800, "INJ-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_TIA, &s39_tiausdt_ichi_h2, "tiausdt", 7200, "TIA-ICHI-H2", 0.00, 0.0, 100, 730, 39});
@@ -2289,7 +2205,6 @@ g_slots.push_back({chimera::SYM_SUI, &s39_suiusdt_ichi_h2, "suiusdt", 7200, "SUI
 g_slots.push_back({chimera::SYM_ONDO, &s39_ondousdt_tsmom_h3, "ondousdt", 10800, "ONDO-TSMOM-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_AAVE, &s39_aaveusdt_ichi_h3, "aaveusdt", 10800, "AAVE-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_ATOM, &s39_atomusdt_tsmom_h6, "atomusdt", 21600, "ATOM-TSMOM-H6", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_tsmom_h12, "maticusdt", 43200, "MATIC-TSMOM-H12", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_WIF, &s39_wifusdt_ichi_h2, "wifusdt", 7200, "WIF-ICHI-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_ENA, &s39_enausdt_ichi_h4, "enausdt", 14400, "ENA-ICHI-H4", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_AAVE, &s39_aaveusdt_ichi_h2, "aaveusdt", 7200, "AAVE-ICHI-H2", 0.00, 0.0, 100, 730, 39});
@@ -2312,14 +2227,11 @@ g_slots.push_back({chimera::SYM_WIF, &s39_wifusdt_ichi_h6, "wifusdt", 21600, "WI
 g_slots.push_back({chimera::SYM_ARB, &s39_arbusdt_ichi_h3, "arbusdt", 10800, "ARB-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_OP, &s39_opusdt_tsmom_d1, "opusdt", 86400, "OP-TSMOM-D1", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_DOGE, &s39_dogeusdt_ichi_h3, "dogeusdt", 10800, "DOGE-ICHI-H3", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_ichi_h3, "maticusdt", 10800, "MATIC-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_PEPE, &s39_pepeusdt_tsmom_d2, "pepeusdt", 172800, "PEPE-TSMOM-D2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_SEI, &s39_seiusdt_ichi_h4, "seiusdt", 14400, "SEI-ICHI-H4", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_tsmom_d1, "maticusdt", 86400, "MATIC-TSMOM-D1", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_JUP, &s39_jupusdt_ichi_h4, "jupusdt", 14400, "JUP-ICHI-H4", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_OP, &s39_opusdt_ichi_h3, "opusdt", 10800, "OP-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_SUI, &s39_suiusdt_ichi_h6, "suiusdt", 21600, "SUI-ICHI-H6", 0.00, 0.0, 100, 730, 39});
-g_slots.push_back({chimera::SYM_MATIC, &s39_maticusdt_ichi_h4, "maticusdt", 14400, "MATIC-ICHI-H4", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_UNI, &s39_uniusdt_ichi_h2, "uniusdt", 7200, "UNI-ICHI-H2", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_AVAX, &s39_avaxusdt_ichi_h3, "avaxusdt", 10800, "AVAX-ICHI-H3", 0.00, 0.0, 100, 730, 39});
 g_slots.push_back({chimera::SYM_PEPE, &s39_pepeusdt_ichi_h6, "pepeusdt", 21600, "PEPE-ICHI-H6", 0.00, 0.0, 100, 730, 39});

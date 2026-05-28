@@ -4650,6 +4650,18 @@ int main() {
     };
     chimera::EdgeEngine link_keltner_h6(link_keltner_h6_cfg); wire_engine(link_keltner_h6);
 
+    // NEAR-ICHI-H8: 5yr PF=2.92 Sh=4.67 n=192, 730d PF=2.74 365d PF=2.35
+    // 180d PF=2.45 134d PF=2.48 — VERY robust across all windows incl bear.
+    chimera::EdgeEngine::Config near_ichi_h8_cfg{
+        .symbol = "nearusdt", .tag = "NEAR-ICHI-H8",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 28800,
+        .lookback = 8, .hold_bars = 12, .sl_atr_mult = 1.5, .atr_period = 14,
+        .round_trip_bp = 22.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine near_ichi_h8(near_ichi_h8_cfg); wire_engine(near_ichi_h8);
+
     // ══════════════════════════════════════════════════════════════════════
     // ── SECTION L: SUPERTREND ENGINES (Session 29) ──────────────────────
     // ATR-based trailing trend indicator. Enters on flip from bearish to
@@ -5375,6 +5387,7 @@ int main() {
     g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
     g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
     g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
+    g_slots.push_back({chimera::SYM_NEAR, &near_ichi_h8, "nearusdt", 28800, "NEAR-ICHI-H8", 2.92, 4.67, 89, 192, 37});  // S37: bear-stress passed all 4 windows PF>=2.35
 
     // SuperTrend engines (6) — Session 29
 

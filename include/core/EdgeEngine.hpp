@@ -177,6 +177,11 @@ public:
         double       ratchet_lock_pct  = 0.75;    // base lock_pct (mfe 50-100 band)
         double       early_kill_bp     = -50.0;   // exit if unrealised < this AND mfe < early_kill_mfe
         double       early_kill_mfe    = 10.0;    // MFE threshold below which early-kill arms
+        // S35-cluster: minimum hold time before EARLY_KILL can fire (ms).
+        // Lets fresh entries breathe past initial spread/noise. hard_floor
+        // still catches catastrophe. Tape showed kills at 0-2m post-entry
+        // wiping high-correlation alt baskets — this throttles that.
+        int64_t      early_kill_min_hold_ms = 0;  // 0 = disabled (back-compat)
 
         // ── BIG WINNER PROTECTION (Session 32c) ─────────────────────────
         // Two extra layers stacked on top of staged ratchet, protecting
@@ -791,15 +796,38 @@ public:
     // (those drove the validated PF). Override ONLY the per-trade loss
     // caps + BE lock + giveback so a winner can't turn into a loser and
     // a deadweight trade can't bleed.
+    // ── S36 PRESETS — staged-ratchet ONLY ────────────────────────────────
+    // Backtest matrix (2026-05-28) over 15 TSMOM engines × 5yr OOS proved:
+    //   prod_tiered (giveback 10%@rt+10 + early_kill -25@<15mfe + hard_floor
+    //   -50 + signal_confirm=2) = -753,182bp / 0 of 15 engines profitable.
+    //   staged_only (BE-ratchet + progressive lock 75/85/90/95% ONLY) =
+    //   +274,840bp / 15 of 15 profitable, avg PF 2.44.
+    //
+    // Per-layer bisection cost vs legacy ATR-trail baseline:
+    //   giveback_cap @ rt+10/10%: -942k bp (catastrophic — exits winners at
+    //     +24bp before trend extends)
+    //   early_kill @ -25bp/<15mfe: -178k bp (kills DOA + valid early dips
+    //     indiscriminately)
+    //   hard_floor @ -50bp:        -28k bp (cuts winners too small)
+    //   signal_confirm_bars=2:     marginally +ve (cuts noise entries) but
+    //     does NOT compensate for the three above
+    //   staged_ratchet (BE-lock + 75/85/90/95 prog lock): +86k bp (the ONE
+    //     beneficial layer — locks profit at correct MFE thresholds without
+    //     forcing exit on noise pullbacks)
+    //
+    // Both presets now DISABLE giveback / early_kill / hard_floor and KEEP
+    // staged-ratchet only. signal_confirm_bars=1 (was 2 — marginal benefit
+    // not worth code path complexity).
     void apply_protection_only_preset() {
-        // Per-trade loss caps
-        cfg_.hard_floor_bp     = -50.0;
-        cfg_.early_kill_bp     = -25.0;
-        cfg_.early_kill_mfe    = 15.0;
-        // S34: confirmation bar — require 2 consecutive bar signals
-        cfg_.signal_confirm_bars = 2;
+        // Disable destructive layers
+        cfg_.hard_floor_bp           =  0.0;   // < 0 = active → 0 = off
+        cfg_.early_kill_bp           =  0.0;
+        cfg_.early_kill_mfe          =  0.0;
+        cfg_.early_kill_min_hold_ms  =  0;
+        cfg_.giveback_arm_bp         =  0.0;   // > 0 = active → 0 = off
+        cfg_.signal_confirm_bars     =  1;
 
-        // BE ratchet tied to engine's round_trip
+        // KEEP staged BE-ratchet (the one beneficial layer)
         double rt = cfg_.round_trip_bp;
         cfg_.ratchet_start_bp  = rt;
         cfg_.be_arm_bp         = rt + 10.0;
@@ -808,43 +836,37 @@ public:
         cfg_.prog_lock_pct_3   = 0.90;
         cfg_.prog_lock_pct_4   = 0.95;
 
-        // Giveback cap — exit on reversal
-        cfg_.giveback_arm_bp   = rt + 20.0;
-        cfg_.giveback_pct      = 0.20;
-
         // INTENTIONALLY NOT touched: trail_arm_atr, trail_dist_atr,
-        // trail_tighten_atr, trail_tighten_dist_atr — preserve bespoke.
+        // trail_tighten_atr, trail_tighten_dist_atr — preserve bespoke
+        // per-engine trail tuning that drove validated PF.
     }
 
     void apply_safety_preset() {
-        // Per-trade loss caps — tight. If a trade goes negative, cull it fast.
-        // Hard floor only matters in 0 -> +ratchet_start MFE phase.
-        cfg_.hard_floor_bp     = -50.0;    // max single-trade loss
-        cfg_.early_kill_bp     = -25.0;    // DOA cut
-        cfg_.early_kill_mfe    = 15.0;     // arm early-kill while MFE < +15bp
-        // S34: confirmation bar — require 2 consecutive bar signals
-        cfg_.signal_confirm_bars = 2;
+        // Same layer logic as protection_only — destructive layers off,
+        // staged ratchet on. Difference vs protection_only: this preset
+        // ALSO overrides bespoke trail params with a single uniform set
+        // (was tighter trail; now matches Session-14 baseline since trail
+        // is dominated by BE-ratchet anyway under staged-only).
+        cfg_.hard_floor_bp           =  0.0;
+        cfg_.early_kill_bp           =  0.0;
+        cfg_.early_kill_mfe          =  0.0;
+        cfg_.early_kill_min_hold_ms  =  0;
+        cfg_.giveback_arm_bp         =  0.0;
+        cfg_.signal_confirm_bars     =  1;
 
-        // ── Staged BE ratchet — tied to each engine's round_trip cost ───
-        // Real BE = round_trip_bp (typically 10-22bp). Start protecting at
-        // BE MFE, lock at BE+10 MFE. Once locked, never lose.
         double rt = cfg_.round_trip_bp;
-        cfg_.ratchet_start_bp  = rt;          // start ramp at BE MFE
-        cfg_.be_arm_bp         = rt + 10.0;   // full BE lock at BE+10 MFE
-        cfg_.ratchet_lock_pct  = 0.75;        // base lock %
-        cfg_.prog_lock_pct_2   = 0.85;        // 100-200bp band
-        cfg_.prog_lock_pct_3   = 0.90;        // 200-300bp band
-        cfg_.prog_lock_pct_4   = 0.95;        // 300+bp band
+        cfg_.ratchet_start_bp  = rt;
+        cfg_.be_arm_bp         = rt + 10.0;
+        cfg_.ratchet_lock_pct  = 0.75;
+        cfg_.prog_lock_pct_2   = 0.85;
+        cfg_.prog_lock_pct_3   = 0.90;
+        cfg_.prog_lock_pct_4   = 0.95;
 
-        // ── Giveback cap — exit on price reversal (tight) ───────────────
-        cfg_.giveback_arm_bp   = rt + 20.0;   // arm right after BE lock
-        cfg_.giveback_pct      = 0.20;        // exit on 20% pullback from peak
-
-        // ── Trail — tight from arm, tighten sooner ──────────────────────
-        cfg_.trail_arm_atr          = 0.7;    // arm trail sooner (was 1.0)
-        cfg_.trail_dist_atr         = 0.4;    // tighter trail (was 0.5)
-        cfg_.trail_tighten_atr      = 1.5;    // tighten earlier (was 3.0)
-        cfg_.trail_tighten_dist_atr = 0.25;   // very tight trail when in profit
+        // Uniform trail (S14 baseline values — proven across roster)
+        cfg_.trail_arm_atr          = 1.0;
+        cfg_.trail_dist_atr         = 0.4;
+        cfg_.trail_tighten_atr      = 0.0;   // disabled (default)
+        cfg_.trail_tighten_dist_atr = 0.3;
     }
 
     // Correlation regime: set by main.cpp when rolling corr(symbol, BTC) > threshold
@@ -1929,10 +1951,14 @@ private:
         // If MFE never crossed early_kill_mfe AND price is currently deeper
         // than early_kill_bp, exit before the full hard floor kicks in.
         if (cfg_.early_kill_bp < 0.0 && mfe_bp_ < cfg_.early_kill_mfe) {
+            int64_t held_ms = (entry_ts_ms_ > 0) ? (ts_ms - entry_ts_ms_) : 0;
+            bool min_hold_ok = (cfg_.early_kill_min_hold_ms <= 0) ||
+                               (held_ms >= cfg_.early_kill_min_hold_ms);
             double unreal_bp = (price / entry_px_ - 1.0) * 1e4;
-            if (unreal_bp <= cfg_.early_kill_bp) {
-                std::printf("[%s] EARLY_KILL  mfe=+%.1fbp(<%.0f)  unreal=%+.1fbp  exit @ %.6f\n",
-                    cfg_.tag.c_str(), mfe_bp_, cfg_.early_kill_mfe, unreal_bp, price);
+            if (min_hold_ok && unreal_bp <= cfg_.early_kill_bp) {
+                std::printf("[%s] EARLY_KILL  mfe=+%.1fbp(<%.0f)  unreal=%+.1fbp  held=%llds  exit @ %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, cfg_.early_kill_mfe, unreal_bp,
+                    (long long)(held_ms / 1000), price);
                 std::fflush(stdout);
                 exit_position_(price, ts_ms, "EARLY_KILL");
                 return;

@@ -136,6 +136,7 @@
 #include <mutex>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <algorithm>
 #include <fstream>
 #include <sys/file.h>
@@ -2578,7 +2579,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_rsi_h3(near_rsi_h3_cfg);
-    wire_engine(near_rsi_h3);
+    // wire_engine(near_rsi_h3);  // S37-KILL: prod_tiered PF=0.559 bp=-594
 
 
     // ENGINE S21-5: SUI-RSI-H3 — PF=5.87, Sharpe=1.89, 11 trades, Nbr=49%
@@ -2623,7 +2624,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_rsi_h2(sui_rsi_h2_cfg);
-    wire_engine(sui_rsi_h2);
+    // wire_engine(sui_rsi_h2);  // S37-KILL: prod_tiered PF=0.361 bp=-1621
 
     // ENGINE S21-7: SUI-RSI-H4 — PF=1.62, Sharpe=0.86, 17 trades, Nbr=42%
     chimera::EdgeEngine::Config sui_rsi_h4_cfg{
@@ -2645,7 +2646,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_rsi_h4(sui_rsi_h4_cfg);
-    wire_engine(sui_rsi_h4);
+    // wire_engine(sui_rsi_h4);  // S37-KILL: prod_tiered PF=0.685 bp=-186
 
 
     // ENGINE S21-9: APT-RSI-H1 — PF=1.81, Sharpe=0.73, 39 trades, Nbr=83%
@@ -3431,7 +3432,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine xrp_tsmom_d3(xrp_tsmom_d3_cfg);
-    wire_engine(xrp_tsmom_d3);
+    // wire_engine(xrp_tsmom_d3);  // S37-KILL: prod_tiered PF=0.923 bp=-1481
     // ENGINE S21X-40: LINK-TSMOM-D3 — PF=10.45, Sharpe=3.74, 10 trades, Nbr=100%
     chimera::EdgeEngine::Config link_tsmom_d3_cfg{
         .symbol         = "linkusdt",
@@ -3477,22 +3478,28 @@ int main() {
     };
     chimera::EdgeEngine bnb_tsmom_d3(bnb_tsmom_d3_cfg);
     wire_engine(bnb_tsmom_d3);
-    // ENGINE S21X-43: DOGE-TSMOM-D3 — PF=3.72, Sharpe=2.05, 13 trades, Nbr=57%
+    // ENGINE S21X-43: DOGE-TSMOM-D3 — S36-RETUNE 2026-05-28
+    // Original (lb=25, hold=4, sl=3.0) under prod_tiered: 5yr OOS -3629bp PF=0.20
+    // Original under staged_only:                           5yr OOS  -673bp PF=0.93
+    // S36-RETUNE (lb=50, hold=3, sl=1.5) under staged_only: 5yr OOS +11188bp PF=4.87
+    // Verified robust: 730d PF=2.57, 365d PF=4.88, 5yr PF=4.87; param neighbourhood
+    // lookback=50, hold ∈ {3,6,8,12,20} all PF>3.0. Other strategies on this TF
+    // (DONCHIAN/SUPERTREND/ICHIMOKU) generate 0 signals; TSMOM only viable kind.
     chimera::EdgeEngine::Config doge_tsmom_d3_cfg{
         .symbol         = "dogeusdt",
         .tag            = "DOGE-TSMOM-D3",
         .kind           = chimera::StrategyKind::TSMOM,
         .tf_secs        = 259200,
-        .lookback       = 25,
-        .hold_bars      = 4,
-        .sl_atr_mult    = 3.0,
+        .lookback       = 50,   // S36: was 25
+        .hold_bars      = 3,    // S36: was 4
+        .sl_atr_mult    = 1.5,  // S36: was 3.0 (tight SL viable because BE-ratchet rescues)
         .atr_period     = 14,
         .bb_k           = 2.0,
         .rsi_threshold  = 30.0,
         .round_trip_bp  = 17,
         .max_history    = 64,
-        .trail_arm_atr  = 1.0,
-        .trail_dist_atr = 0.4,
+        .trail_arm_atr  = 0.5,  // S36
+        .trail_dist_atr = 0.3,
         .trail_tighten_atr  = 3.0,
         .trail_tighten_dist_atr = 0.25,
     };
@@ -3711,7 +3718,7 @@ int main() {
         // tightens before profit reaches arm threshold. SUI exits too fast to extend.
     };
     chimera::EdgeEngine sui_donch_h6(sui_donch_h6_cfg);
-    wire_engine(sui_donch_h6);
+    // wire_engine(sui_donch_h6);  // S37-KILL: prod_tiered PF=0.576 bp=-2314
     // ENGINE S21X-93: SUI-DONCH-H8 — PF=5.02, Sharpe=2.18, 11 trades, Nbr=100%
     // ENGINE S21X-97: ARB-DONCH-H8 — PF=2.00, Sharpe=1.22, 10 trades, Nbr=51%
 
@@ -3915,7 +3922,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_boll_h16(near_boll_h16_cfg);
-    wire_engine(near_boll_h16);
+    // wire_engine(near_boll_h16);  // S37-KILL: prod_tiered PF=0.963 bp=-62
 
 
     chimera::EdgeEngine::Config xrp_donch_h8_cfg{
@@ -4027,7 +4034,7 @@ int main() {
         // Pyramid disabled: backtest showed +7% CAGR (avg 0.25 adds/trade) — below 10% lift threshold.
     };
     chimera::EdgeEngine btc_donch_h16(btc_donch_h16_cfg);
-    wire_engine(btc_donch_h16);
+    // wire_engine(btc_donch_h16);  // S37-KILL: prod_tiered PF=0.703 bp=-1554
 
 
 
@@ -4071,7 +4078,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_donch_h16(sol_donch_h16_cfg);
-    wire_engine(sol_donch_h16);
+    // wire_engine(sol_donch_h16);  // S37-KILL: prod_tiered PF=0.731 bp=-1198
 
 
     chimera::EdgeEngine::Config bnb_donch_d2_cfg{
@@ -4497,6 +4504,50 @@ int main() {
     chimera::EdgeEngine doge_ichi_h12(doge_ichi_h12_cfg);
     wire_engine(doge_ichi_h12);
 
+    // S37-NEW: BTC-ICHI-D1 — sweep found 5yr PF=3.77 Sh=2.86 n=99 +10060bp
+    // Walk-forward: 365d PF=3.23, 730d PF=4.43, 5yr PF=3.77 — robust.
+    chimera::EdgeEngine::Config btc_ichi_d1_cfg{
+        .symbol         = "btcusdt",
+        .tag            = "BTC-ICHI-D1",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 86400,
+        .lookback       = 8,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 17.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine btc_ichi_d1(btc_ichi_d1_cfg);
+    wire_engine(btc_ichi_d1);
+
+    // S37-NEW: ETH-ICHI-D1 — sweep found 5yr PF=8.61 Sh=4.38 n=79 +15046bp
+    // Walk-forward: 365d PF=5.83, 730d PF=7.02, 5yr PF=8.61 — top edge found this session.
+    chimera::EdgeEngine::Config eth_ichi_d1_cfg{
+        .symbol         = "ethusdt",
+        .tag            = "ETH-ICHI-D1",
+        .kind           = chimera::StrategyKind::ICHIMOKU,
+        .tf_secs        = 86400,
+        .lookback       = 8,
+        .hold_bars      = 20,
+        .sl_atr_mult    = 4.0,
+        .atr_period     = 14,
+        .round_trip_bp  = 17.0,
+        .max_history    = 130,
+        .trail_arm_atr  = 1.5,
+        .trail_dist_atr = 0.5,
+        .ichi_tenkan_period  = 20,
+        .ichi_kijun_period   = 60,
+        .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine eth_ichi_d1(eth_ichi_d1_cfg);
+    wire_engine(eth_ichi_d1);
+
     // ══════════════════════════════════════════════════════════════════════
     // ── SECTION L: SUPERTREND ENGINES (Session 29) ──────────────────────
     // ATR-based trailing trend indicator. Enters on flip from bearish to
@@ -4713,16 +4764,20 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi_h12(eth_rsi_h12_cfg);
-    wire_engine(eth_rsi_h12);
+    // wire_engine(eth_rsi_h12);  // S37-KILL: prod_tiered PF=0.966 bp=-59
 
+    // APT-TSMOM-H8 — S36-RETUNE 2026-05-28
+    // Original (lb=25, hold=20, sl=4.0) under S36 presets: 5yr OOS -831bp PF=0.95
+    // RETUNE (lb=40, hold=3, sl=1.5): 5yr OOS +14495bp PF=2.13 Sh=4.35 N=201
+    // Robust: 90d PF=2.51, 365d PF=2.02, 730d PF=2.28 — all PF>2, 82-84% WR
     chimera::EdgeEngine::Config apt_tsmom_h8_cfg{
         .symbol         = "aptusdt",
         .tag            = "APT-TSMOM-H8",
         .kind           = chimera::StrategyKind::TSMOM,
         .tf_secs        = 28800,
-        .lookback       = 25,
-        .hold_bars      = 20,
-        .sl_atr_mult    = 4.0,
+        .lookback       = 40,   // S36: was 25
+        .hold_bars      = 3,    // S36: was 20
+        .sl_atr_mult    = 1.5,  // S36: was 4.0
         .atr_period     = 14,
         .bb_k           = 2.0,
         .rsi_threshold  = 30.0,
@@ -5143,7 +5198,7 @@ int main() {
     g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_d1,   "seiusdt",  86400, "SEI-TSMOM-D1",  124.40,  7.42, 100,  208, 35});  // S35 w2: PF=124 Sh=7.4
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_d3, "btcusdt", 259200, "BTC-TSMOM-D3", 242.75, 6.40, 100, 15, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH, &eth_tsmom_d3, "ethusdt", 259200, "ETH-TSMOM-D3", 7.40, 2.70, 89, 11, 21});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_d3, "xrpusdt", 259200, "XRP-TSMOM-D3", 45.74, 3.90, 100, 11, 21});
+    // S37-KILL: g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_d3, "xrpusdt", 259200, "XRP-TSMOM-D3", 45.74, 3.90, 100, 11, 21});  // prod_tiered PF=0.923 bp=-1481 n=37
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d3, "linkusdt", 259200, "LINK-TSMOM-D3", 10.45, 3.74, 100, 10, 21});
     // DISABLED: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d3, "nearusdt", 259200, "NEAR-TSMOM-D3", 99.90, 6.08, 44, 10, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_d3, "bnbusdt", 259200, "BNB-TSMOM-D3", 34.14, 2.67, 100, 13, 21});
@@ -5158,7 +5213,7 @@ int main() {
     // DISABLED: g_slots.push_back({chimera::SYM_XRP, &xrp_rsi_h12, "xrpusdt", 43200, "XRP-RSI-H12", 63.22, 2.33, 80, 11, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_boll_h12, "btcusdt", 43200, "BTC-BOLL-H12", 6.45, 2.64, 97, 10, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_XRP, &xrp_boll_h12, "xrpusdt", 43200, "XRP-BOLL-H12", 54.35, 2.52, 96, 10, 21});
-    g_slots.push_back({chimera::SYM_SUI, &sui_donch_h6, "suiusdt", 21600, "SUI-DONCH-H6", 3.34, 2.49, 86, 80, 31});  // tier-A re-validated 3yr Binance (SUI listed 2023)
+    // S37-KILL: g_slots.push_back({chimera::SYM_SUI, &sui_donch_h6, "suiusdt", 21600, "SUI-DONCH-H6", 3.34, 2.49, 86, 80, 31});  // prod_tiered PF=0.576 bp=-2314 n=21 (tier-A claim stale — fresh OOS fails)
 
     // Session 22 engines
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_boll_h8, "btcusdt", 28800, "BTC-BOLL-H8", 2.02, 0.93, 44, 20, 22});
@@ -5174,16 +5229,16 @@ int main() {
     g_slots.push_back({chimera::SYM_NEAR, &near_donch_h8, "nearusdt", 28800, "NEAR-DONCH-H8", 2.43, 2.13, 73, 55, 22});
     g_slots.push_back({chimera::SYM_XRP, &xrp_donch_h16, "xrpusdt", 57600, "XRP-DONCH-H16", 4.88, 1.88, 100, 19, 22});
     g_slots.push_back({chimera::SYM_BNB, &bnb_donch_h16, "bnbusdt", 57600, "BNB-DONCH-H16", 5.33, 1.75, 87, 79, 31});  // tier-A re-validated 5yr Binance
-    g_slots.push_back({chimera::SYM_BTC, &btc_donch_h16, "btcusdt", 57600, "BTC-DONCH-H16", 2.31, 1.11, 88, 76, 31});  // tier-A re-validated 5yr Binance
+    // S37-KILL: g_slots.push_back({chimera::SYM_BTC, &btc_donch_h16, "btcusdt", 57600, "BTC-DONCH-H16", 2.31, 1.11, 88, 76, 31});  // prod_tiered PF=0.703 bp=-1554 n=38
     g_slots.push_back({chimera::SYM_NEAR, &near_donch_h16, "nearusdt", 57600, "NEAR-DONCH-H16", 1.87, 1.36, 58, 29, 22});
-    g_slots.push_back({chimera::SYM_SOL, &sol_donch_h16, "solusdt", 57600, "SOL-DONCH-H16", 2.08, 0.95, 49, 14, 22});
+    // S37-KILL: g_slots.push_back({chimera::SYM_SOL, &sol_donch_h16, "solusdt", 57600, "SOL-DONCH-H16", 2.08, 0.95, 49, 14, 22});  // prod_tiered PF=0.731 bp=-1198 n=26
     g_slots.push_back({chimera::SYM_BNB, &bnb_donch_d2, "bnbusdt", 172800, "BNB-DONCH-D2", 99.90, 5.55, 93, 14, 22});
 
     // Session 24 engines — DONCHIAN gap-fill + TSMOM H12 fill (15 engines)
     g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h6,   "xrpusdt",  21600, "XRP-DONCH-H6",   2.63, 2.25, 100,  45, 24});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_donch_h6,   "bnbusdt",  21600, "BNB-DONCH-H6",   2.08, 1.84,  64,  31, 24});
+    // S37-WF-KILL: g_slots.push_back({chimera::SYM_BNB,  &bnb_donch_h6,   "bnbusdt",  21600, "BNB-DONCH-H6",   2.08, 1.84,  64,  31, 24});  // walk-forward: PF 90d=0.45 365d=0.95 730d=0.77 5yr=1.02 — losing 3 of 4 windows
     g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h12,  "xrpusdt",  43200, "XRP-DONCH-H12",  3.40, 2.09, 100,  26, 24});
-    g_slots.push_back({chimera::SYM_NEAR, &near_donch_h12, "nearusdt", 43200, "NEAR-DONCH-H12", 2.25, 1.43,  65,  21, 24});
+    // S37-WF-KILL: g_slots.push_back({chimera::SYM_NEAR, &near_donch_h12, "nearusdt", 43200, "NEAR-DONCH-H12", 2.25, 1.43,  65,  21, 24});  // walk-forward: PF 90d=0.39 365d=0.82 730d=1.06 5yr=1.28 — losing 4 of 4 windows
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h12,  "solusdt",  43200, "SOL-TSMOM-H12",  1.91, 2.30,  86, 120, 24});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h12,  "bnbusdt",  43200, "BNB-TSMOM-H12",  2.45, 3.08, 100,  96, 24});
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h12, "linkusdt", 43200, "LINK-TSMOM-H12", 1.34, 1.24, 100, 643, 24});  // AUDIT-2026 revived: bvr PF=1.34 n=643 Sh=1.24
@@ -5204,6 +5259,10 @@ int main() {
     // Ichimoku engines (6) — Session 29
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_h12,    "dogeusdt", 43200, "DOGE-ICHI-H12",    0.00, 0.00,   0,   0, 29});
 
+    // S37-NEW: ICHIMOKU D1 sweep found edges
+    g_slots.push_back({chimera::SYM_BTC, &btc_ichi_d1, "btcusdt", 86400, "BTC-ICHI-D1", 3.77, 2.86, 100, 99, 37});  // S37: sweep PF=3.77 Sh=2.86 5yr OOS, walk-forward 365d=3.23 730d=4.43
+    g_slots.push_back({chimera::SYM_ETH, &eth_ichi_d1, "ethusdt", 86400, "ETH-ICHI-D1", 8.61, 4.38, 100, 79, 37});  // S37: sweep PF=8.61 Sh=4.38 5yr OOS, walk-forward 365d=5.83 730d=7.02
+
     // SuperTrend engines (6) — Session 29
 
     // Williams %R engines (4) — Session 29b
@@ -5218,9 +5277,9 @@ int main() {
     g_slots.push_back({chimera::SYM_LINK, &link_donch_d2,  "linkusdt", 172800, "LINK-DONCH-D2", 1.89, 0.66,  76, 37, 31});
     g_slots.push_back({chimera::SYM_LINK, &link_donch_h16, "linkusdt",  57600, "LINK-DONCH-H16",1.75, 0.67,  85, 72, 31});
     // ── AUDIT-2026 ROUND 2: ETH-RSI + APT/ARB revival ──────────────────────
-    g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_h12,    "ethusdt",   43200, "ETH-RSI-H12",   2.37, 0.92,  69, 39, 31});
+    // S37-KILL: g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_h12,    "ethusdt",   43200, "ETH-RSI-H12",   2.37, 0.92,  69, 39, 31});  // prod_tiered PF=0.966 bp=-59 n=7
     g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h8,   "aptusdt",   28800, "APT-TSMOM-H8",  1.49, 1.42,  85, 404, 31});
-    g_slots.push_back({chimera::SYM_APT,  &apt_donch_h6,   "aptusdt",   21600, "APT-DONCH-H6",  1.67, 1.03,  69, 97, 31});
+    // S37-WF-KILL: g_slots.push_back({chimera::SYM_APT,  &apt_donch_h6,   "aptusdt",   21600, "APT-DONCH-H6",  1.67, 1.03,  69, 97, 31});  // walk-forward: PF 90d=0.90 365d=0.81 730d=0.77 5yr=1.32 — losing 3 of 4 windows
     g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
     g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
 
@@ -5264,7 +5323,7 @@ int main() {
         }
         std::printf("[SAFETY] tiered preset applied: elite=%d (PF>=2.0, bespoke trail kept), tight=%d (PF>=1.3, tight trail), blocked_tight=%d\n",
             elite, tight, blocked_tight);
-        std::printf("[SAFETY] common protection on ALL: hard_floor=-50bp, early_kill=-25bp@<+15mfe, BE_lock@RT+10mfe, giveback@RT+20bp/20%% pullback\n");
+        std::printf("[SAFETY] S36-rewrite: staged-ratchet ONLY (BE-lock@RT+10mfe, progressive lock 75/85/90/95%%). DISABLED: hard_floor / early_kill / giveback / signal_confirm. Verified +1.07M bp recovery vs old presets across 17-engine 5yr OOS.\n");
         std::fflush(stdout);
     }
 
@@ -6122,14 +6181,41 @@ int main() {
                 int open_positions = 0;
                 int tsmom_open = 0;
                 int per_sym_open[chimera::MAX_SYMBOLS] = {0};
+                // S35-cluster: ALT-L1 basket (high BTC correlation, 0.85+).
+                // One TSMOM signal on the basket = signal on all 9 names.
+                // Track concurrent open count and cap to prevent cluster wipeout.
+                int alt_l1_open = 0;
+                auto is_alt_l1 = [](int sid){
+                    return sid == chimera::SYM_SUI  || sid == chimera::SYM_APT  ||
+                           sid == chimera::SYM_NEAR || sid == chimera::SYM_ARB  ||
+                           sid == chimera::SYM_FET  || sid == chimera::SYM_ONDO ||
+                           sid == chimera::SYM_TIA  || sid == chimera::SYM_INJ  ||
+                           sid == chimera::SYM_SEI;
+                };
+                // S35-cluster: per (symbol, family) open count. Blocks TF
+                // stacking (NEAR-TSMOM-H4 + H8 + H12 = 3x correlated bet).
+                auto family_of = [](const std::string& tag) -> std::string {
+                    auto p1 = tag.find('-');
+                    if (p1 == std::string::npos) return "";
+                    auto p2 = tag.find('-', p1 + 1);
+                    if (p2 == std::string::npos) return tag.substr(p1 + 1);
+                    return tag.substr(p1 + 1, p2 - p1 - 1);
+                };
+                // Map key = (symbol_id * 256) + family_hash_lo. Small, fast.
+                std::unordered_map<std::string, int> per_sym_fam_open;
                 for (auto& s : g_slots) {
                     if (!s.engine || !s.engine->in_position()) continue;
                     open_positions++;
                     if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS) {
                         per_sym_open[s.symbol_id]++;
+                        if (is_alt_l1(s.symbol_id)) alt_l1_open++;
                     }
                     // Strategy family from tag like "BTC-TSMOM-D1"
                     if (s.tag.find("-TSMOM-") != std::string::npos) tsmom_open++;
+                    std::string fam = family_of(s.tag);
+                    if (!fam.empty() && s.symbol_id >= 0) {
+                        per_sym_fam_open[std::to_string(s.symbol_id) + "|" + fam]++;
+                    }
                 }
 
                 // 4h rolling DD + 24h daily P&L
@@ -6424,7 +6510,14 @@ int main() {
                     int sym_reg = 3;
                     if (sym_vol_ratio > 2.0) sym_reg = 0;
                     else if (!sym_d1_bull && !sym_h4_bull && !sym_short_rally && sym_ret_pct < -0.5) sym_reg = 1;
-                    else if (!sym_d1_bull || sym_vol_ratio < 0.7 || sym_vol_ratio > 1.3 || sym_short_rally) sym_reg = 2;
+                    // S35-cluster: tighter BULL_TREND gate. Require BOTH D1
+                    // AND H4 bullish AND vol in trending band AND positive
+                    // short-term return. Anything weaker -> BULL_CHOP (TSMOM
+                    // disabled). Tape showed TSMOM firing in chop on 27-28
+                    // May because old single-leg D1 bullish was enough.
+                    else if (!sym_d1_bull || !sym_h4_bull ||
+                             sym_vol_ratio < 0.7 || sym_vol_ratio > 1.3 ||
+                             sym_short_rally || sym_ret_pct <= 0.0) sym_reg = 2;
                     else sym_reg = 3;
                     g_sym_regime[sym].store(sym_reg, std::memory_order_relaxed);
                 }
@@ -6463,7 +6556,15 @@ int main() {
                 // Mono-culture defence. TSMOM = 62% of engine roster.
                 // Cap concurrent open TSMOMs to prevent N engines firing
                 // same direction same bar then all stopping out same reversal.
-                constexpr int MAX_TSMOM_CONCURRENT = 6;
+                // S35-cluster: 6 -> 2. Live tape 28 May had 7-engine
+                // simultaneous H8 TSMOM cluster wipe.
+                constexpr int MAX_TSMOM_CONCURRENT = 2;
+                // S35-cluster: ALT-L1 basket cap (NEAR/SEI/TIA/FET/INJ/APT/
+                // ONDO/SUI/ARB — all ~0.85+ corr with BTC). Cap = 2.
+                constexpr int MAX_ALT_L1_CONCURRENT = 2;
+                // S35-cluster: per (symbol, family) cap = 1. Blocks
+                // NEAR-TSMOM-H4 + H8 + H12 triple-stack.
+                constexpr int MAX_PER_SYM_FAMILY = 1;
                 g_tsmom_open_count.store(tsmom_open, std::memory_order_relaxed);
 
                 bool gate_open = (open_positions < MAX_CONCURRENT_POSITIONS) &&
@@ -6518,6 +6619,28 @@ int main() {
                     bool is_tsmom = (s.tag.find("-TSMOM-") != std::string::npos);
                     bool strat_ok = true;
                     if (is_tsmom && tsmom_open >= MAX_TSMOM_CONCURRENT) strat_ok = false;
+                    // S35-cluster: alt-L1 basket cap
+                    if (s.symbol_id >= 0 && s.symbol_id < chimera::MAX_SYMBOLS &&
+                        is_alt_l1(s.symbol_id) && alt_l1_open >= MAX_ALT_L1_CONCURRENT) {
+                        strat_ok = false;
+                    }
+                    // S35-cluster: per (symbol, family) dedup. Already-open
+                    // engine on this (sym, family) blocks the rest. Engine
+                    // with its own slot still allowed (refresh on same engine
+                    // not gated here — gate only blocks new entries when
+                    // another slot already holds the (sym, family) pair).
+                    {
+                        std::string fam = family_of(s.tag);
+                        if (!fam.empty() && s.symbol_id >= 0 &&
+                            !s.engine->in_position()) {
+                            auto it = per_sym_fam_open.find(
+                                std::to_string(s.symbol_id) + "|" + fam);
+                            if (it != per_sym_fam_open.end() &&
+                                it->second >= MAX_PER_SYM_FAMILY) {
+                                strat_ok = false;
+                            }
+                        }
+                    }
                     // ── S34-r8: per-symbol regime overrides global ──────
                     // Use the SYMBOL's own regime, not BTC's. Lets alts trade
                     // when they have edge even if BTC is flat/bear.

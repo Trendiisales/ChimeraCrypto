@@ -389,6 +389,11 @@ const SYMBOLS = [
   { full: 'fetusdt',  short: 'FET'  },
   { full: 'ondousdt', short: 'ONDO' },
   { full: 'tiausdt',  short: 'TIA'  },
+  { full: 'hbarusdt', short: 'HBAR' },
+  { full: 'injusdt',  short: 'INJ'  },
+  { full: 'adausdt',  short: 'ADA'  },
+  { full: 'trxusdt',  short: 'TRX'  },
+  { full: 'seiusdt',  short: 'SEI'  },
 ];
 
 const TF_LABELS = { 604800:'W1', 259200:'D3', 172800:'D2', 86400:'D1', 57600:'H16', 43200:'H12', 28800:'H8', 21600:'H6', 14400:'H4', 10800:'H3', 7200:'H2', 3600:'H1' };
@@ -417,6 +422,16 @@ function fmtPx(v) {
   if (v >= 0.001)  return v.toFixed(6);
   if (v >= 0.00001) return v.toFixed(8);
   return v.toFixed(10);
+}
+// Compact form for narrow ticker chips — sub-cent prices in scientific notation.
+function fmtPxTicker(v) {
+  if (v == null || isNaN(v) || v <= 0) return '---';
+  if (v < 0.001) {
+    // e.g. 0.00000347 -> "3.47e-6"
+    const exp = v.toExponential(2);              // "3.47e-6"
+    return exp.replace('e+', 'e').replace('e-0', 'e-').replace('e+0', 'e');
+  }
+  return fmtPx(v);
 }
 function fmtBp(v) {
   if (v == null || isNaN(v)) return '+0.0';
@@ -511,7 +526,7 @@ function renderTicker(spot) {
     let cls = 'flat';
     if (px && prev && px > prev) cls = 'up';
     else if (px && prev && px < prev) cls = 'down';
-    return '<div class="tick"><div class="sym">' + s.short + '</div><div class="px ' + cls + '">' + (px ? fmtPx(px) : '---') + '</div></div>';
+    return '<div class="tick"><div class="sym">' + s.short + '</div><div class="px ' + cls + '">' + (px ? fmtPxTicker(px) : '---') + '</div></div>';
   }).join('');
 }
 
@@ -594,7 +609,7 @@ function renderPositions(engines, spotPrices) {
     const hist = priceHistory[sym];
     const canvasId = 'pos-chart-' + (e.tag||'').replace(/[^a-zA-Z0-9]/g,'_');
     const canvas = document.getElementById(canvasId);
-    if (!canvas || hist.length < 3) return;
+    if (!canvas || !hist || hist.length < 3) return;
 
     // Destroy old chart if exists
     if (posCharts[canvasId]) { posCharts[canvasId].destroy(); }
@@ -831,7 +846,7 @@ let lastTradesJson = '';
 
 async function refresh() {
   try {
-    const r = await fetch('/api/state2', { cache: 'no-store' });
+    const r = await fetch('/api/state2', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
 
@@ -911,7 +926,7 @@ async function refresh() {
 
 async function refreshTrades() {
   try {
-    const r = await fetch('/api/trades', { cache: 'no-store' });
+    const r = await fetch('/api/trades', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (!r.ok) return;
     const text = await r.text();
     if (text === lastTradesJson) return;

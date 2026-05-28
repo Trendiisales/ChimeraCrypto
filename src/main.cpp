@@ -1118,7 +1118,25 @@ static void http_server_thread(int port) {
              << "Connection: close\r\n\r\n"
              << body;
         auto s = resp.str();
-        if (write(client, s.c_str(), s.size()) < 0) { /* ignore */ }
+        // Write the whole response, retrying on partial writes.
+        size_t sent = 0;
+        const char* p = s.c_str();
+        size_t remaining = s.size();
+        while (remaining > 0) {
+            ssize_t n = write(client, p + sent, remaining);
+            if (n <= 0) break;
+            sent     += (size_t)n;
+            remaining -= (size_t)n;
+        }
+        // S39: graceful close — half-close write side, drain client bytes,
+        // then close. Prevents RST-on-close (which nginx sees as 104
+        // "Connection reset by peer while reading upstream").
+        shutdown(client, SHUT_WR);
+        char drain[1024];
+        for (int i = 0; i < 8; ++i) {
+            ssize_t n = read(client, drain, sizeof(drain));
+            if (n <= 0) break;
+        }
         close(client);
     }
     close(server_fd);
@@ -5411,6 +5429,7 @@ int main() {
 
 #include "engines_s38_new.cpp"
 #include "engines_s39_new.cpp"
+#include "engines_s40_new.cpp"
 
     // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
     load_pf_data_into_slots();

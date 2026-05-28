@@ -14,7 +14,7 @@ namespace chimera {
 // Session 35 (AUDIT-2026-S35): Added HBAR, INJ, ADA, TRX, SEI (5 L1/DeFi)
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 31;
+static constexpr int MAX_SYMBOLS = 46;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
@@ -22,7 +22,9 @@ static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "SUI", "APT", "NEAR", "ARB",
     "PEPE", "WIF", "FET", "ONDO", "TIA",
     "HBAR", "INJ", "ADA", "TRX", "SEI",
-    "OP", "MATIC", "ATOM", "FIL", "AAVE", "UNI", "LDO", "ENA", "JUP"
+    "OP", "MATIC", "ATOM", "FIL", "AAVE", "UNI", "LDO", "ENA", "JUP",
+    "TON", "DOT", "ICP", "RNDR", "PYTH", "GRT", "SAND", "MANA",
+    "CRV", "COMP", "MKR", "IMX", "STX", "ARKM", "MASK"
 };
 
 // Full Binance stream names (lowercase)
@@ -32,7 +34,9 @@ static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt",
     "hbarusdt", "injusdt", "adausdt", "trxusdt", "seiusdt",
     "opusdt", "maticusdt", "atomusdt", "filusdt", "aaveusdt", "uniusdt",
-    "ldousdt", "enausdt", "jupusdt"
+    "ldousdt", "enausdt", "jupusdt",
+    "tonusdt", "dotusdt", "icpusdt", "rndrusdt", "pythusdt", "grtusdt", "sandusdt", "manausdt",
+    "crvusdt", "compusdt", "mkrusdt", "imxusdt", "stxusdt", "arkmusdt", "maskusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -84,6 +88,21 @@ enum SymbolId : uint8_t {
     SYM_LDO   = 28,
     SYM_ENA   = 29,
     SYM_JUP   = 30,
+    SYM_TON   = 31,
+    SYM_DOT   = 32,
+    SYM_ICP   = 33,
+    SYM_RNDR  = 34,
+    SYM_PYTH  = 35,
+    SYM_GRT   = 36,
+    SYM_SAND  = 37,
+    SYM_MANA  = 38,
+    SYM_CRV   = 39,
+    SYM_COMP  = 40,
+    SYM_MKR   = 41,
+    SYM_IMX   = 42,
+    SYM_STX   = 43,
+    SYM_ARKM  = 44,
+    SYM_MASK  = 45,
     SYM_COUNT = MAX_SYMBOLS
 };
 

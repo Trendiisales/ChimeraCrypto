@@ -440,6 +440,9 @@ function updateAll(data) {
   window._lastApiData = data;
   if (!uptimeStart) uptimeStart = Date.now();
 
+  // S33: portfolio gate banner
+  updateGateBanner(data.portfolio_gate);
+
   // Restart detection
   const serverUptime = data.uptime_hours || 0;
   if (lastKnownUptimeHours !== null && serverUptime < lastKnownUptimeHours - 0.01) {
@@ -702,7 +705,7 @@ function setPollError(reason) {
 async function poll() {
   let res;
   try {
-    res = await fetch('/api/state', { cache:'no-store', signal:AbortSignal.timeout(4000) });
+    res = await fetch('/api/state', { cache:'no-store', signal:AbortSignal.timeout(15000) });
   } catch(e) {
     setPollError(e.name === 'TimeoutError' ? 'Fetch timeout' : 'Network error — backend down?');
     return;
@@ -783,3 +786,49 @@ async function executeKill() {
 
 
 
+
+// ── S33: Gate banner ────────────────────────────────────────────────────────
+function updateGateBanner(pg) {
+  const el = document.getElementById('gateBanner');
+  if (!el) return;
+  if (!pg) { el.style.display = 'none'; return; }
+
+  const titleEl  = document.getElementById('gateBannerTitle');
+  const reasonEl = document.getElementById('gateBannerReason');
+  const statsEl  = document.getElementById('gateBannerStats');
+
+  const reasons = [];
+  if (pg.ratchet_locked) reasons.push('PEAK RATCHET LOCKED');
+  if (pg.streak_halted)  reasons.push('losing-streak halt');
+  if (pg.recent_pnl_bp <= -1500) reasons.push('4h drawdown limit');
+  if (pg.unrealized_bp <= -500)  reasons.push('open-position drawdown');
+
+  // Stall: gate open, no trades for 3h+
+  const now = Date.now();
+  const sinceMin = pg.last_trade_exit_ms ? Math.floor((now - pg.last_trade_exit_ms) / 60000) : null;
+  const stalled = pg.gate_open && sinceMin !== null && sinceMin > 180;
+
+  el.classList.remove('ratchet','stalled');
+
+  if (!pg.gate_open) {
+    el.style.display = 'block';
+    if (pg.ratchet_locked) el.classList.add('ratchet');
+    titleEl.textContent  = pg.ratchet_locked ? 'PROFIT LOCKED — TRADING HALTED' : 'TRADING HALTED';
+    reasonEl.textContent = reasons.length ? '— ' + reasons.join(', ') : '';
+    statsEl.textContent  =
+      `session_cum=${(pg.session_cum_bp||0).toFixed(1)}bp · peak=${(pg.session_peak_bp||0).toFixed(1)}bp` +
+      ` · 4h_pnl=${(pg.recent_pnl_bp||0).toFixed(1)}bp · unrealized=${(pg.unrealized_bp||0).toFixed(1)}bp` +
+      ` · open=${pg.open_positions||0}`;
+  } else if (stalled) {
+    el.style.display = 'block';
+    el.classList.add('stalled');
+    const h = Math.floor(sinceMin/60), m = sinceMin%60;
+    titleEl.textContent  = 'NO TRADES';
+    reasonEl.textContent = `— ${h}h${m}m since last exit. Gate is open. Investigate signals/seeding.`;
+    statsEl.textContent  =
+      `session_cum=${(pg.session_cum_bp||0).toFixed(1)}bp · peak=${(pg.session_peak_bp||0).toFixed(1)}bp` +
+      ` · open=${pg.open_positions||0}`;
+  } else {
+    el.style.display = 'none';
+  }
+}

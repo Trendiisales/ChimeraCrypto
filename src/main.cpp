@@ -4548,6 +4548,108 @@ int main() {
     chimera::EdgeEngine eth_ichi_d1(eth_ichi_d1_cfg);
     wire_engine(eth_ichi_d1);
 
+    // S37-EDGE-PASS: 9 more ICHIMOKU + KELTNER engines passed broad sweep
+    // (PF>=2.5 5yr AND no walk-forward window PF<1.5 with n>=10).
+
+    // SOL-ICHI-D1: 5yr PF=4.34 Sh=3.45 n=53, 365d PF=4.47 730d PF=2.41
+    chimera::EdgeEngine::Config sol_ichi_d1_cfg{
+        .symbol = "solusdt", .tag = "SOL-ICHI-D1",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 86400,
+        .lookback = 8, .hold_bars = 6, .sl_atr_mult = 1.5, .atr_period = 14,
+        .round_trip_bp = 20.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine sol_ichi_d1(sol_ichi_d1_cfg); wire_engine(sol_ichi_d1);
+
+    // BNB-ICHI-D1: 5yr PF=13.34 Sh=6.71 n=61, 365d PF=6.37 730d PF=4.41
+    chimera::EdgeEngine::Config bnb_ichi_d1_cfg{
+        .symbol = "bnbusdt", .tag = "BNB-ICHI-D1",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 86400,
+        .lookback = 8, .hold_bars = 4, .sl_atr_mult = 2.0, .atr_period = 14,
+        .round_trip_bp = 20.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine bnb_ichi_d1(bnb_ichi_d1_cfg); wire_engine(bnb_ichi_d1);
+
+    // LINK-ICHI-D1: 5yr PF=9.95 Sh=3.50 n=38, 365d PF=4.58 730d PF=3.88
+    chimera::EdgeEngine::Config link_ichi_d1_cfg{
+        .symbol = "linkusdt", .tag = "LINK-ICHI-D1",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 86400,
+        .lookback = 8, .hold_bars = 20, .sl_atr_mult = 4.0, .atr_period = 14,
+        .round_trip_bp = 22.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine link_ichi_d1(link_ichi_d1_cfg); wire_engine(link_ichi_d1);
+
+    // AVAX-ICHI-D1: 5yr PF=4.02 Sh=2.49 n=34, 365d PF=4.02 730d PF=5.07
+    chimera::EdgeEngine::Config avax_ichi_d1_cfg{
+        .symbol = "avaxusdt", .tag = "AVAX-ICHI-D1",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 86400,
+        .lookback = 8, .hold_bars = 8, .sl_atr_mult = 3.0, .atr_period = 14,
+        .round_trip_bp = 22.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine avax_ichi_d1(avax_ichi_d1_cfg); wire_engine(avax_ichi_d1);
+
+    // DOGE-ICHI-D1: 5yr PF=3.38 Sh=2.45 n=25, 365d PF=3.38 730d PF=2.00
+    chimera::EdgeEngine::Config doge_ichi_d1_cfg{
+        .symbol = "dogeusdt", .tag = "DOGE-ICHI-D1",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 86400,
+        .lookback = 8, .hold_bars = 3, .sl_atr_mult = 2.0, .atr_period = 14,
+        .round_trip_bp = 20.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine doge_ichi_d1(doge_ichi_d1_cfg); wire_engine(doge_ichi_d1);
+
+    // XRP-ICHI-D1: 5yr PF=4.98 Sh=2.86 n=51, 365d PF=2.37 730d PF=3.34
+    chimera::EdgeEngine::Config xrp_ichi_d1_cfg{
+        .symbol = "xrpusdt", .tag = "XRP-ICHI-D1",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 86400,
+        .lookback = 8, .hold_bars = 20, .sl_atr_mult = 4.0, .atr_period = 14,
+        .round_trip_bp = 20.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine xrp_ichi_d1(xrp_ichi_d1_cfg); wire_engine(xrp_ichi_d1);
+
+    // ETH-ICHI-H12: 5yr PF=3.87 Sh=3.86 n=169, 365d PF=5.35 730d PF=2.85 180d PF=3.44
+    chimera::EdgeEngine::Config eth_ichi_h12_cfg{
+        .symbol = "ethusdt", .tag = "ETH-ICHI-H12",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 43200,
+        .lookback = 8, .hold_bars = 20, .sl_atr_mult = 4.0, .atr_period = 14,
+        .round_trip_bp = 17.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine eth_ichi_h12(eth_ichi_h12_cfg); wire_engine(eth_ichi_h12);
+
+    // SOL-ICHI-H8: 5yr PF=5.92 Sh=6.20 n=188, 365d PF=3.68 730d PF=2.45 180d PF=41.6
+    chimera::EdgeEngine::Config sol_ichi_h8_cfg{
+        .symbol = "solusdt", .tag = "SOL-ICHI-H8",
+        .kind = chimera::StrategyKind::ICHIMOKU, .tf_secs = 28800,
+        .lookback = 8, .hold_bars = 20, .sl_atr_mult = 3.0, .atr_period = 14,
+        .round_trip_bp = 20.0, .max_history = 130,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
+    };
+    chimera::EdgeEngine sol_ichi_h8(sol_ichi_h8_cfg); wire_engine(sol_ichi_h8);
+
+    // LINK-KELTNER-H6: 5yr PF=6.12 Sh=2.69 n=35, 365d PF=3.99 180d PF=3.46
+    chimera::EdgeEngine::Config link_keltner_h6_cfg{
+        .symbol = "linkusdt", .tag = "LINK-KELTNER-H6",
+        .kind = chimera::StrategyKind::KELTNER_REVERT, .tf_secs = 21600,
+        .lookback = 8, .hold_bars = 8, .sl_atr_mult = 2.5, .atr_period = 14,
+        .round_trip_bp = 22.0, .max_history = 64,
+        .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
+        .keltner_ema_len = 30, .keltner_atr_mult = 2.5,
+    };
+    chimera::EdgeEngine link_keltner_h6(link_keltner_h6_cfg); wire_engine(link_keltner_h6);
+
     // ══════════════════════════════════════════════════════════════════════
     // ── SECTION L: SUPERTREND ENGINES (Session 29) ──────────────────────
     // ATR-based trailing trend indicator. Enters on flip from bearish to
@@ -5262,6 +5364,17 @@ int main() {
     // S37-NEW: ICHIMOKU D1 sweep found edges
     g_slots.push_back({chimera::SYM_BTC, &btc_ichi_d1, "btcusdt", 86400, "BTC-ICHI-D1", 3.77, 2.86, 100, 99, 37});  // S37: sweep PF=3.77 Sh=2.86 5yr OOS, walk-forward 365d=3.23 730d=4.43
     g_slots.push_back({chimera::SYM_ETH, &eth_ichi_d1, "ethusdt", 86400, "ETH-ICHI-D1", 8.61, 4.38, 100, 79, 37});  // S37: sweep PF=8.61 Sh=4.38 5yr OOS, walk-forward 365d=5.83 730d=7.02
+
+    // S37-EDGE-PASS: 9 more engines passed broad sweep + walk-forward
+    g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_d1,  "solusdt",  86400, "SOL-ICHI-D1",  4.34, 3.45,  91,  53, 37});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_ichi_d1,  "bnbusdt",  86400, "BNB-ICHI-D1", 13.34, 6.71,  95,  61, 37});
+    g_slots.push_back({chimera::SYM_LINK, &link_ichi_d1, "linkusdt", 86400, "LINK-ICHI-D1", 9.95, 3.50,  95,  38, 37});
+    g_slots.push_back({chimera::SYM_AVAX, &avax_ichi_d1, "avaxusdt", 86400, "AVAX-ICHI-D1", 4.02, 2.49,  88,  34, 37});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_d1, "dogeusdt", 86400, "DOGE-ICHI-D1", 3.38, 2.45,  84,  25, 37});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_d1,  "xrpusdt",  86400, "XRP-ICHI-D1",  4.98, 2.86,  94,  51, 37});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
+    g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
 
     // SuperTrend engines (6) — Session 29
 

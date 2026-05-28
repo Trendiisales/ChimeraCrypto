@@ -296,10 +296,22 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
 
     // Feed OOS bars as ticks
     r.total_bars = total - oos_start;
+    // S38: D1 trend feed for kinds that gate on it (e.g. BREAKOUT_PULLBACK).
+    // D1 TSMOM lookback=10 is the production BTC-TSMOM-D1 setting; on the
+    // bar TF that's `bars_per_d1 * 10` bars back.
+    int bars_per_d1 = (cfg.tf_secs > 0) ? (int)(86400 / cfg.tf_secs) : 1;
+    if (bars_per_d1 < 1) bars_per_d1 = 1;
+    int d1_lookback_bars = bars_per_d1 * 10;
     for (int i = oos_start; i < total; ++i) {
         const Kline& k = klines[i];
         int64_t bar_start_ms = k.open_ts_ms;
         int64_t tick_step    = (cfg.tf_secs * 1000) / 4;
+
+        // Feed D1 trend state to the engine (no-op for kinds that ignore it).
+        if (i >= d1_lookback_bars) {
+            bool d1_bull = klines[i].c > klines[i - d1_lookback_bars].c;
+            engine.set_d1_bullish(d1_bull);
+        }
 
         bool bullish = (k.c >= k.o);
 
@@ -547,6 +559,51 @@ static void apply_preset_named(chimera::EdgeEngine::Config& c, const std::string
         c.hard_floor_bp           = -50.0;
         return;
     }
+    if (p == "prod_tiered_pyramid") {
+        // S38: prod_tiered + pyramid + tight trail + giveback. Only arms
+        // pyramid AFTER trail-armed (BE locked), so bounded downside.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 2.5;
+        c.pyramid_step_atr      = 1.5;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        c.trail_tighten_atr     = 2.0;
+        c.trail_tighten_dist_atr = 0.2;
+        c.giveback_arm_bp       = 100.0;
+        c.giveback_pct          = 0.30;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_pure") {
+        // S38b: pyramid only — keep prod_tiered exits as-is, just enable adds.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 2.5;
+        c.pyramid_step_atr      = 1.5;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_low") {
+        // S38c: pyramid_arm at +1.0 ATR (typical TSMOM winner ~1-1.5 ATR MFE).
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 1.0;
+        c.pyramid_step_atr      = 0.7;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_xlow") {
+        // S38d: pyramid_arm at +0.5 ATR — aggressive.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 0.5;
+        c.pyramid_step_atr      = 0.3;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        return;
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -587,6 +644,117 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "[MODE] --last-days %d (OOS = last N days per engine; converted to bars via tf_secs)\n", g_last_days);
     }
 
+    // ── DISCOVER MODE: full matrix (symbol × tf × kind × params) ─────────
+    // Usage: ./backtest_mac --discover [--preset prod_tiered] [--last-days 180]
+    // Static C++ arrays; one binary run; writes one CSV row per backtest.
+    bool discover_mode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--discover") { discover_mode = true; break; }
+    }
+    if (discover_mode) {
+        static constexpr const char* kSymbols[] = {
+            "btcusdt","ethusdt","solusdt","linkusdt","bnbusdt","xrpusdt",
+            "avaxusdt","dogeusdt","aptusdt","arbusdt","fetusdt","nearusdt",
+            "ondousdt","pepeusdt","suiusdt","tiausdt","wifusdt",
+            "hbarusdt","injusdt","adausdt","trxusdt","seiusdt",
+            "opusdt","maticusdt","atomusdt","filusdt","aaveusdt","uniusdt",
+            "ldousdt","enausdt","jupusdt"
+        };
+        // S38c WIDER NET: 10 TFs (H1, H2, H3, H4, H6, H8, H12, D1, D2, D3).
+        static constexpr int kTfSecs[]   = { 3600, 7200, 10800, 14400, 21600, 28800, 43200, 86400, 172800, 259200 };
+        static constexpr const char* kTfNames[] = { "H1","H2","H3","H4","H6","H8","H12","D1","D2","D3" };
+        static constexpr chimera::StrategyKind kKinds[] = {
+            chimera::StrategyKind::TSMOM,
+            chimera::StrategyKind::DONCHIAN,
+            chimera::StrategyKind::BOLLINGER,
+            chimera::StrategyKind::RSI_REVERT,
+            chimera::StrategyKind::OVERNIGHT,
+            chimera::StrategyKind::WEEKDAY,
+            chimera::StrategyKind::KELTNER_REVERT,
+            chimera::StrategyKind::DUAL_THRUST,
+            chimera::StrategyKind::ICHIMOKU,
+            chimera::StrategyKind::SUPERTREND,
+            chimera::StrategyKind::WILLIAMS_R,
+            chimera::StrategyKind::STOCH_RSI,
+            chimera::StrategyKind::BREAKOUT_PULLBACK,
+        };
+        // S38d ULTRA WIDE: finest grid (6×6×4 = 144 combos).
+        static constexpr int    kLookbacks[] = { 6, 12, 18, 30, 45, 60 };
+        static constexpr int    kHolds[]     = { 3, 5, 8, 12, 18, 24 };
+        static constexpr double kSlAtrs[]    = { 1.0, 2.0, 3.0, 4.0 };
+
+        std::string data_dir_local;
+        if (fs::exists("data/btc_h1_part0.json"))           data_dir_local = "data";
+        else if (fs::exists("backtest/data/btc_h1_part0.json")) data_dir_local = "backtest/data";
+        else { std::fprintf(stderr, "ERROR: no data dir\n"); return 1; }
+
+        std::printf("symbol,tf_name,tf_secs,kind,lookback,hold,sl_atr,trades,wins,wr,net_bp,pf,sharpe,maxdd_bp,bars\n");
+
+        long total_runs = 0;
+        for (const char* sym : kSymbols) {
+            // Resolve data prefix: btcusdt -> btc, others -> <sym>
+            std::string base = sym;
+            if (std::string(sym) == "btcusdt") base = "btc";
+            std::string h1_probe = data_dir_local + "/" + base + "_h1_part0.json";
+            if (!fs::exists(h1_probe)) {
+                std::fprintf(stderr, "[SKIP] %s — no H1 data\n", sym);
+                continue;
+            }
+            auto h1 = load_all_parts(data_dir_local, base + "_h1_part");
+            std::fprintf(stderr, "[DISCOVER] %s H1=%zu bars\n", sym, h1.size());
+
+            for (size_t ti = 0; ti < sizeof(kTfSecs)/sizeof(kTfSecs[0]); ++ti) {
+                int tf_secs = kTfSecs[ti];
+                std::vector<Kline> bars;
+                if (tf_secs == 3600) bars = h1;
+                else                 bars = synthesize_bars(h1, tf_secs);
+                if ((int)bars.size() < 300) {
+                    std::fprintf(stderr, "  [SKIP] %s %s — only %zu bars\n", sym, kTfNames[ti], bars.size());
+                    continue;
+                }
+
+                // Cost (mirror main.cpp / sweep mode)
+                double rt = 22.0;
+                std::string ss = sym;
+                if (ss == "btcusdt" || ss == "ethusdt") rt = 17.0;
+                else if (ss == "solusdt" || ss == "bnbusdt" || ss == "dogeusdt" || ss == "xrpusdt") rt = 20.0;
+
+                for (auto kind : kKinds) {
+                    // OVERNIGHT requires H1 + UTC hour gate; skip non-H1.
+                    if (kind == chimera::StrategyKind::OVERNIGHT && tf_secs != 3600) continue;
+                    // WEEKDAY requires D1; skip non-D1.
+                    if (kind == chimera::StrategyKind::WEEKDAY && tf_secs != 86400) continue;
+
+                    for (int lb : kLookbacks)
+                    for (int hold : kHolds)
+                    for (double sl : kSlAtrs) {
+                        chimera::EdgeEngine::Config c{
+                            .symbol = ss, .tag = "DISC", .kind = kind, .tf_secs = tf_secs,
+                            .lookback = lb, .hold_bars = hold, .sl_atr_mult = sl,
+                            .atr_period = 14, .bb_k = 2.0, .rsi_threshold = 30.0,
+                            .round_trip_bp = rt, .max_history = 128,
+                            .trail_arm_atr = 1.0, .trail_dist_atr = 0.5,
+                            .trail_tighten_atr = 3.0, .trail_tighten_dist_atr = 0.25,
+                        };
+                        apply_preset_named(c, preset_name);
+                        chimera::EdgeEngine eng(c);
+                        auto r = run_backtest(eng, c, bars);
+                        std::printf("%s,%s,%d,%s,%d,%d,%.1f,%d,%d,%.1f,%.1f,%.3f,%.2f,%.0f,%d\n",
+                            ss.c_str(), kTfNames[ti], tf_secs,
+                            chimera::strategy_name(kind),
+                            lb, hold, sl,
+                            r.trades, r.wins, r.win_rate, r.total_bp,
+                            r.pf, r.sharpe, r.max_dd_bp, r.total_bars);
+                        std::fflush(stdout);
+                        ++total_runs;
+                    }
+                }
+            }
+        }
+        std::fprintf(stderr, "[DISCOVER] DONE — %ld backtests\n", total_runs);
+        return 0;
+    }
+
     // ── SWEEP MODE: param search for a (symbol, tf, strategy) triple ─────
     // Usage: ./backtest_mac --sweep dogeusdt:259200:TSMOM [--preset staged_only]
     // Iterates lookback × hold × sl × trail combos, applies preset, prints
@@ -619,10 +787,19 @@ int main(int argc, char* argv[]) {
         else if (fs::exists("backtest/data/btc_h1_part0.json")) data_dir_local = "backtest/data";
         else { std::fprintf(stderr, "ERROR: no data dir\n"); return 1; }
 
-        auto h1 = load_all_parts(data_dir_local, base + "_h1_part");
+        // For sub-H1 timeframes, load native M15 parts (btcusdt_m15_part*) and
+        // synthesize anything coarser from M15 if requested. Otherwise use H1.
         std::vector<Kline> bars;
-        if (tf_secs == 3600) bars = h1;
-        else                 bars = synthesize_bars(h1, tf_secs);
+        bool have_m15 = fs::exists(data_dir_local + "/" + sym + "_m15_part0.json");
+        if (tf_secs < 3600 && have_m15) {
+            auto m15 = load_all_parts(data_dir_local, sym + "_m15_part");
+            if (tf_secs == 900) bars = m15;
+            else                bars = synthesize_bars(m15, tf_secs);
+        } else {
+            auto h1 = load_all_parts(data_dir_local, base + "_h1_part");
+            if (tf_secs == 3600) bars = h1;
+            else                 bars = synthesize_bars(h1, tf_secs);
+        }
         if (bars.size() < 100) {
             std::fprintf(stderr, "ERROR: insufficient bars (%zu) for %s tf=%d\n", bars.size(), sym.c_str(), tf_secs);
             return 1;
@@ -646,6 +823,7 @@ int main(int argc, char* argv[]) {
         else if (strat == "WILLIAMS_R") kind = chimera::StrategyKind::WILLIAMS_R;
         else if (strat == "ICHIMOKU") kind = chimera::StrategyKind::ICHIMOKU;
         else if (strat == "DUAL_THRUST") kind = chimera::StrategyKind::DUAL_THRUST;
+        else if (strat == "BREAKOUT_PULLBACK") kind = chimera::StrategyKind::BREAKOUT_PULLBACK;
 
         for (int lookback : {8, 10, 15, 20, 25, 30, 40, 50}) {
         for (int hold : {3, 4, 6, 8, 12, 20}) {

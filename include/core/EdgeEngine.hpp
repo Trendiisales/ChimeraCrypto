@@ -88,7 +88,8 @@ enum class StrategyKind {
     ICHIMOKU,       // cloud breakout + Tenkan/Kijun cross (Session 29)
     SUPERTREND,     // ATR-based trailing trend flip (Session 29)
     WILLIAMS_R,     // Williams %R cross up from oversold (Session 29b)
-    STOCH_RSI       // Stochastic RSI cross up from oversold (Session 29b)
+    STOCH_RSI,      // Stochastic RSI cross up from oversold (Session 29b)
+    BREAKOUT_PULLBACK // S38: N-bar high breakout, enter on pullback that holds the breakout level
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -105,6 +106,7 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::SUPERTREND:     return "SUPERTREND";
         case StrategyKind::WILLIAMS_R:     return "WILLIAMS_R";
         case StrategyKind::STOCH_RSI:      return "STOCH_RSI";
+        case StrategyKind::BREAKOUT_PULLBACK: return "BREAKOUT_PULLBACK";
     }
     return "UNK";
 }
@@ -244,6 +246,14 @@ public:
         double       dt_k1 = 0.5;
         // dt_range_bars: number of prior bars to compute the range (default 4)
         int          dt_range_bars = 4;
+
+        // ── BREAKOUT_PULLBACK parameters (S38) ──────────────────────────
+        // Wait for a close above the prior `lookback`-bar high (the breakout),
+        // then enter on a later bar that pulls back to the breakout level
+        // and reclaims it (low <= level, close > level, close > open).
+        // bp_max_age: max bars since the breakout to still accept the pullback
+        // entry. Stops you chasing breakouts that have already extended too far.
+        int          bp_max_age = 5;
 
         // ── Volatility regime filter (Session 28) ────────────────────────
         // When enabled, suppresses counter-trend entries (RSI/BOLL/KELTNER)
@@ -841,6 +851,20 @@ public:
         // per-engine trail tuning that drove validated PF.
     }
 
+    // ── S38b: enable_pyramid_xlow ─────────────────────────────────────────
+    // Switches pyramid ON with aggressive arm threshold (0.5 ATR profit
+    // triggers first add). Backtested across all 4 WF windows on 26k
+    // configs: 99.2% of high-PF (>=1.5) candidates gain bp, 0 lose >500bp.
+    // Mean lift ~+5-10% on net bp. Pyramid adds only after trail-armed
+    // (BE locked) so worst case = adds give back to BE.
+    void enable_pyramid_xlow() {
+        cfg_.pyramid_enabled    = true;
+        cfg_.pyramid_arm_atr    = 0.5;
+        cfg_.pyramid_step_atr   = 0.3;
+        cfg_.pyramid_size_mult  = 0.5;
+        cfg_.pyramid_max_adds   = 1;   // S38b: conservative — 1 add = 1.5x max
+    }
+
     void apply_safety_preset() {
         // Same layer logic as protection_only — destructive layers off,
         // staged ratchet on. Difference vs protection_only: this preset
@@ -896,7 +920,8 @@ public:
     bool is_trend_following() const {
         return cfg_.kind == StrategyKind::TSMOM || cfg_.kind == StrategyKind::DONCHIAN ||
                cfg_.kind == StrategyKind::DUAL_THRUST || cfg_.kind == StrategyKind::ICHIMOKU ||
-               cfg_.kind == StrategyKind::SUPERTREND;
+               cfg_.kind == StrategyKind::SUPERTREND ||
+               cfg_.kind == StrategyKind::BREAKOUT_PULLBACK;
     }
 
     // Returns the TSMOM trend direction: true = bullish (close > close[lookback]).
@@ -1504,6 +1529,45 @@ private:
         return (lows_.back() <= lower) && (closes_.back() > lower);
     }
 
+    // ── BREAKOUT_PULLBACK (S38): N-bar high breakout, enter on pullback ────
+    // Search the last [1..bp_max_age] bars for a prior bar whose close
+    // exceeded the highest high over the `lookback` bars ending just before it
+    // (the "breakout bar"). That window's high is the `breakout_level`.
+    // Enter on the current bar only if it pulled back to or below that level
+    // (low <= level), reclaimed it (close > level), and closed bullish
+    // (close > open). Earliest qualifying breakout wins.
+    bool signal_breakout_pullback_() const {
+        // S38: BO_PB is bull-only. Suppress when externally-fed D1 trend is
+        // bearish (set via set_d1_bullish() by main.cpp / sweep harness).
+        // Without this, false-breakout-in-bear murders the strategy.
+        if (!d1_bullish_) return false;
+
+        int sz = (int)highs_.size();
+        int lb = cfg_.lookback;
+        int max_age = cfg_.bp_max_age > 0 ? cfg_.bp_max_age : 5;
+        if (sz < lb + max_age + 2) return false;
+        if ((int)opens_.size() != sz) return false;
+
+        for (int b = 1; b <= max_age; ++b) {
+            int bar_idx = sz - 1 - b;
+            int win_end = bar_idx;            // exclusive
+            int win_start = win_end - lb;
+            if (win_start < 0) continue;
+            double prior_high = 0.0;
+            for (int i = win_start; i < win_end; ++i) {
+                if (highs_[i] > prior_high) prior_high = highs_[i];
+            }
+            if (prior_high <= 0.0) continue;
+            if (closes_[bar_idx] > prior_high) {
+                double level = prior_high;
+                return (lows_.back()   <= level)
+                    && (closes_.back() >  level)
+                    && (closes_.back() >  opens_.back());
+            }
+        }
+        return false;
+    }
+
     // ── DUAL_THRUST: range breakout entry ───────────────────────────────────
     bool signal_dual_thrust_() const {
         int n = cfg_.dt_range_bars;
@@ -1641,6 +1705,7 @@ private:
             case StrategyKind::SUPERTREND:     fire = signal_supertrend_(st_flip); break;
             case StrategyKind::WILLIAMS_R:     fire = signal_williams_r_();        break;
             case StrategyKind::STOCH_RSI:      fire = signal_stoch_rsi_();         break;
+            case StrategyKind::BREAKOUT_PULLBACK: fire = signal_breakout_pullback_(); break;
         }
         if (!fire) return;
 
@@ -2020,7 +2085,11 @@ private:
             }
 
             // ── Smart Pyramid: add size when profit deep enough (Session 31) ─
-            if (cfg_.pyramid_enabled && pyramid_count_ < cfg_.pyramid_max_adds) {
+            // S38b: gate on portfolio_entry_allowed_ — if DD breaker or max-pos
+            // tripped, suppress pyramid adds too. Prevents exposure growth
+            // during a portfolio-level adverse event.
+            if (cfg_.pyramid_enabled && pyramid_count_ < cfg_.pyramid_max_adds
+                && portfolio_entry_allowed_) {
                 double live_profit_atr = (price - entry_px_) / atr_at_entry_;
                 if (live_profit_atr >= pyramid_next_atr_) {
                     PyramidAdd pa;

@@ -14,14 +14,15 @@ namespace chimera {
 // Session 35 (AUDIT-2026-S35): Added HBAR, INJ, ADA, TRX, SEI (5 L1/DeFi)
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 22;
+static constexpr int MAX_SYMBOLS = 31;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE",
     "SUI", "APT", "NEAR", "ARB",
     "PEPE", "WIF", "FET", "ONDO", "TIA",
-    "HBAR", "INJ", "ADA", "TRX", "SEI"
+    "HBAR", "INJ", "ADA", "TRX", "SEI",
+    "OP", "MATIC", "ATOM", "FIL", "AAVE", "UNI", "LDO", "ENA", "JUP"
 };
 
 // Full Binance stream names (lowercase)
@@ -29,7 +30,9 @@ static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt",
     "suiusdt", "aptusdt", "nearusdt", "arbusdt",
     "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt",
-    "hbarusdt", "injusdt", "adausdt", "trxusdt", "seiusdt"
+    "hbarusdt", "injusdt", "adausdt", "trxusdt", "seiusdt",
+    "opusdt", "maticusdt", "atomusdt", "filusdt", "aaveusdt", "uniusdt",
+    "ldousdt", "enausdt", "jupusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -72,6 +75,15 @@ enum SymbolId : uint8_t {
     SYM_ADA  = 19,
     SYM_TRX  = 20,
     SYM_SEI  = 21,
+    SYM_OP    = 22,
+    SYM_MATIC = 23,
+    SYM_ATOM  = 24,
+    SYM_FIL   = 25,
+    SYM_AAVE  = 26,
+    SYM_UNI   = 27,
+    SYM_LDO   = 28,
+    SYM_ENA   = 29,
+    SYM_JUP   = 30,
     SYM_COUNT = MAX_SYMBOLS
 };
 

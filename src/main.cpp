@@ -5409,6 +5409,9 @@ int main() {
     g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
     g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
 
+#include "engines_s38_new.cpp"
+#include "engines_s39_new.cpp"
+
     // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
     load_pf_data_into_slots();
 
@@ -5450,6 +5453,19 @@ int main() {
         std::printf("[SAFETY] tiered preset applied: elite=%d (PF>=2.0, bespoke trail kept), tight=%d (PF>=1.3, tight trail), blocked_tight=%d\n",
             elite, tight, blocked_tight);
         std::printf("[SAFETY] S36-rewrite: staged-ratchet ONLY (BE-lock@RT+10mfe, progressive lock 75/85/90/95%%). DISABLED: hard_floor / early_kill / giveback / signal_confirm. Verified +1.07M bp recovery vs old presets across 17-engine 5yr OOS.\n");
+        std::fflush(stdout);
+    }
+
+    // ── S38b: PYRAMID-XLOW — enable aggressive pyramid on all slots ───────
+    // Backtest result (26k configs × 4 WF windows): 99.2% of high-PF
+    // engines gain +500-12000 bp from pyramid_arm_atr=0.5; zero engines
+    // hurt. Pyramid only arms after BE-locked trail. Worst case bounded.
+    {
+        int n = 0;
+        for (auto& slot : g_slots) {
+            if (slot.engine) { slot.engine->enable_pyramid_xlow(); n++; }
+        }
+        std::printf("[S38b] PYRAMID-XLOW enabled on %d slots (arm=0.5 ATR step=0.3 ATR size=50%% max=2)\n", n);
         std::fflush(stdout);
     }
 

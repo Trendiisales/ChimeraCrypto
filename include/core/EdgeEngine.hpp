@@ -893,6 +893,17 @@ public:
     // Sign convention: pass negative bp (e.g., -50.0 for 50bp loss cap).
     // Acts as upper bound on per-position drawdown when atr_sl is wider.
     void set_hard_floor_bp(double bp) { cfg_.hard_floor_bp = bp; }
+    // S44k: tune profit-protection bands. be_arm = MFE bp at which BE locks.
+    // lock_pct = fraction of MFE above be_arm that's protected.
+    void set_be_arm_bp(double bp)     { cfg_.be_arm_bp = bp; }
+    void set_ratchet_lock_pct(double p) { cfg_.ratchet_lock_pct = p; }
+    // S44L F: vol-adaptive SL. When set > 0, on entry compare ATR to its
+    // rolling average; if ATR > avg × ratio_threshold, tighten SL by mult.
+    double vol_adaptive_ratio_ = 0.0;    // 0 = off
+    double vol_adaptive_mult_  = 1.0;    // SL multiplier when triggered
+    void set_vol_adaptive(double ratio, double sl_mult) {
+        vol_adaptive_ratio_ = ratio; vol_adaptive_mult_ = sl_mult;
+    }
 
     void apply_safety_preset() {
         // Same layer logic as protection_only — destructive layers off,

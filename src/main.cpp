@@ -1798,6 +1798,10 @@ int main() {
         // layers disabled) + filters by strategy type. Same overlay set
         // that g_slots engines get — now applied uniformly.
         engine.apply_safety_preset();
+        // S44k (A): tighter PPB — be_arm=25 (was 32), lock_pct=0.85 (was 0.75).
+        // Sweep validated bp/dd 5.50 -> 5.60.
+        engine.set_be_arm_bp(25.0);
+        engine.set_ratchet_lock_pct(0.85);
         // S44j: per-trade HARD FLOOR at -170 bp.
         // Sweep -80 to -200 step 10 on 405-engine 180d showed -170 = bp/DD
         // peak (5.50). 83% of no-floor profit retained, 19% DD cut.

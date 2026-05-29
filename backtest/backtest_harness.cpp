@@ -240,6 +240,11 @@ static int g_last_bars = 0;  // 0 = use 80/20 split; >0 = last N bars
 static int g_last_days = 0;  // 0 = ignore; >0 = last N days (converted via tf_secs)
 static int g_end_days_ago = 0; // >0: drop last N days from klines before split (holdout sim)
 static double g_hard_floor_bp_override = 1.0; // 1.0 = no override; <=0 = applies after preset
+static double g_ppb_be_arm_override = -1.0;    // <0 = no override
+static double g_ppb_lock_pct_override = -1.0;  // <0 = no override
+static double g_engine_daily_cap_bp  = 0.0;    // 0 = off; positive N = block entries when -bp in 24h >= N
+static double g_symbol_daily_cap_bp  = 0.0;    // 0 = off; per-symbol cap across all engines (used in roster mode)
+static double g_sl_mult_scale = 1.0;           // multiplier on sl_atr_mult (1.0 = no change)
 
 static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                                     const chimera::EdgeEngine::Config& cfg,
@@ -308,6 +313,11 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
     double max_dd        = 0.0;
     int    prev_trades   = engine.trades();
     double prev_total_bp = engine.total_bp();
+    // S44L: per-engine daily loss cap — track (exit_ts, bp), block entries
+    // when cumulative net bp over rolling 24h <= -cap_bp.
+    std::vector<std::pair<int64_t, double>> recent_trades_24h;
+    int64_t cap_block_until_ts = 0;
+    int64_t day_ms = 24LL * 3600 * 1000;
 
     // Feed OOS bars as ticks
     r.total_bars = total - oos_start;
@@ -364,6 +374,24 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
             if (dd > max_dd) max_dd = dd;
             prev_trades   = engine.trades();
             prev_total_bp = engine.total_bp();
+            // S44L: feed daily-loss tracker
+            if (g_engine_daily_cap_bp > 0.0) {
+                recent_trades_24h.push_back({bar_start_ms, trade_bp});
+                int64_t cutoff = bar_start_ms - day_ms;
+                while (!recent_trades_24h.empty() && recent_trades_24h.front().first < cutoff)
+                    recent_trades_24h.erase(recent_trades_24h.begin());
+                double sum_24h = 0;
+                for (auto& p : recent_trades_24h) sum_24h += p.second;
+                if (sum_24h <= -g_engine_daily_cap_bp) {
+                    cap_block_until_ts = bar_start_ms + day_ms;
+                }
+            }
+        }
+        // S44L: enforce daily cap — when blocked, freeze engine (no entries)
+        if (g_engine_daily_cap_bp > 0.0 && bar_start_ms < cap_block_until_ts) {
+            engine.set_portfolio_gate(false);
+        } else if (g_engine_daily_cap_bp > 0.0) {
+            engine.set_portfolio_gate(true);
         }
     }
 
@@ -661,6 +689,10 @@ int main(int argc, char* argv[]) {
         else if (a == "--last-days" && i+1 < argc) { g_last_days = std::atoi(argv[++i]); }
         else if (a == "--end-days-ago" && i+1 < argc) { g_end_days_ago = std::atoi(argv[++i]); }
         else if (a == "--hard-floor-bp" && i+1 < argc) { g_hard_floor_bp_override = std::atof(argv[++i]); }
+        else if (a == "--ppb-be-arm" && i+1 < argc) { g_ppb_be_arm_override = std::atof(argv[++i]); }
+        else if (a == "--ppb-lock-pct" && i+1 < argc) { g_ppb_lock_pct_override = std::atof(argv[++i]); }
+        else if (a == "--engine-daily-cap-bp" && i+1 < argc) { g_engine_daily_cap_bp = std::atof(argv[++i]); }
+        else if (a == "--sl-mult-scale" && i+1 < argc) { g_sl_mult_scale = std::atof(argv[++i]); }
     }
     if (!preset_name.empty()) {
         std::fprintf(stderr, "[MODE] --preset %s\n", preset_name.c_str());
@@ -1018,6 +1050,9 @@ int main(int argc, char* argv[]) {
                 cfg.keltner_atr_mult = std::atof(cols[ci_kam].c_str());
             apply_preset_named(cfg, preset_name);
             if (g_hard_floor_bp_override <= 0.0) cfg.hard_floor_bp = g_hard_floor_bp_override;
+            if (g_ppb_be_arm_override   > 0.0) cfg.be_arm_bp        = g_ppb_be_arm_override;
+            if (g_ppb_lock_pct_override > 0.0) cfg.ratchet_lock_pct = g_ppb_lock_pct_override;
+            if (g_sl_mult_scale != 1.0) cfg.sl_atr_mult *= g_sl_mult_scale;
             chimera::EdgeEngine eng(cfg);
             auto r = run_backtest(eng, cfg, bars);
             const char* verdict = (r.pf >= 1.3 && r.sharpe >= 0.3 && r.trades >= 5)

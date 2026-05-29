@@ -1496,7 +1496,9 @@ int main() {
         if (engine.cfg().symbol != "btcusdt") {
             engine.enable_corr_filter(true);
         }
-        g_all_wired.push_back(&engine);
+        // Dedup: some engines call wire_engine twice — don't double-count.
+        auto it = std::find(g_all_wired.begin(), g_all_wired.end(), &engine);
+        if (it == g_all_wired.end()) g_all_wired.push_back(&engine);
         engine.set_on_order_intent(
             [&](const chimera::EdgeEngine::OrderIntentRecord& intent) {
                 if (!exec_ok || !executor.is_ready()) {

@@ -216,6 +216,9 @@ struct EngineSlot {
 };
 
 static std::vector<EngineSlot>  g_slots;
+// S44b: every wire_engine'd EdgeEngine ptr (g_slots + S43/S43b #includes).
+// Used for dashboard count + uniform overlay application.
+static std::vector<chimera::EdgeEngine*> g_all_wired;
 static std::mutex               g_engine_mtx;
 static int64_t                  g_startup_ts_ms = 0;   // epoch ms at startup
 
@@ -810,7 +813,8 @@ static std::string build_state_json() {
     std::ostringstream js;
     js << "{\"build\":\"" << BUILD_VERSION << "\",";
     js << "\"startup_ts\":" << g_startup_ts_ms << ",";
-    js << "\"engine_count\":" << g_slots.size() << ",";
+    js << "\"engine_count\":" << g_all_wired.size() << ",";
+    js << "\"slot_count\":" << g_slots.size() << ",";
 
     // ── S33: portfolio gate state (drives GUI banner) ────────────────────
     js << "\"portfolio_gate\":{";
@@ -1475,6 +1479,24 @@ int main() {
         engine.enable_pyramid_elite();
         engine.set_on_trade(on_trade_callback);
         engine.set_on_bar(on_bar_callback);
+        // S44b: apply safety preset (staged BE-lock ratchet, destructive
+        // layers disabled) + filters by strategy type. Same overlay set
+        // that g_slots engines get — now applied uniformly.
+        engine.apply_safety_preset();
+        engine.enable_volume_gate(true);
+        if (engine.is_trend_following()) {
+            engine.enable_adx_filter(true);
+            engine.set_adx_threshold(25.0);
+        } else {
+            engine.enable_vol_filter(true);
+            if (engine.cfg().tf_secs < 86400) {
+                engine.enable_mtf_gate(true);
+            }
+        }
+        if (engine.cfg().symbol != "btcusdt") {
+            engine.enable_corr_filter(true);
+        }
+        g_all_wired.push_back(&engine);
         engine.set_on_order_intent(
             [&](const chimera::EdgeEngine::OrderIntentRecord& intent) {
                 if (!exec_ok || !executor.is_ready()) {
@@ -4648,7 +4670,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine eth_ichi_h12(eth_ichi_h12_cfg); wire_engine(eth_ichi_h12);
+// S44-CULL:     chimera::EdgeEngine eth_ichi_h12(eth_ichi_h12_cfg); wire_engine(eth_ichi_h12);
 
     // SOL-ICHI-H8: 5yr PF=5.92 Sh=6.20 n=188, 365d PF=3.68 730d PF=2.45 180d PF=41.6
     chimera::EdgeEngine::Config sol_ichi_h8_cfg{
@@ -5406,7 +5428,7 @@ int main() {
 // S44-CULL:     g_slots.push_back({chimera::SYM_AVAX, &avax_ichi_d1, "avaxusdt", 86400, "AVAX-ICHI-D1", 4.02, 2.49,  88,  34, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_d1, "dogeusdt", 86400, "DOGE-ICHI-D1", 3.38, 2.45,  84,  25, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_d1,  "xrpusdt",  86400, "XRP-ICHI-D1",  4.98, 2.86,  94,  51, 37});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
     g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
     g_slots.push_back({chimera::SYM_NEAR, &near_ichi_h8, "nearusdt", 28800, "NEAR-ICHI-H8", 2.92, 4.67, 89, 192, 37});  // S37: bear-stress passed all 4 windows PF>=2.35

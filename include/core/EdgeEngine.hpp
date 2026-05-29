@@ -889,6 +889,10 @@ public:
     }
     // S44f: per-tier pyramid_max override (TOP_ELITE=3, STRONG=3, STANDARD=2)
     void set_pyramid_max_adds(int n) { cfg_.pyramid_max_adds = n; }
+    // S44i: per-trade hard floor — tighten SL inward to cap loss at N bp.
+    // Sign convention: pass negative bp (e.g., -50.0 for 50bp loss cap).
+    // Acts as upper bound on per-position drawdown when atr_sl is wider.
+    void set_hard_floor_bp(double bp) { cfg_.hard_floor_bp = bp; }
 
     void apply_safety_preset() {
         // Same layer logic as protection_only — destructive layers off,

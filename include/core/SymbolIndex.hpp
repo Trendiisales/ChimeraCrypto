@@ -14,7 +14,7 @@ namespace chimera {
 // Session 35 (AUDIT-2026-S35): Added HBAR, INJ, ADA, TRX, SEI (5 L1/DeFi)
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 46;
+static constexpr int MAX_SYMBOLS = 62;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
@@ -24,7 +24,10 @@ static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "HBAR", "INJ", "ADA", "TRX", "SEI",
     "OP", "MATIC", "ATOM", "FIL", "AAVE", "UNI", "LDO", "ENA", "JUP",
     "TON", "DOT", "ICP", "RENDER", "PYTH", "GRT", "SAND", "MANA",
-    "CRV", "COMP", "MKR", "IMX", "STX", "ARKM", "MASK"
+    "CRV", "COMP", "MKR", "IMX", "STX", "ARKM", "MASK",
+    "RUNE", "JTO", "W", "TURBO", "BOME", "FLOKI",
+    "ETHFI", "EIGEN", "ZRO", "GMT", "SHIB", "BCH",
+    "LTC", "ETC", "XLM", "VET"
 };
 
 // Full Binance stream names (lowercase)
@@ -36,7 +39,10 @@ static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "opusdt", "maticusdt", "atomusdt", "filusdt", "aaveusdt", "uniusdt",
     "ldousdt", "enausdt", "jupusdt",
     "tonusdt", "dotusdt", "icpusdt", "renderusdt", "pythusdt", "grtusdt", "sandusdt", "manausdt",
-    "crvusdt", "compusdt", "mkrusdt", "imxusdt", "stxusdt", "arkmusdt", "maskusdt"
+    "crvusdt", "compusdt", "mkrusdt", "imxusdt", "stxusdt", "arkmusdt", "maskusdt",
+    "runeusdt", "jtousdt", "wusdt", "turbousdt", "bomeusdt", "flokiusdt",
+    "ethfiusdt", "eigenusdt", "zrousdt", "gmtusdt", "shibusdt", "bchusdt",
+    "ltcusdt", "etcusdt", "xlmusdt", "vetusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -103,6 +109,22 @@ enum SymbolId : uint8_t {
     SYM_STX   = 43,
     SYM_ARKM  = 44,
     SYM_MASK  = 45,
+    SYM_RUNE  = 46,
+    SYM_JTO   = 47,
+    SYM_W     = 48,
+    SYM_TURBO = 49,
+    SYM_BOME  = 50,
+    SYM_FLOKI = 51,
+    SYM_ETHFI = 52,
+    SYM_EIGEN = 53,
+    SYM_ZRO   = 54,
+    SYM_GMT   = 55,
+    SYM_SHIB  = 56,
+    SYM_BCH   = 57,
+    SYM_LTC   = 58,
+    SYM_ETC   = 59,
+    SYM_XLM   = 60,
+    SYM_VET   = 61,
     SYM_COUNT = MAX_SYMBOLS
 };
 

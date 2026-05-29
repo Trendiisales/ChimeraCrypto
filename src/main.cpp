@@ -5429,6 +5429,8 @@ int main() {
 
 // S41: S38/S39/S40 superseded by consolidated patch (PF>=2.0 across all 4 WF windows).
 #include "engines_s41_consolidated.cpp"
+// S42: Gen-Y 62-sym × 10-TF × 144 grid (incl JTO/BOME/FLOKI/SHIB/LTC/BCH/RUNE/etc).
+#include "engines_s42_consolidated.cpp"
 
     // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
     load_pf_data_into_slots();

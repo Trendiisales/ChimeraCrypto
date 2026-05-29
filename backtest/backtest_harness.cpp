@@ -661,7 +661,10 @@ int main(int argc, char* argv[]) {
             "ldousdt","enausdt","jupusdt",
             "tonusdt","dotusdt","icpusdt","renderusdt","pythusdt","grtusdt",
             "sandusdt","manausdt","crvusdt","compusdt","mkrusdt","imxusdt",
-            "stxusdt","arkmusdt","maskusdt"
+            "stxusdt","arkmusdt","maskusdt",
+            "runeusdt","jtousdt","wusdt","turbousdt","bomeusdt","flokiusdt",
+            "ethfiusdt","eigenusdt","zrousdt","gmtusdt","shibusdt","bchusdt",
+            "ltcusdt","etcusdt","xlmusdt","vetusdt"
         };
         // S38c WIDER NET: 10 TFs (H1, H2, H3, H4, H6, H8, H12, D1, D2, D3).
         static constexpr int kTfSecs[]   = { 3600, 7200, 10800, 14400, 21600, 28800, 43200, 86400, 172800, 259200 };

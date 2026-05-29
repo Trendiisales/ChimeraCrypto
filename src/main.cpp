@@ -5813,9 +5813,80 @@ int main() {
             }
         }
 
-        std::printf("[STARTUP] Seeding complete: REST=%d  H1-agg=%d  saved=%d  cold=%d\n",
+        std::printf("[STARTUP] Seeding complete (g_slots): REST=%d  H1-agg=%d  saved=%d  cold=%d\n",
             seeded_rest, seeded_agg, seeded_saved, cold);
         std::fflush(stdout);
+
+        // S44c: seed the non-slot wired engines (S43 + S43b cohorts).
+        // Same logic as slot loop above but iterates g_all_wired instead.
+        {
+            int extra_rest = 0, extra_agg = 0, extra_saved = 0, extra_cold = 0, extra_skipped = 0;
+            int total_extra = 0;
+            for (auto* e : g_all_wired) {
+                if (!e) continue;
+                bool in_slots = false;
+                for (auto& s : g_slots) if (s.engine == e) { in_slots = true; break; }
+                if (in_slots) { extra_skipped++; continue; }
+                total_extra++;
+            }
+            std::printf("[STARTUP] Seeding %d non-slot wired engines (S43/S43b)\n", total_extra);
+            std::fflush(stdout);
+            int progress2 = 0;
+            for (auto* e : g_all_wired) {
+                if (!e) continue;
+                bool in_slots = false;
+                for (auto& s : g_slots) if (s.engine == e) { in_slots = true; break; }
+                if (in_slots) continue;
+                progress2++;
+                if (progress2 % 25 == 0 || progress2 == total_extra) {
+                    std::printf("[SEED-EXTRA] Progress: %d/%d\n", progress2, total_extra);
+                    std::fflush(stdout);
+                }
+                const std::string& symstr = e->cfg().symbol;
+                int64_t tf_secs = e->cfg().tf_secs;
+                const std::string& tag = e->cfg().tag;
+                int need = e->max_history_needed();
+                if (need < 64) need = 64;
+                const char* iv = tf_to_binance_interval(tf_secs);
+                if (iv && *iv) {
+                    seed_engine_from_history(seed_rest, *e, symstr, tf_secs, tag, need);
+                    extra_rest++;
+                } else {
+                    // try H1 aggregation for sub-day, D1 agg for D2+
+                    if (tf_secs >= 172800) {
+                        auto kl = seed_rest.fetch_klines(symstr, "1d", need * (int)(tf_secs/86400) + 5);
+                        if (!kl.empty()) {
+                            // aggregate
+                            std::vector<chimera::EdgeEngine::SeedBar> seeds;
+                            seeds.reserve(kl.size());
+                            for (auto& k : kl) {
+                                chimera::EdgeEngine::SeedBar sb;
+                                sb.open_ts_ms = k.open_ts_ms; sb.o=k.o; sb.h=k.h; sb.l=k.l; sb.c=k.c;
+                                seeds.push_back(sb);
+                            }
+                            e->seed_bars(seeds);
+                            extra_agg++;
+                        } else extra_cold++;
+                    } else {
+                        auto kl = seed_rest.fetch_klines(symstr, "1h", need * (int)(tf_secs/3600) + 5);
+                        if (!kl.empty()) {
+                            std::vector<chimera::EdgeEngine::SeedBar> seeds;
+                            seeds.reserve(kl.size());
+                            for (auto& k : kl) {
+                                chimera::EdgeEngine::SeedBar sb;
+                                sb.open_ts_ms = k.open_ts_ms; sb.o=k.o; sb.h=k.h; sb.l=k.l; sb.c=k.c;
+                                seeds.push_back(sb);
+                            }
+                            e->seed_bars(seeds);
+                            extra_agg++;
+                        } else extra_cold++;
+                    }
+                }
+            }
+            std::printf("[STARTUP] Seeding extra complete: REST=%d  agg=%d  cold=%d  skipped(in_slots)=%d\n",
+                extra_rest, extra_agg, extra_cold, extra_skipped);
+            std::fflush(stdout);
+        }
 
         // ── S34-r8: seed per-symbol rally buffers from 1m klines ─────────
         // So per-symbol regime detector works from first second after restart.
@@ -6117,8 +6188,21 @@ int main() {
         if (tick_age_ms > 5000.0) return;
 
         // Route to whichever engine slot matches this symbol id.
+        // S44c: also feed S43/S43b engines from g_all_wired (they aren't
+        // in g_slots so the slot loop misses them).
         {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
+            // First — non-slot wired engines (no blowoff guard, no slot
+            // metadata, just raw on_tick).
+            for (auto* e : g_all_wired) {
+                if (!e) continue;
+                if (chimera::symbol_to_id(e->cfg().symbol) != id) continue;
+                // Skip if already in g_slots (g_slots loop handles below)
+                bool in_slots = false;
+                for (auto& s : g_slots) if (s.engine == e) { in_slots = true; break; }
+                if (in_slots) continue;
+                e->on_tick(mid, now_ms);
+            }
             for (auto& s : g_slots) {
                 if (s.symbol_id == id && s.engine) {
                     // ── AUDIT-2026 BLOWOFF GUARD ──────────────────────────

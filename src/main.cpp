@@ -271,6 +271,18 @@ static std::atomic<bool>    g_protection_disabled_for_testing{false};
 static std::map<std::string, std::string> g_engine_tier;     // tag -> tier name
 static std::map<std::string, double>      g_tier_multiplier; // tier -> multiplier
 static std::map<std::string, int>         g_tier_pyramid_max; // tier -> max adds
+// S44g: per-symbol liquidity tier — caps base position before edge boosts
+//   MAJOR (BTC/ETH/SOL/BNB/XRP/DOGE) -> 1.0x  (10k base)
+//   MID                              -> 0.5x  (5k base)
+//   THIN  (post-2024 launches)       -> 0.2x  (2k base)
+static std::map<std::string, std::string> g_symbol_liq;       // symbol -> tier name
+static std::map<std::string, double>      g_liq_multiplier;   // tier -> multiplier
+static double liq_mult_for_symbol(const std::string& sym) {
+    auto it = g_symbol_liq.find(sym);
+    if (it == g_symbol_liq.end()) return 0.5;  // unknown sym -> conservative MID
+    auto mit = g_liq_multiplier.find(it->second);
+    return (mit != g_liq_multiplier.end()) ? mit->second : 0.5;
+}
 static double tier_mult_for_tag(const std::string& tag) {
     auto it = g_engine_tier.find(tag);
     if (it == g_engine_tier.end()) return 1.0;
@@ -1653,6 +1665,58 @@ int main() {
         }
     }
 
+    // S44g: load per-symbol liquidity tier
+    {
+        std::ifstream lf("data/symbol_liquidity.json");
+        if (lf.is_open()) {
+            std::string content((std::istreambuf_iterator<char>(lf)),
+                                 std::istreambuf_iterator<char>());
+            lf.close();
+            auto parse_section = [&](const std::string& key, std::map<std::string, std::string>* out_s,
+                                     std::map<std::string, double>* out_d) {
+                auto sp = content.find("\"" + key + "\":");
+                if (sp == std::string::npos) return;
+                auto end_brace = content.find('}', sp);
+                if (end_brace == std::string::npos) return;
+                std::string blob = content.substr(sp, end_brace - sp);
+                size_t q = 0;
+                while ((q = blob.find('"', q)) != std::string::npos) {
+                    size_t k_end = blob.find('"', q + 1);
+                    if (k_end == std::string::npos) break;
+                    std::string mk = blob.substr(q + 1, k_end - q - 1);
+                    if (mk == key) { q = k_end + 1; continue; }
+                    size_t colon = blob.find(':', k_end);
+                    if (colon == std::string::npos) break;
+                    if (out_s) {
+                        size_t v_start = blob.find('"', colon);
+                        size_t v_end   = (v_start != std::string::npos) ? blob.find('"', v_start + 1) : std::string::npos;
+                        if (v_start == std::string::npos || v_end == std::string::npos) break;
+                        (*out_s)[mk] = blob.substr(v_start + 1, v_end - v_start - 1);
+                        q = v_end + 1;
+                    } else if (out_d) {
+                        size_t num_start = blob.find_first_of("0123456789.-", colon);
+                        if (num_start == std::string::npos) break;
+                        try { (*out_d)[mk] = std::stod(blob.substr(num_start)); } catch (...) {}
+                        q = num_start + 1;
+                    }
+                }
+            };
+            parse_section("liquidity",   &g_symbol_liq, nullptr);
+            parse_section("multipliers", nullptr, &g_liq_multiplier);
+            std::printf("[STARTUP] liquidity map loaded: %d symbols, %d tier multipliers\n",
+                        (int)g_symbol_liq.size(), (int)g_liq_multiplier.size());
+            for (auto& [t,m] : g_liq_multiplier) {
+                int n = 0;
+                for (auto& [k,v] : g_symbol_liq) if (v == t) n++;
+                std::printf("  %-6s -> %.2fx  base=%.0f USD  syms=%d\n",
+                            t.c_str(), m, m * 10000.0, n);
+            }
+            std::fflush(stdout);
+        } else {
+            std::fprintf(stderr, "[STARTUP] data/symbol_liquidity.json not found — all syms = 0.5x conservative MID\n");
+        }
+    }
+
     // S44d: publish testing-bypass flag to global so the gate logic sees it
     g_protection_disabled_for_testing.store(
         runtime_cfg.protection_disabled_for_testing, std::memory_order_relaxed);
@@ -1752,15 +1816,24 @@ int main() {
                     }
                 }
 
+                // S44g: liquidity floor — caps THIN alts to 2k base (× edges).
+                // Edge boosts still apply but on a smaller base, so even
+                // TOP_ELITE × full stack on JTO stays under ~6.5k notional.
+                double liq_mult = liq_mult_for_symbol(intent.symbol);
+                double sym_base_usd = runtime_cfg.max_position_usd * liq_mult;
                 double total_mult = tier_mult * funding_mult * confluence_mult * crash_mult;
-                double qty = (runtime_cfg.max_position_usd * total_mult) / intent.ref_px;
+                double qty = (sym_base_usd * total_mult) / intent.ref_px;
                 auto _ti = g_engine_tier.find(intent.tag);
                 const char* tier_str = (_ti != g_engine_tier.end()) ? _ti->second.c_str() : "UNKNOWN";
-                std::printf("[ORDER-INTENT] tag=%s symbol=%s side=%s qty=%.8f px=%.4f tier=%s "
-                            "tier_mult=%.2fx funding=%.2fx conflu=%.2fx crash=%.2fx total=%.2fx\n",
+                auto _li = g_symbol_liq.find(intent.symbol);
+                const char* liq_str = (_li != g_symbol_liq.end()) ? _li->second.c_str() : "UNKNOWN";
+                std::printf("[ORDER-INTENT] tag=%s symbol=%s side=%s qty=%.8f px=%.4f tier=%s liq=%s "
+                            "tier_mult=%.2fx liq_mult=%.2fx funding=%.2fx conflu=%.2fx crash=%.2fx total=%.2fx notional=%.0f\n",
                     intent.tag.c_str(), intent.symbol.c_str(),
                     intent.is_buy ? "BUY" : "SELL", qty, intent.ref_px,
-                    tier_str, tier_mult, funding_mult, confluence_mult, crash_mult, total_mult);
+                    tier_str, liq_str,
+                    tier_mult, liq_mult, funding_mult, confluence_mult, crash_mult, total_mult,
+                    qty * intent.ref_px);
                 std::fflush(stdout);
                 auto result = executor.execute(intent.symbol, intent.is_buy, qty, intent.ref_px);
                 if (!result.ok) {
@@ -1796,11 +1869,14 @@ int main() {
                     if (g_funding_filter.has_tailwind(sym_id))      funding_mult = 1.2;
                     else if (g_funding_filter.has_headwind(sym_id)) funding_mult = 0.8;
                 }
+                // S44g: liquidity floor applies to pyramid adds too.
+                double liq_mult = liq_mult_for_symbol(engine.cfg().symbol);
+                double sym_base_usd = runtime_cfg.max_position_usd * liq_mult;
                 double total_mult = tier_mult * funding_mult;
-                double add_usd = runtime_cfg.max_position_usd * size_mult * total_mult;
+                double add_usd = sym_base_usd * size_mult * total_mult;
                 double qty = add_usd / price;
-                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% tier=%.2fx funding=%.2fx total=%.2fx add_usd=%.2f qty=%.8f\n",
-                    tag.c_str(), add_num, size_mult * 100.0, tier_mult, funding_mult, total_mult, add_usd, qty);
+                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% tier=%.2fx liq=%.2fx funding=%.2fx total=%.2fx add_usd=%.2f qty=%.8f\n",
+                    tag.c_str(), add_num, size_mult * 100.0, tier_mult, liq_mult, funding_mult, total_mult, add_usd, qty);
                 std::fflush(stdout);
                 // Pyramid uses engine's symbol context; resolve via tag prefix is non-trivial,
                 // so use engine.symbol field captured at config time.

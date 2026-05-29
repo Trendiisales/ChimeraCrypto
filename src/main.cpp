@@ -877,13 +877,20 @@ static std::string build_state_json() {
     }
     js << "},";
 
-    // ── engines — merge state_json() with slot metadata ─────────────────────
+    // ── engines — merge state_json() with slot metadata (g_slots first) ─────
+    // S44b: also include S43/S43b engines that are wired via wire_engine
+    // but not in g_slots, so the dashboard table shows every live engine.
     js << "\"engines\":[";
+    bool first = true;
+    // Track which engine pointers we already emitted (g_slots subset)
+    std::vector<chimera::EdgeEngine*> emitted;
+    emitted.reserve(g_slots.size());
     for (size_t i = 0; i < g_slots.size(); ++i) {
-        if (i > 0) js << ",";
+        if (!first) js << ",";
+        first = false;
         if (g_slots[i].engine) {
+            emitted.push_back(g_slots[i].engine);
             std::string ej = g_slots[i].engine->state_json();
-            // Insert backtest metadata before the closing brace
             std::string meta;
             {
                 std::ostringstream m;
@@ -893,11 +900,9 @@ static std::string build_state_json() {
                 m << ",\"oos_nbr\":" << g_slots[i].oos_nbr;
                 m << ",\"oos_trades\":" << g_slots[i].oos_trades;
                 m << ",\"session\":" << g_slots[i].session;
-                // S34: live PF filter state
                 m << ",\"bt_pf\":" << g_slots[i].bt_pf;
                 m << ",\"bt_trades\":" << g_slots[i].bt_trades;
                 m << ",\"pf_blocked\":" << (g_slots[i].pf_blocked ? "true" : "false");
-                // S34-r8: per-symbol regime + recent return
                 if (g_slots[i].symbol_id >= 0 && g_slots[i].symbol_id < chimera::MAX_SYMBOLS) {
                     int sr = g_sym_regime[g_slots[i].symbol_id].load();
                     const char* srs = (sr == 0) ? "CRASH" : (sr == 1) ? "BEAR" : (sr == 2) ? "BULL_CHOP" : "BULL_TREND";
@@ -906,7 +911,6 @@ static std::string build_state_json() {
                 }
                 meta = m.str();
             }
-            // Insert before final '}'
             if (!ej.empty() && ej.back() == '}') {
                 ej.pop_back();
                 ej += meta + "}";
@@ -915,6 +919,25 @@ static std::string build_state_json() {
         } else {
             js << "null";
         }
+    }
+    // S44b: append wired-but-not-slotted engines (S43 + S43b cohorts).
+    // These don't have slot metadata, so we mark them session=43 and leave
+    // OOS/bt metadata empty — the dashboard will render them with reduced
+    // info but they show up in the engine table.
+    for (auto* e : g_all_wired) {
+        if (std::find(emitted.begin(), emitted.end(), e) != emitted.end()) continue;
+        if (!e) continue;
+        if (!first) js << ",";
+        first = false;
+        std::string ej = e->state_json();
+        std::string meta = ",\"oos_pf\":0,\"oos_sharpe\":0,\"oos_nbr\":0,\"oos_trades\":0,"
+                           "\"session\":43,\"bt_pf\":0,\"bt_trades\":0,\"pf_blocked\":false,"
+                           "\"wired_non_slot\":true";
+        if (!ej.empty() && ej.back() == '}') {
+            ej.pop_back();
+            ej += meta + "}";
+        }
+        js << ej;
     }
     js << "]}";
     return js.str();

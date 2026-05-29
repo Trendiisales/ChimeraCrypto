@@ -5975,6 +5975,22 @@ int main() {
             elite, tight, blocked_tight);
         std::printf("[SAFETY] S36-rewrite: staged-ratchet ONLY (BE-lock@RT+10mfe, progressive lock 75/85/90/95%%). DISABLED: hard_floor / early_kill / giveback / signal_confirm. Verified +1.07M bp recovery vs old presets across 17-engine 5yr OOS.\n");
         std::fflush(stdout);
+
+        // S44N: re-apply S44k/M/i overrides AFTER slot-loop's preset call
+        // (which resets be_arm to rt+10, signal_confirm to 1, hard_floor to 0).
+        // wire_engine already set these but slot loop just overrode them.
+        // Idempotent for non-slot engines (no-op since already set).
+        int n_reapplied = 0;
+        for (auto& slot : g_slots) {
+            if (!slot.engine) continue;
+            slot.engine->set_be_arm_bp(25.0);
+            slot.engine->set_ratchet_lock_pct(0.85);
+            slot.engine->set_hard_floor_bp(-170.0);
+            slot.engine->set_signal_confirm_bars(2);
+            n_reapplied++;
+        }
+        std::printf("[S44N] Re-applied S44k/M/i overrides on %d slot engines (be_arm=25 lock=0.85 hard_floor=-170 signal_confirm=2)\n", n_reapplied);
+        std::fflush(stdout);
     }
 
     // ── S38b: PYRAMID-XLOW — enable aggressive pyramid on all slots ───────

@@ -4,3 +4,7 @@ logs/
 config/binance_credentials.json
 /tmp/chimera_*
 backtest/data/
+
+# build version override (deploy-time, per-host)
+.build_version
+include/version_generated.hpp

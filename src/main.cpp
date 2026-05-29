@@ -1628,7 +1628,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_tsmom_d1(eth_d1_cfg);
-    wire_engine(eth_tsmom_d1);
+// S44-CULL:     wire_engine(eth_tsmom_d1);
 
     // ENGINE A3: SOL-TSMOM-D1 — PF=2.25, Sharpe=2.41, Nbr=89%
     chimera::EdgeEngine::Config sol_d1_cfg{
@@ -1650,7 +1650,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sol_tsmom_d1(sol_d1_cfg);
-    wire_engine(sol_tsmom_d1);
+// S44-CULL:     wire_engine(sol_tsmom_d1);
 
     // ENGINE A4: LINK-TSMOM-D1 — PF=2.18, Sharpe=1.92, Nbr=100%
     chimera::EdgeEngine::Config link_d1_cfg{
@@ -1672,7 +1672,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_tsmom_d1(link_d1_cfg);
-    wire_engine(link_tsmom_d1);
+// S44-CULL:     wire_engine(link_tsmom_d1);
 
     // ENGINE A5: BNB-TSMOM-D1 — PF=3.16, Sharpe=2.91, Nbr=90%
     chimera::EdgeEngine::Config bnb_d1_cfg{
@@ -1770,7 +1770,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h6(xrp_h6_cfg);
-    wire_engine(xrp_tsmom_h6);
+// S44-CULL:     wire_engine(xrp_tsmom_h6);
 
     // ENGINE C2: BTC-TSMOM-H6 — PF=2.59, Sharpe=5.16, 169 trades, Nbr=100%
     chimera::EdgeEngine::Config btc_h6_cfg{
@@ -1836,7 +1836,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h6(sol_h6_cfg);
-    wire_engine(sol_tsmom_h6);
+// S44-CULL:     wire_engine(sol_tsmom_h6);
 
     // ENGINE C5: BNB-TSMOM-H6 — PF=2.07, Sharpe=2.76, 95 trades, Nbr=100%
     chimera::EdgeEngine::Config bnb_h6_cfg{
@@ -1924,7 +1924,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine avax_tsmom_h6(avax_h6_cfg);
-    wire_engine(avax_tsmom_h6);
+// S44-CULL:     wire_engine(avax_tsmom_h6);
 
     // ══════════════════════════════════════════════════════════════════════
     // ── SECTION D: H4 ENGINES (Session 14) ──────────────────────────────
@@ -1972,7 +1972,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h4(bnb_h4_cfg);
-    wire_engine(bnb_tsmom_h4);
+// S44-CULL:     wire_engine(bnb_tsmom_h4);
 
     // ENGINE D3: LINK-TSMOM-H4 — PF=1.91, Sharpe=4.07, 205 trades, Nbr=95%
     chimera::EdgeEngine::Config link_h4_cfg{
@@ -2038,7 +2038,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h4(btc_h4_cfg);
-    wire_engine(btc_tsmom_h4);
+// S44-CULL:     wire_engine(btc_tsmom_h4);
 
     // ENGINE D6: ETH-TSMOM-H4 — PF=1.76, Sharpe=3.26, 196 trades, Nbr=100%
     chimera::EdgeEngine::Config eth_h4_cfg{
@@ -2117,7 +2117,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h2(btc_h2_cfg);
-    wire_engine(btc_tsmom_h2);
+// S44-CULL:     wire_engine(btc_tsmom_h2);
 
     // ENGINE F2: ETH-TSMOM-H2 — PF=1.50, Sharpe=3.02, 359 trades, Nbr=100%
     chimera::EdgeEngine::Config eth_h2_cfg{
@@ -2139,7 +2139,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h2(eth_h2_cfg);
-    wire_engine(eth_tsmom_h2);
+// S44-CULL:     wire_engine(eth_tsmom_h2);
 
     // ENGINE F3: SOL-TSMOM-H2 — PF=1.78, Sharpe=4.17, 340 trades, Nbr=100%
     chimera::EdgeEngine::Config sol_h2_cfg{
@@ -2183,7 +2183,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_tsmom_h2(xrp_h2_cfg);
-    wire_engine(xrp_tsmom_h2);
+// S44-CULL:     wire_engine(xrp_tsmom_h2);
 
 
 
@@ -2212,7 +2212,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h3(btc_h3_cfg);
-    wire_engine(btc_tsmom_h3);
+// S44-CULL:     wire_engine(btc_tsmom_h3);
 
     // ENGINE G2: ETH-TSMOM-H3 — PF=1.74, Sharpe=3.65, 278 trades, Nbr=98%
     chimera::EdgeEngine::Config eth_h3_cfg{
@@ -2234,7 +2234,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_tsmom_h3(eth_h3_cfg);
-    wire_engine(eth_tsmom_h3);
+// S44-CULL:     wire_engine(eth_tsmom_h3);
 
     // ENGINE G3: SOL-TSMOM-H3 — PF=1.92, Sharpe=4.15, 259 trades, Nbr=93%
     chimera::EdgeEngine::Config sol_h3_cfg{
@@ -2256,7 +2256,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h3(sol_h3_cfg);
-    wire_engine(sol_tsmom_h3);
+// S44-CULL:     wire_engine(sol_tsmom_h3);
 
     // ENGINE G4: XRP-TSMOM-H3 — PF=2.19, Sharpe=4.70, 243 trades, Nbr=100%
     chimera::EdgeEngine::Config xrp_h3_cfg{
@@ -2300,7 +2300,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h3(link_h3_cfg);
-    wire_engine(link_tsmom_h3);
+// S44-CULL:     wire_engine(link_tsmom_h3);
 
     // ENGINE G6: BNB-TSMOM-H3 — PF=1.55, Sharpe=2.74, 349 trades, Nbr=97%
     chimera::EdgeEngine::Config bnb_h3_cfg{
@@ -2322,7 +2322,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h3(bnb_h3_cfg);
-    wire_engine(bnb_tsmom_h3);
+// S44-CULL:     wire_engine(bnb_tsmom_h3);
 
     // ENGINE G7: DOGE-TSMOM-H3 — PF=1.25, Sharpe=1.48, 309 trades, Nbr=87%
     chimera::EdgeEngine::Config doge_h3_cfg{
@@ -2344,7 +2344,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_tsmom_h3(doge_h3_cfg);
-    wire_engine(doge_tsmom_h3);
+// S44-CULL:     wire_engine(doge_tsmom_h3);
 
     // ══════════════════════════════════════════════════════════════════════
     // BEAR-MARKET COUNTER-TREND ENGINES — Session 19 (2026-05-16)
@@ -2442,7 +2442,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine near_tsmom_d1(near_d1_cfg);
-    wire_engine(near_tsmom_d1);
+// S44-CULL:     wire_engine(near_tsmom_d1);
 
     // ENGINE H2: NEAR-TSMOM-H12 — PF=1.92, Sharpe=3.03, 126 trades, Nbr=95%
     chimera::EdgeEngine::Config near_h12_cfg{
@@ -4695,7 +4695,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine eth_ichi_h12(eth_ichi_h12_cfg); wire_engine(eth_ichi_h12);
+// S44-CULL:     chimera::EdgeEngine eth_ichi_h12(eth_ichi_h12_cfg); wire_engine(eth_ichi_h12);
 
     // SOL-ICHI-H8: 5yr PF=5.92 Sh=6.20 n=188, 365d PF=3.68 730d PF=2.45 180d PF=41.6
     chimera::EdgeEngine::Config sol_ichi_h8_cfg{
@@ -5453,7 +5453,7 @@ int main() {
 // S44-CULL:     g_slots.push_back({chimera::SYM_AVAX, &avax_ichi_d1, "avaxusdt", 86400, "AVAX-ICHI-D1", 4.02, 2.49,  88,  34, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_d1, "dogeusdt", 86400, "DOGE-ICHI-D1", 3.38, 2.45,  84,  25, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_d1,  "xrpusdt",  86400, "XRP-ICHI-D1",  4.98, 2.86,  94,  51, 37});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
     g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
     g_slots.push_back({chimera::SYM_NEAR, &near_ichi_h8, "nearusdt", 28800, "NEAR-ICHI-H8", 2.92, 4.67, 89, 192, 37});  // S37: bear-stress passed all 4 windows PF>=2.35

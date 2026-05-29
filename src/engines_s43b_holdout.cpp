@@ -367,7 +367,7 @@ chimera::EdgeEngine::Config s43b_ethfiusdt_tsmom_7200_60_5_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43b_ethfiusdt_tsmom_7200_60_5(s43b_ethfiusdt_tsmom_7200_60_5_cfg);
-wire_engine(s43b_ethfiusdt_tsmom_7200_60_5);
+// S44-CULL: wire_engine(s43b_ethfiusdt_tsmom_7200_60_5);
 
 // ETHFI-TSMOM-H3  IS_PF=2.25 n=901  OOS_PF=1.53 n=410 bp=+12101 dd=2742
 chimera::EdgeEngine::Config s43b_ethfiusdt_tsmom_10800_45_3_cfg{

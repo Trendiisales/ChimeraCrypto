@@ -305,6 +305,11 @@ static constexpr double SYM_DAILY_CAP_BP = -300.0;
 // S44M #1: per-symbol SL-COUNT circuit breaker. 3+ SL hits on same symbol
 // within 4h -> halt symbol entries for 4h. Triggers BEFORE bp threshold.
 static std::atomic<int64_t> g_sym_sl_circuit_blocked_until_ms[chimera::MAX_SYMBOLS]{};
+// S44O: per-symbol post-SL cooldown. After ANY engine SLs on a symbol,
+// block ALL engines on that symbol for 30 min. Catches chop earlier
+// than the 3-SL circuit. Engine cooldown is per-engine; this is sym-wide.
+static std::atomic<int64_t> g_sym_post_sl_cooldown_until_ms[chimera::MAX_SYMBOLS]{};
+static constexpr int64_t SYM_POST_SL_COOLDOWN_MS = 30LL * 60 * 1000;
 static constexpr int     SYM_SL_COUNT_THRESHOLD = 3;
 static constexpr int64_t SYM_SL_WINDOW_MS       = 4LL * 3600 * 1000;
 static constexpr int64_t SYM_SL_BLOCK_MS        = 4LL * 3600 * 1000;
@@ -1806,6 +1811,13 @@ int main() {
                 int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count();
                 engine_enter_cooldown(engine_ptr, now_ms, tf_ms);
+                // S44O: per-symbol post-SL cooldown — block all engines on
+                // this symbol for 30 min. Catches chop fast.
+                int sid = chimera::symbol_to_id(rec.symbol);
+                if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
+                    g_sym_post_sl_cooldown_until_ms[sid].store(
+                        now_ms + SYM_POST_SL_COOLDOWN_MS);
+                }
             }
         });
         engine.set_on_bar(on_bar_callback);
@@ -6229,7 +6241,7 @@ int main() {
         // S44c: seed the non-slot wired engines (S43 + S43b cohorts).
         // Same logic as slot loop above but iterates g_all_wired instead.
         {
-            int extra_rest = 0, extra_agg = 0, extra_saved = 0, extra_cold = 0, extra_skipped = 0;
+            int extra_rest = 0, extra_agg = 0, extra_cold = 0, extra_skipped = 0;
             int total_extra = 0;
             for (auto* e : g_all_wired) {
                 if (!e) continue;
@@ -6616,7 +6628,10 @@ int main() {
                     int64_t blocked_until = g_sym_daily_blocked_until_ms[sid].load();
                     // S44M #1: also check SL-count circuit
                     int64_t sl_blocked = g_sym_sl_circuit_blocked_until_ms[sid].load();
-                    if (now_ms_ck < blocked_until || now_ms_ck < sl_blocked) {
+                    // S44O: per-symbol post-SL cooldown (30 min after any SL)
+                    int64_t post_sl_blocked = g_sym_post_sl_cooldown_until_ms[sid].load();
+                    if (now_ms_ck < blocked_until || now_ms_ck < sl_blocked ||
+                        now_ms_ck < post_sl_blocked) {
                         e->set_portfolio_gate(false);
                     }
                 }

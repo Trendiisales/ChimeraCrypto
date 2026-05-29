@@ -262,6 +262,17 @@ static std::atomic<bool>    g_gate_open{true};
 static std::atomic<bool>    g_ratchet_locked{false};
 // S44d: testing-mode protection bypass. Set from live_config.json at startup.
 static std::atomic<bool>    g_protection_disabled_for_testing{false};
+// S44e: per-engine tier multipliers for lot sizing. Loaded from
+// data/engine_tiers.json at startup; ELITE=1.5x, STRONG=1.2x, STANDARD=1.0x.
+static std::map<std::string, std::string> g_engine_tier;     // tag -> tier name
+static std::map<std::string, double>      g_tier_multiplier; // tier -> multiplier
+static double tier_mult_for_tag(const std::string& tag) {
+    auto it = g_engine_tier.find(tag);
+    if (it == g_engine_tier.end()) return 1.0;
+    auto mit = g_tier_multiplier.find(it->second);
+    if (mit == g_tier_multiplier.end()) return 1.0;
+    return mit->second;
+}
 // S44d: sticky alert log for ratchet/lock events. Persists across queries.
 static std::mutex           g_alerts_mtx;
 static std::vector<std::string> g_alerts;
@@ -1539,6 +1550,62 @@ int main() {
 
     // Executor — engines mirror entry/exit intents into this via on_order_intent.
     chimera::SpotExecutor executor;
+    // S44e: load tier map for per-engine lot sizing
+    {
+        std::ifstream tf("data/engine_tiers.json");
+        if (tf.is_open()) {
+            std::string content((std::istreambuf_iterator<char>(tf)),
+                                 std::istreambuf_iterator<char>());
+            tf.close();
+            // Parse tiers (tag -> tier string)
+            auto tpos = content.find("\"tiers\":");
+            auto mpos = content.find("\"multipliers\":");
+            if (tpos != std::string::npos && mpos != std::string::npos) {
+                std::string tiers_blob = content.substr(tpos, mpos - tpos);
+                // Match "TAG":"TIER"
+                size_t p = 0;
+                while ((p = tiers_blob.find('"', p)) != std::string::npos) {
+                    size_t key_end = tiers_blob.find('"', p + 1);
+                    if (key_end == std::string::npos) break;
+                    std::string key = tiers_blob.substr(p + 1, key_end - p - 1);
+                    if (key == "tiers") { p = key_end + 1; continue; }
+                    size_t v_start = tiers_blob.find('"', key_end + 1);
+                    size_t v_end   = (v_start != std::string::npos) ? tiers_blob.find('"', v_start + 1) : std::string::npos;
+                    if (v_start == std::string::npos || v_end == std::string::npos) break;
+                    std::string val = tiers_blob.substr(v_start + 1, v_end - v_start - 1);
+                    g_engine_tier[key] = val;
+                    p = v_end + 1;
+                }
+                // Parse multipliers (TIER -> double)
+                std::string mults_blob = content.substr(mpos);
+                size_t q = 0;
+                while ((q = mults_blob.find('"', q)) != std::string::npos) {
+                    size_t k_end = mults_blob.find('"', q + 1);
+                    if (k_end == std::string::npos) break;
+                    std::string mk = mults_blob.substr(q + 1, k_end - q - 1);
+                    if (mk == "multipliers" || mk == "note") { q = k_end + 1; continue; }
+                    size_t colon = mults_blob.find(':', k_end);
+                    if (colon == std::string::npos) break;
+                    size_t num_start = mults_blob.find_first_of("0123456789.-", colon);
+                    if (num_start == std::string::npos) break;
+                    try {
+                        double mv = std::stod(mults_blob.substr(num_start));
+                        g_tier_multiplier[mk] = mv;
+                    } catch (...) {}
+                    q = num_start + 1;
+                }
+            }
+            std::printf("[STARTUP] tier map loaded: %d engines, %d tier multipliers\n",
+                        (int)g_engine_tier.size(), (int)g_tier_multiplier.size());
+            for (auto& [t,m] : g_tier_multiplier) {
+                std::printf("  %-10s -> %.2fx\n", t.c_str(), m);
+            }
+            std::fflush(stdout);
+        } else {
+            std::fprintf(stderr, "[STARTUP] data/engine_tiers.json not found — all engines = 1.0x\n");
+        }
+    }
+
     // S44d: publish testing-bypass flag to global so the gate logic sees it
     g_protection_disabled_for_testing.store(
         runtime_cfg.protection_disabled_for_testing, std::memory_order_relaxed);
@@ -1603,10 +1670,17 @@ int main() {
                         intent.tag.c_str(), intent.ref_px, runtime_cfg.max_position_usd);
                     return;
                 }
-                double qty = runtime_cfg.max_position_usd / intent.ref_px;
-                std::printf("[ORDER-INTENT] tag=%s symbol=%s side=%s qty=%.8f px=%.4f\n",
+                // S44e: per-engine tier multiplier (ELITE 1.5x, STRONG 1.2x,
+                // STANDARD 1.0x). Unknown tag -> 1.0x. Tier loaded at startup
+                // from data/engine_tiers.json.
+                double tier_mult = tier_mult_for_tag(intent.tag);
+                double qty = (runtime_cfg.max_position_usd * tier_mult) / intent.ref_px;
+                auto _ti = g_engine_tier.find(intent.tag);
+                const char* tier_str = (_ti != g_engine_tier.end()) ? _ti->second.c_str() : "UNKNOWN";
+                std::printf("[ORDER-INTENT] tag=%s symbol=%s side=%s qty=%.8f px=%.4f tier=%s mult=%.2fx\n",
                     intent.tag.c_str(), intent.symbol.c_str(),
-                    intent.is_buy ? "BUY" : "SELL", qty, intent.ref_px);
+                    intent.is_buy ? "BUY" : "SELL", qty, intent.ref_px,
+                    tier_str, tier_mult);
                 std::fflush(stdout);
                 auto result = executor.execute(intent.symbol, intent.is_buy, qty, intent.ref_px);
                 if (!result.ok) {
@@ -1632,10 +1706,12 @@ int main() {
                         tag.c_str(), price, size_mult);
                     return;
                 }
-                double add_usd = runtime_cfg.max_position_usd * size_mult;
+                // S44e: tier multiplier applies to pyramid adds too.
+                double tier_mult = tier_mult_for_tag(tag);
+                double add_usd = runtime_cfg.max_position_usd * size_mult * tier_mult;
                 double qty = add_usd / price;
-                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% add_usd=%.2f qty=%.8f px=%.4f\n",
-                    tag.c_str(), add_num, size_mult * 100.0, add_usd, qty, price);
+                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% tier=%.2fx add_usd=%.2f qty=%.8f px=%.4f\n",
+                    tag.c_str(), add_num, size_mult * 100.0, tier_mult, add_usd, qty, price);
                 std::fflush(stdout);
                 // Pyramid uses engine's symbol context; resolve via tag prefix is non-trivial,
                 // so use engine.symbol field captured at config time.

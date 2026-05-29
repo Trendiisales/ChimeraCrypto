@@ -260,6 +260,23 @@ static constexpr int64_t FUNDING_FETCH_INTERVAL_MS = 8 * 3600 * 1000LL; // every
 // build_state_json() to surface lock reasons to the dashboard.
 static std::atomic<bool>    g_gate_open{true};
 static std::atomic<bool>    g_ratchet_locked{false};
+// S44d: testing-mode protection bypass. Set from live_config.json at startup.
+static std::atomic<bool>    g_protection_disabled_for_testing{false};
+// S44d: sticky alert log for ratchet/lock events. Persists across queries.
+static std::mutex           g_alerts_mtx;
+static std::vector<std::string> g_alerts;
+static void push_alert(const std::string& msg) {
+    int64_t ts = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::lock_guard<std::mutex> lk(g_alerts_mtx);
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "{\"ts_ms\":%lld,\"msg\":\"", (long long)ts);
+    g_alerts.push_back(std::string(buf) + msg + "\"}");
+    // Keep last 100 alerts
+    if (g_alerts.size() > 100) {
+        g_alerts.erase(g_alerts.begin(), g_alerts.begin() + (g_alerts.size() - 100));
+    }
+}
 static std::atomic<bool>    g_streak_halted{false};
 static std::atomic<uint64_t> g_session_cum_bp_bits{0};
 static std::atomic<uint64_t> g_session_peak_bp_bits{0};
@@ -815,6 +832,18 @@ static std::string build_state_json() {
     js << "\"startup_ts\":" << g_startup_ts_ms << ",";
     js << "\"engine_count\":" << g_all_wired.size() << ",";
     js << "\"slot_count\":" << g_slots.size() << ",";
+    js << "\"protection_disabled_for_testing\":"
+       << (g_protection_disabled_for_testing.load() ? "true" : "false") << ",";
+    // S44d alerts queue
+    {
+        std::lock_guard<std::mutex> lk(g_alerts_mtx);
+        js << "\"alerts\":[";
+        for (size_t i = 0; i < g_alerts.size(); ++i) {
+            if (i > 0) js << ",";
+            js << g_alerts[i];
+        }
+        js << "],";
+    }
 
     // ── S33: portfolio gate state (drives GUI banner) ────────────────────
     js << "\"portfolio_gate\":{";
@@ -1182,6 +1211,10 @@ struct LiveRuntimeConfig {
     bool        shadow_mode      = true;
     double      max_position_usd = 10000.0;
     double      min_edge_bps     = 10.0;
+    // S44d: testing-mode protection bypass. When TRUE + shadow_mode=true,
+    // the portfolio ratchet does NOT halt entries (lets testing flow
+    // through). Going live (shadow_mode=false) with this set = FATAL abort.
+    bool        protection_disabled_for_testing = false;
 };
 
 static std::string lrc_extract_string(const std::string& s, const char* key) {
@@ -1239,10 +1272,30 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     cfg.shadow_mode      = lrc_extract_bool(content, "shadow_mode", true);
     cfg.max_position_usd = lrc_extract_double(content, "max_position_usd", 10000.0);
     cfg.min_edge_bps     = lrc_extract_double(content, "min_edge_bps", 10.0);
-    std::printf("[STARTUP] live_config loaded from %s: creds=%s shadow=%d max_pos=%.2f min_edge=%.2fbp\n",
+    cfg.protection_disabled_for_testing =
+        lrc_extract_bool(content, "protection_disabled_for_testing", false);
+    std::printf("[STARTUP] live_config loaded from %s: creds=%s shadow=%d max_pos=%.2f min_edge=%.2fbp protection_disabled=%d\n",
                 opened.c_str(), cfg.credentials_file.c_str(),
-                cfg.shadow_mode ? 1 : 0, cfg.max_position_usd, cfg.min_edge_bps);
+                cfg.shadow_mode ? 1 : 0, cfg.max_position_usd, cfg.min_edge_bps,
+                cfg.protection_disabled_for_testing ? 1 : 0);
     std::fflush(stdout);
+
+    // S44d TRIP-SWITCH: going live with protection disabled = HARD ABORT.
+    if (!cfg.shadow_mode && cfg.protection_disabled_for_testing) {
+        std::fprintf(stderr,
+            "\n\n"
+            "==================================================================\n"
+            " FATAL: shadow_mode=false (LIVE TRADING) but\n"
+            "        protection_disabled_for_testing=true (PROTECTIONS BYPASSED).\n"
+            "\n"
+            " This combination would route real orders without ratchet/drawdown\n"
+            " halts. Refusing to start.\n"
+            "\n"
+            " To go live: set protection_disabled_for_testing=false in\n"
+            " config/live_config.json, OR remove the key entirely.\n"
+            "==================================================================\n\n");
+        std::exit(1);
+    }
     return cfg;
 }
 
@@ -1486,6 +1539,19 @@ int main() {
 
     // Executor — engines mirror entry/exit intents into this via on_order_intent.
     chimera::SpotExecutor executor;
+    // S44d: publish testing-bypass flag to global so the gate logic sees it
+    g_protection_disabled_for_testing.store(
+        runtime_cfg.protection_disabled_for_testing, std::memory_order_relaxed);
+    if (runtime_cfg.protection_disabled_for_testing) {
+        std::printf("\n"
+            "==================================================================\n"
+            " WARNING: protection_disabled_for_testing=TRUE in live_config.json\n"
+            " Ratchet halts are BYPASSED. Shadow mode trades flow freely.\n"
+            " REMEMBER: set this back to false (or remove) before going live.\n"
+            "==================================================================\n\n");
+        std::fflush(stdout);
+        push_alert("PROTECTION DISABLED for testing — ratchet halts bypassed");
+    }
     bool exec_ok = executor.init(runtime_cfg.credentials_file);
     if (!exec_ok) {
         std::fprintf(stderr, "[STARTUP] WARNING: executor init failed — order intents will drop\n");
@@ -6733,12 +6799,22 @@ int main() {
                                     ((giveback / all_time_peak) > RATCHET_GIVEBACK_PCT);
                     if (abs_trip || pct_trip) {
                         if (!ratchet_locked) {
+                            std::fprintf(stderr,
+                                "\n[RATCHET] **LOCKED** peak=%+.1fbp cum=%+.1fbp giveback=%.1fbp (%.1f%%) -> halt entries\n\n",
+                                all_time_peak, all_time_cum, giveback,
+                                100.0 * giveback / std::max(all_time_peak, 1.0));
                             std::printf("[RATCHET] LOCKED: peak=%+.1fbp cum=%+.1fbp giveback=%.1fbp (%.1f%%) -> halt entries\n",
                                 all_time_peak, all_time_cum, giveback,
                                 100.0 * giveback / std::max(all_time_peak, 1.0));
                             std::fflush(stdout);
                             ratchet_locked = true;
                             lock_start_ms = now_ms;
+                            char buf[256];
+                            std::snprintf(buf, sizeof(buf),
+                                "RATCHET LOCKED peak=%+.1fbp cum=%+.1fbp giveback=%.1fbp (%.1f%%)",
+                                all_time_peak, all_time_cum, giveback,
+                                100.0 * giveback / std::max(all_time_peak, 1.0));
+                            push_alert(buf);
                         }
                     } else if (ratchet_locked && giveback < RATCHET_REARM_BP) {
                         std::printf("[RATCHET] UNLOCKED: peak=%+.1fbp cum=%+.1fbp giveback=%.1fbp -> resume\n",
@@ -6746,6 +6822,7 @@ int main() {
                         std::fflush(stdout);
                         ratchet_locked = false;
                         lock_start_ms = 0;
+                        push_alert("RATCHET UNLOCKED — entries resume");
                     }
                 }
 
@@ -6917,14 +6994,18 @@ int main() {
                 constexpr int MAX_PER_SYM_FAMILY = 1;
                 g_tsmom_open_count.store(tsmom_open, std::memory_order_relaxed);
 
+                // S44d: testing-mode bypass — ignore protective halts so
+                // shadow trades can flow during research. Trip-switch:
+                // shadow_mode=false + this flag = FATAL at startup.
+                bool testing_bypass = g_protection_disabled_for_testing.load();
                 bool gate_open = (open_positions < MAX_CONCURRENT_POSITIONS) &&
-                                 (recent_pnl > DRAWDOWN_HALT_BP) &&
-                                 (total_unrealized_bp > UNREALIZED_HALT_BP) &&
-                                 (!streak_halted) &&
-                                 (!ratchet_locked) &&
-                                 (!daily_halted) &&
-                                 (regime != 0) && (regime != 1) &&  // CRASH/BEAR = no entries
-                                 (size_throttle > 0.0);
+                                 (testing_bypass || recent_pnl > DRAWDOWN_HALT_BP) &&
+                                 (testing_bypass || total_unrealized_bp > UNREALIZED_HALT_BP) &&
+                                 (testing_bypass || !streak_halted) &&
+                                 (testing_bypass || !ratchet_locked) &&
+                                 (testing_bypass || !daily_halted) &&
+                                 (testing_bypass || (regime != 0 && regime != 1)) &&
+                                 (testing_bypass || size_throttle > 0.0);
 
                 // Publish gate state to globals for /api/state2 + GUI banner
                 g_gate_open.store(gate_open, std::memory_order_relaxed);

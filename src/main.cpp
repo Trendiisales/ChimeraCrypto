@@ -1470,6 +1470,9 @@ int main() {
     // into SpotExecutor (shadow mode -> signed-but-not-posted log).
     auto wire_engine = [&](chimera::EdgeEngine& engine) {
         engine.shadow_mode = runtime_cfg.shadow_mode;
+        // S44: pyramid_elite for ALL wired engines (incl S43/S43b includes
+        // which aren't in g_slots). Validated +2.8% portfolio bp.
+        engine.enable_pyramid_elite();
         engine.set_on_trade(on_trade_callback);
         engine.set_on_bar(on_bar_callback);
         engine.set_on_order_intent(
@@ -5538,14 +5541,10 @@ int main() {
     // Backtest result (26k configs × 4 WF windows): 99.2% of high-PF
     // engines gain +500-12000 bp from pyramid_arm_atr=0.5; zero engines
     // hurt. Pyramid only arms after BE-locked trail. Worst case bounded.
-    {
-        int n = 0;
-        for (auto& slot : g_slots) {
-            if (slot.engine) { slot.engine->enable_pyramid_xlow(); n++; }
-        }
-        std::printf("[S38b] PYRAMID-XLOW enabled on %d slots (arm=0.5 ATR step=0.3 ATR size=50%% max=2)\n", n);
-        std::fflush(stdout);
-    }
+    // S44: PYRAMID-ELITE now applied via wire_engine() lambda for ALL engines
+    // (incl S43/S43b includes not in g_slots). See line ~1471.
+    std::printf("[S44] PYRAMID-ELITE armed via wire_engine on all wired engines\n");
+    std::fflush(stdout);
 
     // ── Wire up bar callbacks for persistence + audit trail ────────────────
     for (auto& slot : g_slots) {

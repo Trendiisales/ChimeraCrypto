@@ -610,12 +610,23 @@ static void apply_preset_named(chimera::EdgeEngine::Config& c, const std::string
     }
     if (p == "prod_tiered_pyramid_xlow") {
         // S38d: pyramid_arm at +0.5 ATR — aggressive.
+        // NOTE: live enable_pyramid_xlow() uses max_adds=1, NOT 2 — keep aligned.
         apply_prod_tiered(c, hpf);
         c.pyramid_enabled       = true;
         c.pyramid_arm_atr       = 0.5;
         c.pyramid_step_atr      = 0.3;
         c.pyramid_size_mult     = 0.5;
-        c.pyramid_max_adds      = 2;
+        c.pyramid_max_adds      = 1;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_elite") {
+        // S44 candidate: ELITE-tier preset. arm earlier, larger adds, more adds.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 0.5;
+        c.pyramid_step_atr      = 0.3;
+        c.pyramid_size_mult     = 0.75;  // up from 0.5
+        c.pyramid_max_adds      = 4;     // up from 2
         return;
     }
 }
@@ -926,7 +937,13 @@ int main(int argc, char* argv[]) {
             ci_sl = col_idx("sl_atr_mult"), ci_rt = col_idx("round_trip_bp"),
             ci_ta = col_idx("trail_arm_atr"), ci_td = col_idx("trail_dist_atr"),
             ci_tta = col_idx("trail_tighten_atr"), ci_ttd = col_idx("trail_tighten_dist_atr"),
-            ci_bb = col_idx("bb_k"), ci_rsi = col_idx("rsi_threshold");
+            ci_bb = col_idx("bb_k"), ci_rsi = col_idx("rsi_threshold"),
+            // S44: ICHI + KELT strategy-specific overrides (optional)
+            ci_itk = col_idx("ichi_tenkan_period"),
+            ci_ikj = col_idx("ichi_kijun_period"),
+            ci_isb = col_idx("ichi_senkou_b_period"),
+            ci_kel = col_idx("keltner_ema_len"),
+            ci_kam = col_idx("keltner_atr_mult");
 
         std::printf("tag,symbol,strategy,tf_secs,trades,wins,wr,total_bp,pf,sharpe,maxdd_bp,verdict\n");
         int passed = 0, failed = 0, skipped = 0;
@@ -985,6 +1002,17 @@ int main(int argc, char* argv[]) {
                 .trail_tighten_atr = std::atof(cols[ci_tta].c_str()),
                 .trail_tighten_dist_atr = std::atof(cols[ci_ttd].c_str()),
             };
+            // S44: apply optional strategy-specific overrides if present in CSV
+            if (ci_itk >= 0 && ci_itk < (int)cols.size() && !cols[ci_itk].empty())
+                cfg.ichi_tenkan_period = std::atoi(cols[ci_itk].c_str());
+            if (ci_ikj >= 0 && ci_ikj < (int)cols.size() && !cols[ci_ikj].empty())
+                cfg.ichi_kijun_period = std::atoi(cols[ci_ikj].c_str());
+            if (ci_isb >= 0 && ci_isb < (int)cols.size() && !cols[ci_isb].empty())
+                cfg.ichi_senkou_b_period = std::atoi(cols[ci_isb].c_str());
+            if (ci_kel >= 0 && ci_kel < (int)cols.size() && !cols[ci_kel].empty())
+                cfg.keltner_ema_len = std::atoi(cols[ci_kel].c_str());
+            if (ci_kam >= 0 && ci_kam < (int)cols.size() && !cols[ci_kam].empty())
+                cfg.keltner_atr_mult = std::atof(cols[ci_kam].c_str());
             apply_preset_named(cfg, preset_name);
             chimera::EdgeEngine eng(cfg);
             auto r = run_backtest(eng, cfg, bars);

@@ -865,6 +865,18 @@ public:
         cfg_.pyramid_max_adds   = 1;   // S38b: conservative — 1 add = 1.5x max
     }
 
+    // ── S44: enable_pyramid_elite — validated on 405-engine 180d OOS ──────
+    // +2.8% portfolio bp vs xlow, DD -0.1%, 343/405 engines improved bp,
+    // 405/405 retained PF >=90%. arm 0.5 ATR, step 0.3 ATR, mult 0.75, 4 adds.
+    // Worst case = pyramid adds give back to BE (BE-locked before first add).
+    void enable_pyramid_elite() {
+        cfg_.pyramid_enabled    = true;
+        cfg_.pyramid_arm_atr    = 0.5;
+        cfg_.pyramid_step_atr   = 0.3;
+        cfg_.pyramid_size_mult  = 0.75;
+        cfg_.pyramid_max_adds   = 4;
+    }
+
     void apply_safety_preset() {
         // Same layer logic as protection_only — destructive layers off,
         // staged ratchet on. Difference vs protection_only: this preset

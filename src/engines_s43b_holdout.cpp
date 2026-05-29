@@ -517,7 +517,7 @@ chimera::EdgeEngine::Config s43b_jtousdt_tsmom_21600_45_5_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43b_jtousdt_tsmom_21600_45_5(s43b_jtousdt_tsmom_21600_45_5_cfg);
-wire_engine(s43b_jtousdt_tsmom_21600_45_5);
+// S44-CULL: wire_engine(s43b_jtousdt_tsmom_21600_45_5);
 
 // JTO-TSMOM-H8  IS_PF=2.42 n=345  OOS_PF=3.63 n=203 bp=+35721 dd=1821
 chimera::EdgeEngine::Config s43b_jtousdt_tsmom_28800_30_3_cfg{

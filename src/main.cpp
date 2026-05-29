@@ -2330,7 +2330,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi30_h4(eth_rsi30_h4_cfg);
-    wire_engine(eth_rsi30_h4);
+// S44-CULL:     wire_engine(eth_rsi30_h4);
 
 
 
@@ -2356,7 +2356,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_boll25_h3(bnb_boll25_h3_cfg);
-    wire_engine(bnb_boll25_h3);
+// S44-CULL:     wire_engine(bnb_boll25_h3);
 
     // ── TIER 2 — GOOD edges (Nbr >= 40%, PF > 1.15) ────────────────────
 
@@ -2621,7 +2621,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_rsi_h3(sui_rsi_h3_cfg);
-    wire_engine(sui_rsi_h3);
+// S44-CULL:     wire_engine(sui_rsi_h3);
 
     // ENGINE S21-6: SUI-RSI-H2 — PF=2.05, Sharpe=1.16, 13 trades, Nbr=49%
     chimera::EdgeEngine::Config sui_rsi_h2_cfg{
@@ -2688,7 +2688,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h1(apt_rsi_h1_cfg);
-    wire_engine(apt_rsi_h1);
+// S44-CULL:     wire_engine(apt_rsi_h1);
 
 
 
@@ -2712,7 +2712,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_rsi_h3(apt_rsi_h3_cfg);
-    wire_engine(apt_rsi_h3);
+// S44-CULL:     wire_engine(apt_rsi_h3);
 
     // ENGINE S21-13: ARB-RSI-H2 — PF=4.80, Sharpe=2.66, 13 trades, Nbr=100%
     chimera::EdgeEngine::Config arb_rsi_h2_cfg{
@@ -2734,7 +2734,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h2(arb_rsi_h2_cfg);
-    wire_engine(arb_rsi_h2);
+// S44-CULL:     wire_engine(arb_rsi_h2);
 
     // ENGINE S21-14: ARB-RSI-H4 — PF=2.46, Sharpe=1.54, 14 trades, Nbr=84%
     chimera::EdgeEngine::Config arb_rsi_h4_cfg{
@@ -2756,7 +2756,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h4(arb_rsi_h4_cfg);
-    wire_engine(arb_rsi_h4);
+// S44-CULL:     wire_engine(arb_rsi_h4);
 
 
 
@@ -2780,7 +2780,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_rsi_h3(arb_rsi_h3_cfg);
-    wire_engine(arb_rsi_h3);
+// S44-CULL:     wire_engine(arb_rsi_h3);
 
 
 
@@ -2806,7 +2806,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_boll_h2(apt_boll_h2_cfg);
-    wire_engine(apt_boll_h2);
+// S44-CULL:     wire_engine(apt_boll_h2);
 
 
 
@@ -2833,7 +2833,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_boll_h6(sui_boll_h6_cfg);
-    wire_engine(sui_boll_h6);
+// S44-CULL:     wire_engine(sui_boll_h6);
 
 
 
@@ -2863,7 +2863,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h8(btc_tsmom_h8_cfg);
-    wire_engine(btc_tsmom_h8);
+// S44-CULL:     wire_engine(btc_tsmom_h8);
     // ENGINE S21X-2: ETH-TSMOM-H8 — PF=2.90, Sharpe=5.10, 121 trades, Nbr=100%
     chimera::EdgeEngine::Config eth_tsmom_h8_cfg{
         .symbol         = "ethusdt",
@@ -2905,7 +2905,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_tsmom_h8(link_tsmom_h8_cfg);
-    wire_engine(link_tsmom_h8);
+// S44-CULL:     wire_engine(link_tsmom_h8);
     // ENGINE S21X-6: NEAR-TSMOM-H8 — PF=2.10, Sharpe=3.79, 171 trades, Nbr=97%
     chimera::EdgeEngine::Config near_tsmom_h8_cfg{
         .symbol         = "nearusdt",
@@ -3031,7 +3031,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_tsmom_h8(arb_tsmom_h8_cfg);
-    wire_engine(arb_tsmom_h8);
+// S44-CULL:     wire_engine(arb_tsmom_h8);
     // ENGINE S21X-13: BTC-TSMOM-H16 — PF=5.16, Sharpe=4.01, 22 trades, Nbr=100%
     chimera::EdgeEngine::Config btc_tsmom_h16_cfg{
         .symbol         = "btcusdt",
@@ -3052,7 +3052,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_tsmom_h16(btc_tsmom_h16_cfg);
-    wire_engine(btc_tsmom_h16);
+// S44-CULL:     wire_engine(btc_tsmom_h16);
     // ENGINE S21X-15: SOL-TSMOM-H16 — PF=3.47, Sharpe=3.77, 54 trades, Nbr=100%
     chimera::EdgeEngine::Config sol_tsmom_h16_cfg{
         .symbol         = "solusdt",
@@ -3073,7 +3073,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h16(sol_tsmom_h16_cfg);
-    wire_engine(sol_tsmom_h16);
+// S44-CULL:     wire_engine(sol_tsmom_h16);
     // ENGINE S21X-16: XRP-TSMOM-H16 — PF=4.72, Sharpe=4.14, 55 trades, Nbr=100%
     chimera::EdgeEngine::Config xrp_tsmom_h16_cfg{
         .symbol         = "xrpusdt",
@@ -3136,7 +3136,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_tsmom_h16(bnb_tsmom_h16_cfg);
-    wire_engine(bnb_tsmom_h16);
+// S44-CULL:     wire_engine(bnb_tsmom_h16);
     // ENGINE S21X-20: DOGE-TSMOM-H16 — PF=2.16, Sharpe=2.33, 54 trades, Nbr=92%
     chimera::EdgeEngine::Config doge_tsmom_h16_cfg{
         .symbol         = "dogeusdt",
@@ -3178,7 +3178,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_tsmom_h16(sui_tsmom_h16_cfg);
-    wire_engine(sui_tsmom_h16);
+// S44-CULL:     wire_engine(sui_tsmom_h16);
     // ENGINE S21X-24: ARB-TSMOM-H16 — PF=2.33, Sharpe=2.84, 43 trades, Nbr=40%
     chimera::EdgeEngine::Config arb_tsmom_h16_cfg{
         .symbol         = "arbusdt",
@@ -3220,7 +3220,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_tsmom_d2(btc_tsmom_d2_cfg);
-    wire_engine(btc_tsmom_d2);
+// S44-CULL:     wire_engine(btc_tsmom_d2);
     // ENGINE S21X-26: ETH-TSMOM-D2 — PF=5.99, Sharpe=2.48, 10 trades, Nbr=88%
     chimera::EdgeEngine::Config eth_tsmom_d2_cfg{
         .symbol         = "ethusdt",
@@ -3241,7 +3241,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_tsmom_d2(eth_tsmom_d2_cfg);
-    wire_engine(eth_tsmom_d2);
+// S44-CULL:     wire_engine(eth_tsmom_d2);
     // ENGINE S21X-27: SOL-TSMOM-D2 — PF=5.97, Sharpe=3.30, 14 trades, Nbr=82%
     chimera::EdgeEngine::Config sol_tsmom_d2_cfg{
         .symbol         = "solusdt",
@@ -3262,7 +3262,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sol_tsmom_d2(sol_tsmom_d2_cfg);
-    wire_engine(sol_tsmom_d2);
+// S44-CULL:     wire_engine(sol_tsmom_d2);
     // ENGINE S21X-28: XRP-TSMOM-D2 — PF=26.86, Sharpe=3.35, 22 trades, Nbr=100%
     chimera::EdgeEngine::Config xrp_tsmom_d2_cfg{
         .symbol         = "xrpusdt",
@@ -3283,7 +3283,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine xrp_tsmom_d2(xrp_tsmom_d2_cfg);
-    wire_engine(xrp_tsmom_d2);
+// S44-CULL:     wire_engine(xrp_tsmom_d2);
     // ENGINE S21X-29: LINK-TSMOM-D2 — PF=28.76, Sharpe=3.56, 14 trades, Nbr=100%
     chimera::EdgeEngine::Config link_tsmom_d2_cfg{
         .symbol         = "linkusdt",
@@ -3304,7 +3304,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_tsmom_d2(link_tsmom_d2_cfg);
-    wire_engine(link_tsmom_d2);
+// S44-CULL:     wire_engine(link_tsmom_d2);
     // ENGINE S21X-30: NEAR-TSMOM-D2 — PF=4.09, Sharpe=2.62, 13 trades, Nbr=53%
     chimera::EdgeEngine::Config near_tsmom_d2_cfg{
         .symbol         = "nearusdt",
@@ -3325,7 +3325,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine near_tsmom_d2(near_tsmom_d2_cfg);
-    wire_engine(near_tsmom_d2);
+// S44-CULL:     wire_engine(near_tsmom_d2);
     // ENGINE S21X-31: BNB-TSMOM-D2 — PF=13.09, Sharpe=2.78, 31 trades, Nbr=100%
     chimera::EdgeEngine::Config bnb_tsmom_d2_cfg{
         .symbol         = "bnbusdt",
@@ -3346,7 +3346,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_tsmom_d2(bnb_tsmom_d2_cfg);
-    wire_engine(bnb_tsmom_d2);
+// S44-CULL:     wire_engine(bnb_tsmom_d2);
     // ENGINE S21X-32: DOGE-TSMOM-D2 — PF=4.99, Sharpe=3.51, 20 trades, Nbr=100%
     chimera::EdgeEngine::Config doge_tsmom_d2_cfg{
         .symbol         = "dogeusdt",
@@ -3367,7 +3367,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine doge_tsmom_d2(doge_tsmom_d2_cfg);
-    wire_engine(doge_tsmom_d2);
+// S44-CULL:     wire_engine(doge_tsmom_d2);
     // ENGINE S21X-34: SUI-TSMOM-D2 — PF=3.84, Sharpe=2.10, 13 trades, Nbr=91%
     chimera::EdgeEngine::Config sui_tsmom_d2_cfg{
         .symbol         = "suiusdt",
@@ -3388,7 +3388,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sui_tsmom_d2(sui_tsmom_d2_cfg);
-    wire_engine(sui_tsmom_d2);
+// S44-CULL:     wire_engine(sui_tsmom_d2);
     // ENGINE S21X-36: BTC-TSMOM-D3 — PF=242.75, Sharpe=6.40, 15 trades, Nbr=100%
     chimera::EdgeEngine::Config btc_tsmom_d3_cfg{
         .symbol         = "btcusdt",
@@ -3409,7 +3409,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine btc_tsmom_d3(btc_tsmom_d3_cfg);
-    wire_engine(btc_tsmom_d3);
+// S44-CULL:     wire_engine(btc_tsmom_d3);
     // ENGINE S21X-37: ETH-TSMOM-D3 — PF=7.40, Sharpe=2.70, 11 trades, Nbr=89%
     chimera::EdgeEngine::Config eth_tsmom_d3_cfg{
         .symbol         = "ethusdt",
@@ -3430,7 +3430,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine eth_tsmom_d3(eth_tsmom_d3_cfg);
-    wire_engine(eth_tsmom_d3);
+// S44-CULL:     wire_engine(eth_tsmom_d3);
     // ENGINE S21X-39: XRP-TSMOM-D3 — PF=45.74, Sharpe=3.90, 11 trades, Nbr=100%
     chimera::EdgeEngine::Config xrp_tsmom_d3_cfg{
         .symbol         = "xrpusdt",
@@ -3472,7 +3472,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine link_tsmom_d3(link_tsmom_d3_cfg);
-    wire_engine(link_tsmom_d3);
+// S44-CULL:     wire_engine(link_tsmom_d3);
     // ENGINE S21X-41: NEAR-TSMOM-D3 — DISABLED (FAILED re-validation: OOS PF=0.86, edge not confirmed)
     // chimera::EdgeEngine::Config near_tsmom_d3_cfg{...};
     // chimera::EdgeEngine near_tsmom_d3(near_tsmom_d3_cfg);
@@ -3496,7 +3496,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_tsmom_d3(bnb_tsmom_d3_cfg);
-    wire_engine(bnb_tsmom_d3);
+// S44-CULL:     wire_engine(bnb_tsmom_d3);
     // ENGINE S21X-43: DOGE-TSMOM-D3 — S36-RETUNE 2026-05-28
     // Original (lb=25, hold=4, sl=3.0) under prod_tiered: 5yr OOS -3629bp PF=0.20
     // Original under staged_only:                           5yr OOS  -673bp PF=0.93
@@ -3523,7 +3523,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine doge_tsmom_d3(doge_tsmom_d3_cfg);
-    wire_engine(doge_tsmom_d3);
+// S44-CULL:     wire_engine(doge_tsmom_d3);
     // ENGINE S21X-45: SUI-TSMOM-D3 — PF=2.38, Sharpe=1.43, 10 trades, Nbr=56%
     chimera::EdgeEngine::Config sui_tsmom_d3_cfg{
         .symbol         = "suiusdt",
@@ -3544,7 +3544,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine sui_tsmom_d3(sui_tsmom_d3_cfg);
-    wire_engine(sui_tsmom_d3);
+// S44-CULL:     wire_engine(sui_tsmom_d3);
     // ENGINE S21X-49: SOL-RSI-H6 — PF=3.64, Sharpe=1.83, 10 trades, Nbr=80%
     // ENGINE S21X-51: BNB-RSI-H6 — DISABLED (FAILED re-validation: OOS PF=1.08, original 373.9 was mirage)
     // chimera::EdgeEngine::Config bnb_rsi_h6_cfg{...};
@@ -3569,7 +3569,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_rsi_h6(doge_rsi_h6_cfg);
-    wire_engine(doge_rsi_h6);
+// S44-CULL:     wire_engine(doge_rsi_h6);
     // ENGINE S21X-54: BTC-BOLL-H6 — PF=8.04, Sharpe=3.24, 18 trades, Nbr=100%
     chimera::EdgeEngine::Config btc_boll_h6_cfg{
         .symbol         = "btcusdt",
@@ -3590,7 +3590,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h6(btc_boll_h6_cfg);
-    wire_engine(btc_boll_h6);
+// S44-CULL:     wire_engine(btc_boll_h6);
     // ENGINE S21X-56: SOL-BOLL-H6 — PF=5.77, Sharpe=3.23, 14 trades, Nbr=84%
     chimera::EdgeEngine::Config sol_boll_h6_cfg{
         .symbol         = "solusdt",
@@ -3611,7 +3611,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_boll_h6(sol_boll_h6_cfg);
-    wire_engine(sol_boll_h6);
+// S44-CULL:     wire_engine(sol_boll_h6);
     // ENGINE S21X-58: LINK-BOLL-H6 — PF=99.90, Sharpe=6.18, 14 trades, Nbr=100%
     chimera::EdgeEngine::Config link_boll_h6_cfg{
         .symbol         = "linkusdt",
@@ -3632,7 +3632,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll_h6(link_boll_h6_cfg);
-    wire_engine(link_boll_h6);
+// S44-CULL:     wire_engine(link_boll_h6);
     // ENGINE S21X-60: DOGE-BOLL-H6 — PF=99.90, Sharpe=4.78, 15 trades, Nbr=100%
     chimera::EdgeEngine::Config doge_boll_h6_cfg{
         .symbol         = "dogeusdt",
@@ -3653,7 +3653,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_boll_h6(doge_boll_h6_cfg);
-    wire_engine(doge_boll_h6);
+// S44-CULL:     wire_engine(doge_boll_h6);
     // ENGINE S21X-65: XRP-RSI-H12 — DISABLED (FAILED re-validation: OOS PF=1.09, recent PF=0.89, no edge)
     // chimera::EdgeEngine::Config xrp_rsi_h12_cfg{...};
     // chimera::EdgeEngine xrp_rsi_h12(xrp_rsi_h12_cfg);
@@ -3677,7 +3677,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h12(btc_boll_h12_cfg);
-    wire_engine(btc_boll_h12);
+// S44-CULL:     wire_engine(btc_boll_h12);
     // ENGINE S21X-71: XRP-BOLL-H12 — PF=54.35, Sharpe=2.52, 10 trades, Nbr=96%
     chimera::EdgeEngine::Config xrp_boll_h12_cfg{
         .symbol         = "xrpusdt",
@@ -3698,7 +3698,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h12(xrp_boll_h12_cfg);
-    wire_engine(xrp_boll_h12);
+// S44-CULL:     wire_engine(xrp_boll_h12);
     // ENGINE S21X-75: ETH-RSI-H8 — PF=99.90, Sharpe=3.99, 13 trades, Nbr=66%
     // ENGINE S21X-76: XRP-RSI-H8 — PF=10.46, Sharpe=2.69, 12 trades, Nbr=100%
     // ENGINE S21X-77: LINK-RSI-H8 — PF=4.82, Sharpe=2.15, 14 trades, Nbr=67%
@@ -3775,7 +3775,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine btc_boll_h8(btc_boll_h8_cfg);
-    wire_engine(btc_boll_h8);
+// S44-CULL:     wire_engine(btc_boll_h8);
 
 
     chimera::EdgeEngine::Config sol_boll_h8_cfg{
@@ -3797,7 +3797,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_boll_h8(sol_boll_h8_cfg);
-    wire_engine(sol_boll_h8);
+// S44-CULL:     wire_engine(sol_boll_h8);
 
     chimera::EdgeEngine::Config bnb_boll_h8_cfg{
         .symbol         = "bnbusdt",
@@ -3818,7 +3818,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_boll_h8(bnb_boll_h8_cfg);
-    wire_engine(bnb_boll_h8);
+// S44-CULL:     wire_engine(bnb_boll_h8);
 
 
     chimera::EdgeEngine::Config link_boll_h8_cfg{
@@ -3840,7 +3840,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine link_boll_h8(link_boll_h8_cfg);
-    wire_engine(link_boll_h8);
+// S44-CULL:     wire_engine(link_boll_h8);
 
     chimera::EdgeEngine::Config xrp_boll_h8_cfg{
         .symbol         = "xrpusdt",
@@ -3861,7 +3861,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h8(xrp_boll_h8_cfg);
-    wire_engine(xrp_boll_h8);
+// S44-CULL:     wire_engine(xrp_boll_h8);
 
     chimera::EdgeEngine::Config doge_boll_h8_cfg{
         .symbol         = "dogeusdt",
@@ -3882,7 +3882,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine doge_boll_h8(doge_boll_h8_cfg);
-    wire_engine(doge_boll_h8);
+// S44-CULL:     wire_engine(doge_boll_h8);
 
     chimera::EdgeEngine::Config sui_boll_h8_cfg{
         .symbol         = "suiusdt",
@@ -3903,7 +3903,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sui_boll_h8(sui_boll_h8_cfg);
-    wire_engine(sui_boll_h8);
+// S44-CULL:     wire_engine(sui_boll_h8);
 
 
 
@@ -3963,7 +3963,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h8(xrp_donch_h8_cfg);
-    wire_engine(xrp_donch_h8);
+// S44-CULL:     wire_engine(xrp_donch_h8);
 
     chimera::EdgeEngine::Config near_donch_h8_cfg{
         .symbol         = "nearusdt",
@@ -3984,7 +3984,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h8(near_donch_h8_cfg);
-    wire_engine(near_donch_h8);
+// S44-CULL:     wire_engine(near_donch_h8);
 
 
 
@@ -4008,7 +4008,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h16(xrp_donch_h16_cfg);
-    wire_engine(xrp_donch_h16);
+// S44-CULL:     wire_engine(xrp_donch_h16);
 
     chimera::EdgeEngine::Config bnb_donch_h16_cfg{
         .symbol         = "bnbusdt",
@@ -4031,7 +4031,7 @@ int main() {
         // not worth the operational complexity. Trail tightens at 1.5 ATR before adds trigger.
     };
     chimera::EdgeEngine bnb_donch_h16(bnb_donch_h16_cfg);
-    wire_engine(bnb_donch_h16);
+// S44-CULL:     wire_engine(bnb_donch_h16);
 
     chimera::EdgeEngine::Config btc_donch_h16_cfg{
         .symbol         = "btcusdt",
@@ -4076,7 +4076,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h16(near_donch_h16_cfg);
-    wire_engine(near_donch_h16);
+// S44-CULL:     wire_engine(near_donch_h16);
 
     chimera::EdgeEngine::Config sol_donch_h16_cfg{
         .symbol         = "solusdt",
@@ -4119,7 +4119,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine bnb_donch_d2(bnb_donch_d2_cfg);
-    wire_engine(bnb_donch_d2);
+// S44-CULL:     wire_engine(bnb_donch_d2);
 
 
 
@@ -4159,7 +4159,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h6(xrp_donch_h6_cfg);
-    wire_engine(xrp_donch_h6);
+// S44-CULL:     wire_engine(xrp_donch_h6);
 
     // ENGINE S24-7: BNB-DONCH-H6 — PF=2.08, Sharpe=1.84, 31 trades, Nbr=64%
     chimera::EdgeEngine::Config bnb_donch_h6_cfg{
@@ -4181,7 +4181,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine bnb_donch_h6(bnb_donch_h6_cfg);
-    wire_engine(bnb_donch_h6);
+// S44-CULL:     wire_engine(bnb_donch_h6);
 
     // ENGINE S24-8: XRP-DONCH-H12 — PF=3.40, Sharpe=2.09, 26 trades, Nbr=100%
     chimera::EdgeEngine::Config xrp_donch_h12_cfg{
@@ -4203,7 +4203,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_donch_h12(xrp_donch_h12_cfg);
-    wire_engine(xrp_donch_h12);
+// S44-CULL:     wire_engine(xrp_donch_h12);
 
     // ENGINE S24-9: NEAR-DONCH-H12 — PF=2.25, Sharpe=1.43, 21 trades, Nbr=65%
     chimera::EdgeEngine::Config near_donch_h12_cfg{
@@ -4225,7 +4225,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine near_donch_h12(near_donch_h12_cfg);
-    wire_engine(near_donch_h12);
+// S44-CULL:     wire_engine(near_donch_h12);
 
 
     // ENGINE S24-11: SOL-TSMOM-H12 — PF=1.91, Sharpe=2.30, 120 trades, Nbr=86%
@@ -4248,7 +4248,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_tsmom_h12(sol_tsmom_h12_cfg);
-    wire_engine(sol_tsmom_h12);
+// S44-CULL:     wire_engine(sol_tsmom_h12);
 
     // ENGINE S24-12: BNB-TSMOM-H12 — PF=2.45, Sharpe=3.08, 96 trades, Nbr=100%
     chimera::EdgeEngine::Config bnb_tsmom_h12_cfg{
@@ -4339,7 +4339,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_rsi_h4(eth_rsi_h4_cfg);
-    wire_engine(eth_rsi_h4);
+// S44-CULL:     wire_engine(eth_rsi_h4);
 
 
     // ENGINE S26-3: XRP-RSI-H4 — PF=1.74, Sharpe=1.38, 45 trades, Nbr=70%
@@ -4362,7 +4362,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_rsi_h4(xrp_rsi_h4_cfg);
-    wire_engine(xrp_rsi_h4);
+// S44-CULL:     wire_engine(xrp_rsi_h4);
 
 
 
@@ -4388,7 +4388,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine sol_boll_h2(sol_boll_h2_cfg);
-    wire_engine(sol_boll_h2);
+// S44-CULL:     wire_engine(sol_boll_h2);
 
 
     // ENGINE S26-10: XRP-BOLL-H4 — PF=1.56, Sharpe=1.21, 29 trades, Nbr=62%
@@ -4411,7 +4411,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine xrp_boll_h4(xrp_boll_h4_cfg);
-    wire_engine(xrp_boll_h4);
+// S44-CULL:     wire_engine(xrp_boll_h4);
 
     // ENGINE S27-1: SUI-RSI-H12 — PF=1.61, Sharpe=1.12, 21 trades, Nbr=96%
     // Walk-forward: IS PF=0.94, OOS PF=1.66, Stability=100%
@@ -4437,7 +4437,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine eth_boll_h12(eth_boll_h12_cfg);
-    wire_engine(eth_boll_h12);
+// S44-CULL:     wire_engine(eth_boll_h12);
 
 
     // ══════════════════════════════════════════════════════════════════════
@@ -4468,7 +4468,7 @@ int main() {
         .keltner_atr_mult = 2.5,
     };
     chimera::EdgeEngine link_keltner_h12(link_keltner_h12_cfg);
-    wire_engine(link_keltner_h12);
+// S44-CULL:     wire_engine(link_keltner_h12);
 
     // ENGINE S28-3: DOGE-KELTNER-H8 — PF=4.38, Sharpe=2.45, 18 trades, Nbr=64%
     // Walk-forward: IS PF=0.97, OOS PF=4.38, Stability=64%
@@ -4521,7 +4521,7 @@ int main() {
         .ichi_senkou_b_period = 120,
     };
     chimera::EdgeEngine doge_ichi_h12(doge_ichi_h12_cfg);
-    wire_engine(doge_ichi_h12);
+// S44-CULL:     wire_engine(doge_ichi_h12);
 
     // S37-NEW: BTC-ICHI-D1 — sweep found 5yr PF=3.77 Sh=2.86 n=99 +10060bp
     // Walk-forward: 365d PF=3.23, 730d PF=4.43, 5yr PF=3.77 — robust.
@@ -4543,7 +4543,7 @@ int main() {
         .ichi_senkou_b_period = 120,
     };
     chimera::EdgeEngine btc_ichi_d1(btc_ichi_d1_cfg);
-    wire_engine(btc_ichi_d1);
+// S44-CULL:     wire_engine(btc_ichi_d1);
 
     // S37-NEW: ETH-ICHI-D1 — sweep found 5yr PF=8.61 Sh=4.38 n=79 +15046bp
     // Walk-forward: 365d PF=5.83, 730d PF=7.02, 5yr PF=8.61 — top edge found this session.
@@ -4565,7 +4565,7 @@ int main() {
         .ichi_senkou_b_period = 120,
     };
     chimera::EdgeEngine eth_ichi_d1(eth_ichi_d1_cfg);
-    wire_engine(eth_ichi_d1);
+// S44-CULL:     wire_engine(eth_ichi_d1);
 
     // S37-EDGE-PASS: 9 more ICHIMOKU + KELTNER engines passed broad sweep
     // (PF>=2.5 5yr AND no walk-forward window PF<1.5 with n>=10).
@@ -4579,7 +4579,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine sol_ichi_d1(sol_ichi_d1_cfg); wire_engine(sol_ichi_d1);
+// S44-CULL:     chimera::EdgeEngine sol_ichi_d1(sol_ichi_d1_cfg); wire_engine(sol_ichi_d1);
 
     // BNB-ICHI-D1: 5yr PF=13.34 Sh=6.71 n=61, 365d PF=6.37 730d PF=4.41
     chimera::EdgeEngine::Config bnb_ichi_d1_cfg{
@@ -4590,7 +4590,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine bnb_ichi_d1(bnb_ichi_d1_cfg); wire_engine(bnb_ichi_d1);
+// S44-CULL:     chimera::EdgeEngine bnb_ichi_d1(bnb_ichi_d1_cfg); wire_engine(bnb_ichi_d1);
 
     // LINK-ICHI-D1: 5yr PF=9.95 Sh=3.50 n=38, 365d PF=4.58 730d PF=3.88
     chimera::EdgeEngine::Config link_ichi_d1_cfg{
@@ -4601,7 +4601,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine link_ichi_d1(link_ichi_d1_cfg); wire_engine(link_ichi_d1);
+// S44-CULL:     chimera::EdgeEngine link_ichi_d1(link_ichi_d1_cfg); wire_engine(link_ichi_d1);
 
     // AVAX-ICHI-D1: 5yr PF=4.02 Sh=2.49 n=34, 365d PF=4.02 730d PF=5.07
     chimera::EdgeEngine::Config avax_ichi_d1_cfg{
@@ -4612,7 +4612,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine avax_ichi_d1(avax_ichi_d1_cfg); wire_engine(avax_ichi_d1);
+// S44-CULL:     chimera::EdgeEngine avax_ichi_d1(avax_ichi_d1_cfg); wire_engine(avax_ichi_d1);
 
     // DOGE-ICHI-D1: 5yr PF=3.38 Sh=2.45 n=25, 365d PF=3.38 730d PF=2.00
     chimera::EdgeEngine::Config doge_ichi_d1_cfg{
@@ -4623,7 +4623,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine doge_ichi_d1(doge_ichi_d1_cfg); wire_engine(doge_ichi_d1);
+// S44-CULL:     chimera::EdgeEngine doge_ichi_d1(doge_ichi_d1_cfg); wire_engine(doge_ichi_d1);
 
     // XRP-ICHI-D1: 5yr PF=4.98 Sh=2.86 n=51, 365d PF=2.37 730d PF=3.34
     chimera::EdgeEngine::Config xrp_ichi_d1_cfg{
@@ -4634,7 +4634,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .ichi_tenkan_period = 20, .ichi_kijun_period = 60, .ichi_senkou_b_period = 120,
     };
-    chimera::EdgeEngine xrp_ichi_d1(xrp_ichi_d1_cfg); wire_engine(xrp_ichi_d1);
+// S44-CULL:     chimera::EdgeEngine xrp_ichi_d1(xrp_ichi_d1_cfg); wire_engine(xrp_ichi_d1);
 
     // ETH-ICHI-H12: 5yr PF=3.87 Sh=3.86 n=169, 365d PF=5.35 730d PF=2.85 180d PF=3.44
     chimera::EdgeEngine::Config eth_ichi_h12_cfg{
@@ -4667,7 +4667,7 @@ int main() {
         .trail_arm_atr = 0.5, .trail_dist_atr = 0.5,
         .keltner_ema_len = 30, .keltner_atr_mult = 2.5,
     };
-    chimera::EdgeEngine link_keltner_h6(link_keltner_h6_cfg); wire_engine(link_keltner_h6);
+// S44-CULL:     chimera::EdgeEngine link_keltner_h6(link_keltner_h6_cfg); wire_engine(link_keltner_h6);
 
     // NEAR-ICHI-H8: 5yr PF=2.92 Sh=4.67 n=192, 730d PF=2.74 365d PF=2.35
     // 180d PF=2.45 134d PF=2.48 — VERY robust across all windows incl bear.
@@ -4812,7 +4812,7 @@ int main() {
         .trail_dist_atr = 0.3,
     };
     chimera::EdgeEngine eth_donch_d3(eth_donch_d3_cfg);
-    wire_engine(eth_donch_d3);
+// S44-CULL:     wire_engine(eth_donch_d3);
 
     chimera::EdgeEngine::Config eth_donch_d2_cfg{
         .symbol         = "ethusdt",
@@ -4831,7 +4831,7 @@ int main() {
         .trail_dist_atr = 0.3,
     };
     chimera::EdgeEngine eth_donch_d2(eth_donch_d2_cfg);
-    wire_engine(eth_donch_d2);
+// S44-CULL:     wire_engine(eth_donch_d2);
 
     chimera::EdgeEngine::Config link_donch_d2_cfg{
         .symbol         = "linkusdt",
@@ -4850,7 +4850,7 @@ int main() {
         .trail_dist_atr = 0.3,
     };
     chimera::EdgeEngine link_donch_d2(link_donch_d2_cfg);
-    wire_engine(link_donch_d2);
+// S44-CULL:     wire_engine(link_donch_d2);
 
     chimera::EdgeEngine::Config link_donch_h16_cfg{
         .symbol         = "linkusdt",
@@ -4869,7 +4869,7 @@ int main() {
         .trail_dist_atr = 0.3,
     };
     chimera::EdgeEngine link_donch_h16(link_donch_h16_cfg);
-    wire_engine(link_donch_h16);
+// S44-CULL:     wire_engine(link_donch_h16);
 
     // ── AUDIT-2026 ROUND 2: ETH 3rd engine + APT/ARB revival ───────────────
     //   ETH-RSI-H12   PF=2.37  n=39   Sh=0.92  (mean-revert overlay)
@@ -4943,7 +4943,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine apt_donch_h6(apt_donch_h6_cfg);
-    wire_engine(apt_donch_h6);
+// S44-CULL:     wire_engine(apt_donch_h6);
 
     chimera::EdgeEngine::Config arb_tsmom_d2_cfg{
         .symbol         = "arbusdt",
@@ -4964,7 +4964,7 @@ int main() {
         .trail_tighten_dist_atr = 0.25,
     };
     chimera::EdgeEngine arb_tsmom_d2(arb_tsmom_d2_cfg);
-    wire_engine(arb_tsmom_d2);
+// S44-CULL:     wire_engine(arb_tsmom_d2);
 
     chimera::EdgeEngine::Config arb_donch_h6_cfg{
         .symbol         = "arbusdt",
@@ -4985,7 +4985,7 @@ int main() {
         .trail_tighten_dist_atr = 0.15,
     };
     chimera::EdgeEngine arb_donch_h6(arb_donch_h6_cfg);
-    wire_engine(arb_donch_h6);
+// S44-CULL:     wire_engine(arb_donch_h6);
 
     // ══════════════════════════════════════════════════════════════════════
     // AUDIT-2026-S35: NEW SYMBOL engines (FET / TIA / ONDO).
@@ -5018,7 +5018,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine fet_tsmom_d1(fet_tsmom_d1_cfg);
-    wire_engine(fet_tsmom_d1);
+// S44-CULL:     wire_engine(fet_tsmom_d1);
 
     chimera::EdgeEngine::Config tia_tsmom_h8_cfg{
         .symbol="tiausdt", .tag="TIA-TSMOM-H8", .kind=chimera::StrategyKind::TSMOM,
@@ -5045,7 +5045,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine ondo_tsmom_h12(ondo_tsmom_h12_cfg);
-    wire_engine(ondo_tsmom_h12);
+// S44-CULL:     wire_engine(ondo_tsmom_h12);
 
     // ══════════════════════════════════════════════════════════════════════
     // AUDIT-2026-S35 WAVE 2: HBAR / INJ / ADA / TRX / SEI.
@@ -5060,7 +5060,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine hbar_tsmom_h8(hbar_tsmom_h8_cfg);
-    wire_engine(hbar_tsmom_h8);
+// S44-CULL:     wire_engine(hbar_tsmom_h8);
 
     chimera::EdgeEngine::Config hbar_tsmom_h12_cfg{
         .symbol="hbarusdt", .tag="HBAR-TSMOM-H12", .kind=chimera::StrategyKind::TSMOM,
@@ -5069,7 +5069,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine hbar_tsmom_h12(hbar_tsmom_h12_cfg);
-    wire_engine(hbar_tsmom_h12);
+// S44-CULL:     wire_engine(hbar_tsmom_h12);
 
     chimera::EdgeEngine::Config hbar_tsmom_d1_cfg{
         .symbol="hbarusdt", .tag="HBAR-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
@@ -5078,7 +5078,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine hbar_tsmom_d1(hbar_tsmom_d1_cfg);
-    wire_engine(hbar_tsmom_d1);
+// S44-CULL:     wire_engine(hbar_tsmom_d1);
 
     chimera::EdgeEngine::Config inj_tsmom_h8_cfg{
         .symbol="injusdt", .tag="INJ-TSMOM-H8", .kind=chimera::StrategyKind::TSMOM,
@@ -5105,7 +5105,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine inj_tsmom_d1(inj_tsmom_d1_cfg);
-    wire_engine(inj_tsmom_d1);
+// S44-CULL:     wire_engine(inj_tsmom_d1);
 
     chimera::EdgeEngine::Config ada_tsmom_h8_cfg{
         .symbol="adausdt", .tag="ADA-TSMOM-H8", .kind=chimera::StrategyKind::TSMOM,
@@ -5114,7 +5114,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine ada_tsmom_h8(ada_tsmom_h8_cfg);
-    wire_engine(ada_tsmom_h8);
+// S44-CULL:     wire_engine(ada_tsmom_h8);
 
     chimera::EdgeEngine::Config ada_tsmom_h12_cfg{
         .symbol="adausdt", .tag="ADA-TSMOM-H12", .kind=chimera::StrategyKind::TSMOM,
@@ -5123,7 +5123,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine ada_tsmom_h12(ada_tsmom_h12_cfg);
-    wire_engine(ada_tsmom_h12);
+// S44-CULL:     wire_engine(ada_tsmom_h12);
 
     chimera::EdgeEngine::Config ada_tsmom_d1_cfg{
         .symbol="adausdt", .tag="ADA-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
@@ -5132,7 +5132,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine ada_tsmom_d1(ada_tsmom_d1_cfg);
-    wire_engine(ada_tsmom_d1);
+// S44-CULL:     wire_engine(ada_tsmom_d1);
 
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
@@ -5141,7 +5141,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine trx_tsmom_d1(trx_tsmom_d1_cfg);
-    wire_engine(trx_tsmom_d1);
+// S44-CULL:     wire_engine(trx_tsmom_d1);
 
     chimera::EdgeEngine::Config trx_tsmom_d2_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D2", .kind=chimera::StrategyKind::TSMOM,
@@ -5150,7 +5150,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine trx_tsmom_d2(trx_tsmom_d2_cfg);
-    wire_engine(trx_tsmom_d2);
+// S44-CULL:     wire_engine(trx_tsmom_d2);
 
     chimera::EdgeEngine::Config sei_tsmom_h8_cfg{
         .symbol="seiusdt", .tag="SEI-TSMOM-H8", .kind=chimera::StrategyKind::TSMOM,
@@ -5168,7 +5168,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine sei_tsmom_h12(sei_tsmom_h12_cfg);
-    wire_engine(sei_tsmom_h12);
+// S44-CULL:     wire_engine(sei_tsmom_h12);
 
     chimera::EdgeEngine::Config sei_tsmom_d1_cfg{
         .symbol="seiusdt", .tag="SEI-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
@@ -5177,7 +5177,7 @@ int main() {
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine sei_tsmom_d1(sei_tsmom_d1_cfg);
-    wire_engine(sei_tsmom_d1);
+// S44-CULL:     wire_engine(sei_tsmom_d1);
 
     // ══════════════════════════════════════════════════════════════════════
     // DISABLED ENGINES — No OOS edge after costs (Sessions 13-15)
@@ -5215,11 +5215,11 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h6,   "xrpusdt",  21600, "XRP-TSMOM-H6",   2.68, 4.41, 100, 120, 15});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h6,    "btcusdt",  21600, "BTC-TSMOM-H6",   2.59, 5.16, 100, 169, 15});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_h6,    "ethusdt",  21600, "ETH-TSMOM-H6",   2.07, 3.70, 100, 151, 15});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h6,    "solusdt",  21600, "SOL-TSMOM-H6",   2.07, 3.25, 100, 127, 15});
+// S44-CULL:     g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h6,    "solusdt",  21600, "SOL-TSMOM-H6",   2.07, 3.25, 100, 127, 15});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h6,    "bnbusdt",  21600, "BNB-TSMOM-H6",   2.07, 2.76, 100,  95, 15});
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h6,   "linkusdt", 21600, "LINK-TSMOM-H6",  1.33, 1.12, 100, 549, 15});  // AUDIT-2026 revived: bvr PF=1.33 n=549 Sh=1.12
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h6,   "dogeusdt", 21600, "DOGE-TSMOM-H6",  1.72, 2.24,  77,  91, 15});
-    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h6,   "avaxusdt", 21600, "AVAX-TSMOM-H6",  1.48, 2.03, 100, 1157, 15});  // AUDIT-2026 revived: bvr PF=1.48 n=1157 Sh=2.03 (top dark engine)
+// S44-CULL:     g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h6,   "avaxusdt", 21600, "AVAX-TSMOM-H6",  1.48, 2.03, 100, 1157, 15});  // AUDIT-2026 revived: bvr PF=1.48 n=1157 Sh=2.03 (top dark engine)
 
     // H4 engines (7)
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h4,   "xrpusdt",  14400, "XRP-TSMOM-H4",   2.43, 5.80, 100, 267, 14});
@@ -5275,12 +5275,12 @@ int main() {
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_ARB, &arb_rsi_h4, "arbusdt", 14400, "ARB-RSI-H4", 2.46, 1.54, 84, 14, 21});
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_ARB, &arb_rsi_h3, "arbusdt", 10800, "ARB-RSI-H3", 3.71, 2.22, 66, 11, 21});
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_APT, &apt_boll_h2, "aptusdt", 7200, "APT-BOLL-H2", 4.55, 3.05, 100, 29, 21});
-    g_slots.push_back({chimera::SYM_SUI, &sui_boll_h6, "suiusdt", 21600, "SUI-BOLL-H6", 1.54, 1.05, 86, 146, 31});  // tier-A re-validated 5yr Binance
+// S44-CULL:     g_slots.push_back({chimera::SYM_SUI, &sui_boll_h6, "suiusdt", 21600, "SUI-BOLL-H6", 1.54, 1.05, 86, 146, 31});  // tier-A re-validated 5yr Binance
 
     // ── Exotic TFs + extended counter-trend (Session 21) — 100 engines ────
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_h8, "btcusdt", 28800, "BTC-TSMOM-H8", 1.99, 2.55, 82, 77, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH, &eth_tsmom_h8, "ethusdt", 28800, "ETH-TSMOM-H8", 2.90, 5.10, 100, 121, 21});
-    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h8, "linkusdt", 28800, "LINK-TSMOM-H8", 2.95, 4.78, 100, 119, 21});  // AUDIT-2026-S35 revived: protected-bvr PF=31.02 Sharpe=13.7 worst=-72bp MDD/cum=0.1%
+// S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h8, "linkusdt", 28800, "LINK-TSMOM-H8", 2.95, 4.78, 100, 119, 21});  // AUDIT-2026-S35 revived: protected-bvr PF=31.02 Sharpe=13.7 worst=-72bp MDD/cum=0.1%
     g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h8, "nearusdt", 28800, "NEAR-TSMOM-H8", 2.10, 3.79, 97, 171, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_h8, "bnbusdt", 28800, "BNB-TSMOM-H8", 2.86, 3.67, 100, 138, 21});
     g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h8, "dogeusdt", 28800, "DOGE-TSMOM-H8", 2.02, 2.54, 100, 107, 21});
@@ -5288,54 +5288,54 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_h8, "suiusdt", 28800, "SUI-TSMOM-H8", 2.27, 2.50, 81, 62, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ARB, &arb_tsmom_h8, "arbusdt", 28800, "ARB-TSMOM-H8", 2.01, 2.84, 50, 86, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_h16, "btcusdt", 57600, "BTC-TSMOM-H16", 5.16, 4.01, 100, 22, 21});
-    g_slots.push_back({chimera::SYM_SOL, &sol_tsmom_h16, "solusdt", 57600, "SOL-TSMOM-H16", 3.47, 3.77, 100, 54, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_SOL, &sol_tsmom_h16, "solusdt", 57600, "SOL-TSMOM-H16", 3.47, 3.77, 100, 54, 21});
     g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_h16, "xrpusdt", 57600, "XRP-TSMOM-H16", 4.72, 4.14, 100, 55, 21});
     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h16, "linkusdt", 57600, "LINK-TSMOM-H16", 1.37, 0.85, 100, 272, 21});  // AUDIT-2026 revived: bvr PF=1.37 n=272 Sh=0.85
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_h16, "bnbusdt", 57600, "BNB-TSMOM-H16", 2.76, 2.70, 100, 61, 21});
     g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h16, "dogeusdt", 57600, "DOGE-TSMOM-H16", 2.16, 2.33, 92, 54, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_h16, "suiusdt", 57600, "SUI-TSMOM-H16", 2.13, 2.16, 85, 40, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ARB, &arb_tsmom_h16, "arbusdt", 57600, "ARB-TSMOM-H16", 2.33, 2.84, 40, 43, 21});
-    g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_d2, "btcusdt", 172800, "BTC-TSMOM-D2", 38.30, 7.17, 100, 10, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_d2, "btcusdt", 172800, "BTC-TSMOM-D2", 38.30, 7.17, 100, 10, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH, &eth_tsmom_d2, "ethusdt", 172800, "ETH-TSMOM-D2", 5.99, 2.48, 88, 10, 21});
-    g_slots.push_back({chimera::SYM_SOL, &sol_tsmom_d2, "solusdt", 172800, "SOL-TSMOM-D2", 5.97, 3.30, 82, 14, 21});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_d2, "xrpusdt", 172800, "XRP-TSMOM-D2", 26.86, 3.35, 100, 22, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_SOL, &sol_tsmom_d2, "solusdt", 172800, "SOL-TSMOM-D2", 5.97, 3.30, 82, 14, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_d2, "xrpusdt", 172800, "XRP-TSMOM-D2", 26.86, 3.35, 100, 22, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d2, "linkusdt", 172800, "LINK-TSMOM-D2", 28.76, 3.56, 100, 14, 21});
-    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d2, "nearusdt", 172800, "NEAR-TSMOM-D2", 4.09, 2.62, 53, 13, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d2, "nearusdt", 172800, "NEAR-TSMOM-D2", 4.09, 2.62, 53, 13, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_d2, "bnbusdt", 172800, "BNB-TSMOM-D2", 13.09, 2.78, 100, 31, 21});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_d2, "dogeusdt", 172800, "DOGE-TSMOM-D2", 4.99, 3.51, 100, 20, 21});
-    g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_d2, "suiusdt", 172800, "SUI-TSMOM-D2", 3.84, 2.10, 91, 13, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_d2, "dogeusdt", 172800, "DOGE-TSMOM-D2", 4.99, 3.51, 100, 20, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_d2, "suiusdt", 172800, "SUI-TSMOM-D2", 3.84, 2.10, 91, 13, 21});
 
     // AUDIT-2026-S35: NEW SYMBOL engines — FET/TIA/ONDO TSMOM at slower TFs.
     // Validated protected-bvr stats noted below (sym, tf, PF, Sharpe, MDD bp).
     g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_h8,   "fetusdt",  28800, "FET-TSMOM-H8",   68.23, 13.71, 100, 1479, 35});  // S35 new: PF=68 Sh=13.7 worst=-72bp MDD=-144bp
     g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_h12,  "fetusdt",  43200, "FET-TSMOM-H12", 120.29, 11.57, 100,  980, 35});  // S35 new: PF=120 Sh=11.6
-    g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_d1,   "fetusdt",  86400, "FET-TSMOM-D1",  331.33,  8.66, 100,  451, 35});  // S35 new: PF=331 Sh=8.7
+// S44-CULL:     g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_d1,   "fetusdt",  86400, "FET-TSMOM-D1",  331.33,  8.66, 100,  451, 35});  // S35 new: PF=331 Sh=8.7
     g_slots.push_back({chimera::SYM_TIA,  &tia_tsmom_h8,   "tiausdt",  28800, "TIA-TSMOM-H8",   56.38, 12.73, 100,  631, 35});  // S35 new: PF=56 Sh=12.7
     g_slots.push_back({chimera::SYM_TIA,  &tia_tsmom_h12,  "tiausdt",  43200, "TIA-TSMOM-H12",  61.89, 10.53, 100,  425, 35});  // S35 new: PF=62 Sh=10.5
-    g_slots.push_back({chimera::SYM_ONDO, &ondo_tsmom_h12, "ondousdt", 43200, "ONDO-TSMOM-H12", 33.54, 11.08, 100,  180, 35});  // S35 new: PF=33 Sh=11.1 (shortest history, ~1yr)
+// S44-CULL:     g_slots.push_back({chimera::SYM_ONDO, &ondo_tsmom_h12, "ondousdt", 43200, "ONDO-TSMOM-H12", 33.54, 11.08, 100,  180, 35});  // S35 new: PF=33 Sh=11.1 (shortest history, ~1yr)
 
     // AUDIT-2026-S35 WAVE 2: HBAR / INJ / ADA / TRX / SEI TSMOM engines.
-    g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_h8,  "hbarusdt", 28800, "HBAR-TSMOM-H8",  34.94, 10.00, 100, 1458, 35});  // S35 w2: PF=35 Sh=10.0
-    g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_h12, "hbarusdt", 43200, "HBAR-TSMOM-H12", 47.04,  8.36, 100,  934, 35});  // S35 w2: PF=47 Sh=8.4
-    g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_d1,  "hbarusdt", 86400, "HBAR-TSMOM-D1",  72.48,  7.40, 100,  430, 35});  // S35 w2: PF=72 Sh=7.4
+// S44-CULL:     g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_h8,  "hbarusdt", 28800, "HBAR-TSMOM-H8",  34.94, 10.00, 100, 1458, 35});  // S35 w2: PF=35 Sh=10.0
+// S44-CULL:     g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_h12, "hbarusdt", 43200, "HBAR-TSMOM-H12", 47.04,  8.36, 100,  934, 35});  // S35 w2: PF=47 Sh=8.4
+// S44-CULL:     g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_d1,  "hbarusdt", 86400, "HBAR-TSMOM-D1",  72.48,  7.40, 100,  430, 35});  // S35 w2: PF=72 Sh=7.4
     g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_h8,   "injusdt",  28800, "INJ-TSMOM-H8",   42.00, 13.00, 100, 1546, 35});  // S35 w2: PF=42 Sh=13.0
     g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_h12,  "injusdt",  43200, "INJ-TSMOM-H12",  80.88, 11.17, 100, 1043, 35});  // S35 w2: PF=81 Sh=11.2
-    g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_d1,   "injusdt",  86400, "INJ-TSMOM-D1",  146.79,  8.81, 100,  479, 35});  // S35 w2: PF=147 Sh=8.8
-    g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_h8,   "adausdt",  28800, "ADA-TSMOM-H8",   27.17, 11.48, 100, 1438, 35});  // S35 w2: PF=27 Sh=11.5
-    g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_h12,  "adausdt",  43200, "ADA-TSMOM-H12",  41.00, 10.27, 100,  954, 35});  // S35 w2: PF=41 Sh=10.3
-    g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_d1,   "adausdt",  86400, "ADA-TSMOM-D1",   72.66,  7.20, 100,  423, 35});  // S35 w2: PF=73 Sh=7.2
-    g_slots.push_back({chimera::SYM_TRX,  &trx_tsmom_d1,   "trxusdt",  86400, "TRX-TSMOM-D1",   23.00,  6.61, 100,  612, 35});  // S35 w2: PF=23 Sh=6.6 (stable carry — slow TF only)
-    g_slots.push_back({chimera::SYM_TRX,  &trx_tsmom_d2,   "trxusdt", 172800, "TRX-TSMOM-D2",   42.34,  5.62, 100,  305, 35});  // S35 w2: PF=42 Sh=5.6
+// S44-CULL:     g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_d1,   "injusdt",  86400, "INJ-TSMOM-D1",  146.79,  8.81, 100,  479, 35});  // S35 w2: PF=147 Sh=8.8
+// S44-CULL:     g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_h8,   "adausdt",  28800, "ADA-TSMOM-H8",   27.17, 11.48, 100, 1438, 35});  // S35 w2: PF=27 Sh=11.5
+// S44-CULL:     g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_h12,  "adausdt",  43200, "ADA-TSMOM-H12",  41.00, 10.27, 100,  954, 35});  // S35 w2: PF=41 Sh=10.3
+// S44-CULL:     g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_d1,   "adausdt",  86400, "ADA-TSMOM-D1",   72.66,  7.20, 100,  423, 35});  // S35 w2: PF=73 Sh=7.2
+// S44-CULL:     g_slots.push_back({chimera::SYM_TRX,  &trx_tsmom_d1,   "trxusdt",  86400, "TRX-TSMOM-D1",   23.00,  6.61, 100,  612, 35});  // S35 w2: PF=23 Sh=6.6 (stable carry — slow TF only)
+// S44-CULL:     g_slots.push_back({chimera::SYM_TRX,  &trx_tsmom_d2,   "trxusdt", 172800, "TRX-TSMOM-D2",   42.34,  5.62, 100,  305, 35});  // S35 w2: PF=42 Sh=5.6
     g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_h8,   "seiusdt",  28800, "SEI-TSMOM-H8",   49.69, 13.39, 100,  722, 35});  // S35 w2: PF=50 Sh=13.4
-    g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_h12,  "seiusdt",  43200, "SEI-TSMOM-H12",  66.76, 10.13, 100,  461, 35});  // S35 w2: PF=67 Sh=10.1
-    g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_d1,   "seiusdt",  86400, "SEI-TSMOM-D1",  124.40,  7.42, 100,  208, 35});  // S35 w2: PF=124 Sh=7.4
+// S44-CULL:     g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_h12,  "seiusdt",  43200, "SEI-TSMOM-H12",  66.76, 10.13, 100,  461, 35});  // S35 w2: PF=67 Sh=10.1
+// S44-CULL:     g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_d1,   "seiusdt",  86400, "SEI-TSMOM-D1",  124.40,  7.42, 100,  208, 35});  // S35 w2: PF=124 Sh=7.4
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_d3, "btcusdt", 259200, "BTC-TSMOM-D3", 242.75, 6.40, 100, 15, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH, &eth_tsmom_d3, "ethusdt", 259200, "ETH-TSMOM-D3", 7.40, 2.70, 89, 11, 21});
     // S37-KILL: g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_d3, "xrpusdt", 259200, "XRP-TSMOM-D3", 45.74, 3.90, 100, 11, 21});  // prod_tiered PF=0.923 bp=-1481 n=37
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d3, "linkusdt", 259200, "LINK-TSMOM-D3", 10.45, 3.74, 100, 10, 21});
     // DISABLED: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d3, "nearusdt", 259200, "NEAR-TSMOM-D3", 99.90, 6.08, 44, 10, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_d3, "bnbusdt", 259200, "BNB-TSMOM-D3", 34.14, 2.67, 100, 13, 21});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_d3, "dogeusdt", 259200, "DOGE-TSMOM-D3", 3.72, 2.05, 57, 13, 21});
+// S44-CULL:     g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_d3, "dogeusdt", 259200, "DOGE-TSMOM-D3", 3.72, 2.05, 57, 13, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_d3, "suiusdt", 259200, "SUI-TSMOM-D3", 2.38, 1.43, 56, 10, 21});
     // DISABLED: g_slots.push_back({chimera::SYM_BNB, &bnb_rsi_h6, "bnbusdt", 21600, "BNB-RSI-H6", 373.91, 2.49, 100, 14, 21});
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_DOGE, &doge_rsi_h6, "dogeusdt", 21600, "DOGE-RSI-H6", 2.25, 1.10, 65, 108, 31});  // tier-A re-validated 5yr Binance
@@ -5358,19 +5358,19 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI, &sui_boll_h8, "suiusdt", 28800, "SUI-BOLL-H8", 2.49, 1.55, 66, 13, 22});
     // DISABLED: g_slots.push_back({chimera::SYM_ETH, &eth_rsi_h16, "ethusdt", 57600, "ETH-RSI-H16", 158.17, 9.07, 100, 24, 22});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_NEAR, &near_boll_h16, "nearusdt", 57600, "NEAR-BOLL-H16", 2.94, 1.15, 55, 10, 22});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_donch_h8, "xrpusdt", 28800, "XRP-DONCH-H8", 3.05, 2.21, 100, 45, 22});
-    g_slots.push_back({chimera::SYM_NEAR, &near_donch_h8, "nearusdt", 28800, "NEAR-DONCH-H8", 2.43, 2.13, 73, 55, 22});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_donch_h16, "xrpusdt", 57600, "XRP-DONCH-H16", 4.88, 1.88, 100, 19, 22});
-    g_slots.push_back({chimera::SYM_BNB, &bnb_donch_h16, "bnbusdt", 57600, "BNB-DONCH-H16", 5.33, 1.75, 87, 79, 31});  // tier-A re-validated 5yr Binance
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP, &xrp_donch_h8, "xrpusdt", 28800, "XRP-DONCH-H8", 3.05, 2.21, 100, 45, 22});
+// S44-CULL:     g_slots.push_back({chimera::SYM_NEAR, &near_donch_h8, "nearusdt", 28800, "NEAR-DONCH-H8", 2.43, 2.13, 73, 55, 22});
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP, &xrp_donch_h16, "xrpusdt", 57600, "XRP-DONCH-H16", 4.88, 1.88, 100, 19, 22});
+// S44-CULL:     g_slots.push_back({chimera::SYM_BNB, &bnb_donch_h16, "bnbusdt", 57600, "BNB-DONCH-H16", 5.33, 1.75, 87, 79, 31});  // tier-A re-validated 5yr Binance
     // S37-KILL: g_slots.push_back({chimera::SYM_BTC, &btc_donch_h16, "btcusdt", 57600, "BTC-DONCH-H16", 2.31, 1.11, 88, 76, 31});  // prod_tiered PF=0.703 bp=-1554 n=38
-    g_slots.push_back({chimera::SYM_NEAR, &near_donch_h16, "nearusdt", 57600, "NEAR-DONCH-H16", 1.87, 1.36, 58, 29, 22});
+// S44-CULL:     g_slots.push_back({chimera::SYM_NEAR, &near_donch_h16, "nearusdt", 57600, "NEAR-DONCH-H16", 1.87, 1.36, 58, 29, 22});
     // S37-KILL: g_slots.push_back({chimera::SYM_SOL, &sol_donch_h16, "solusdt", 57600, "SOL-DONCH-H16", 2.08, 0.95, 49, 14, 22});  // prod_tiered PF=0.731 bp=-1198 n=26
-    g_slots.push_back({chimera::SYM_BNB, &bnb_donch_d2, "bnbusdt", 172800, "BNB-DONCH-D2", 99.90, 5.55, 93, 14, 22});
+// S44-CULL:     g_slots.push_back({chimera::SYM_BNB, &bnb_donch_d2, "bnbusdt", 172800, "BNB-DONCH-D2", 99.90, 5.55, 93, 14, 22});
 
     // Session 24 engines — DONCHIAN gap-fill + TSMOM H12 fill (15 engines)
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h6,   "xrpusdt",  21600, "XRP-DONCH-H6",   2.63, 2.25, 100,  45, 24});
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h6,   "xrpusdt",  21600, "XRP-DONCH-H6",   2.63, 2.25, 100,  45, 24});
     // S37-WF-KILL: g_slots.push_back({chimera::SYM_BNB,  &bnb_donch_h6,   "bnbusdt",  21600, "BNB-DONCH-H6",   2.08, 1.84,  64,  31, 24});  // walk-forward: PF 90d=0.45 365d=0.95 730d=0.77 5yr=1.02 — losing 3 of 4 windows
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h12,  "xrpusdt",  43200, "XRP-DONCH-H12",  3.40, 2.09, 100,  26, 24});
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_donch_h12,  "xrpusdt",  43200, "XRP-DONCH-H12",  3.40, 2.09, 100,  26, 24});
     // S37-WF-KILL: g_slots.push_back({chimera::SYM_NEAR, &near_donch_h12, "nearusdt", 43200, "NEAR-DONCH-H12", 2.25, 1.43,  65,  21, 24});  // walk-forward: PF 90d=0.39 365d=0.82 730d=1.06 5yr=1.28 — losing 4 of 4 windows
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h12,  "solusdt",  43200, "SOL-TSMOM-H12",  1.91, 2.30,  86, 120, 24});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h12,  "bnbusdt",  43200, "BNB-TSMOM-H12",  2.45, 3.08, 100,  96, 24});
@@ -5381,7 +5381,7 @@ int main() {
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_h4,     "ethusdt",  14400, "ETH-RSI-H4",     1.82, 1.45,  72,  38, 26});
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_XRP,  &xrp_rsi_h4,     "xrpusdt",  14400, "XRP-RSI-H4",     1.74, 1.38,  70,  45, 26});
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_SOL,  &sol_boll_h2,    "solusdt",   7200, "SOL-BOLL-H2",    1.53, 1.19,  61,  52, 26});
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_boll_h4,    "xrpusdt",  14400, "XRP-BOLL-H4",    1.56, 1.21,  62,  29, 26});
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_boll_h4,    "xrpusdt",  14400, "XRP-BOLL-H4",    1.56, 1.21,  62,  29, 26});
 
     // ── Session 27 — H12 gap-fill (2 engines) ──────────────────────────────
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH,  &eth_boll_h12,   "ethusdt",  43200, "ETH-BOLL-H12",  48.01, 3.02, 100,  12, 27});
@@ -5393,19 +5393,19 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_h12,    "dogeusdt", 43200, "DOGE-ICHI-H12",    0.00, 0.00,   0,   0, 29});
 
     // S37-NEW: ICHIMOKU D1 sweep found edges
-    g_slots.push_back({chimera::SYM_BTC, &btc_ichi_d1, "btcusdt", 86400, "BTC-ICHI-D1", 3.77, 2.86, 100, 99, 37});  // S37: sweep PF=3.77 Sh=2.86 5yr OOS, walk-forward 365d=3.23 730d=4.43
-    g_slots.push_back({chimera::SYM_ETH, &eth_ichi_d1, "ethusdt", 86400, "ETH-ICHI-D1", 8.61, 4.38, 100, 79, 37});  // S37: sweep PF=8.61 Sh=4.38 5yr OOS, walk-forward 365d=5.83 730d=7.02
+// S44-CULL:     g_slots.push_back({chimera::SYM_BTC, &btc_ichi_d1, "btcusdt", 86400, "BTC-ICHI-D1", 3.77, 2.86, 100, 99, 37});  // S37: sweep PF=3.77 Sh=2.86 5yr OOS, walk-forward 365d=3.23 730d=4.43
+// S44-CULL:     g_slots.push_back({chimera::SYM_ETH, &eth_ichi_d1, "ethusdt", 86400, "ETH-ICHI-D1", 8.61, 4.38, 100, 79, 37});  // S37: sweep PF=8.61 Sh=4.38 5yr OOS, walk-forward 365d=5.83 730d=7.02
 
     // S37-EDGE-PASS: 9 more engines passed broad sweep + walk-forward
-    g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_d1,  "solusdt",  86400, "SOL-ICHI-D1",  4.34, 3.45,  91,  53, 37});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_ichi_d1,  "bnbusdt",  86400, "BNB-ICHI-D1", 13.34, 6.71,  95,  61, 37});
-    g_slots.push_back({chimera::SYM_LINK, &link_ichi_d1, "linkusdt", 86400, "LINK-ICHI-D1", 9.95, 3.50,  95,  38, 37});
-    g_slots.push_back({chimera::SYM_AVAX, &avax_ichi_d1, "avaxusdt", 86400, "AVAX-ICHI-D1", 4.02, 2.49,  88,  34, 37});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_d1, "dogeusdt", 86400, "DOGE-ICHI-D1", 3.38, 2.45,  84,  25, 37});
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_d1,  "xrpusdt",  86400, "XRP-ICHI-D1",  4.98, 2.86,  94,  51, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_d1,  "solusdt",  86400, "SOL-ICHI-D1",  4.34, 3.45,  91,  53, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_BNB,  &bnb_ichi_d1,  "bnbusdt",  86400, "BNB-ICHI-D1", 13.34, 6.71,  95,  61, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_ichi_d1, "linkusdt", 86400, "LINK-ICHI-D1", 9.95, 3.50,  95,  38, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_AVAX, &avax_ichi_d1, "avaxusdt", 86400, "AVAX-ICHI-D1", 4.02, 2.49,  88,  34, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_d1, "dogeusdt", 86400, "DOGE-ICHI-D1", 3.38, 2.45,  84,  25, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_d1,  "xrpusdt",  86400, "XRP-ICHI-D1",  4.98, 2.86,  94,  51, 37});
     g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
     g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
-    g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
+// S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
     g_slots.push_back({chimera::SYM_NEAR, &near_ichi_h8, "nearusdt", 28800, "NEAR-ICHI-H8", 2.92, 4.67, 89, 192, 37});  // S37: bear-stress passed all 4 windows PF>=2.35
 
     // SuperTrend engines (6) — Session 29
@@ -5417,16 +5417,16 @@ int main() {
     // W1 mean-reversion engines (Session 30, Edge 6)
 
     // ── AUDIT-2026 DARK-SYMBOL REVIVAL (ETH/LINK DONCHIAN) ─────────────────
-    g_slots.push_back({chimera::SYM_ETH,  &eth_donch_d3,   "ethusdt",  259200, "ETH-DONCH-D3",  9.77, 1.82,  90, 30, 31});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_donch_d2,   "ethusdt",  172800, "ETH-DONCH-D2",  2.05, 0.71,  90, 39, 31});
-    g_slots.push_back({chimera::SYM_LINK, &link_donch_d2,  "linkusdt", 172800, "LINK-DONCH-D2", 1.89, 0.66,  76, 37, 31});
-    g_slots.push_back({chimera::SYM_LINK, &link_donch_h16, "linkusdt",  57600, "LINK-DONCH-H16",1.75, 0.67,  85, 72, 31});
+// S44-CULL:     g_slots.push_back({chimera::SYM_ETH,  &eth_donch_d3,   "ethusdt",  259200, "ETH-DONCH-D3",  9.77, 1.82,  90, 30, 31});
+// S44-CULL:     g_slots.push_back({chimera::SYM_ETH,  &eth_donch_d2,   "ethusdt",  172800, "ETH-DONCH-D2",  2.05, 0.71,  90, 39, 31});
+// S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_donch_d2,  "linkusdt", 172800, "LINK-DONCH-D2", 1.89, 0.66,  76, 37, 31});
+// S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_donch_h16, "linkusdt",  57600, "LINK-DONCH-H16",1.75, 0.67,  85, 72, 31});
     // ── AUDIT-2026 ROUND 2: ETH-RSI + APT/ARB revival ──────────────────────
     // S37-KILL: g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_h12,    "ethusdt",   43200, "ETH-RSI-H12",   2.37, 0.92,  69, 39, 31});  // prod_tiered PF=0.966 bp=-59 n=7
     g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h8,   "aptusdt",   28800, "APT-TSMOM-H8",  1.49, 1.42,  85, 404, 31});
     // S37-WF-KILL: g_slots.push_back({chimera::SYM_APT,  &apt_donch_h6,   "aptusdt",   21600, "APT-DONCH-H6",  1.67, 1.03,  69, 97, 31});  // walk-forward: PF 90d=0.90 365d=0.81 730d=0.77 5yr=1.32 — losing 3 of 4 windows
-    g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
-    g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
+// S44-CULL:     g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
+// S44-CULL:     g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
 
 // S43-CULL-2026-05-29: S41 + S42 tombstoned. Their "4 WF windows" gate was 4 IS
 // lookback slices (134/180/365/730d), NOT held-out OOS. 278 engines re-tested

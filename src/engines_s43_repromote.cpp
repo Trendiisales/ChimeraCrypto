@@ -41,7 +41,7 @@ chimera::EdgeEngine::Config s43_fetusdt_ichi_h12_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_fetusdt_ichi_h12(s43_fetusdt_ichi_h12_cfg);
-wire_engine(s43_fetusdt_ichi_h12);
+// S44-CULL: wire_engine(s43_fetusdt_ichi_h12);
 
 // MANA-ICHI-H12 minPF=2.00 score=34560
 chimera::EdgeEngine::Config s43_manausdt_ichi_h12_cfg{
@@ -51,7 +51,7 @@ chimera::EdgeEngine::Config s43_manausdt_ichi_h12_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_manausdt_ichi_h12(s43_manausdt_ichi_h12_cfg);
-wire_engine(s43_manausdt_ichi_h12);
+// S44-CULL: wire_engine(s43_manausdt_ichi_h12);
 
 // ICP-ICHI-H3 minPF=2.10 score=89626
 chimera::EdgeEngine::Config s43_icpusdt_ichi_h3_cfg{
@@ -71,7 +71,7 @@ chimera::EdgeEngine::Config s43_linkusdt_ichi_h12_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_linkusdt_ichi_h12(s43_linkusdt_ichi_h12_cfg);
-wire_engine(s43_linkusdt_ichi_h12);
+// S44-CULL: wire_engine(s43_linkusdt_ichi_h12);
 
 // IMX-TSMOM-H6 minPF=2.10 score=102095
 chimera::EdgeEngine::Config s43_imxusdt_tsmom_h6_cfg{
@@ -91,7 +91,7 @@ chimera::EdgeEngine::Config s43_ldousdt_ichi_h12_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_ldousdt_ichi_h12(s43_ldousdt_ichi_h12_cfg);
-wire_engine(s43_ldousdt_ichi_h12);
+// S44-CULL: wire_engine(s43_ldousdt_ichi_h12);
 
 // LDO-TSMOM-D2 minPF=2.32 score=54480
 chimera::EdgeEngine::Config s43_ldousdt_tsmom_d2_cfg{
@@ -101,7 +101,7 @@ chimera::EdgeEngine::Config s43_ldousdt_tsmom_d2_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_ldousdt_tsmom_d2(s43_ldousdt_tsmom_d2_cfg);
-wire_engine(s43_ldousdt_tsmom_d2);
+// S44-CULL: wire_engine(s43_ldousdt_tsmom_d2);
 
 // CRV-ICHI-H12 minPF=2.18 score=55876
 chimera::EdgeEngine::Config s43_crvusdt_ichi_h12_cfg{
@@ -121,7 +121,7 @@ chimera::EdgeEngine::Config s43_icpusdt_tsmom_d2_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_icpusdt_tsmom_d2(s43_icpusdt_tsmom_d2_cfg);
-wire_engine(s43_icpusdt_tsmom_d2);
+// S44-CULL: wire_engine(s43_icpusdt_tsmom_d2);
 
 // AVAX-TSMOM-H12 minPF=2.00 score=59627
 chimera::EdgeEngine::Config s43_avaxusdt_tsmom_h12_cfg{
@@ -221,7 +221,7 @@ chimera::EdgeEngine::Config s43_dogeusdt_tsmom_d1_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_dogeusdt_tsmom_d1(s43_dogeusdt_tsmom_d1_cfg);
-wire_engine(s43_dogeusdt_tsmom_d1);
+// S44-CULL: wire_engine(s43_dogeusdt_tsmom_d1);
 
 // MANA-ICHI-H6 minPF=2.40 score=56330
 chimera::EdgeEngine::Config s43_manausdt_ichi_h6_cfg{
@@ -371,7 +371,7 @@ chimera::EdgeEngine::Config s43_jtousdt_tsmom_h6_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_jtousdt_tsmom_h6(s43_jtousdt_tsmom_h6_cfg);
-wire_engine(s43_jtousdt_tsmom_h6);
+// S44-CULL: wire_engine(s43_jtousdt_tsmom_h6);
 
 // INJ-TSMOM-H4 minPF=2.25 score=185680
 chimera::EdgeEngine::Config s43_injusdt_tsmom_h4_cfg{
@@ -1111,7 +1111,7 @@ chimera::EdgeEngine::Config s43_maskusdt_tsmom_d1_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_maskusdt_tsmom_d1(s43_maskusdt_tsmom_d1_cfg);
-wire_engine(s43_maskusdt_tsmom_d1);
+// S44-CULL: wire_engine(s43_maskusdt_tsmom_d1);
 
 // ETH-TSMOM-H12 minPF=2.50 score=72332
 chimera::EdgeEngine::Config s43_ethusdt_tsmom_h12_cfg{
@@ -1191,7 +1191,7 @@ chimera::EdgeEngine::Config s43_avaxusdt_tsmom_d1_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_avaxusdt_tsmom_d1(s43_avaxusdt_tsmom_d1_cfg);
-wire_engine(s43_avaxusdt_tsmom_d1);
+// S44-CULL: wire_engine(s43_avaxusdt_tsmom_d1);
 
 // JTO-ICHI-H8 minPF=2.06 score=57854
 chimera::EdgeEngine::Config s43_jtousdt_ichi_h8_cfg{
@@ -1251,7 +1251,7 @@ chimera::EdgeEngine::Config s43_atomusdt_tsmom_d2_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_atomusdt_tsmom_d2(s43_atomusdt_tsmom_d2_cfg);
-wire_engine(s43_atomusdt_tsmom_d2);
+// S44-CULL: wire_engine(s43_atomusdt_tsmom_d2);
 
 // BCH-TSMOM-H12 minPF=2.00 score=52867
 chimera::EdgeEngine::Config s43_bchusdt_tsmom_h12_cfg{
@@ -1271,7 +1271,7 @@ chimera::EdgeEngine::Config s43_dogeusdt_ichi_h8_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_dogeusdt_ichi_h8(s43_dogeusdt_ichi_h8_cfg);
-wire_engine(s43_dogeusdt_ichi_h8);
+// S44-CULL: wire_engine(s43_dogeusdt_ichi_h8);
 
 // RUNE-ICHI-H8 minPF=2.77 score=50389
 chimera::EdgeEngine::Config s43_runeusdt_ichi_h8_cfg{
@@ -1301,7 +1301,7 @@ chimera::EdgeEngine::Config s43_etcusdt_tsmom_d1_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_etcusdt_tsmom_d1(s43_etcusdt_tsmom_d1_cfg);
-wire_engine(s43_etcusdt_tsmom_d1);
+// S44-CULL: wire_engine(s43_etcusdt_tsmom_d1);
 
 // RUNE-TSMOM-D2 minPF=2.08 score=46973
 chimera::EdgeEngine::Config s43_runeusdt_tsmom_d2_cfg{
@@ -1311,7 +1311,7 @@ chimera::EdgeEngine::Config s43_runeusdt_tsmom_d2_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_runeusdt_tsmom_d2(s43_runeusdt_tsmom_d2_cfg);
-wire_engine(s43_runeusdt_tsmom_d2);
+// S44-CULL: wire_engine(s43_runeusdt_tsmom_d2);
 
 // ATOM-TSMOM-D1 minPF=2.22 score=46930
 chimera::EdgeEngine::Config s43_atomusdt_tsmom_d1_cfg{
@@ -1361,7 +1361,7 @@ chimera::EdgeEngine::Config s43_trxusdt_tsmom_d3_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_trxusdt_tsmom_d3(s43_trxusdt_tsmom_d3_cfg);
-wire_engine(s43_trxusdt_tsmom_d3);
+// S44-CULL: wire_engine(s43_trxusdt_tsmom_d3);
 
 // LTC-ICHI-H12 minPF=3.11 score=38706
 chimera::EdgeEngine::Config s43_ltcusdt_ichi_h12_cfg{
@@ -1371,7 +1371,7 @@ chimera::EdgeEngine::Config s43_ltcusdt_ichi_h12_cfg{
     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
 };
 chimera::EdgeEngine s43_ltcusdt_ichi_h12(s43_ltcusdt_ichi_h12_cfg);
-wire_engine(s43_ltcusdt_ichi_h12);
+// S44-CULL: wire_engine(s43_ltcusdt_ichi_h12);
 
 // RUNE-ICHI-H6 minPF=2.06 score=35350
 chimera::EdgeEngine::Config s43_runeusdt_ichi_h6_cfg{

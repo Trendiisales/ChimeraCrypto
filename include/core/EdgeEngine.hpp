@@ -742,6 +742,17 @@ public:
         js << "\"pyramid_enabled\":" << (cfg_.pyramid_enabled ? "true" : "false") << ",";
         js << "\"pyramid_count\":" << pyramid_count_ << ",";
         js << "\"pyramid_max_adds\":" << cfg_.pyramid_max_adds << ",";
+        js << "\"pyramid_arm_atr\":" << std::setprecision(2) << cfg_.pyramid_arm_atr << ",";
+        js << "\"pyramid_step_atr\":" << cfg_.pyramid_step_atr << ",";
+        js << "\"pyramid_size_mult\":" << cfg_.pyramid_size_mult << ",";
+        // S44d audit: expose ALL filter flags + safety preset values so
+        // dashboard/API can verify overlays per-engine.
+        js << "\"vol_filter\":" << (cfg_.vol_filter ? "true" : "false") << ",";
+        js << "\"mtf_gate\":" << (cfg_.mtf_gate ? "true" : "false") << ",";
+        js << "\"corr_filter\":" << (cfg_.corr_filter ? "true" : "false") << ",";
+        js << "\"ratchet_start_bp\":" << std::setprecision(1) << cfg_.ratchet_start_bp << ",";
+        js << "\"be_arm_bp\":" << cfg_.be_arm_bp << ",";
+        js << "\"ratchet_lock_pct\":" << std::setprecision(2) << cfg_.ratchet_lock_pct << ",";
 
         // Momentum: close[now] vs close[now - lookback]
         bool signal_ready = ((int)closes_.size() >= cfg_.lookback + 1);

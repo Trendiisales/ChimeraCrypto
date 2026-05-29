@@ -298,6 +298,36 @@ static int tier_pyramid_max_for_tag(const std::string& tag) {
     return mit->second;
 }
 
+// S44h: per-engine SL cooldown. After SL hit, engine blocked from entry for
+// 1 bar duration (tf_secs). Prevents immediate re-entry into chop.
+static std::mutex g_cooldown_mtx;
+static std::map<chimera::EdgeEngine*, int64_t> g_engine_cooldown_until;
+static void engine_enter_cooldown(chimera::EdgeEngine* e, int64_t now_ms, int64_t hold_ms) {
+    if (!e) return;
+    std::lock_guard<std::mutex> lk(g_cooldown_mtx);
+    g_engine_cooldown_until[e] = now_ms + hold_ms;
+    e->set_portfolio_gate(false);
+}
+static void engine_check_cooldown_expiry(chimera::EdgeEngine* e, int64_t now_ms) {
+    if (!e) return;
+    std::lock_guard<std::mutex> lk(g_cooldown_mtx);
+    auto it = g_engine_cooldown_until.find(e);
+    if (it == g_engine_cooldown_until.end()) return;
+    if (now_ms >= it->second) {
+        e->set_portfolio_gate(true);
+        g_engine_cooldown_until.erase(it);
+    }
+}
+
+// S44h: EMERGENCY HALT — triggered when portfolio drawdown spikes fast or BTC
+// crashes. Force-closes all open positions + halts entries for 4 hours.
+static std::atomic<int64_t> g_emergency_halt_until_ms{0};
+static std::atomic<int> g_recent_sl_count{0};  // SLs in last 30 min, updated by detector
+static constexpr int64_t EMERGENCY_HALT_DURATION_MS = 4 * 3600 * 1000;
+static constexpr int     EMERGENCY_SL_THRESHOLD     = 10;   // 10+ SLs in 30 min
+static constexpr double  EMERGENCY_DD_BP_THRESHOLD  = 300.0; // -300 bp in 30 min
+static constexpr double  EMERGENCY_BTC_PCT          = -3.0;  // -3% in 15 min
+
 // S44f #3: confluence detector — when >=3 engines on same symbol fire same
 // direction in a short window, boost first add. Tracks (symbol, is_buy)
 // pairs with timestamps; intent callback queries this then increments.
@@ -305,9 +335,12 @@ static std::mutex g_confluence_mtx;
 struct ConfluenceKey { std::string symbol; bool is_buy; };
 struct ConfluenceTrack { std::vector<int64_t> recent_ts; };  // ms
 static std::map<std::string, ConfluenceTrack> g_confluence;  // key = symbol + "L"/"S"
+// S44h: confluence boost DISABLED — backfired during 30 May regime drawdown.
+// 6 JTO engines fired same direction, all stopped out together for amplified
+// loss. Reverting to 1.0x (no boost) until correlation-cluster guard added.
 static constexpr int64_t CONFLUENCE_WINDOW_MS = 15 * 60 * 1000; // 15 min
-static constexpr int     CONFLUENCE_THRESHOLD = 3;
-static constexpr double  CONFLUENCE_BOOST     = 1.3;
+static constexpr int     CONFLUENCE_THRESHOLD = 999;            // effectively off
+static constexpr double  CONFLUENCE_BOOST     = 1.0;
 // Returns boost multiplier (>= 1.0). Pushes current timestamp into tracker.
 static double check_and_record_confluence(const std::string& symbol, bool is_buy, int64_t now_ms) {
     std::string key = symbol + (is_buy ? "L" : "S");
@@ -1747,7 +1780,19 @@ int main() {
         // S44f: per-tier pyramid_max override
         int pmax = tier_pyramid_max_for_tag(engine.cfg().tag);
         engine.set_pyramid_max_adds(pmax);
-        engine.set_on_trade(on_trade_callback);
+        // S44h: wrap on_trade with per-engine SL cooldown. After SL, block
+        // entries for 1 bar duration (tf_secs). Prevents immediate re-entry
+        // into chop.
+        chimera::EdgeEngine* engine_ptr = &engine;
+        int64_t tf_ms = (int64_t)engine.cfg().tf_secs * 1000;
+        engine.set_on_trade([engine_ptr, tf_ms](const chimera::EdgeEngine::TradeRecord& rec) {
+            on_trade_callback(rec);
+            if (rec.reason == "SL" || rec.reason == "EARLY_KILL") {
+                int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                engine_enter_cooldown(engine_ptr, now_ms, tf_ms);
+            }
+        });
         engine.set_on_bar(on_bar_callback);
         // S44b: apply safety preset (staged BE-lock ratchet, destructive
         // layers disabled) + filters by strategy type. Same overlay set
@@ -6497,8 +6542,17 @@ int main() {
         // Route to whichever engine slot matches this symbol id.
         // S44c: also feed S43/S43b engines from g_all_wired (they aren't
         // in g_slots so the slot loop misses them).
+        // S44h: check cooldown expiry + emergency halt state.
         {
+            int64_t now_ms_ck = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            int64_t halt_until = g_emergency_halt_until_ms.load(std::memory_order_relaxed);
+            bool in_emergency = (now_ms_ck < halt_until);
             std::lock_guard<std::mutex> lk(g_engine_mtx);
+            // S44h: re-enable gates that have completed cooldown
+            for (auto* e : g_all_wired) {
+                if (!in_emergency) engine_check_cooldown_expiry(e, now_ms_ck);
+            }
             // First — non-slot wired engines (no blowoff guard, no slot
             // metadata, just raw on_tick).
             for (auto* e : g_all_wired) {
@@ -6876,18 +6930,79 @@ int main() {
                 }
 
                 // 4h rolling DD + 24h daily P&L
+                // S44h: also track last-30min SL count + 30min portfolio DD
+                // for emergency-halt detector.
                 double recent_pnl = 0.0;
                 double daily_pnl  = 0.0;
+                double pnl_30min  = 0.0;
+                int    sl_30min   = 0;
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
                     int64_t cutoff4h  = now_ms - DRAWDOWN_LOOKBACK_MS;
                     int64_t cutoff24h = now_ms - DAILY_WINDOW_MS;
+                    int64_t cutoff30m = now_ms - 30LL * 60 * 1000;
                     for (int i = (int)g_trade_log.size() - 1; i >= 0; --i) {
                         const auto& tr = g_trade_log[i];
                         if (tr.exit_ts_ms < cutoff24h) break;
                         if (tr.reason == "SHUTDOWN") continue;
                         daily_pnl += tr.net_bp;
                         if (tr.exit_ts_ms >= cutoff4h) recent_pnl += tr.net_bp;
+                        if (tr.exit_ts_ms >= cutoff30m) {
+                            pnl_30min += tr.net_bp;
+                            if (tr.reason == "SL" || tr.reason == "EARLY_KILL" ||
+                                tr.reason == "KILL") ++sl_30min;
+                        }
+                    }
+                }
+                g_recent_sl_count.store(sl_30min, std::memory_order_relaxed);
+
+                // ── S44h EMERGENCY HALT DETECTOR ─────────────────────────
+                // Force-close all open positions + halt entries for 4h when:
+                //   - SL count last 30min >= 10  OR
+                //   - portfolio DD last 30min <= -300bp  OR
+                //   - BTC dropped >= -3% in last 15min
+                {
+                    int64_t halt_until = g_emergency_halt_until_ms.load(std::memory_order_relaxed);
+                    bool in_emergency = (now_ms < halt_until);
+                    bool trigger_sl   = (sl_30min >= EMERGENCY_SL_THRESHOLD);
+                    bool trigger_dd   = (pnl_30min <= -EMERGENCY_DD_BP_THRESHOLD);
+                    // BTC drop check via per-symbol rally buffer
+                    double btc_short = load_dbl_atomic(g_sym_short_ret[chimera::SYM_BTC]);
+                    bool trigger_btc = (btc_short <= EMERGENCY_BTC_PCT);
+                    if (!in_emergency && (trigger_sl || trigger_dd || trigger_btc)) {
+                        const char* reason = trigger_sl ? "SL_CASCADE" :
+                                             trigger_dd ? "PORTFOLIO_DD" : "BTC_CRASH";
+                        char buf[256];
+                        std::snprintf(buf, sizeof(buf),
+                            "EMERGENCY HALT triggered: %s  sl_30min=%d  pnl_30min=%+.1fbp  btc_15min=%+.2f%%",
+                            reason, sl_30min, pnl_30min, btc_short);
+                        std::fprintf(stderr, "\n[EMERGENCY] %s\n\n", buf);
+                        std::printf("[EMERGENCY] %s\n", buf);
+                        std::fflush(stdout);
+                        push_alert(buf);
+                        g_emergency_halt_until_ms.store(now_ms + EMERGENCY_HALT_DURATION_MS,
+                                                       std::memory_order_relaxed);
+                        // Force-close every open position
+                        int closed = 0;
+                        for (auto* e : g_all_wired) {
+                            if (!e || !e->in_position()) continue;
+                            int sym_id = chimera::symbol_to_id(e->cfg().symbol);
+                            if (sym_id < 0) continue;
+                            double spot = load_dbl_atomic(g_last_spot_px_bits[sym_id]);
+                            if (spot > 0.0) {
+                                e->kill_all(spot, now_ms);
+                                ++closed;
+                            }
+                        }
+                        std::snprintf(buf, sizeof(buf), "Force-closed %d open positions", closed);
+                        push_alert(buf);
+                        std::printf("[EMERGENCY] %s\n", buf);
+                        std::fflush(stdout);
+                    } else if (in_emergency) {
+                        // While halted, ensure entries blocked
+                        for (auto* e : g_all_wired) {
+                            if (e) e->set_portfolio_gate(false);
+                        }
                     }
                 }
 

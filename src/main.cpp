@@ -298,6 +298,15 @@ static int tier_pyramid_max_for_tag(const std::string& tag) {
     return mit->second;
 }
 
+// S44L C: per-symbol daily loss cap. Across all engines on same symbol, if
+// cumulative net_bp in last 24h <= -300, block new entries for 24h.
+static std::atomic<int64_t> g_sym_daily_blocked_until_ms[chimera::MAX_SYMBOLS]{};
+static constexpr double SYM_DAILY_CAP_BP = -300.0;
+
+// S44L D: regime-conditional pyramid. Disable pyramid adds when regime is
+// BULL_CHOP (2), BEAR (1), or CRASH (0). Only allow in BULL_TREND (3).
+static bool pyramid_allowed_in_regime(int regime) { return regime == 3; }
+
 // S44h: per-engine SL cooldown. After SL hit, engine blocked from entry for
 // 1 bar duration (tf_secs). Prevents immediate re-entry into chop.
 static std::mutex g_cooldown_mtx;
@@ -1913,6 +1922,18 @@ int main() {
                         "[PYRAMID] invalid sizing tag=%s px=%.8f size_mult=%.2f\n",
                         tag.c_str(), price, size_mult);
                     return;
+                }
+                // S44L D: regime-conditional pyramid. Only add in BULL_TREND.
+                // CHOP/BEAR/CRASH regime -> skip pyramid add (whipsaw kills it).
+                int sym_id_d = chimera::symbol_to_id(engine.cfg().symbol);
+                if (sym_id_d >= 0) {
+                    int sym_reg = g_sym_regime[sym_id_d].load();
+                    if (!pyramid_allowed_in_regime(sym_reg)) {
+                        std::printf("[PYRAMID-SKIP] tag=%s regime=%d (not BULL_TREND)\n",
+                            tag.c_str(), sym_reg);
+                        std::fflush(stdout);
+                        return;
+                    }
                 }
                 // S44e/f: tier × funding × confluence (no crash carve on
                 // pyramid — adds happen on existing position so regime check
@@ -6560,8 +6581,17 @@ int main() {
             bool in_emergency = (now_ms_ck < halt_until);
             std::lock_guard<std::mutex> lk(g_engine_mtx);
             // S44h: re-enable gates that have completed cooldown
+            // S44L C: also apply per-symbol daily lock
             for (auto* e : g_all_wired) {
                 if (!in_emergency) engine_check_cooldown_expiry(e, now_ms_ck);
+                if (!e) continue;
+                int sid = chimera::symbol_to_id(e->cfg().symbol);
+                if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
+                    int64_t blocked_until = g_sym_daily_blocked_until_ms[sid].load();
+                    if (now_ms_ck < blocked_until) {
+                        e->set_portfolio_gate(false);
+                    }
+                }
             }
             // First — non-slot wired engines (no blowoff guard, no slot
             // metadata, just raw on_tick).
@@ -6946,6 +6976,8 @@ int main() {
                 double daily_pnl  = 0.0;
                 double pnl_30min  = 0.0;
                 int    sl_30min   = 0;
+                // S44L C: per-symbol 24h sum
+                double sym_24h_bp[chimera::MAX_SYMBOLS] = {0};
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
                     int64_t cutoff4h  = now_ms - DRAWDOWN_LOOKBACK_MS;
@@ -6962,6 +6994,26 @@ int main() {
                             if (tr.reason == "SL" || tr.reason == "EARLY_KILL" ||
                                 tr.reason == "KILL") ++sl_30min;
                         }
+                        int sid = chimera::symbol_to_id(tr.symbol);
+                        if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
+                            sym_24h_bp[sid] += tr.net_bp;
+                        }
+                    }
+                }
+                // S44L C: lock symbols whose 24h cumulative <= -300bp
+                for (int sid = 0; sid < chimera::MAX_SYMBOLS; ++sid) {
+                    if (sym_24h_bp[sid] <= SYM_DAILY_CAP_BP) {
+                        int64_t prev = g_sym_daily_blocked_until_ms[sid].load();
+                        if (prev < now_ms) {
+                            char buf[128];
+                            std::snprintf(buf, sizeof(buf),
+                                "SYM_DAILY_CAP sid=%d 24h=%.1fbp -> 24h block",
+                                sid, sym_24h_bp[sid]);
+                            std::printf("[%s]\n", buf);
+                            std::fflush(stdout);
+                            push_alert(buf);
+                        }
+                        g_sym_daily_blocked_until_ms[sid].store(now_ms + DAILY_WINDOW_MS);
                     }
                 }
                 g_recent_sl_count.store(sl_30min, std::memory_order_relaxed);

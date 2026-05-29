@@ -1,11 +1,11 @@
 {
-  "_comment": "Binance whitelist (50-sym cap). Engines for syms not in this list are disabled at startup. Update this file + restart to change.",
+  "_comment": "Binance whitelist (50-sym cap). Optimized by composite avg_PF * sqrt(engine_count). Update + restart to change.",
   "whitelisted": [
     "btcusdt","ethusdt","solusdt","bnbusdt","linkusdt","xrpusdt","dogeusdt","adausdt","trxusdt",
-    "aaveusdt","atomusdt","bchusdt","compusdt","crvusdt","dotusdt","etcusdt","filusdt","grtusdt","hbarusdt",
-    "icpusdt","injusdt","ltcusdt","manausdt","nearusdt","runeusdt","sandusdt","shibusdt","uniusdt","vetusdt",
-    "xlmusdt","gmtusdt","ldousdt","opusdt","aptusdt","arbusdt","suiusdt","flokiusdt","seiusdt","jtousdt",
-    "jupusdt","pythusdt","bomeusdt","ethfiusdt","enausdt","wusdt","taousdt","zrousdt","renderusdt","tonusdt",
-    "turbousdt","eigenusdt"
+    "aptusdt","arbusdt","suiusdt","nearusdt","injusdt","hbarusdt","seiusdt","jtousdt","jupusdt","pythusdt",
+    "atomusdt","compusdt","crvusdt","dotusdt","grtusdt","icpusdt","ltcusdt","manausdt","runeusdt",
+    "uniusdt","xlmusdt","ldousdt","opusdt","flokiusdt","bomeusdt","ethfiusdt","enausdt","renderusdt","tonusdt",
+    "turbousdt","eigenusdt","zrousdt",
+    "fetusdt","tiausdt","ondousdt","pepeusdt","imxusdt","avaxusdt","wifusdt","stxusdt","arkmusdt","maskusdt"
   ]
 }

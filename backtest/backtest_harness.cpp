@@ -52,6 +52,7 @@
 #include <map>
 #include <numeric>
 
+#include <unistd.h>
 #include "core/EdgeEngine.hpp"
 
 namespace fs = std::filesystem;
@@ -237,6 +238,7 @@ struct BacktestResult {
 
 static int g_last_bars = 0;  // 0 = use 80/20 split; >0 = last N bars
 static int g_last_days = 0;  // 0 = ignore; >0 = last N days (converted via tf_secs)
+static int g_end_days_ago = 0; // >0: drop last N days from klines before split (holdout sim)
 
 static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                                     const chimera::EdgeEngine::Config& cfg,
@@ -253,9 +255,21 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
         return r;
     }
 
+    // Holdout sim: drop last g_end_days_ago days so we score on data preceding
+    // some recent window the optimizer "couldn't see".
+    std::vector<Kline> klines_trimmed;
+    const std::vector<Kline>* klines_use = &klines;
+    if (g_end_days_ago > 0) {
+        int trim_bars = (int)((int64_t)g_end_days_ago * 86400 / cfg.tf_secs);
+        if (trim_bars > 0 && trim_bars < (int)klines.size()) {
+            klines_trimmed.assign(klines.begin(), klines.end() - trim_bars);
+            klines_use = &klines_trimmed;
+        }
+    }
+
     // Seed/OOS split: default 80/20. If g_last_days or g_last_bars > 0, OOS
     // = last N bars (seed = everything before). Lets us test "live era".
-    int total = (int)klines.size();
+    int total = (int)klines_use->size();
     int oos_bars = 0;
     if (g_last_days > 0) {
         // Convert days -> bars via this engine's TF.
@@ -277,11 +291,11 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
     seeds.reserve(seed_count);
     for (int i = 0; i < seed_count; ++i) {
         chimera::EdgeEngine::SeedBar sb;
-        sb.open_ts_ms = klines[i].open_ts_ms;
-        sb.o = klines[i].o;
-        sb.h = klines[i].h;
-        sb.l = klines[i].l;
-        sb.c = klines[i].c;
+        sb.open_ts_ms = (*klines_use)[i].open_ts_ms;
+        sb.o = (*klines_use)[i].o;
+        sb.h = (*klines_use)[i].h;
+        sb.l = (*klines_use)[i].l;
+        sb.c = (*klines_use)[i].c;
         seeds.push_back(sb);
     }
     engine.seed_bars(seeds);
@@ -303,13 +317,13 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
     if (bars_per_d1 < 1) bars_per_d1 = 1;
     int d1_lookback_bars = bars_per_d1 * 10;
     for (int i = oos_start; i < total; ++i) {
-        const Kline& k = klines[i];
+        const Kline& k = (*klines_use)[i];
         int64_t bar_start_ms = k.open_ts_ms;
         int64_t tick_step    = (cfg.tf_secs * 1000) / 4;
 
         // Feed D1 trend state to the engine (no-op for kinds that ignore it).
         if (i >= d1_lookback_bars) {
-            bool d1_bull = klines[i].c > klines[i - d1_lookback_bars].c;
+            bool d1_bull = (*klines_use)[i].c > (*klines_use)[i - d1_lookback_bars].c;
             engine.set_d1_bullish(d1_bull);
         }
 
@@ -633,6 +647,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--preset" && i+1 < argc) { preset_name = argv[++i]; }
         else if (a == "--last-bars" && i+1 < argc) { g_last_bars = std::atoi(argv[++i]); }
         else if (a == "--last-days" && i+1 < argc) { g_last_days = std::atoi(argv[++i]); }
+        else if (a == "--end-days-ago" && i+1 < argc) { g_end_days_ago = std::atoi(argv[++i]); }
     }
     if (!preset_name.empty()) {
         std::fprintf(stderr, "[MODE] --preset %s\n", preset_name.c_str());
@@ -642,6 +657,9 @@ int main(int argc, char* argv[]) {
     }
     if (g_last_days > 0) {
         std::fprintf(stderr, "[MODE] --last-days %d (OOS = last N days per engine; converted to bars via tf_secs)\n", g_last_days);
+    }
+    if (g_end_days_ago > 0) {
+        std::fprintf(stderr, "[MODE] --end-days-ago %d (holdout sim: drop last N days from klines before split)\n", g_end_days_ago);
     }
 
     // ── DISCOVER MODE: full matrix (symbol × tf × kind × params) ─────────
@@ -744,7 +762,16 @@ int main(int argc, char* argv[]) {
                         };
                         apply_preset_named(c, preset_name);
                         chimera::EdgeEngine eng(c);
+                        // Suppress engine internal printf during backtest
+                        std::fflush(stdout);
+                        int _saved_stdout = dup(fileno(stdout));
+                        FILE* _devnull = fopen("/dev/null", "w");
+                        dup2(fileno(_devnull), fileno(stdout));
                         auto r = run_backtest(eng, c, bars);
+                        std::fflush(stdout);
+                        dup2(_saved_stdout, fileno(stdout));
+                        close(_saved_stdout);
+                        fclose(_devnull);
                         std::printf("%s,%s,%d,%s,%d,%d,%.1f,%d,%d,%.1f,%.1f,%.3f,%.2f,%.0f,%d\n",
                             ss.c_str(), kTfNames[ti], tf_secs,
                             chimera::strategy_name(kind),
@@ -940,6 +967,8 @@ int main(int argc, char* argv[]) {
             else if (kind_s == "WILLIAMS_R")      kind = chimera::StrategyKind::WILLIAMS_R;
             else if (kind_s == "ICHIMOKU")        kind = chimera::StrategyKind::ICHIMOKU;
             else if (kind_s == "DUAL_THRUST")     kind = chimera::StrategyKind::DUAL_THRUST;
+            else if (kind_s == "STOCH_RSI")       kind = chimera::StrategyKind::STOCH_RSI;
+            else if (kind_s == "BREAKOUT_PULLBACK") kind = chimera::StrategyKind::BREAKOUT_PULLBACK;
 
             chimera::EdgeEngine::Config cfg{
                 .symbol = sym, .tag = tag, .kind = kind, .tf_secs = tf_secs,

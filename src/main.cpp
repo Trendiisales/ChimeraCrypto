@@ -5428,10 +5428,19 @@ int main() {
     g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
     g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
 
-// S41: S38/S39/S40 superseded by consolidated patch (PF>=2.0 across all 4 WF windows).
-#include "engines_s41_consolidated.cpp"
-// S42: Gen-Y 62-sym × 10-TF × 144 grid (incl JTO/BOME/FLOKI/SHIB/LTC/BCH/RUNE/etc).
-#include "engines_s42_consolidated.cpp"
+// S43-CULL-2026-05-29: S41 + S42 tombstoned. Their "4 WF windows" gate was 4 IS
+// lookback slices (134/180/365/730d), NOT held-out OOS. 278 engines re-tested
+// via prod backtest_harness.cpp with TRUE held-out windows ([-1460,-1095] IS and
+// [-1095,-730] OOS, both pre-S42-discover cutoff at -730d).
+// 137 PASSED   (PF>=1.3 both windows, n>=20, bp>0) -> repromoted as S43.
+//  18 FAIL/COND (PF<1.3 in OOS or negative bp) -> stay culled.
+// 124 SKIPPED  (symbol launched after holdout window — cannot WF-validate).
+// Backup: /Users/jo/Chimera_Baselines/pre_cull_20260529_162344
+// Verdict CSV: /tmp/cull_holdout_verdict.csv
+// #include "engines_s41_consolidated.cpp"  // CULLED
+// #include "engines_s42_consolidated.cpp"  // CULLED
+#include "engines_s43_repromote.cpp"        // 137 strict-WF-validated engines
+#include "engines_s43b_holdout.cpp"         // 142 fresh-discover holdout-validated
 
     // ── S42b: SYMBOL WHITELIST FILTER (Binance 50-sym cap) ────────────────
     // Reads config/symbol_whitelist.json, drops g_slots entries for non-

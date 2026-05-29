@@ -174,6 +174,16 @@ public:
         // never crossed early_kill_mfe AND unrealised < early_kill_bp,
         // exit immediately (catches dead-on-arrival dumps).
         double       hard_floor_bp     = -100.0;  // absolute per-position loss cap
+        // S44L G: MFE-trail standalone. Exit when current_bp / mfe_bp < retain
+        // AND mfe_bp >= min_mfe. 0 = off.
+        double       mfe_trail_retain  = 0.0;   // e.g., 0.50 = exit if give back 50% of MFE
+        double       mfe_trail_min_bp  = 50.0;  // only active once MFE crosses this
+        // S44L H: swing-low SL — set SL = max(atr_sl, swing_low_N). 0 = off.
+        int          swing_low_bars    = 0;     // lookback bars for swing-low
+        // S44M #2: low-vol entry filter. If current ATR < ratio × avg_ATR_N,
+        // skip entry (chop suppression). 0 = off.
+        double       low_vol_skip_ratio = 0.0;
+        int          low_vol_avg_bars   = 20;
         double       ratchet_start_bp  = 15.0;    // earliest partial protection (Stage 2 begins)
         double       be_arm_bp         = 50.0;    // BE lock threshold (Stage 3 begins)
         double       ratchet_lock_pct  = 0.75;    // base lock_pct (mfe 50-100 band)
@@ -897,6 +907,14 @@ public:
     // lock_pct = fraction of MFE above be_arm that's protected.
     void set_be_arm_bp(double bp)     { cfg_.be_arm_bp = bp; }
     void set_ratchet_lock_pct(double p) { cfg_.ratchet_lock_pct = p; }
+    void set_mfe_trail(double retain, double min_bp) {
+        cfg_.mfe_trail_retain = retain; cfg_.mfe_trail_min_bp = min_bp;
+    }
+    void set_swing_low_bars(int n) { cfg_.swing_low_bars = n; }
+    void set_low_vol_filter(double ratio, int avg_bars) {
+        cfg_.low_vol_skip_ratio = ratio; cfg_.low_vol_avg_bars = avg_bars;
+    }
+    void set_signal_confirm_bars(int n) { cfg_.signal_confirm_bars = n; }
     // S44L F: vol-adaptive SL. When set > 0, on entry compare ATR to its
     // rolling average; if ATR > avg × ratio_threshold, tighten SL by mult.
     double vol_adaptive_ratio_ = 0.0;    // 0 = off
@@ -1938,6 +1956,23 @@ private:
 
         double a = atr_(cfg_.atr_period);
         if (a <= 0.0) return;
+        // S44M #2: low-vol entry filter. Compare current ATR to rolling avg.
+        // When ATR is suppressed (chop), skip entry — TSMOM bait into reversal.
+        if (cfg_.low_vol_skip_ratio > 0.0 && cfg_.low_vol_avg_bars > 0
+            && (int)closes_.size() > cfg_.low_vol_avg_bars + cfg_.atr_period) {
+            double sum_atr = 0.0;
+            int n_atr = std::min((int)closes_.size() - cfg_.atr_period, cfg_.low_vol_avg_bars);
+            for (int i = 0; i < n_atr; ++i) {
+                int idx = (int)closes_.size() - n_atr + i;
+                if (idx >= cfg_.atr_period) {
+                    sum_atr += std::abs(highs_[idx] - lows_[idx]);
+                }
+            }
+            double avg_atr = (n_atr > 0) ? sum_atr / n_atr : a;
+            if (avg_atr > 0.0 && a < cfg_.low_vol_skip_ratio * avg_atr) {
+                return;  // chop suppression
+            }
+        }
 
         // Entry will materialise on the NEXT bar's open — but in a live tick
         // stream, "next bar open" = current price right now (we're at the bar
@@ -1949,6 +1984,15 @@ private:
         entry_px_     = last_close_;
         atr_at_entry_ = a;
         sl_px_        = entry_px_ - cfg_.sl_atr_mult * a;
+        // S44L H: swing-low SL — find min(low) over last N bars, use as
+        // tighter bound. SL = max(atr_sl, swing_low) so we never go wider.
+        if (cfg_.swing_low_bars > 0 && (int)lows_.size() >= cfg_.swing_low_bars) {
+            double swing = lows_[lows_.size() - cfg_.swing_low_bars];
+            for (size_t i = lows_.size() - cfg_.swing_low_bars; i < lows_.size(); ++i) {
+                if (lows_[i] < swing) swing = lows_[i];
+            }
+            if (swing > sl_px_) sl_px_ = swing;  // tighter (closer to entry)
+        }
         // ── HARD FLOOR (Session 32) — never lose more than hard_floor_bp ──
         if (cfg_.hard_floor_bp < 0.0) {
             double floor_px = entry_px_ * (1.0 + cfg_.hard_floor_bp / 1e4);
@@ -2163,6 +2207,16 @@ private:
             const char* reason = (trail_armed_ && trail_stop_px_ >= sl_px_) ? "TRAIL" : "SL";
             exit_position_(eff_stop, ts_ms, reason);
             return;
+        }
+
+        // S44L G: MFE-trail standalone. Once MFE crosses min_bp, exit if
+        // current bp pulls back to retain% of MFE peak.
+        if (cfg_.mfe_trail_retain > 0.0 && mfe_bp_ >= cfg_.mfe_trail_min_bp) {
+            double current_bp = (price / entry_px_ - 1.0) * 1e4;
+            if (current_bp < mfe_bp_ * cfg_.mfe_trail_retain) {
+                exit_position_(price, ts_ms, "MFE_TRAIL");
+                return;
+            }
         }
 
         // Time exit: held long enough.

@@ -245,6 +245,12 @@ static double g_ppb_lock_pct_override = -1.0;  // <0 = no override
 static double g_engine_daily_cap_bp  = 0.0;    // 0 = off; positive N = block entries when -bp in 24h >= N
 static double g_symbol_daily_cap_bp  = 0.0;    // 0 = off; per-symbol cap across all engines (used in roster mode)
 static double g_sl_mult_scale = 1.0;           // multiplier on sl_atr_mult (1.0 = no change)
+static double g_mfe_trail_retain = 0.0;        // 0 = off
+static double g_mfe_trail_min_bp = 50.0;
+static int    g_swing_low_bars   = 0;          // 0 = off
+static double g_low_vol_ratio    = 0.0;        // 0 = off
+static int    g_low_vol_avg_bars = 20;
+static int    g_signal_confirm_override = 0;   // 0 = off
 
 static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                                     const chimera::EdgeEngine::Config& cfg,
@@ -693,6 +699,12 @@ int main(int argc, char* argv[]) {
         else if (a == "--ppb-lock-pct" && i+1 < argc) { g_ppb_lock_pct_override = std::atof(argv[++i]); }
         else if (a == "--engine-daily-cap-bp" && i+1 < argc) { g_engine_daily_cap_bp = std::atof(argv[++i]); }
         else if (a == "--sl-mult-scale" && i+1 < argc) { g_sl_mult_scale = std::atof(argv[++i]); }
+        else if (a == "--mfe-trail-retain" && i+1 < argc) { g_mfe_trail_retain = std::atof(argv[++i]); }
+        else if (a == "--mfe-trail-min-bp" && i+1 < argc) { g_mfe_trail_min_bp = std::atof(argv[++i]); }
+        else if (a == "--swing-low-bars"   && i+1 < argc) { g_swing_low_bars   = std::atoi(argv[++i]); }
+        else if (a == "--low-vol-ratio"    && i+1 < argc) { g_low_vol_ratio    = std::atof(argv[++i]); }
+        else if (a == "--low-vol-avg-bars" && i+1 < argc) { g_low_vol_avg_bars = std::atoi(argv[++i]); }
+        else if (a == "--signal-confirm"   && i+1 < argc) { g_signal_confirm_override = std::atoi(argv[++i]); }
     }
     if (!preset_name.empty()) {
         std::fprintf(stderr, "[MODE] --preset %s\n", preset_name.c_str());
@@ -1053,6 +1065,16 @@ int main(int argc, char* argv[]) {
             if (g_ppb_be_arm_override   > 0.0) cfg.be_arm_bp        = g_ppb_be_arm_override;
             if (g_ppb_lock_pct_override > 0.0) cfg.ratchet_lock_pct = g_ppb_lock_pct_override;
             if (g_sl_mult_scale != 1.0) cfg.sl_atr_mult *= g_sl_mult_scale;
+            if (g_mfe_trail_retain > 0.0) {
+                cfg.mfe_trail_retain = g_mfe_trail_retain;
+                cfg.mfe_trail_min_bp = g_mfe_trail_min_bp;
+            }
+            if (g_swing_low_bars > 0) cfg.swing_low_bars = g_swing_low_bars;
+            if (g_low_vol_ratio > 0.0) {
+                cfg.low_vol_skip_ratio = g_low_vol_ratio;
+                cfg.low_vol_avg_bars   = g_low_vol_avg_bars;
+            }
+            if (g_signal_confirm_override > 0) cfg.signal_confirm_bars = g_signal_confirm_override;
             chimera::EdgeEngine eng(cfg);
             auto r = run_backtest(eng, cfg, bars);
             const char* verdict = (r.pf >= 1.3 && r.sharpe >= 0.3 && r.trades >= 5)

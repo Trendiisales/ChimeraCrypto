@@ -302,6 +302,12 @@ static int tier_pyramid_max_for_tag(const std::string& tag) {
 // cumulative net_bp in last 24h <= -300, block new entries for 24h.
 static std::atomic<int64_t> g_sym_daily_blocked_until_ms[chimera::MAX_SYMBOLS]{};
 static constexpr double SYM_DAILY_CAP_BP = -300.0;
+// S44M #1: per-symbol SL-COUNT circuit breaker. 3+ SL hits on same symbol
+// within 4h -> halt symbol entries for 4h. Triggers BEFORE bp threshold.
+static std::atomic<int64_t> g_sym_sl_circuit_blocked_until_ms[chimera::MAX_SYMBOLS]{};
+static constexpr int     SYM_SL_COUNT_THRESHOLD = 3;
+static constexpr int64_t SYM_SL_WINDOW_MS       = 4LL * 3600 * 1000;
+static constexpr int64_t SYM_SL_BLOCK_MS        = 4LL * 3600 * 1000;
 
 // S44L D: regime-conditional pyramid. Disable pyramid adds when regime is
 // BULL_CHOP (2), BEAR (1), or CRASH (0). Only allow in BULL_TREND (3).
@@ -1807,6 +1813,10 @@ int main() {
         // layers disabled) + filters by strategy type. Same overlay set
         // that g_slots engines get — now applied uniformly.
         engine.apply_safety_preset();
+        // S44M #5: signal_confirm=2 — require 2 consecutive bar closes in
+        // trend direction. Sweep validated: +0.4% bp, -21% DD, bp/dd 5.50->6.96.
+        // Safety preset sets this to 1; override to 2 here.
+        engine.set_signal_confirm_bars(2);
         // S44k (A): tighter PPB — be_arm=25 (was 32), lock_pct=0.85 (was 0.75).
         // Sweep validated bp/dd 5.50 -> 5.60.
         engine.set_be_arm_bp(25.0);
@@ -6588,7 +6598,9 @@ int main() {
                 int sid = chimera::symbol_to_id(e->cfg().symbol);
                 if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
                     int64_t blocked_until = g_sym_daily_blocked_until_ms[sid].load();
-                    if (now_ms_ck < blocked_until) {
+                    // S44M #1: also check SL-count circuit
+                    int64_t sl_blocked = g_sym_sl_circuit_blocked_until_ms[sid].load();
+                    if (now_ms_ck < blocked_until || now_ms_ck < sl_blocked) {
                         e->set_portfolio_gate(false);
                     }
                 }
@@ -6978,6 +6990,8 @@ int main() {
                 int    sl_30min   = 0;
                 // S44L C: per-symbol 24h sum
                 double sym_24h_bp[chimera::MAX_SYMBOLS] = {0};
+                // S44M #1: per-symbol SL count in last 4h
+                int sym_sl_4h[chimera::MAX_SYMBOLS] = {0};
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
                     int64_t cutoff4h  = now_ms - DRAWDOWN_LOOKBACK_MS;
@@ -6997,7 +7011,28 @@ int main() {
                         int sid = chimera::symbol_to_id(tr.symbol);
                         if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
                             sym_24h_bp[sid] += tr.net_bp;
+                            // S44M #1: count SLs in last 4h per symbol
+                            if (tr.exit_ts_ms >= (now_ms - SYM_SL_WINDOW_MS) &&
+                                (tr.reason == "SL" || tr.reason == "EARLY_KILL")) {
+                                sym_sl_4h[sid]++;
+                            }
                         }
+                    }
+                }
+                // S44M #1: lock symbols hitting 3+ SLs in 4h
+                for (int sid = 0; sid < chimera::MAX_SYMBOLS; ++sid) {
+                    if (sym_sl_4h[sid] >= SYM_SL_COUNT_THRESHOLD) {
+                        int64_t prev = g_sym_sl_circuit_blocked_until_ms[sid].load();
+                        if (prev < now_ms) {
+                            char buf[128];
+                            std::snprintf(buf, sizeof(buf),
+                                "SYM_SL_CIRCUIT sid=%d sl_4h=%d -> 4h block",
+                                sid, sym_sl_4h[sid]);
+                            std::printf("[%s]\n", buf);
+                            std::fflush(stdout);
+                            push_alert(buf);
+                        }
+                        g_sym_sl_circuit_blocked_until_ms[sid].store(now_ms + SYM_SL_BLOCK_MS);
                     }
                 }
                 // S44L C: lock symbols whose 24h cumulative <= -300bp

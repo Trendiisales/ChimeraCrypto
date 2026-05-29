@@ -262,16 +262,53 @@ static std::atomic<bool>    g_gate_open{true};
 static std::atomic<bool>    g_ratchet_locked{false};
 // S44d: testing-mode protection bypass. Set from live_config.json at startup.
 static std::atomic<bool>    g_protection_disabled_for_testing{false};
-// S44e: per-engine tier multipliers for lot sizing. Loaded from
-// data/engine_tiers.json at startup; ELITE=1.5x, STRONG=1.2x, STANDARD=1.0x.
+// S44e/f: per-engine tier multipliers for lot sizing. Loaded from
+// data/engine_tiers.json at startup.
+//   TOP_ELITE Sh>=6 n>=100: 2.0x, pyramid_max=3 (peak 6.5x)
+//   ELITE                  : 1.5x, pyramid_max=4 (peak 6.0x)
+//   STRONG                 : 1.2x, pyramid_max=3 (peak 3.9x)
+//   STANDARD               : 1.0x, pyramid_max=2 (peak 2.5x)
 static std::map<std::string, std::string> g_engine_tier;     // tag -> tier name
 static std::map<std::string, double>      g_tier_multiplier; // tier -> multiplier
+static std::map<std::string, int>         g_tier_pyramid_max; // tier -> max adds
 static double tier_mult_for_tag(const std::string& tag) {
     auto it = g_engine_tier.find(tag);
     if (it == g_engine_tier.end()) return 1.0;
     auto mit = g_tier_multiplier.find(it->second);
     if (mit == g_tier_multiplier.end()) return 1.0;
     return mit->second;
+}
+static int tier_pyramid_max_for_tag(const std::string& tag) {
+    auto it = g_engine_tier.find(tag);
+    if (it == g_engine_tier.end()) return 4;  // default
+    auto mit = g_tier_pyramid_max.find(it->second);
+    if (mit == g_tier_pyramid_max.end()) return 4;
+    return mit->second;
+}
+
+// S44f #3: confluence detector — when >=3 engines on same symbol fire same
+// direction in a short window, boost first add. Tracks (symbol, is_buy)
+// pairs with timestamps; intent callback queries this then increments.
+static std::mutex g_confluence_mtx;
+struct ConfluenceKey { std::string symbol; bool is_buy; };
+struct ConfluenceTrack { std::vector<int64_t> recent_ts; };  // ms
+static std::map<std::string, ConfluenceTrack> g_confluence;  // key = symbol + "L"/"S"
+static constexpr int64_t CONFLUENCE_WINDOW_MS = 15 * 60 * 1000; // 15 min
+static constexpr int     CONFLUENCE_THRESHOLD = 3;
+static constexpr double  CONFLUENCE_BOOST     = 1.3;
+// Returns boost multiplier (>= 1.0). Pushes current timestamp into tracker.
+static double check_and_record_confluence(const std::string& symbol, bool is_buy, int64_t now_ms) {
+    std::string key = symbol + (is_buy ? "L" : "S");
+    std::lock_guard<std::mutex> lk(g_confluence_mtx);
+    auto& t = g_confluence[key];
+    // Prune stale
+    int64_t cutoff = now_ms - CONFLUENCE_WINDOW_MS;
+    t.recent_ts.erase(
+        std::remove_if(t.recent_ts.begin(), t.recent_ts.end(),
+                       [cutoff](int64_t ts){ return ts < cutoff; }),
+        t.recent_ts.end());
+    t.recent_ts.push_back(now_ms);
+    return (t.recent_ts.size() >= (size_t)CONFLUENCE_THRESHOLD) ? CONFLUENCE_BOOST : 1.0;
 }
 // S44d: sticky alert log for ratchet/lock events. Persists across queries.
 static std::mutex           g_alerts_mtx;
@@ -1576,24 +1613,34 @@ int main() {
                     g_engine_tier[key] = val;
                     p = v_end + 1;
                 }
-                // Parse multipliers (TIER -> double)
-                std::string mults_blob = content.substr(mpos);
-                size_t q = 0;
-                while ((q = mults_blob.find('"', q)) != std::string::npos) {
-                    size_t k_end = mults_blob.find('"', q + 1);
-                    if (k_end == std::string::npos) break;
-                    std::string mk = mults_blob.substr(q + 1, k_end - q - 1);
-                    if (mk == "multipliers" || mk == "note") { q = k_end + 1; continue; }
-                    size_t colon = mults_blob.find(':', k_end);
-                    if (colon == std::string::npos) break;
-                    size_t num_start = mults_blob.find_first_of("0123456789.-", colon);
-                    if (num_start == std::string::npos) break;
-                    try {
-                        double mv = std::stod(mults_blob.substr(num_start));
-                        g_tier_multiplier[mk] = mv;
-                    } catch (...) {}
-                    q = num_start + 1;
-                }
+                // Parse multipliers + pyramid_max sections
+                auto parse_section = [&](const std::string& key, std::map<std::string, double>* out_d,
+                                         std::map<std::string, int>* out_i) {
+                    auto sp = content.find("\"" + key + "\":");
+                    if (sp == std::string::npos) return;
+                    // Find end of section (next "...":{...} OR end of object)
+                    auto end_brace = content.find('}', sp);
+                    if (end_brace == std::string::npos) return;
+                    std::string blob = content.substr(sp, end_brace - sp);
+                    size_t q = 0;
+                    while ((q = blob.find('"', q)) != std::string::npos) {
+                        size_t k_end = blob.find('"', q + 1);
+                        if (k_end == std::string::npos) break;
+                        std::string mk = blob.substr(q + 1, k_end - q - 1);
+                        if (mk == key) { q = k_end + 1; continue; }
+                        size_t colon = blob.find(':', k_end);
+                        if (colon == std::string::npos) break;
+                        size_t num_start = blob.find_first_of("0123456789.-", colon);
+                        if (num_start == std::string::npos) break;
+                        try {
+                            if (out_d) (*out_d)[mk] = std::stod(blob.substr(num_start));
+                            if (out_i) (*out_i)[mk] = std::stoi(blob.substr(num_start));
+                        } catch (...) {}
+                        q = num_start + 1;
+                    }
+                };
+                parse_section("multipliers", &g_tier_multiplier, nullptr);
+                parse_section("pyramid_max", nullptr, &g_tier_pyramid_max);
             }
             std::printf("[STARTUP] tier map loaded: %d engines, %d tier multipliers\n",
                         (int)g_engine_tier.size(), (int)g_tier_multiplier.size());
@@ -1633,6 +1680,9 @@ int main() {
         // S44: pyramid_elite for ALL wired engines (incl S43/S43b includes
         // which aren't in g_slots). Validated +2.8% portfolio bp.
         engine.enable_pyramid_elite();
+        // S44f: per-tier pyramid_max override
+        int pmax = tier_pyramid_max_for_tag(engine.cfg().tag);
+        engine.set_pyramid_max_adds(pmax);
         engine.set_on_trade(on_trade_callback);
         engine.set_on_bar(on_bar_callback);
         // S44b: apply safety preset (staged BE-lock ratchet, destructive
@@ -1670,17 +1720,47 @@ int main() {
                         intent.tag.c_str(), intent.ref_px, runtime_cfg.max_position_usd);
                     return;
                 }
-                // S44e: per-engine tier multiplier (ELITE 1.5x, STRONG 1.2x,
-                // STANDARD 1.0x). Unknown tag -> 1.0x. Tier loaded at startup
-                // from data/engine_tiers.json.
+                // S44e/f: composite sizing — tier × funding × confluence ×
+                // counter-trend-crash carve-out. Each is multiplicative.
                 double tier_mult = tier_mult_for_tag(intent.tag);
-                double qty = (runtime_cfg.max_position_usd * tier_mult) / intent.ref_px;
+
+                // S44f #1: funding-rate bias. Negative funding = shorts pay
+                // longs = squeeze tailwind for TSMOM longs. +20%/-20% modifier.
+                double funding_mult = 1.0;
+                int sym_id = chimera::symbol_to_id(intent.symbol);
+                if (sym_id >= 0 && g_funding_filter.is_ready() && intent.is_buy) {
+                    if (g_funding_filter.has_tailwind(sym_id))      funding_mult = 1.2;
+                    else if (g_funding_filter.has_headwind(sym_id)) funding_mult = 0.8;
+                }
+
+                // S44f #3: confluence — if >=3 engines on same symbol same
+                // direction fire within 15min window, boost first add 1.3x.
+                int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                double confluence_mult = check_and_record_confluence(
+                    intent.symbol, intent.is_buy, now_ms);
+
+                // S44f #4: counter-trend crash carve-out. Global size_throttle
+                // = 0 in CRASH/BEAR kills all entries. Counter-trend strats
+                // (mean-reversion) actually benefit in those regimes — bypass
+                // throttle and boost 1.3x.
+                double crash_mult = 1.0;
+                if (sym_id >= 0) {
+                    int sym_reg = g_sym_regime[sym_id].load();
+                    if ((sym_reg == 0 || sym_reg == 1) && !engine.is_trend_following()) {
+                        crash_mult = 1.3;
+                    }
+                }
+
+                double total_mult = tier_mult * funding_mult * confluence_mult * crash_mult;
+                double qty = (runtime_cfg.max_position_usd * total_mult) / intent.ref_px;
                 auto _ti = g_engine_tier.find(intent.tag);
                 const char* tier_str = (_ti != g_engine_tier.end()) ? _ti->second.c_str() : "UNKNOWN";
-                std::printf("[ORDER-INTENT] tag=%s symbol=%s side=%s qty=%.8f px=%.4f tier=%s mult=%.2fx\n",
+                std::printf("[ORDER-INTENT] tag=%s symbol=%s side=%s qty=%.8f px=%.4f tier=%s "
+                            "tier_mult=%.2fx funding=%.2fx conflu=%.2fx crash=%.2fx total=%.2fx\n",
                     intent.tag.c_str(), intent.symbol.c_str(),
                     intent.is_buy ? "BUY" : "SELL", qty, intent.ref_px,
-                    tier_str, tier_mult);
+                    tier_str, tier_mult, funding_mult, confluence_mult, crash_mult, total_mult);
                 std::fflush(stdout);
                 auto result = executor.execute(intent.symbol, intent.is_buy, qty, intent.ref_px);
                 if (!result.ok) {
@@ -1706,12 +1786,21 @@ int main() {
                         tag.c_str(), price, size_mult);
                     return;
                 }
-                // S44e: tier multiplier applies to pyramid adds too.
+                // S44e/f: tier × funding × confluence (no crash carve on
+                // pyramid — adds happen on existing position so regime check
+                // is already past).
                 double tier_mult = tier_mult_for_tag(tag);
-                double add_usd = runtime_cfg.max_position_usd * size_mult * tier_mult;
+                double funding_mult = 1.0;
+                int sym_id = chimera::symbol_to_id(engine.cfg().symbol);
+                if (sym_id >= 0 && g_funding_filter.is_ready()) {
+                    if (g_funding_filter.has_tailwind(sym_id))      funding_mult = 1.2;
+                    else if (g_funding_filter.has_headwind(sym_id)) funding_mult = 0.8;
+                }
+                double total_mult = tier_mult * funding_mult;
+                double add_usd = runtime_cfg.max_position_usd * size_mult * total_mult;
                 double qty = add_usd / price;
-                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% tier=%.2fx add_usd=%.2f qty=%.8f px=%.4f\n",
-                    tag.c_str(), add_num, size_mult * 100.0, tier_mult, add_usd, qty, price);
+                std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% tier=%.2fx funding=%.2fx total=%.2fx add_usd=%.2f qty=%.8f\n",
+                    tag.c_str(), add_num, size_mult * 100.0, tier_mult, funding_mult, total_mult, add_usd, qty);
                 std::fflush(stdout);
                 // Pyramid uses engine's symbol context; resolve via tag prefix is non-trivial,
                 // so use engine.symbol field captured at config time.

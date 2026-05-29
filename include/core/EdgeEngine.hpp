@@ -887,6 +887,8 @@ public:
         cfg_.pyramid_size_mult  = 0.75;
         cfg_.pyramid_max_adds   = 4;
     }
+    // S44f: per-tier pyramid_max override (TOP_ELITE=3, STRONG=3, STANDARD=2)
+    void set_pyramid_max_adds(int n) { cfg_.pyramid_max_adds = n; }
 
     void apply_safety_preset() {
         // Same layer logic as protection_only — destructive layers off,

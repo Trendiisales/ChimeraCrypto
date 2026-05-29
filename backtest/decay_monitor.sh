@@ -42,6 +42,11 @@ if [ -z "$prior" ]; then
 fi
 echo "[decay] comparing $out  vs  $prior"
 
+# S44f: track per-engine decay-week streak in data/decay/streak.json.
+# After 3 consecutive weeks of DECAY, auto-cull the engine via cull list.
+STREAK_FILE=data/decay/streak.json
+[ -f "$STREAK_FILE" ] || echo "{}" > "$STREAK_FILE"
+
 python3 - <<PY
 import csv, pathlib, sys
 def load(p):
@@ -71,4 +76,36 @@ if not alerts:
 else:
     print(f"[decay] {len(alerts)} ALERT(S):")
     for a in alerts: print(f"  {a}")
+
+# S44f: streak tracker + auto-cull after 3 consecutive DECAY weeks
+import json
+streak_path = "$STREAK_FILE"
+try:
+    streak = json.loads(open(streak_path).read())
+except Exception:
+    streak = {}
+decay_tags = set()
+for a in alerts:
+    if a.startswith("DECAY"):
+        # "DECAY  TAG-NAME pf=..." -> extract tag (column 1)
+        parts = a.split()
+        if len(parts) >= 2: decay_tags.add(parts[1])
+# Increment streaks for engines in decay this week
+# Reset streaks for engines NOT in decay
+new_streak = {}
+to_cull = []
+for tag in set(list(streak.keys()) + list(decay_tags)):
+    if tag in decay_tags:
+        new_streak[tag] = streak.get(tag, 0) + 1
+        if new_streak[tag] >= 3:
+            to_cull.append((tag, new_streak[tag]))
+    # else: omit (resets to 0)
+open(streak_path, "w").write(json.dumps(new_streak, indent=2))
+if to_cull:
+    cull_path = "data/decay/autocull.txt"
+    with open(cull_path, "a") as f:
+        for tag, weeks in to_cull:
+            f.write(f"{tag}\n")
+            print(f"[decay] AUTOCULL {tag} (decay {weeks} weeks straight) -> appended to {cull_path}")
+    print(f"[decay] Run: python3 /tmp/cull_v3.py {cull_path} && rebuild + restart")
 PY

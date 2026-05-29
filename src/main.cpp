@@ -136,6 +136,7 @@
 #include <mutex>
 #include <vector>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <algorithm>
 #include <fstream>
@@ -5431,6 +5432,54 @@ int main() {
 #include "engines_s41_consolidated.cpp"
 // S42: Gen-Y 62-sym × 10-TF × 144 grid (incl JTO/BOME/FLOKI/SHIB/LTC/BCH/RUNE/etc).
 #include "engines_s42_consolidated.cpp"
+
+    // ── S42b: SYMBOL WHITELIST FILTER (Binance 50-sym cap) ────────────────
+    // Reads config/symbol_whitelist.json, drops g_slots entries for non-
+    // whitelisted symbols. Prevents firing orders for syms not in user's
+    // Binance API whitelist. Update file + restart to change.
+    {
+        std::ifstream wf("config/symbol_whitelist.json");
+        std::set<std::string> whitelist;
+        if (wf.is_open()) {
+            std::string txt((std::istreambuf_iterator<char>(wf)),
+                            std::istreambuf_iterator<char>());
+            wf.close();
+            // Crude JSON array extract: pull every "xxxusdt" quoted token in the array.
+            size_t pos = 0;
+            while ((pos = txt.find("\"", pos)) != std::string::npos) {
+                size_t end = txt.find("\"", pos + 1);
+                if (end == std::string::npos) break;
+                std::string tok = txt.substr(pos + 1, end - pos - 1);
+                if (tok.size() > 4 && tok.substr(tok.size() - 4) == "usdt") {
+                    whitelist.insert(tok);
+                }
+                pos = end + 1;
+            }
+        }
+        if (whitelist.empty()) {
+            std::printf("[WHITELIST] config/symbol_whitelist.json missing/empty — no filter applied\n");
+        } else {
+            int before = (int)g_slots.size();
+            std::map<std::string,int> dropped_by_sym;
+            std::vector<EngineSlot> kept;
+            kept.reserve(g_slots.size());
+            for (const auto& s : g_slots) {
+                if (whitelist.count(s.symbol_str)) {
+                    kept.push_back(s);
+                } else {
+                    dropped_by_sym[s.symbol_str]++;
+                }
+            }
+            g_slots = std::move(kept);
+            int after = (int)g_slots.size();
+            std::printf("[WHITELIST] %zu syms allowed, dropped %d slots (was %d -> now %d)\n",
+                whitelist.size(), before - after, before, after);
+            for (const auto& [sym, cnt] : dropped_by_sym) {
+                std::printf("[WHITELIST]   dropped %s: %d engine(s)\n", sym.c_str(), cnt);
+            }
+            std::fflush(stdout);
+        }
+    }
 
     // ── S34 PF FILTER: load batch-validation PFs and disable bleed engines ─
     load_pf_data_into_slots();

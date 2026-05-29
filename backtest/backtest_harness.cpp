@@ -239,6 +239,7 @@ struct BacktestResult {
 static int g_last_bars = 0;  // 0 = use 80/20 split; >0 = last N bars
 static int g_last_days = 0;  // 0 = ignore; >0 = last N days (converted via tf_secs)
 static int g_end_days_ago = 0; // >0: drop last N days from klines before split (holdout sim)
+static double g_hard_floor_bp_override = 1.0; // 1.0 = no override; <=0 = applies after preset
 
 static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                                     const chimera::EdgeEngine::Config& cfg,
@@ -659,6 +660,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--last-bars" && i+1 < argc) { g_last_bars = std::atoi(argv[++i]); }
         else if (a == "--last-days" && i+1 < argc) { g_last_days = std::atoi(argv[++i]); }
         else if (a == "--end-days-ago" && i+1 < argc) { g_end_days_ago = std::atoi(argv[++i]); }
+        else if (a == "--hard-floor-bp" && i+1 < argc) { g_hard_floor_bp_override = std::atof(argv[++i]); }
     }
     if (!preset_name.empty()) {
         std::fprintf(stderr, "[MODE] --preset %s\n", preset_name.c_str());
@@ -772,6 +774,7 @@ int main(int argc, char* argv[]) {
                             .trail_tighten_atr = 3.0, .trail_tighten_dist_atr = 0.25,
                         };
                         apply_preset_named(c, preset_name);
+                        if (g_hard_floor_bp_override <= 0.0) c.hard_floor_bp = g_hard_floor_bp_override;
                         chimera::EdgeEngine eng(c);
                         // Suppress engine internal printf during backtest
                         std::fflush(stdout);
@@ -1014,6 +1017,7 @@ int main(int argc, char* argv[]) {
             if (ci_kam >= 0 && ci_kam < (int)cols.size() && !cols[ci_kam].empty())
                 cfg.keltner_atr_mult = std::atof(cols[ci_kam].c_str());
             apply_preset_named(cfg, preset_name);
+            if (g_hard_floor_bp_override <= 0.0) cfg.hard_floor_bp = g_hard_floor_bp_override;
             chimera::EdgeEngine eng(cfg);
             auto r = run_backtest(eng, cfg, bars);
             const char* verdict = (r.pf >= 1.3 && r.sharpe >= 0.3 && r.trades >= 5)

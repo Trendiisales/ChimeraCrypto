@@ -1798,11 +1798,12 @@ int main() {
         // layers disabled) + filters by strategy type. Same overlay set
         // that g_slots engines get — now applied uniformly.
         engine.apply_safety_preset();
-        // S44i: per-trade HARD FLOOR — cap each trade's loss at 50 bp.
-        // apply_safety_preset sets hard_floor_bp = 0 (disabled). We re-enable
-        // at -50 to prevent the -500bp single-trade catastrophes seen 30 May.
-        // ATR-based SL still computed; hard floor tightens it inward when wider.
-        engine.set_hard_floor_bp(-50.0);
+        // S44j: per-trade HARD FLOOR at -170 bp.
+        // Sweep -80 to -200 step 10 on 405-engine 180d showed -170 = bp/DD
+        // peak (5.50). 83% of no-floor profit retained, 19% DD cut.
+        // Caps the 30 May catastrophes (SEI -503 -> -170, etc) without
+        // killing normal winners that dip 30-80bp before going green.
+        engine.set_hard_floor_bp(-170.0);
         engine.enable_volume_gate(true);
         if (engine.is_trend_following()) {
             engine.enable_adx_filter(true);

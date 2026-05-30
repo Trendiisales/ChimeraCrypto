@@ -38,12 +38,12 @@ int main() {
         if(in){printf("    FAIL\n");failures++;}
     }
 
-    // ── 2: concurrency cap decision (per-symbol 2, per-cluster 5) ───────────
-    const int MAXSYM=2, MAXCLU=5;
+    // ── 2: concurrency cap decision (S54: per-symbol 1, per-cluster 5) ──────
+    const int MAXSYM=1, MAXCLU=5;
     auto allow=[&](int s,int c){return s<MAXSYM && c<MAXCLU;};
     { int s=0,c=0,n=0; for(int i=0;i<6;i++) if(allow(s,c)){s++;c++;n++;}
-      printf("[2a] 6 JTO (one symbol) -> entered=%d (expect 2)\n",n);
-      if(n!=2){printf("    FAIL\n");failures++;} }
+      printf("[2a] 6 on one symbol -> entered=%d (expect 1; S54 kills XLM double-fill)\n",n);
+      if(n!=1){printf("    FAIL\n");failures++;} }
     { int c=0,n=0,s[8]={0}; for(int i=0;i<8;i++) if(allow(s[i],c)){s[i]++;c++;n++;}
       printf("[2b] 8 distinct DEFI -> entered=%d (expect 5)\n",n);
       if(n!=5){printf("    FAIL\n");failures++;} }

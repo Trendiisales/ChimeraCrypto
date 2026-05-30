@@ -389,7 +389,13 @@ static constexpr int64_t SYM_SL_BLOCK_MS        = 4LL * 3600 * 1000;
 // Self-resetting: an engine's cluster_gate re-opens automatically once a
 // correlated position exits and the count drops back under the cap.
 enum CryptoCluster { CL_MAJORS = 0, CL_L1 = 1, CL_DEFI = 2, CL_MEME = 3, CL_OTHER = 4, CL_COUNT = 5 };
-static constexpr int CLUSTER_MAX_PER_SYMBOL  = 2;   // max concurrent opens per symbol
+static constexpr int CLUSTER_MAX_PER_SYMBOL  = 1;   // max concurrent opens per symbol
+                                                    // S54: 2->1. Long-only book ->
+                                                    // 2 simultaneous longs on one coin =
+                                                    // pure 2x leverage + double fees, ZERO
+                                                    // diversification. The XLM double-fill
+                                                    // (-196.5 x2 = -393bp single-name) was
+                                                    // the only path past the -170 hard floor.
 static constexpr int CLUSTER_MAX_PER_CLUSTER = 5;   // max concurrent opens per correlated bucket
 
 // Symbol-id -> cluster. Indexed by chimera::SymbolId (0..61). Buckets group

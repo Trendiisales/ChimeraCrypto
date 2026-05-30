@@ -132,6 +132,16 @@ public:
         // Max bar buffer history kept (must be >= max(lookback, bb_len, atr_period)+5)
         int          max_history = 64;
 
+        // ── P0/S46: gap-honest exit fill ──────────────────────────────────
+        // A stop guarantees you EXIT, never the PRICE. If a tick gaps BELOW the
+        // effective stop, the real fill is at that penetrating price, not the
+        // stop level. Recording the stop level was the optimism that booked SEI
+        // at -170 when it actually traded -422. Default true = fill honestly at
+        // the breaching price. gap_extra_slip_bp adds book-depth slippage on top.
+        // Harness --legacy-stop-fill sets this false to reproduce old numbers.
+        bool         realistic_gap_fill = true;
+        double       gap_extra_slip_bp  = 0.0;
+
         // ── Trailing stop parameters ──────────────────────────────────────
         // trail_arm_atr: profit (in ATR multiples) required before trail
         //   activates. E.g. 1.0 means price must reach entry + 1.0*ATR.
@@ -429,6 +439,10 @@ public:
         bool        is_buy = true;
         double      ref_px = 0.0;
         int64_t     ts_ms  = 0;
+        // P1/S46: safety size multiplier (DD-throttle x vol-overlay), carried to
+        // main.cpp so the live qty calc finally applies them. Was previously
+        // computed into sizing_mult_ and discarded (never reached order qty).
+        double      risk_mult = 1.0;
     };
 
     using OrderIntentCallback = std::function<void(const OrderIntentRecord&)>;
@@ -903,6 +917,8 @@ public:
     // Sign convention: pass negative bp (e.g., -50.0 for 50bp loss cap).
     // Acts as upper bound on per-position drawdown when atr_sl is wider.
     void set_hard_floor_bp(double bp) { cfg_.hard_floor_bp = bp; }
+    void set_realistic_gap_fill(bool b) { cfg_.realistic_gap_fill = b; }
+    void set_gap_extra_slip_bp(double bp) { cfg_.gap_extra_slip_bp = bp; }
     // S44k: tune profit-protection bands. be_arm = MFE bp at which BE locks.
     // lock_pct = fraction of MFE above be_arm that's protected.
     void set_be_arm_bp(double bp)     { cfg_.be_arm_bp = bp; }
@@ -1021,6 +1037,9 @@ public:
     // Reduced during high vol, boosted during funding tailwind.
     // Applied by main.cpp at execution time (not inside engine signal logic).
     void set_sizing_mult(double m) { sizing_mult_ = m; }
+    // P1/S46: safety size mult (DD-throttle x vol-overlay) actually applied to qty
+    void set_risk_mult(double m) { risk_mult_ = m; }
+    double risk_mult() const { return risk_mult_; }
     double sizing_mult() const { return sizing_mult_; }
 
     // ── Session 30: Cross-TF momentum score (Edge 5) ────────────────────────
@@ -1078,6 +1097,7 @@ private:
 
     // Session 30: Position sizing multiplier (base=1.0)
     double  sizing_mult_ = 1.0;
+    double  risk_mult_   = 1.0;   // P1: DD-throttle x vol-overlay, applied to live qty
 
     // Session 30: Cross-TF momentum score (0.0-1.0)
     double  cross_tf_score_ = 0.0;
@@ -2057,6 +2077,7 @@ private:
             intent.is_buy = true;
             intent.ref_px = entry_px_;
             intent.ts_ms  = entry_ts_ms_;
+            intent.risk_mult = risk_mult_;   // P1: carry DD-throttle x vol-overlay to qty calc
             on_order_intent_(intent);
         }
     }
@@ -2224,7 +2245,21 @@ private:
         double eff_stop = effective_stop_();
         if (price <= eff_stop) {
             const char* reason = (trail_armed_ && trail_stop_px_ >= sl_px_) ? "TRAIL" : "SL";
-            exit_position_(eff_stop, ts_ms, reason);
+            // P0/S46: gap-honest fill. In LIVE the engine sees dense (~5s) ticks,
+            // so the breaching tick `price` IS the real next-available fill — a
+            // stop crossed by continuous trade fills within a few bp of the stop,
+            // and a genuine gap fills at the jumped price. Default ON for live.
+            // NOTE for backtest: the path-sim feeds only O/H/L/C, so `price` can be
+            // a coarse-bar low that live would never ride down to — that is why the
+            // HARNESS leaves this OFF for the baseline edge measure (fills at
+            // eff_stop, correct for continuous liquid pairs) and only turns it ON
+            // for the explicit --inject-gap stress test. gap_extra_slip_bp pads
+            // book-depth slippage on thin names.
+            double fill = eff_stop;
+            if (cfg_.realistic_gap_fill && price < eff_stop) {
+                fill = price * (1.0 - cfg_.gap_extra_slip_bp / 1e4);
+            }
+            exit_position_(fill, ts_ms, reason);
             return;
         }
 

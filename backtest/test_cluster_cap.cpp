@@ -49,27 +49,49 @@ int main() {
       if(n!=5){printf("    FAIL\n");failures++;} }
 
     // ── 3: REAL hard floor cuts a loser at ~-170bp (the 29-May fix) ─────────
-    // Enter on a rising series, then dump -400bp. With hard_floor=-170 the SL
-    // is tightened to -170 at entry, so the exit must land near -170, NOT -400.
+    // 3a CLEAN TOUCH: price eases down to the -170 floor in fine steps. Honest
+    // fill ~= the stop level, so loss caps at ~-170. Proves the floor holds when
+    // there is NO gap.
     {
-        EdgeEngine e(mk_cfg("FLOOR","seiusdt"));
-        e.set_cluster_gate(true);
-        e.apply_safety_preset();              // PRODUCTION path: disables early_kill/giveback/hard_floor
-        e.set_hard_floor_bp(-170.0);          // ...then the S45 fix re-arms a REAL -170 floor
+        EdgeEngine e(mk_cfg("FLOOR-CLEAN","seiusdt"));
+        e.set_cluster_gate(true); e.apply_safety_preset(); e.set_hard_floor_bp(-170.0);
+        e.set_signal_confirm_bars(1);   // realistic_gap_fill defaults TRUE (P0)
+        int i=0;
+        for(double px=100.0; px<=103.0; px+=1.0) bar(e,i++,px);          // enter ~103
+        for(double px=102.9; px>=100.5; px-=0.05) bar(e,i++,px);         // FINE decline -> clean touch
+        double last=e.total_bp();
+        printf("[3a] clean touch  net_bp=%.1f (expect ~ -170..-185)\n", last);
+        if(e.in_position() || last < -190.0 || last > -160.0){printf("    FAIL: floor not ~-170 on clean touch\n");failures++;}
+    }
+    // 3b GAP-THROUGH: price gaps from just-above the floor straight to -400bp in
+    // ONE tick. With P0 gap-honest fill the exit books ~-400, NOT -170 -- this is
+    // the truth caveat-2 was hiding. A stop cannot save the FILL on a gap; only
+    // sizing + the cluster/bear breakers limit the damage.
+    {
+        EdgeEngine e(mk_cfg("FLOOR-GAP","seiusdt"));
+        e.set_cluster_gate(true); e.apply_safety_preset(); e.set_hard_floor_bp(-170.0);
         e.set_signal_confirm_bars(1);
         int i=0;
-        // rising bars at atr~1 -> ATR stop ~-250bp (wider than floor) so floor
-        // clamps SL to -170. The decline's first bar closes bar#3 -> entry @103.
-        for(double px=100.0; px<=103.0; px+=1.0) bar(e,i++,px);   // 100,101,102,103
-        // monotonic decline from BELOW entry: mfe stays 0 so the staged ratchet
-        // never engages and ONLY the -170 floor governs the exit.
-        for(double px=102.5; px>=98.0; px-=0.5) bar(e,i++,px);
-        bool entered=(e.total_bp()!=0.0)|| !e.in_position();      // a trade occurred
-        bool flat=!e.in_position();
-        double last=e.total_bp();   // single trade -> cumulative == this trade's net
-        printf("[3] entered=%d  exited=%d  net_bp=%.1f (expect ~ -170..-185, NOT < -250)\n",
-               entered, flat, last);
-        if(!entered || !flat || last < -200.0 || last > -150.0){printf("    FAIL: floor did not cut loss at -170\n");failures++;}
+        for(double px=100.0; px<=103.0; px+=1.0) bar(e,i++,px);          // enter ~103
+        bar(e,i++,102.5);                                               // still above floor
+        bar(e,i++,103.0*(1.0-0.040));                                   // GAP to ~-400bp in one tick
+        bar(e,i++,103.0*(1.0-0.045));
+        double last=e.total_bp();
+        printf("[3b] gap-through net_bp=%.1f (expect ~ -400, honest -- floor does NOT save the fill)\n", last);
+        if(e.in_position() || last > -300.0){printf("    FAIL: gap fill not honest (still clamped to floor?)\n");failures++;}
+    }
+    // 3c LEGACY clamp OFF the honesty: same gap but realistic_gap_fill=false ->
+    // books the old optimistic -170. Guards the --legacy-stop-fill escape hatch.
+    {
+        EdgeEngine e(mk_cfg("FLOOR-LEGACY","seiusdt"));
+        e.set_cluster_gate(true); e.apply_safety_preset(); e.set_hard_floor_bp(-170.0);
+        e.set_signal_confirm_bars(1); e.set_realistic_gap_fill(false);  // legacy
+        int i=0;
+        for(double px=100.0; px<=103.0; px+=1.0) bar(e,i++,px);
+        bar(e,i++,102.5); bar(e,i++,103.0*(1.0-0.040)); bar(e,i++,103.0*(1.0-0.045));
+        double last=e.total_bp();
+        printf("[3c] legacy fill net_bp=%.1f (expect ~ -170, old optimistic behavior)\n", last);
+        if(e.in_position() || last < -190.0 || last > -150.0){printf("    FAIL: legacy mode not clamping to floor\n");failures++;}
     }
 
     // ── 4: unified guard = concurrency && cluster-loss-ok && regime-ok ──────

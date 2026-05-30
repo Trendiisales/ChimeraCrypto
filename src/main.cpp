@@ -277,11 +277,37 @@ static std::map<std::string, int>         g_tier_pyramid_max; // tier -> max add
 //   THIN  (post-2024 launches)       -> 0.2x  (2k base)
 static std::map<std::string, std::string> g_symbol_liq;       // symbol -> tier name
 static std::map<std::string, double>      g_liq_multiplier;   // tier -> multiplier
+// P1/S46: hardcoded per-symbol liquidity-tier DEFAULT, indexed by chimera::SymbolId.
+// The live config ships with no [liquidity] section, so the old code fell back to
+// a FLAT 0.5x for every symbol — thin alts (SEI/RENDER/FET/JTO) were sized the
+// SAME as BTC, which is the sizing analogue of the cosmetic-floor bug and the real
+// gap exposure. This table actually down-sizes thin / meme / recent-launch names
+// (largest gap risk) toward 0.2-0.35x while keeping majors at 1.0x. Config (if
+// present) still overrides. Mirror of SYMBOL_CLUSTER tiers.
+static constexpr double SYMBOL_LIQ_DEFAULT[chimera::MAX_SYMBOLS] = {
+    /*0 BTC*/1.00, /*1 ETH*/1.00, /*2 SOL*/1.00, /*3 BNB*/1.00, /*4 AVAX*/0.60,
+    /*5 LINK*/0.60, /*6 XRP*/0.80, /*7 DOGE*/0.60, /*8 SUI*/0.40, /*9 APT*/0.40,
+    /*10 NEAR*/0.50, /*11 ARB*/0.40, /*12 PEPE*/0.25, /*13 WIF*/0.25, /*14 FET*/0.40,
+    /*15 ONDO*/0.30, /*16 TIA*/0.35, /*17 HBAR*/0.40, /*18 INJ*/0.40, /*19 ADA*/0.70,
+    /*20 TRX*/0.60, /*21 SEI*/0.30, /*22 OP*/0.40, /*23 MATIC*/0.50, /*24 ATOM*/0.50,
+    /*25 FIL*/0.40, /*26 AAVE*/0.50, /*27 UNI*/0.50, /*28 LDO*/0.35, /*29 ENA*/0.30,
+    /*30 JUP*/0.30, /*31 TON*/0.50, /*32 DOT*/0.50, /*33 ICP*/0.40, /*34 RENDER*/0.35,
+    /*35 PYTH*/0.30, /*36 GRT*/0.35, /*37 SAND*/0.35, /*38 MANA*/0.35, /*39 CRV*/0.35,
+    /*40 COMP*/0.35, /*41 MKR*/0.40, /*42 IMX*/0.35, /*43 STX*/0.35, /*44 ARKM*/0.25,
+    /*45 MASK*/0.30, /*46 RUNE*/0.40, /*47 JTO*/0.30, /*48 W*/0.25, /*49 TURBO*/0.20,
+    /*50 BOME*/0.20, /*51 FLOKI*/0.20, /*52 ETHFI*/0.30, /*53 EIGEN*/0.30, /*54 ZRO*/0.30,
+    /*55 GMT*/0.30, /*56 SHIB*/0.30, /*57 BCH*/0.60, /*58 LTC*/0.60, /*59 ETC*/0.50,
+    /*60 XLM*/0.50, /*61 VET*/0.35,
+};
 static double liq_mult_for_symbol(const std::string& sym) {
-    auto it = g_symbol_liq.find(sym);
-    if (it == g_symbol_liq.end()) return 0.5;  // unknown sym -> conservative MID
-    auto mit = g_liq_multiplier.find(it->second);
-    return (mit != g_liq_multiplier.end()) ? mit->second : 0.5;
+    auto it = g_symbol_liq.find(sym);  // config override wins if present
+    if (it != g_symbol_liq.end()) {
+        auto mit = g_liq_multiplier.find(it->second);
+        if (mit != g_liq_multiplier.end()) return mit->second;
+    }
+    int sid = chimera::sym_id(sym);    // else: real per-symbol tier (not flat 0.5)
+    if (sid >= 0 && sid < chimera::MAX_SYMBOLS) return SYMBOL_LIQ_DEFAULT[sid];
+    return 0.3;                        // truly-unknown sym -> conservative THIN
 }
 static double tier_mult_for_tag(const std::string& tag) {
     auto it = g_engine_tier.find(tag);
@@ -366,6 +392,21 @@ static int g_cluster_open_bucket[CL_COUNT]          = {0};
 // entries in that cluster are halted for 24h. Set in the monitor loop.
 static std::atomic<int64_t> g_cluster_blocked_until_ms[CL_COUNT]{};
 static constexpr double  CLUSTER_DAILY_CAP_BP = -250.0;  // halt whole cluster 24h below this
+
+// P1/S46: per-trade $-risk budget. Cap each entry's notional so a worst-case
+// overnight GAP (the one thing a stop cannot price-guarantee) cannot lose more
+// than MAX_TRADE_RISK_USD. worst-case gap is cluster-tiered (thin/meme names gap
+// hardest). This backstops the boost stack (tier x funding x crash up to ~2x)
+// from inflating a thin alt to full size. majors get full size (250bp*10k=$250).
+// The clamp is a BACKSTOP against the boost stack (tier x funding x crash)
+// inflating a position, NOT the primary sizer — it must bind only on extremes,
+// leaving the liquidity tier and engine tier free to differentiate size. The
+// worst-gap figures below are PLAUSIBLE overnight gaps (not the extreme -1376bp
+// P3 stress tail, which over-tightened the clamp and flattened all sizing). The
+// rare extreme tail is bounded instead by liq down-sizing + the 5/cluster cap.
+static constexpr double  MAX_TRADE_RISK_USD = 400.0;
+static constexpr double  CLUSTER_WORST_GAP_BP[CL_COUNT] = {
+    /*majors*/300.0, /*l1*/500.0, /*defi*/600.0, /*meme*/800.0, /*other*/500.0 };
 
 // S45: BEAR-REGIME entry halt. The book is spot-LONG-only — it cannot profit in
 // a falling market, so it must sit out entirely rather than feed longs into a
@@ -1877,6 +1918,16 @@ int main() {
     // warm-start persistence, and on_order_intent to mirror entries/exits
     // into SpotExecutor (shadow mode -> signed-but-not-posted log).
     auto wire_engine = [&](chimera::EdgeEngine& engine) {
+        // S46 dedup: the same tag appears in BOTH engines_s43_repromote.cpp and
+        // engines_s43b_holdout.cpp (repromoted + re-discovered), so 20 tags were
+        // wired twice = redundant concurrent exposure on one signal, wasting the
+        // per-symbol cap. Keep the first-wired (repromote is #included first =
+        // stricter WF validation) and skip the later duplicate.
+        static std::set<std::string> wired_tags;
+        if (!wired_tags.insert(engine.cfg().tag).second) {
+            std::printf("[DEDUP] skipped duplicate engine tag=%s\n", engine.cfg().tag.c_str());
+            return;
+        }
         engine.shadow_mode = runtime_cfg.shadow_mode;
         // S44: pyramid_elite for ALL wired engines (incl S43/S43b includes
         // which aren't in g_slots). Validated +2.8% portfolio bp.
@@ -1993,6 +2044,15 @@ int main() {
                 double sym_base_usd = runtime_cfg.max_position_usd * liq_mult;
                 double total_mult = tier_mult * funding_mult * confluence_mult * crash_mult;
                 double qty = (sym_base_usd * total_mult) / intent.ref_px;
+                // P1/S46: ENTRIES ONLY — apply DD-throttle x vol-overlay (was dead)
+                // and the per-trade $-risk-budget clamp. Exits (sells) flatten the
+                // held position and must NOT be shrunk, so leave them untouched.
+                if (intent.is_buy) {
+                    qty *= intent.risk_mult;
+                    int _cl = symbol_cluster(chimera::symbol_to_id(intent.symbol));
+                    double max_notional = MAX_TRADE_RISK_USD / (CLUSTER_WORST_GAP_BP[_cl] / 1e4);
+                    if (qty * intent.ref_px > max_notional) qty = max_notional / intent.ref_px;
+                }
                 auto _ti = g_engine_tier.find(intent.tag);
                 const char* tier_str = (_ti != g_engine_tier.end()) ? _ti->second.c_str() : "UNKNOWN";
                 auto _li = g_symbol_liq.find(intent.symbol);
@@ -2056,6 +2116,12 @@ int main() {
                 double sym_base_usd = runtime_cfg.max_position_usd * liq_mult;
                 double total_mult = tier_mult * funding_mult;
                 double add_usd = sym_base_usd * size_mult * total_mult;
+                // P1/S46: per-trade $-risk-budget clamp on pyramid adds too.
+                {
+                    int _cl = symbol_cluster(chimera::symbol_to_id(engine.cfg().symbol));
+                    double max_add = MAX_TRADE_RISK_USD / (CLUSTER_WORST_GAP_BP[_cl] / 1e4);
+                    if (add_usd > max_add) add_usd = max_add;
+                }
                 double qty = add_usd / price;
                 std::printf("[PYRAMID-INTENT] tag=%s add=%d size_mult=%.0f%% tier=%.2fx liq=%.2fx funding=%.2fx total=%.2fx add_usd=%.2f qty=%.8f\n",
                     tag.c_str(), add_num, size_mult * 100.0, tier_mult, liq_mult, funding_mult, total_mult, add_usd, qty);
@@ -6770,7 +6836,14 @@ int main() {
                     bool concurrency_ok = (g_cluster_open_sym[sid]  < CLUSTER_MAX_PER_SYMBOL) &&
                                           (g_cluster_open_bucket[cl] < CLUSTER_MAX_PER_CLUSTER);
                     bool cluster_loss_ok = (now_ms_ck >= g_cluster_blocked_until_ms[cl].load());
-                    bool regime_ok       = (g_regime.load(std::memory_order_relaxed) >= REGIME_MIN_FOR_ENTRY);
+                    // P2/S46: require BOTH global BTC regime AND this symbol's own
+                    // regime to be bullish (>=BULL_CHOP). Closes the "BTC coattails"
+                    // leak where a personally-collapsing alt was waved through on
+                    // BTC's regime alone. Long-only: don't long a falling name.
+                    bool btc_regime_ok = (g_regime.load(std::memory_order_relaxed) >= REGIME_MIN_FOR_ENTRY);
+                    bool sym_regime_ok = (sid < 0) ||
+                                         (g_sym_regime[sid].load(std::memory_order_relaxed) >= REGIME_MIN_FOR_ENTRY);
+                    bool regime_ok       = btc_regime_ok && sym_regime_ok;
                     e->set_cluster_gate(concurrency_ok && cluster_loss_ok && regime_ok);
                 } else {
                     e->set_cluster_gate(true);
@@ -7539,10 +7612,16 @@ int main() {
                 // needs SOME tradeable regime when not bullish.
                 if (btc_vol_ratio > 2.0) {
                     regime = 0;  // CRASH — halt all
-                } else if (!btc_d1_bullish && !btc_h4_bullish && !short_rally && btc_short_ret_pct < -0.5) {
-                    regime = 1;  // BEAR — confirmed dump, halt all
+                } else if (!btc_d1_bullish && !btc_h4_bullish) {
+                    // P2/S46: BEAR is now reachable on a PERSISTENT downtrend (both
+                    // D1 and H4 bearish), independent of micro-bounces. Old code
+                    // required !short_rally && short_ret<-0.5 so any 0.2% blip
+                    // demoted a confirmed downtrend back to CHOP (which PASSES the
+                    // entry gate) — that leak fed longs into grinding bears. For a
+                    // spot-LONG-only book a both-TF downtrend means: sit out.
+                    regime = 1;  // BEAR — halt all
                 } else if (!btc_d1_bullish || btc_vol_ratio < 0.7 || btc_vol_ratio > 1.3 || short_rally) {
-                    regime = 2;  // BULL_CHOP — mean-revert allowed, TSMOM off
+                    regime = 2;  // BULL_CHOP — only symbols personally bullish trade (P2 #2)
                 } else {
                     regime = 3;  // BULL_TREND — all engines
                 }
@@ -7750,6 +7829,17 @@ int main() {
                     double overlay_mult = g_portfolio_overlay.multiplier_for(s.symbol_id);
                     double tier_mult = tier_sizing_mult_blended(s.tag, s.oos_sharpe, s.bt_pf);
                     s.engine->set_sizing_mult(size_throttle * overlay_mult * tier_mult);
+                }
+                // P1/S46: set the REAL risk multiplier (DD-throttle x vol-overlay)
+                // on EVERY wired engine — this is what the live qty calc now reads
+                // (intent.risk_mult). Excludes tier (tier is applied separately in
+                // the callback). This is what makes the drawdown throttle and
+                // vol-scaling finally shrink position size; previously discarded.
+                for (auto* e : g_all_wired) {
+                    if (!e) continue;
+                    int sid = chimera::symbol_to_id(e->cfg().symbol);
+                    double ov = (sid >= 0) ? g_portfolio_overlay.multiplier_for(sid) : 1.0;
+                    e->set_risk_mult(size_throttle * ov);
                 }
 
                 static bool prev_gate = true;

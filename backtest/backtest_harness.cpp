@@ -251,6 +251,20 @@ static int    g_swing_low_bars   = 0;          // 0 = off
 static double g_low_vol_ratio    = 0.0;        // 0 = off
 static int    g_low_vol_avg_bars = 20;
 static int    g_signal_confirm_override = 0;   // 0 = off
+// P0: baseline backtest fills stops at eff_stop (correct for continuous liquid
+// pairs; the coarse O/H/L/C path-sim cannot tell a real gap from an intrabar
+// trend, so filling at the bar low is an artifact). --realistic-gap-fill turns
+// on price-fill, used WITH --inject-gap-bp for the explicit gap stress test.
+static bool   g_realistic_gap_fill  = false;
+static double g_gap_extra_slip_bp   = 0.0;     // P0: extra book-depth slippage on gap fills
+// P3/S46: gap-injection stress. On every g_gap_every-th bar, inject a gap-DOWN
+// open of g_inject_gap_bp (negative) so an open position fills at the gapped
+// price (needs --realistic-gap-fill). Measures how often realized loss exceeds
+// the -170 floor and the worst tail, per engine.
+static double g_inject_gap_bp = 0.0;           // 0 = off; e.g. -400
+static int    g_gap_every     = 50;            // inject on every Nth bar
+static double g_worst_trade_bp   = 0.0;        // P3: worst single-trade bp this run
+static int    g_n_beyond_floor   = 0;          // P3: # trades worse than -170 floor
 
 static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                                     const chimera::EdgeEngine::Config& cfg,
@@ -261,6 +275,12 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
     r.strategy = chimera::strategy_name(cfg.kind);
     r.tf_secs  = (int)cfg.tf_secs;
     r.cost_bp  = cfg.round_trip_bp;
+
+    // P0/S46: baseline fills at eff_stop; --realistic-gap-fill opts into price-
+    // fill for the gap stress test.
+    engine.set_realistic_gap_fill(g_realistic_gap_fill);
+    engine.set_gap_extra_slip_bp(g_gap_extra_slip_bp);
+    g_worst_trade_bp = 0.0; g_n_beyond_floor = 0;   // P3: reset per-engine stress counters
 
     if (klines.empty()) {
         r.total_bars = 0;
@@ -346,6 +366,14 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
 
         bool bullish = (k.c >= k.o);
 
+        // P3/S46: inject a synthetic gap-DOWN open on selected bars. Fed as the
+        // FIRST tick so cur_open_ = gapped price; an open position below its stop
+        // then fills at the gap (with --realistic-gap-fill), exercising the
+        // gap-through tail that real klines rarely contain.
+        if (g_inject_gap_bp < 0.0 && g_gap_every > 0 && (i % g_gap_every) == 0) {
+            engine.on_tick(k.o * (1.0 + g_inject_gap_bp / 1e4), bar_start_ms);
+        }
+
         // Tick 1: Open
         engine.on_tick(k.o, bar_start_ms);
 
@@ -379,6 +407,8 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
         if (engine.trades() > prev_trades) {
             double trade_bp = engine.total_bp() - prev_total_bp;
             trade_returns.push_back(trade_bp);
+            if (trade_bp < g_worst_trade_bp) g_worst_trade_bp = trade_bp;  // P3 stress
+            if (trade_bp < -185.0) g_n_beyond_floor++;                     // worse than -170 floor+cost
             equity_bp = engine.total_bp();
             if (equity_bp > peak_bp) peak_bp = equity_bp;
             double dd = peak_bp - equity_bp;
@@ -439,6 +469,14 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
         r.sharpe = (sd > 0.0) ? (mean / sd) * std::sqrt(trades_per_year) : 0.0;
     } else {
         r.sharpe = 0.0;
+    }
+
+    // P3/S46: gap-stress summary (only when injecting). Shows how a -170 floor
+    // fares against injected gaps: how many fills blew past it and the worst tail.
+    if (g_inject_gap_bp < 0.0) {
+        std::fprintf(stderr, "[GAP-STRESS] %-20s inject=%.0fbp/every%d  trades=%d  worst_trade=%.0fbp  fills_beyond_floor=%d (%.1f%%)\n",
+            cfg.tag.c_str(), g_inject_gap_bp, g_gap_every, r.trades, g_worst_trade_bp,
+            g_n_beyond_floor, r.trades > 0 ? 100.0 * g_n_beyond_floor / r.trades : 0.0);
     }
 
     return r;
@@ -710,6 +748,10 @@ int main(int argc, char* argv[]) {
         else if (a == "--low-vol-ratio"    && i+1 < argc) { g_low_vol_ratio    = std::atof(argv[++i]); }
         else if (a == "--low-vol-avg-bars" && i+1 < argc) { g_low_vol_avg_bars = std::atoi(argv[++i]); }
         else if (a == "--signal-confirm"   && i+1 < argc) { g_signal_confirm_override = std::atoi(argv[++i]); }
+        else if (a == "--realistic-gap-fill")              { g_realistic_gap_fill = true; }
+        else if (a == "--gap-slip-bp"       && i+1 < argc) { g_gap_extra_slip_bp = std::atof(argv[++i]); }
+        else if (a == "--inject-gap-bp"     && i+1 < argc) { g_inject_gap_bp = std::atof(argv[++i]); g_realistic_gap_fill = true; }
+        else if (a == "--gap-every"         && i+1 < argc) { g_gap_every = std::atoi(argv[++i]); }
     }
     if (!preset_name.empty()) {
         std::fprintf(stderr, "[MODE] --preset %s\n", preset_name.c_str());

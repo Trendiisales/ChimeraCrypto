@@ -546,6 +546,11 @@ static std::atomic<int64_t> g_last_trade_exit_ms{0};
 static std::atomic<uint64_t> g_all_time_peak_bp_bits{0};    // persisted
 static std::atomic<uint64_t> g_all_time_cum_bp_bits{0};     // recomputed each loop
 static std::atomic<int64_t>  g_daily_kill_until_ms{0};      // persisted; halt entries until this ts
+// S54: session-reset epoch. Risk-cap rolling windows (24h daily / per-symbol /
+// per-cluster) only count trades with exit_ts >= this. POST /api/session_reset
+// sets it to now, voiding pre-fix bug losses from the live risk accounting and
+// clearing every halt. The trade ledger itself is untouched (history intact).
+static std::atomic<int64_t>  g_pnl_epoch_ms{0};             // persisted; 0 = count all
 static std::atomic<uint64_t> g_daily_pnl_bp_bits{0};        // rolling 24h pnl
 static std::atomic<int>      g_regime{2};                    // 0=CRASH, 1=CHOP, 2=TREND
 static std::atomic<uint64_t> g_size_throttle_bits{0};        // current sizing multiplier (0..1)
@@ -771,10 +776,11 @@ static void save_protection_state() {
         std::fprintf(stderr, "[PROTECTION] Failed to open %s for write\n", PROTECTION_FILE);
         return;
     }
-    std::fprintf(f, "{\"all_time_peak_bp\":%.4f,\"all_time_cum_bp\":%.4f,\"daily_kill_until_ms\":%lld}\n",
+    std::fprintf(f, "{\"all_time_peak_bp\":%.4f,\"all_time_cum_bp\":%.4f,\"daily_kill_until_ms\":%lld,\"pnl_epoch_ms\":%lld}\n",
         load_dbl_atomic(g_all_time_peak_bp_bits),
         load_dbl_atomic(g_all_time_cum_bp_bits),
-        (long long)g_daily_kill_until_ms.load(std::memory_order_relaxed));
+        (long long)g_daily_kill_until_ms.load(std::memory_order_relaxed),
+        (long long)g_pnl_epoch_ms.load(std::memory_order_relaxed));
     fclose(f);
 }
 
@@ -803,13 +809,15 @@ static void load_protection_state() {
     double peak = extract_num("all_time_peak_bp");
     double cum  = extract_num("all_time_cum_bp");
     int64_t kill_until = (int64_t)extract_num("daily_kill_until_ms");
+    int64_t pnl_epoch  = (int64_t)extract_num("pnl_epoch_ms");
 
     store_dbl_atomic(g_all_time_peak_bp_bits, peak);
     store_dbl_atomic(g_all_time_cum_bp_bits,  cum);
     g_daily_kill_until_ms.store(kill_until, std::memory_order_relaxed);
+    g_pnl_epoch_ms.store(pnl_epoch, std::memory_order_relaxed);
 
-    std::printf("[PROTECTION] Loaded: all_time_peak=%+.1fbp  all_time_cum=%+.1fbp  daily_kill_until_ms=%lld\n",
-        peak, cum, (long long)kill_until);
+    std::printf("[PROTECTION] Loaded: all_time_peak=%+.1fbp  all_time_cum=%+.1fbp  daily_kill_until_ms=%lld  pnl_epoch_ms=%lld\n",
+        peak, cum, (long long)kill_until, (long long)pnl_epoch);
     std::fflush(stdout);
 }
 
@@ -1396,6 +1404,31 @@ static void http_server_thread(int port) {
             std::printf("[PROTECTION] daily_kill cleared via API (was until %lld)\n", (long long)old);
             std::fflush(stdout);
             body = "{\"ok\":true}";
+        } else if (strstr(req, "POST /api/session_reset")) {
+            // S54: full session reset — void pre-fix bug losses from live risk
+            // accounting and clear every halt so trading resumes clean. The trade
+            // ledger (history) is NOT modified. Optional ?cum=<bp> seeds the
+            // displayed cumulative (default 0 = fresh slate).
+            int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            double seed_cum = 0.0;
+            if (const char* q = strstr(req, "cum=")) seed_cum = std::atof(q + 4);
+            g_pnl_epoch_ms.store(now, std::memory_order_relaxed);
+            g_daily_kill_until_ms.store(0, std::memory_order_relaxed);
+            for (int c = 0; c < CL_COUNT; ++c) g_cluster_blocked_until_ms[c].store(0, std::memory_order_relaxed);
+            for (int s = 0; s < chimera::MAX_SYMBOLS; ++s) {
+                g_sym_daily_blocked_until_ms[s].store(0, std::memory_order_relaxed);
+                g_sym_sl_circuit_blocked_until_ms[s].store(0, std::memory_order_relaxed);
+            }
+            store_dbl_atomic(g_all_time_cum_bp_bits,  seed_cum);
+            store_dbl_atomic(g_all_time_peak_bp_bits, seed_cum > 0 ? seed_cum : 0.0);
+            store_dbl_atomic(g_session_cum_bp_bits,   seed_cum);
+            store_dbl_atomic(g_session_peak_bp_bits,  seed_cum > 0 ? seed_cum : 0.0);
+            save_protection_state();
+            std::printf("[PROTECTION] SESSION_RESET via API: epoch=%lld seed_cum=%.1fbp — all halts cleared\n",
+                (long long)now, seed_cum);
+            std::fflush(stdout);
+            body = "{\"ok\":true,\"epoch_ms\":" + std::to_string(now) + "}";
         } else if (strstr(req, "GET /api/state2") || strstr(req, "GET /api/state")) {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
             body = build_state_json();
@@ -7301,7 +7334,9 @@ int main() {
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
                     int64_t cutoff4h  = now_ms - DRAWDOWN_LOOKBACK_MS;
-                    int64_t cutoff24h = now_ms - DAILY_WINDOW_MS;
+                    // S54: never count trades before the session-reset epoch.
+                    int64_t cutoff24h = std::max(now_ms - DAILY_WINDOW_MS,
+                                                 g_pnl_epoch_ms.load(std::memory_order_relaxed));
                     int64_t cutoff30m = now_ms - 30LL * 60 * 1000;
                     for (int i = (int)g_trade_log.size() - 1; i >= 0; --i) {
                         const auto& tr = g_trade_log[i];

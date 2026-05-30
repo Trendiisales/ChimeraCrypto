@@ -6081,6 +6081,7 @@ int main() {
 // #include "engines_s42_consolidated.cpp"  // CULLED
 #include "engines_s43_repromote.cpp"        // 137 strict-WF-validated engines
 #include "engines_s43b_holdout.cpp"         // 142 fresh-discover holdout-validated
+#include "engines_gems.cpp"                  // S52: 13 strict-validated salvaged gems (s41/s42)
 
     // ── S42b: SYMBOL WHITELIST FILTER (Binance 50-sym cap) ────────────────
     // Reads config/symbol_whitelist.json, drops g_slots entries for non-

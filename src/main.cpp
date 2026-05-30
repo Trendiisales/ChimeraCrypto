@@ -316,6 +316,18 @@ static double tier_mult_for_tag(const std::string& tag) {
     if (mit == g_tier_multiplier.end()) return 1.0;
     return mit->second;
 }
+// S47: tier-aware per-trade risk-budget scaler. The ELITE/STRONG engines are
+// fine-fill + walk-forward + crash validated (several are crash-POSITIVE), so
+// they earn a larger gap budget -> the $-clamp lets their bigger lots + deeper
+// pyramids through instead of capping them at the STANDARD ceiling. Maximises
+// profit on the trusted names while keeping the backstop proportional to proof.
+static double tier_risk_mult(const std::string& tag) {
+    auto it = g_engine_tier.find(tag);
+    if (it == g_engine_tier.end()) return 1.0;
+    if (it->second == "ELITE")  return 1.5;
+    if (it->second == "STRONG") return 1.25;
+    return 1.0;
+}
 static int tier_pyramid_max_for_tag(const std::string& tag) {
     auto it = g_engine_tier.find(tag);
     if (it == g_engine_tier.end()) return 4;  // default
@@ -1928,6 +1940,25 @@ int main() {
             std::printf("[DEDUP] skipped duplicate engine tag=%s\n", engine.cfg().tag.c_str());
             return;
         }
+        // S47 cull: skip engines below profit on the fine-fill (real H1 intrabar)
+        // backtest. Loaded once from config/culled_engines.txt. Reversible.
+        static std::set<std::string> culled_tags = []{
+            std::set<std::string> s; std::ifstream cf("config/culled_engines.txt");
+            std::string ln;
+            while (std::getline(cf, ln)) {
+                if (!ln.empty() && ln[0] != '#') {
+                    ln.erase(0, ln.find_first_not_of(" \t"));
+                    ln.erase(ln.find_last_not_of(" \t\r\n") + 1);
+                    if (!ln.empty()) s.insert(ln);
+                }
+            }
+            std::printf("[CULL] loaded %zu culled engine tags\n", s.size());
+            return s;
+        }();
+        if (culled_tags.count(engine.cfg().tag)) {
+            std::printf("[CULL] skipped below-profit engine tag=%s\n", engine.cfg().tag.c_str());
+            return;
+        }
         engine.shadow_mode = runtime_cfg.shadow_mode;
         // S44: pyramid_elite for ALL wired engines (incl S43/S43b includes
         // which aren't in g_slots). Validated +2.8% portfolio bp.
@@ -2050,7 +2081,9 @@ int main() {
                 if (intent.is_buy) {
                     qty *= intent.risk_mult;
                     int _cl = symbol_cluster(chimera::symbol_to_id(intent.symbol));
-                    double max_notional = MAX_TRADE_RISK_USD / (CLUSTER_WORST_GAP_BP[_cl] / 1e4);
+                    // S47: tier-aware budget — trusted engines get a bigger ceiling
+                    double max_notional = MAX_TRADE_RISK_USD * tier_risk_mult(intent.tag)
+                                          / (CLUSTER_WORST_GAP_BP[_cl] / 1e4);
                     if (qty * intent.ref_px > max_notional) qty = max_notional / intent.ref_px;
                 }
                 auto _ti = g_engine_tier.find(intent.tag);
@@ -2119,7 +2152,8 @@ int main() {
                 // P1/S46: per-trade $-risk-budget clamp on pyramid adds too.
                 {
                     int _cl = symbol_cluster(chimera::symbol_to_id(engine.cfg().symbol));
-                    double max_add = MAX_TRADE_RISK_USD / (CLUSTER_WORST_GAP_BP[_cl] / 1e4);
+                    double max_add = MAX_TRADE_RISK_USD * tier_risk_mult(engine.cfg().tag)
+                                     / (CLUSTER_WORST_GAP_BP[_cl] / 1e4);
                     if (add_usd > max_add) add_usd = max_add;
                 }
                 double qty = add_usd / price;

@@ -263,6 +263,13 @@ static double g_gap_extra_slip_bp   = 0.0;     // P0: extra book-depth slippage 
 // the -170 floor and the worst tail, per engine.
 static double g_inject_gap_bp = 0.0;           // 0 = off; e.g. -400
 static int    g_gap_every     = 50;            // inject on every Nth bar
+// FINE-FILL: replace the synthesized higher-TF O->H->L guess with the REAL
+// constituent H1 bars in sequence (true intrabar path at H1 granularity, fed
+// low-first within each H1 = conservative). Removes the phantom-high trail-arm
+// optimism that let the roster show PF 3 in a -60% alt crash.
+static const std::vector<Kline>* g_fine_h1 = nullptr;
+static bool   g_fine_fill   = false;
+static size_t g_fine_cursor = 0;
 static double g_worst_trade_bp   = 0.0;        // P3: worst single-trade bp this run
 static int    g_n_beyond_floor   = 0;          // P3: # trades worse than -170 floor
 
@@ -347,6 +354,7 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
 
     // Feed OOS bars as ticks
     r.total_bars = total - oos_start;
+    g_fine_cursor = 0;   // FINE-FILL: reset H1 cursor for this engine's OOS pass
     // S38: D1 trend feed for kinds that gate on it (e.g. BREAKOUT_PULLBACK).
     // D1 TSMOM lookback=10 is the production BTC-TSMOM-D1 setting; on the
     // bar TF that's `bars_per_d1 * 10` bars back.
@@ -366,36 +374,45 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
 
         bool bullish = (k.c >= k.o);
 
-        // P3/S46: inject a synthetic gap-DOWN open on selected bars. Fed as the
-        // FIRST tick so cur_open_ = gapped price; an open position below its stop
-        // then fills at the gap (with --realistic-gap-fill), exercising the
-        // gap-through tail that real klines rarely contain.
-        if (g_inject_gap_bp < 0.0 && g_gap_every > 0 && (i % g_gap_every) == 0) {
-            engine.on_tick(k.o * (1.0 + g_inject_gap_bp / 1e4), bar_start_ms);
+        // FINE-FILL: feed the REAL constituent H1 bars for this higher-TF bar in
+        // true sequence (low-first within each H1 = conservative). The engine
+        // aggregates them into the tf_secs bar via on_tick's bar_id logic, and
+        // check_exits_ runs every H1 tick -> real intrabar path, no O->H->L guess.
+        bool fed_fine = false;
+        if (g_fine_fill && g_fine_h1 && cfg.tf_secs > 3600) {
+            int64_t bar_end_ms = bar_start_ms + (int64_t)cfg.tf_secs * 1000;
+            while (g_fine_cursor < g_fine_h1->size() &&
+                   (*g_fine_h1)[g_fine_cursor].open_ts_ms < bar_start_ms) g_fine_cursor++;
+            size_t c = g_fine_cursor;
+            while (c < g_fine_h1->size() && (*g_fine_h1)[c].open_ts_ms < bar_end_ms) {
+                const Kline& hb = (*g_fine_h1)[c];
+                int64_t t = hb.open_ts_ms;
+                engine.on_tick(hb.o, t);
+                engine.on_tick(hb.l, t + 1000);   // low first (conservative within H1)
+                engine.on_tick(hb.h, t + 2000);
+                engine.on_tick(hb.c, t + 3000);
+                fed_fine = true; c++;
+            }
+            g_fine_cursor = c;
+            // if no H1 covered this bar (gap), fall through to the synthetic feed
         }
 
-        // Tick 1: Open
-        engine.on_tick(k.o, bar_start_ms);
-
-        if (bullish) {
-            // Tick 2: Low (test SL first)
-            engine.on_tick(k.l, bar_start_ms + tick_step);
-            // Tick 3: High
-            engine.on_tick(k.h, bar_start_ms + tick_step * 2);
-        } else {
-            // Tick 2: High (test trail arm first)
-            engine.on_tick(k.h, bar_start_ms + tick_step);
-            // Tick 3: Low (test SL)
-            engine.on_tick(k.l, bar_start_ms + tick_step * 2);
+        if (!fed_fine) {
+            // P3/S46: inject a synthetic gap-DOWN open on selected bars.
+            if (g_inject_gap_bp < 0.0 && g_gap_every > 0 && (i % g_gap_every) == 0) {
+                engine.on_tick(k.o * (1.0 + g_inject_gap_bp / 1e4), bar_start_ms);
+            }
+            engine.on_tick(k.o, bar_start_ms);                       // Open
+            if (bullish) {
+                engine.on_tick(k.l, bar_start_ms + tick_step);       // Low (test SL first)
+                engine.on_tick(k.h, bar_start_ms + tick_step * 2);   // High
+            } else {
+                engine.on_tick(k.h, bar_start_ms + tick_step);       // High (test trail arm first)
+                engine.on_tick(k.l, bar_start_ms + tick_step * 2);   // Low (test SL)
+            }
+            // Tick 4: true close as last in-bar tick (indicators read real closes).
+            engine.on_tick(k.c, bar_start_ms + tick_step * 3);
         }
-
-        // Tick 4: Close — feed the TRUE close as the last in-bar tick so the
-        // engine records k.c (not the bar extreme) as cur_close_. Without this,
-        // the bar was closed by the next bar's open tick, leaving cur_close_ =
-        // tick3 = High on green bars / Low on red bars. Every indicator reads
-        // closes_, so signals were computed on extreme-biased closes that live
-        // (real websocket closes) never sees. 3*tick_step = 0.75*tf stays in-bar.
-        engine.on_tick(k.c, bar_start_ms + tick_step * 3);
 
         // For the final bar there is no next-bar open tick to trigger close_bar_,
         // so force it with a tick 1 second into the next bar.
@@ -748,6 +765,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--low-vol-ratio"    && i+1 < argc) { g_low_vol_ratio    = std::atof(argv[++i]); }
         else if (a == "--low-vol-avg-bars" && i+1 < argc) { g_low_vol_avg_bars = std::atoi(argv[++i]); }
         else if (a == "--signal-confirm"   && i+1 < argc) { g_signal_confirm_override = std::atoi(argv[++i]); }
+        else if (a == "--fine-fill")                       { g_fine_fill = true; }
         else if (a == "--realistic-gap-fill")              { g_realistic_gap_fill = true; }
         else if (a == "--gap-slip-bp"       && i+1 < argc) { g_gap_extra_slip_bp = std::atof(argv[++i]); }
         else if (a == "--inject-gap-bp"     && i+1 < argc) { g_inject_gap_bp = std::atof(argv[++i]); g_realistic_gap_fill = true; }
@@ -1123,6 +1141,7 @@ int main(int argc, char* argv[]) {
             }
             if (g_signal_confirm_override > 0) cfg.signal_confirm_bars = g_signal_confirm_override;
             chimera::EdgeEngine eng(cfg);
+            g_fine_h1 = &h1;   // FINE-FILL: real H1 path for this symbol (no-op unless --fine-fill)
             auto r = run_backtest(eng, cfg, bars);
             const char* verdict = (r.pf >= 1.3 && r.sharpe >= 0.3 && r.trades >= 5)
                 ? "PASS" : "FAIL";

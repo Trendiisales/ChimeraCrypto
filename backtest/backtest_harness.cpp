@@ -270,6 +270,10 @@ static int    g_gap_every     = 50;            // inject on every Nth bar
 static const std::vector<Kline>* g_fine_h1 = nullptr;
 static bool   g_fine_fill   = false;
 static size_t g_fine_cursor = 0;
+// REGIME-GATE: replicate the live per-symbol bear-halt the harness otherwise
+// ignores. Block new entries when the symbol's own ~10-D1 trend is DOWN. Many
+// culled engines only bled in bear windows the live bot would have sat out.
+static bool   g_regime_gate = false;
 static double g_worst_trade_bp   = 0.0;        // P3: worst single-trade bp this run
 static int    g_n_beyond_floor   = 0;          // P3: # trades worse than -170 floor
 
@@ -370,6 +374,12 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
         if (i >= d1_lookback_bars) {
             bool d1_bull = (*klines_use)[i].c > (*klines_use)[i - d1_lookback_bars].c;
             engine.set_d1_bullish(d1_bull);
+            // REGIME-GATE: live bear-halt — suppress entries while the symbol's
+            // own ~10-D1 trend is down (cluster_gate is checked in evaluate_signal_
+            // and only blocks ENTRIES; open positions still manage/exit normally).
+            if (g_regime_gate) engine.set_cluster_gate(d1_bull);
+        } else if (g_regime_gate) {
+            engine.set_cluster_gate(true);
         }
 
         bool bullish = (k.c >= k.o);
@@ -766,6 +776,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--low-vol-avg-bars" && i+1 < argc) { g_low_vol_avg_bars = std::atoi(argv[++i]); }
         else if (a == "--signal-confirm"   && i+1 < argc) { g_signal_confirm_override = std::atoi(argv[++i]); }
         else if (a == "--fine-fill")                       { g_fine_fill = true; }
+        else if (a == "--regime-gate")                     { g_regime_gate = true; }
         else if (a == "--realistic-gap-fill")              { g_realistic_gap_fill = true; }
         else if (a == "--gap-slip-bp"       && i+1 < argc) { g_gap_extra_slip_bp = std::atof(argv[++i]); }
         else if (a == "--inject-gap-bp"     && i+1 < argc) { g_inject_gap_bp = std::atof(argv[++i]); g_realistic_gap_fill = true; }

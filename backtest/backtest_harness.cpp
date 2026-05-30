@@ -241,6 +241,7 @@ static int g_last_days = 0;  // 0 = ignore; >0 = last N days (converted via tf_s
 static int g_end_days_ago = 0; // >0: drop last N days from klines before split (holdout sim)
 static double g_hard_floor_bp_override = 1.0; // 1.0 = no override; <=0 = applies after preset
 static double g_ppb_be_arm_override = -1.0;    // <0 = no override
+static double g_ppb_ratchet_start_override = -1.0;  // <0 = no override (mfe threshold for ANY ratchet)
 static double g_ppb_lock_pct_override = -1.0;  // <0 = no override
 static double g_engine_daily_cap_bp  = 0.0;    // 0 = off; positive N = block entries when -bp in 24h >= N
 static double g_symbol_daily_cap_bp  = 0.0;    // 0 = off; per-symbol cap across all engines (used in roster mode)
@@ -770,6 +771,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--end-days-ago" && i+1 < argc) { g_end_days_ago = std::atoi(argv[++i]); }
         else if (a == "--hard-floor-bp" && i+1 < argc) { g_hard_floor_bp_override = std::atof(argv[++i]); }
         else if (a == "--ppb-be-arm" && i+1 < argc) { g_ppb_be_arm_override = std::atof(argv[++i]); }
+        else if (a == "--ppb-ratchet-start" && i+1 < argc) { g_ppb_ratchet_start_override = std::atof(argv[++i]); }
         else if (a == "--ppb-lock-pct" && i+1 < argc) { g_ppb_lock_pct_override = std::atof(argv[++i]); }
         else if (a == "--engine-daily-cap-bp" && i+1 < argc) { g_engine_daily_cap_bp = std::atof(argv[++i]); }
         else if (a == "--sl-mult-scale" && i+1 < argc) { g_sl_mult_scale = std::atof(argv[++i]); }
@@ -1144,6 +1146,7 @@ int main(int argc, char* argv[]) {
             apply_preset_named(cfg, preset_name);
             if (g_hard_floor_bp_override <= 0.0) cfg.hard_floor_bp = g_hard_floor_bp_override;
             if (g_ppb_be_arm_override   > 0.0) cfg.be_arm_bp        = g_ppb_be_arm_override;
+            if (g_ppb_ratchet_start_override > 0.0) cfg.ratchet_start_bp = g_ppb_ratchet_start_override;
             if (g_ppb_lock_pct_override > 0.0) cfg.ratchet_lock_pct = g_ppb_lock_pct_override;
             if (g_sl_mult_scale != 1.0) cfg.sl_atr_mult *= g_sl_mult_scale;
             if (g_mfe_trail_retain > 0.0) {

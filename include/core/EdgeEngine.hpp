@@ -922,6 +922,7 @@ public:
     // S44k: tune profit-protection bands. be_arm = MFE bp at which BE locks.
     // lock_pct = fraction of MFE above be_arm that's protected.
     void set_be_arm_bp(double bp)     { cfg_.be_arm_bp = bp; }
+    void set_ratchet_start_bp(double bp) { cfg_.ratchet_start_bp = bp; }
     void set_ratchet_lock_pct(double p) { cfg_.ratchet_lock_pct = p; }
     void set_mfe_trail(double retain, double min_bp) {
         cfg_.mfe_trail_retain = retain; cfg_.mfe_trail_min_bp = min_bp;

@@ -6210,9 +6210,19 @@ int main() {
             if (!e) continue;
             e->set_hard_floor_bp(-170.0);     // real SL tightened to -170bp at entry
             e->set_signal_confirm_bars(2);    // 2-bar confirm — fewer chop entries
+            // S54: close the "no protection below cost-MFE" gap. The ratchet only
+            // engaged at mfe >= ratchet_start (=rt~22), so trades that popped +8..
+            // +22bp then reversed (XLM +19.8, ENA +22.5, DOT +8.3 on 31-May) had
+            // ZERO stop-tightening and rode to the -170 floor. Lower the gate to 8
+            // (Stage-2 ramp rescues "almost made it" trades) and the profit-lock to
+            // 15. Validated 3 windows (full / held-out-120d / recent-90d): total
+            // +111k->+250k, PF 7.5->11.1, maxdd 60k->42k, PASS 31->53/65 — drawdown
+            // DOWN, so edge-preserving (ratchet trails up; only pop-faders caught).
+            e->set_ratchet_start_bp(8.0);
+            e->set_be_arm_bp(15.0);
             n_floor++;
         }
-        std::printf("[S45-FLOOR] Enforced real hard_floor=-170 + signal_confirm=2 on ALL %d wired engines (holdout protection-gap closed)\n", n_floor);
+        std::printf("[S45-FLOOR] Enforced hard_floor=-170 + signal_confirm=2 + S54 ratchet_start=8/be_arm=15 on ALL %d wired engines (protection-gap closed)\n", n_floor);
         std::fflush(stdout);
     }
 

@@ -958,6 +958,12 @@ public:
     // Portfolio gate: set by main.cpp when max positions reached or drawdown breaker fires
     void set_portfolio_gate(bool allowed) { portfolio_entry_allowed_ = allowed; }
     bool portfolio_entry_allowed() const { return portfolio_entry_allowed_; }
+    // ── Correlation-cluster exposure gate (independent of portfolio_gate) ──
+    // main.cpp recomputes this every tick from live per-symbol / per-cluster
+    // open-position counts. Self-resetting: re-opens automatically when a
+    // correlated position exits. ANDed with portfolio_entry_allowed_ at entry.
+    void set_cluster_gate(bool allowed) { cluster_gate_ = allowed; }
+    bool cluster_gate() const { return cluster_gate_; }
 
     // MTF gate: called externally when D1 TSMOM trend state changes.
     // true = D1 bullish (allow all entries), false = D1 bearish (suppress counter-trend).
@@ -1061,6 +1067,7 @@ private:
 
     // Portfolio gate state (fed by main.cpp)
     bool    portfolio_entry_allowed_ = true;  // false = max positions or drawdown breaker active
+    bool    cluster_gate_            = true;   // false = correlated-cluster exposure cap hit
 
     // Session 30: Funding filter state
     bool    funding_tailwind_ = false;  // negative funding = carry edge for longs
@@ -1772,6 +1779,18 @@ private:
         // suppress immediately. Cheapest check — do first.
         if (!portfolio_entry_allowed_) {
             std::printf("[%s] PORTFOLIO_GATE: entries disabled — signal SUPPRESSED\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+
+        // ── Correlation-cluster exposure cap (Session 45) ───────────────────
+        // Blocks a fresh entry when too many correlated positions are already
+        // open (per-symbol and per-cluster caps enforced in main.cpp). Prevents
+        // the May-30 failure: 6 same-symbol engines firing together, all
+        // stopped out on one adverse beta move for an amplified loss.
+        if (!cluster_gate_) {
+            std::printf("[%s] CLUSTER_GATE: correlated exposure cap hit — signal SUPPRESSED\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
             return;

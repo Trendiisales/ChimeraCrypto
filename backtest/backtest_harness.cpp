@@ -361,12 +361,17 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
             engine.on_tick(k.l, bar_start_ms + tick_step * 2);
         }
 
-        // Tick 4: Close (triggers bar close via next bar boundary)
-        // We don't send the close as the last tick of this bar — instead
-        // the next iteration's open tick will close THIS bar via bar_id change.
-        // But for the final bar, we need to force it:
+        // Tick 4: Close — feed the TRUE close as the last in-bar tick so the
+        // engine records k.c (not the bar extreme) as cur_close_. Without this,
+        // the bar was closed by the next bar's open tick, leaving cur_close_ =
+        // tick3 = High on green bars / Low on red bars. Every indicator reads
+        // closes_, so signals were computed on extreme-biased closes that live
+        // (real websocket closes) never sees. 3*tick_step = 0.75*tf stays in-bar.
+        engine.on_tick(k.c, bar_start_ms + tick_step * 3);
+
+        // For the final bar there is no next-bar open tick to trigger close_bar_,
+        // so force it with a tick 1 second into the next bar.
         if (i == total - 1) {
-            // Send a tick 1 second into the next bar to force close
             engine.on_tick(k.c, bar_start_ms + cfg.tf_secs * 1000 + 1000);
         }
 

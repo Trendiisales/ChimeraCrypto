@@ -314,6 +314,66 @@ static constexpr int     SYM_SL_COUNT_THRESHOLD = 3;
 static constexpr int64_t SYM_SL_WINDOW_MS       = 4LL * 3600 * 1000;
 static constexpr int64_t SYM_SL_BLOCK_MS        = 4LL * 3600 * 1000;
 
+// ── S45: CORRELATION-CLUSTER EXPOSURE CAP ───────────────────────────────────
+// Crypto is one beta block in a crash: when many correlated longs are open and
+// BTC dumps, they all stop out together for an amplified loss. The reactive
+// breakers (daily cap, SL circuit) only fire AFTER that loss. This is the
+// proactive guard that was flagged-but-never-built after the 30-May drawdown
+// (6 JTO engines fired the same direction, all stopped together).
+//
+// Two limits, enforced together every tick from live open-position counts:
+//   1. per-SYMBOL: at most CLUSTER_MAX_PER_SYMBOL open positions on one symbol
+//      (directly kills the "6 engines, one name" failure).
+//   2. per-CLUSTER: at most CLUSTER_MAX_PER_CLUSTER open across a correlated
+//      bucket (majors / L1 / defi / memes / other).
+// Self-resetting: an engine's cluster_gate re-opens automatically once a
+// correlated position exits and the count drops back under the cap.
+enum CryptoCluster { CL_MAJORS = 0, CL_L1 = 1, CL_DEFI = 2, CL_MEME = 3, CL_OTHER = 4, CL_COUNT = 5 };
+static constexpr int CLUSTER_MAX_PER_SYMBOL  = 2;   // max concurrent opens per symbol
+static constexpr int CLUSTER_MAX_PER_CLUSTER = 5;   // max concurrent opens per correlated bucket
+
+// Symbol-id -> cluster. Indexed by chimera::SymbolId (0..61). Buckets group
+// names that move together vs BTC beta / sector.
+static constexpr int SYMBOL_CLUSTER[chimera::MAX_SYMBOLS] = {
+    /*0 BTC */CL_MAJORS, /*1 ETH */CL_MAJORS, /*2 SOL */CL_L1,   /*3 BNB */CL_MAJORS,
+    /*4 AVAX*/CL_L1,     /*5 LINK*/CL_DEFI,   /*6 XRP */CL_OTHER, /*7 DOGE*/CL_MEME,
+    /*8 SUI */CL_L1,     /*9 APT */CL_L1,     /*10 NEAR*/CL_L1,   /*11 ARB */CL_OTHER,
+    /*12 PEPE*/CL_MEME,  /*13 WIF */CL_MEME,  /*14 FET */CL_DEFI, /*15 ONDO*/CL_DEFI,
+    /*16 TIA */CL_L1,    /*17 HBAR*/CL_L1,    /*18 INJ */CL_DEFI, /*19 ADA */CL_L1,
+    /*20 TRX */CL_L1,    /*21 SEI */CL_L1,    /*22 OP  */CL_OTHER,/*23 MATIC*/CL_OTHER,
+    /*24 ATOM*/CL_L1,    /*25 FIL */CL_OTHER, /*26 AAVE*/CL_DEFI, /*27 UNI */CL_DEFI,
+    /*28 LDO */CL_DEFI,  /*29 ENA */CL_DEFI,  /*30 JUP */CL_DEFI, /*31 TON */CL_L1,
+    /*32 DOT */CL_L1,    /*33 ICP */CL_L1,    /*34 RENDER*/CL_OTHER,/*35 PYTH*/CL_DEFI,
+    /*36 GRT */CL_DEFI,  /*37 SAND*/CL_OTHER, /*38 MANA*/CL_OTHER,/*39 CRV */CL_DEFI,
+    /*40 COMP*/CL_DEFI,  /*41 MKR */CL_DEFI,  /*42 IMX */CL_OTHER,/*43 STX */CL_L1,
+    /*44 ARKM*/CL_OTHER, /*45 MASK*/CL_OTHER, /*46 RUNE*/CL_DEFI, /*47 JTO */CL_DEFI,
+    /*48 W   */CL_OTHER, /*49 TURBO*/CL_MEME, /*50 BOME*/CL_MEME, /*51 FLOKI*/CL_MEME,
+    /*52 ETHFI*/CL_DEFI, /*53 EIGEN*/CL_OTHER,/*54 ZRO */CL_OTHER,/*55 GMT */CL_MEME,
+    /*56 SHIB*/CL_MEME,  /*57 BCH */CL_MAJORS,/*58 LTC */CL_MAJORS,/*59 ETC */CL_MAJORS,
+    /*60 XLM */CL_L1,    /*61 VET */CL_OTHER,
+};
+static inline int symbol_cluster(int sid) {
+    return (sid >= 0 && sid < chimera::MAX_SYMBOLS) ? SYMBOL_CLUSTER[sid] : CL_OTHER;
+}
+// Live exposure snapshot, recomputed each tick (single-threaded gate block).
+static int g_cluster_open_sym[chimera::MAX_SYMBOLS] = {0};
+static int g_cluster_open_bucket[CL_COUNT]          = {0};
+
+// S45: per-CLUSTER 24h loss circuit breaker. The per-tick caps above stop
+// SIMULTANEOUS correlated exposure; this stops a SEQUENTIAL correlated bleed
+// (the 29-May overnight run: RENDER/FET/SEI/NEAR/JUP/PYTH/INJ stopping out one
+// after another). When a bucket's rolling-24h net <= CLUSTER_DAILY_CAP_BP, ALL
+// entries in that cluster are halted for 24h. Set in the monitor loop.
+static std::atomic<int64_t> g_cluster_blocked_until_ms[CL_COUNT]{};
+static constexpr double  CLUSTER_DAILY_CAP_BP = -250.0;  // halt whole cluster 24h below this
+
+// S45: BEAR-REGIME entry halt. The book is spot-LONG-only — it cannot profit in
+// a falling market, so it must sit out entirely rather than feed longs into a
+// downtrend. Block all new entries unless BTC regime is BULL_CHOP(2)/BULL_TREND(3).
+// (Cutting EXISTING losers is handled by the real -170 hard floor + emergency
+// flatten; this only gates new entries.) g_regime: 0=CRASH 1=BEAR 2=BULL_CHOP 3=BULL_TREND.
+static constexpr int REGIME_MIN_FOR_ENTRY = 2;
+
 // S44L D: regime-conditional pyramid. Disable pyramid adds when regime is
 // BULL_CHOP (2), BEAR (1), or CRASH (0). Only allow in BULL_TREND (3).
 static bool pyramid_allowed_in_regime(int regime) { return regime == 3; }
@@ -994,6 +1054,30 @@ static std::string build_state_json() {
         js << "\"pf_blocked_count\":" << blocked << ",";
         js << "\"pf_active_count\":" << active << ",";
         js << "\"pf_elite_count\":" << elite << ",";
+    }
+    // S45: correlation-cluster exposure snapshot (read by GUI / monitor)
+    {
+        static constexpr const char* CLN[CL_COUNT] = {"majors","l1","defi","meme","other"};
+        js << "\"cluster_max_per_symbol\":" << CLUSTER_MAX_PER_SYMBOL << ",";
+        js << "\"cluster_max_per_cluster\":" << CLUSTER_MAX_PER_CLUSTER << ",";
+        js << "\"cluster_open\":{";
+        for (int c = 0; c < CL_COUNT; ++c) {
+            js << "\"" << CLN[c] << "\":" << g_cluster_open_bucket[c];
+            if (c + 1 < CL_COUNT) js << ",";
+        }
+        js << "},";
+        // S45: which clusters are loss-halted (24h breaker) + bear-regime entry halt
+        int64_t now_ck = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        js << "\"cluster_loss_halted\":[";
+        { bool first = true;
+          for (int c = 0; c < CL_COUNT; ++c)
+            if (now_ck < g_cluster_blocked_until_ms[c].load()) {
+                if (!first) js << ","; js << "\"" << CLN[c] << "\""; first = false;
+            } }
+        js << "],";
+        js << "\"regime_entry_halt\":"
+           << ((g_regime.load() < REGIME_MIN_FOR_ENTRY) ? "true" : "false") << ",";
     }
     {
         int r = g_regime.load();
@@ -6003,6 +6087,24 @@ int main() {
         }
         std::printf("[S44N] Re-applied S44k/M/i overrides on %d slot engines (be_arm=25 lock=0.85 hard_floor=-170 signal_confirm=2)\n", n_reapplied);
         std::fflush(stdout);
+
+        // ── S45: FLOOR FIX — enforce the REAL hard floor on ALL wired engines ──
+        // ROOT CAUSE of the 29-May overnight blow-up: the slot-loop preset above
+        // resets hard_floor to 0, and S44N only restored it on the 24 g_slots
+        // engines. The 308 holdout (S43/S43b) engines were left at hard_floor=0,
+        // so their stops sat at full ATR width — SEI ran to -422bp, FET to -2159bp
+        // before exit, while the journal cosmetically showed -170. This loop makes
+        // the -170 floor a real entry-time stop on EVERY engine. A loser can now
+        // never exceed -170bp. Idempotent for slots (already set).
+        int n_floor = 0;
+        for (auto* e : g_all_wired) {
+            if (!e) continue;
+            e->set_hard_floor_bp(-170.0);     // real SL tightened to -170bp at entry
+            e->set_signal_confirm_bars(2);    // 2-bar confirm — fewer chop entries
+            n_floor++;
+        }
+        std::printf("[S45-FLOOR] Enforced real hard_floor=-170 + signal_confirm=2 on ALL %d wired engines (holdout protection-gap closed)\n", n_floor);
+        std::fflush(stdout);
     }
 
     // ── S38b: PYRAMID-XLOW — enable aggressive pyramid on all slots ───────
@@ -6618,6 +6720,19 @@ int main() {
             int64_t halt_until = g_emergency_halt_until_ms.load(std::memory_order_relaxed);
             bool in_emergency = (now_ms_ck < halt_until);
             std::lock_guard<std::mutex> lk(g_engine_mtx);
+            // S45: snapshot live open-position exposure per symbol + cluster
+            // BEFORE feeding this tick. Recomputed every tick so it tracks
+            // cross-symbol cluster state; incrementally updated below as
+            // engines enter/exit during this tick (exact within-tick caps).
+            std::memset(g_cluster_open_sym, 0, sizeof(g_cluster_open_sym));
+            std::memset(g_cluster_open_bucket, 0, sizeof(g_cluster_open_bucket));
+            for (auto* e : g_all_wired) {
+                if (!e || !e->in_position()) continue;
+                int sid = chimera::symbol_to_id(e->cfg().symbol);
+                if (sid < 0 || sid >= chimera::MAX_SYMBOLS) continue;
+                g_cluster_open_sym[sid]++;
+                g_cluster_open_bucket[symbol_cluster(sid)]++;
+            }
             // S44h: re-enable gates that have completed cooldown
             // S44L C: also apply per-symbol daily lock
             for (auto* e : g_all_wired) {
@@ -6636,6 +6751,36 @@ int main() {
                     }
                 }
             }
+            // S45: set the cluster gate for one engine from live counts, feed
+            // the tick, then reconcile counts if it just entered/exited. A flat
+            // engine is allowed only if BOTH its symbol and its cluster are
+            // under cap; an in-position engine is never cluster-blocked (it is
+            // not entering). Keeps the cap exact even when several engines on
+            // the same symbol close a bar on the same tick.
+            auto tick_with_cluster_gate = [&](chimera::EdgeEngine* e) {
+                int sid = chimera::symbol_to_id(e->cfg().symbol);
+                int cl  = symbol_cluster(sid);
+                bool was_in = e->in_position();
+                if (!was_in) {
+                    // Unified hard guard (not overridden by blowoff/portfolio gate):
+                    //   1. per-symbol concurrency cap     (simultaneous exposure)
+                    //   2. per-cluster concurrency cap     (simultaneous correlated)
+                    //   3. per-cluster 24h loss halt       (sequential correlated bleed)
+                    //   4. bear-regime halt                (spot-long-only: no longs in a downtrend)
+                    bool concurrency_ok = (g_cluster_open_sym[sid]  < CLUSTER_MAX_PER_SYMBOL) &&
+                                          (g_cluster_open_bucket[cl] < CLUSTER_MAX_PER_CLUSTER);
+                    bool cluster_loss_ok = (now_ms_ck >= g_cluster_blocked_until_ms[cl].load());
+                    bool regime_ok       = (g_regime.load(std::memory_order_relaxed) >= REGIME_MIN_FOR_ENTRY);
+                    e->set_cluster_gate(concurrency_ok && cluster_loss_ok && regime_ok);
+                } else {
+                    e->set_cluster_gate(true);
+                }
+                e->on_tick(mid, now_ms);
+                bool now_in = e->in_position();
+                if (!was_in && now_in)      { g_cluster_open_sym[sid]++; g_cluster_open_bucket[cl]++; }
+                else if (was_in && !now_in) { if (g_cluster_open_sym[sid] > 0) g_cluster_open_sym[sid]--;
+                                              if (g_cluster_open_bucket[cl] > 0) g_cluster_open_bucket[cl]--; }
+            };
             // First — non-slot wired engines (no blowoff guard, no slot
             // metadata, just raw on_tick).
             for (auto* e : g_all_wired) {
@@ -6645,7 +6790,7 @@ int main() {
                 bool in_slots = false;
                 for (auto& s : g_slots) if (s.engine == e) { in_slots = true; break; }
                 if (in_slots) continue;
-                e->on_tick(mid, now_ms);
+                tick_with_cluster_gate(e);
             }
             for (auto& s : g_slots) {
                 if (s.symbol_id == id && s.engine) {
@@ -6684,7 +6829,9 @@ int main() {
                         }
                         s.engine->set_portfolio_gate(allow);
                     }
-                    s.engine->on_tick(mid, now_ms);
+                    // S45: cluster-cap gate (independent of the blowoff /
+                    // portfolio gate set just above) + tick.
+                    tick_with_cluster_gate(s.engine);
                 }
             }
         }
@@ -7021,6 +7168,8 @@ int main() {
                 int    sl_30min   = 0;
                 // S44L C: per-symbol 24h sum
                 double sym_24h_bp[chimera::MAX_SYMBOLS] = {0};
+                // S45: per-cluster 24h sum (sequential correlated-bleed breaker)
+                double clu_24h_bp[CL_COUNT] = {0};
                 // S44M #1: per-symbol SL count in last 4h
                 int sym_sl_4h[chimera::MAX_SYMBOLS] = {0};
                 {
@@ -7042,6 +7191,7 @@ int main() {
                         int sid = chimera::symbol_to_id(tr.symbol);
                         if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
                             sym_24h_bp[sid] += tr.net_bp;
+                            clu_24h_bp[symbol_cluster(sid)] += tr.net_bp;  // S45
                             // S44M #1: count SLs in last 4h per symbol
                             if (tr.exit_ts_ms >= (now_ms - SYM_SL_WINDOW_MS) &&
                                 (tr.reason == "SL" || tr.reason == "EARLY_KILL")) {
@@ -7080,6 +7230,28 @@ int main() {
                             push_alert(buf);
                         }
                         g_sym_daily_blocked_until_ms[sid].store(now_ms + DAILY_WINDOW_MS);
+                    }
+                }
+                // S45: halt a whole CLUSTER for 24h when its rolling-24h net
+                // bleeds past the cap. Stops a sequential correlated dump dead
+                // (the 29-May run: DEFI+L1 buckets bled together). With spot-
+                // long-only we cannot recoup in a falling cluster — sit it out.
+                {
+                    static constexpr const char* CLN[CL_COUNT] = {"majors","l1","defi","meme","other"};
+                    for (int c = 0; c < CL_COUNT; ++c) {
+                        if (clu_24h_bp[c] <= CLUSTER_DAILY_CAP_BP) {
+                            int64_t prev = g_cluster_blocked_until_ms[c].load();
+                            if (prev < now_ms) {
+                                char buf[128];
+                                std::snprintf(buf, sizeof(buf),
+                                    "CLUSTER_DAILY_CAP cluster=%s 24h=%.1fbp -> 24h halt",
+                                    CLN[c], clu_24h_bp[c]);
+                                std::printf("[%s]\n", buf);
+                                std::fflush(stdout);
+                                push_alert(buf);
+                            }
+                            g_cluster_blocked_until_ms[c].store(now_ms + DAILY_WINDOW_MS);
+                        }
                     }
                 }
                 g_recent_sl_count.store(sl_30min, std::memory_order_relaxed);

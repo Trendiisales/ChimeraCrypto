@@ -822,7 +822,22 @@ function initCharts() {
 }
 
 function updateCharts(trades) {
-  if (!trades || trades.length === 0) return;
+  if (!trades || trades.length === 0) {
+    // No trades (e.g. fresh journal / after a reset) — CLEAR the charts instead
+    // of leaving stale data on screen.
+    if (equityChart) {
+      equityChart.data.labels = ['Start'];
+      equityChart.data.datasets[0].data = [0];
+      equityChart.data.datasets[0].borderColor = '#3ce088';
+      equityChart.update('none');
+    }
+    if (winLossChart) {
+      winLossChart.data.labels = [];
+      winLossChart.data.datasets[0].data = [];
+      winLossChart.update('none');
+    }
+    return;
+  }
 
   // Equity curve
   const sorted = [...trades].sort((a,b) => (a.exit_ts||0) - (b.exit_ts||0));

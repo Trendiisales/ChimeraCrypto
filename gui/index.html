@@ -721,34 +721,40 @@ function renderSignals(engines) {
 // ── All Engines (hidden toggle) ─────────────────────────────────────────────
 
 function renderAllEngines(engines) {
-  const now = Date.now();
+  // Rank best -> worst by gated fine-fill backtest rank (then PF).
   const sorted = [...engines].sort((a,b) => {
-    if (a.in_position && !b.in_position) return -1;
-    if (!a.in_position && b.in_position) return 1;
-    return (b.momentum_pct||0) - (a.momentum_pct||0);
+    const ra = a.rank || 9999, rb = b.rank || 9999;
+    if (ra !== rb) return ra - rb;
+    return (b.bt_pf||0) - (a.bt_pf||0);
   });
-
-  $('#allEnginesGrid').innerHTML = sorted.map(e => {
+  const tcol = t => t==='ELITE' ? '#4ade80' : t==='STRONG' ? '#60a5fa'
+                  : t==='STANDARD' ? '#cbd5e1' : '#64748b';
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:11px;">' +
+    '<thead><tr style="text-align:left;color:var(--dim);border-bottom:1px solid #333;">' +
+    '<th style="padding:4px 6px;">#</th><th>Engine</th><th>Tier</th>' +
+    '<th>BT&nbsp;PF</th><th>Sharpe</th><th>Live</th><th>Net&nbsp;bp</th>' +
+    '<th>Mom%</th><th>Status</th></tr></thead><tbody>';
+  html += sorted.map(e => {
     const mom = (e.momentum_pct||0);
-    const isBull = mom > 0;
-    const blowoff = isBull && isBlowoffBlocked(e);
-    const dotCls = e.in_position ? 'bull' : (blowoff ? 'blocked' : (isBull ? 'bull' : 'bear'));
-    const momStr = (isBull ? '+' : '') + mom.toFixed(1) + '%';
-    const momCls = isBull ? 'pos' : 'neg';
-    const nextMs = (e.next_bar_close_ms || 0) - now;
-    const nextStr = nextMs > 0 ? fmtCountdown(nextMs) : 'now';
-    const chipCls = 'sig-chip' + (blowoff ? ' blocked' : '');
-    const thr = blowoffThresholdForTf(e.tf_secs || 0);
-    const blowoffBadge = blowoff ? '<span class="badge blowoff">Blowoff</span>' : '';
-    const titleAttr = blowoff ? ' title="Blocked by blowoff guard: momentum > ' + thr + '%"' : '';
-    return '<div class="' + chipCls + '"' + titleAttr + '>' +
-      '<span class="dot ' + dotCls + '"></span>' +
-      '<span class="tag">' + (e.tag||'---') + '</span>' +
-      '<span class="mom ' + momCls + '">' + momStr + '</span>' +
-      blowoffBadge +
-      '<span class="next">' + nextStr + '</span>' +
-    '</div>';
+    const pos = e.in_position;
+    const status = pos ? '<span style="color:#4ade80;">● in&nbsp;pos</span>'
+                       : (mom > 0 ? 'bullish' : 'flat');
+    const netCls = (e.total_bp||0) > 0 ? 'pos' : ((e.total_bp||0) < 0 ? 'neg' : '');
+    const netStr = (e.total_bp!=null) ? ((e.total_bp>0?'+':'') + e.total_bp.toFixed(0)) : '0';
+    return '<tr style="border-bottom:1px solid #222;">' +
+      '<td style="padding:3px 6px;color:var(--dim);">' + (e.rank||'—') + '</td>' +
+      '<td style="font-weight:700;color:var(--accent);">' + (e.tag||'---') + '</td>' +
+      '<td style="color:' + tcol(e.tier) + ';font-weight:700;">' + (e.tier||'—') + '</td>' +
+      '<td style="font-weight:700;">' + (e.bt_pf ? e.bt_pf.toFixed(2) : '—') + '</td>' +
+      '<td>' + (e.bt_sharpe ? e.bt_sharpe.toFixed(1) : '—') + '</td>' +
+      '<td>' + (e.trades||0) + 't</td>' +
+      '<td class="' + netCls + '" style="font-weight:700;">' + netStr + '</td>' +
+      '<td class="' + (mom>0?'pos':'neg') + '">' + (mom>0?'+':'') + mom.toFixed(1) + '</td>' +
+      '<td>' + status + '</td>' +
+    '</tr>';
   }).join('');
+  html += '</tbody></table>';
+  $('#allEnginesGrid').innerHTML = html;
 }
 
 // ── Trade History ───���───────────────────────────────────────────────────────
@@ -866,20 +872,16 @@ async function refresh() {
     if (j.startup_ts && Number(j.startup_ts) > 0) serverStartupTs = Number(j.startup_ts);
     $('#buildVer').textContent = 'build ' + (j.build || '---');
 
-    // S34: surface tier counts on toggle button + protection state in footer
+    // Real tier counts from the served (live, post-cull) engines — not the
+    // stale slot PF-filter counts.
     const pg = j.portfolio_gate || {};
-    const active = pg.pf_active_count || 0;
-    const elite = pg.pf_elite_count || 0;
-    const blocked = pg.pf_blocked_count || 0;
-    // Count engines suppressed by blowoff guard (per-TF threshold).
-    const blowoffN = engines.filter(e => e.signal_ready && isBlowoffBlocked(e)
-                                           && !e.in_position && !e.halted).length;
+    const eliteN  = engines.filter(e => e.tier === 'ELITE').length;
+    const strongN = engines.filter(e => e.tier === 'STRONG').length;
+    const inPosN  = engines.filter(e => e.in_position).length;
     const btn = $('#toggleAllEngines');
     if (btn) {
-      let lbl = `Show All ${j.engine_count || 0} Engines (${active} active, ${elite} elite, ${blocked} blocked`;
-      if (blowoffN > 0) lbl += `, ${blowoffN} blowoff`;
-      lbl += ')';
-      btn.textContent = lbl;
+      btn.textContent = `Show All ${j.engine_count || engines.length} Engines `
+        + `(${eliteN} elite, ${strongN} strong, ${inPosN} in pos)`;
     }
 
     const fl = $('#footerLeft');

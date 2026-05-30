@@ -328,6 +328,28 @@ static double tier_risk_mult(const std::string& tag) {
     if (it->second == "STRONG") return 1.25;
     return 1.0;
 }
+// GUI: per-engine backtest ranking (tier/PF/Sharpe/rank) from the gated fine-fill
+// validation. Loaded from data/engine_rankings.csv, served in /api/state2 so the
+// dashboard can show every live engine ranked best->worst.
+struct EngineRank { std::string tier; double pf = 0.0, sharpe = 0.0; int rank = 0; };
+static std::map<std::string, EngineRank> g_engine_rank;
+static void load_engine_rankings() {
+    std::ifstream f("data/engine_rankings.csv");
+    if (!f.is_open()) return;
+    std::string line; std::getline(f, line);  // header
+    while (std::getline(f, line)) {
+        std::stringstream ss(line);
+        std::string tag, tier, pf, sh, n, rk;
+        std::getline(ss, tag, ','); std::getline(ss, tier, ','); std::getline(ss, pf, ',');
+        std::getline(ss, sh, ',');  std::getline(ss, n, ',');    std::getline(ss, rk, ',');
+        if (tag.empty()) continue;
+        EngineRank er; er.tier = tier; er.pf = atof(pf.c_str());
+        er.sharpe = atof(sh.c_str()); er.rank = atoi(rk.c_str());
+        g_engine_rank[tag] = er;
+    }
+    std::printf("[RANK] loaded %zu engine rankings\n", g_engine_rank.size());
+    std::fflush(stdout);
+}
 static int tier_pyramid_max_for_tag(const std::string& tag) {
     auto it = g_engine_tier.find(tag);
     if (it == g_engine_tier.end()) return 4;  // default
@@ -1161,61 +1183,34 @@ static std::string build_state_json() {
     // but not in g_slots, so the dashboard table shows every live engine.
     js << "\"engines\":[";
     bool first = true;
-    // Track which engine pointers we already emitted (g_slots subset)
-    std::vector<chimera::EdgeEngine*> emitted;
-    emitted.reserve(g_slots.size());
-    for (size_t i = 0; i < g_slots.size(); ++i) {
-        if (!first) js << ",";
-        first = false;
-        if (g_slots[i].engine) {
-            emitted.push_back(g_slots[i].engine);
-            std::string ej = g_slots[i].engine->state_json();
-            std::string meta;
-            {
-                std::ostringstream m;
-                m << std::fixed << std::setprecision(2);
-                m << ",\"oos_pf\":" << g_slots[i].oos_pf;
-                m << ",\"oos_sharpe\":" << g_slots[i].oos_sharpe;
-                m << ",\"oos_nbr\":" << g_slots[i].oos_nbr;
-                m << ",\"oos_trades\":" << g_slots[i].oos_trades;
-                m << ",\"session\":" << g_slots[i].session;
-                m << ",\"bt_pf\":" << g_slots[i].bt_pf;
-                m << ",\"bt_trades\":" << g_slots[i].bt_trades;
-                m << ",\"pf_blocked\":" << (g_slots[i].pf_blocked ? "true" : "false");
-                if (g_slots[i].symbol_id >= 0 && g_slots[i].symbol_id < chimera::MAX_SYMBOLS) {
-                    int sr = g_sym_regime[g_slots[i].symbol_id].load();
-                    const char* srs = (sr == 0) ? "CRASH" : (sr == 1) ? "BEAR" : (sr == 2) ? "BULL_CHOP" : "BULL_TREND";
-                    m << ",\"sym_regime\":\"" << srs << "\"";
-                    m << ",\"sym_short_ret_pct\":" << load_dbl_atomic(g_sym_short_ret[g_slots[i].symbol_id]);
-                }
-                meta = m.str();
-            }
-            if (!ej.empty() && ej.back() == '}') {
-                ej.pop_back();
-                ej += meta + "}";
-            }
-            js << ej;
-        } else {
-            js << "null";
-        }
-    }
-    // S44b: append wired-but-not-slotted engines (S43 + S43b cohorts).
-    // These don't have slot metadata, so we mark them session=43 and leave
-    // OOS/bt metadata empty — the dashboard will render them with reduced
-    // info but they show up in the engine table.
+    // GUI FIX: emit ONLY the live wired engines (g_all_wired = active roster
+    // after dedup + cull). Inert culled g_slots are NOT in g_all_wired, so they
+    // no longer pollute the table or the count. Each engine carries its gated
+    // fine-fill ranking (tier/PF/Sharpe/rank) so the dashboard sorts best->worst.
     for (auto* e : g_all_wired) {
-        if (std::find(emitted.begin(), emitted.end(), e) != emitted.end()) continue;
         if (!e) continue;
         if (!first) js << ",";
         first = false;
         std::string ej = e->state_json();
-        std::string meta = ",\"oos_pf\":0,\"oos_sharpe\":0,\"oos_nbr\":0,\"oos_trades\":0,"
-                           "\"session\":43,\"bt_pf\":0,\"bt_trades\":0,\"pf_blocked\":false,"
-                           "\"wired_non_slot\":true";
-        if (!ej.empty() && ej.back() == '}') {
-            ej.pop_back();
-            ej += meta + "}";
+        std::ostringstream m;
+        m << std::fixed << std::setprecision(2);
+        auto rit = g_engine_rank.find(e->cfg().tag);
+        if (rit != g_engine_rank.end()) {
+            m << ",\"tier\":\"" << rit->second.tier << "\"";
+            m << ",\"bt_pf\":"     << rit->second.pf;
+            m << ",\"bt_sharpe\":" << rit->second.sharpe;
+            m << ",\"rank\":"      << rit->second.rank;
+        } else {
+            m << ",\"tier\":\"\",\"bt_pf\":0,\"bt_sharpe\":0,\"rank\":9999";
         }
+        int sid = chimera::symbol_to_id(e->cfg().symbol);
+        if (sid >= 0 && sid < chimera::MAX_SYMBOLS) {
+            int sr = g_sym_regime[sid].load();
+            const char* srs = (sr == 0) ? "CRASH" : (sr == 1) ? "BEAR" : (sr == 2) ? "BULL_CHOP" : "BULL_TREND";
+            m << ",\"sym_regime\":\"" << srs << "\"";
+        }
+        std::string meta = m.str();
+        if (!ej.empty() && ej.back() == '}') { ej.pop_back(); ej += meta + "}"; }
         js << ej;
     }
     js << "]}";
@@ -1789,6 +1784,8 @@ int main() {
 
     // Executor — engines mirror entry/exit intents into this via on_order_intent.
     chimera::SpotExecutor executor;
+    // GUI: load per-engine gated-backtest rankings for the dashboard table
+    load_engine_rankings();
     // S44e: load tier map for per-engine lot sizing
     {
         std::ifstream tf("data/engine_tiers.json");

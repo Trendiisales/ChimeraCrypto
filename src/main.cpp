@@ -551,6 +551,7 @@ static std::atomic<int64_t>  g_daily_kill_until_ms{0};      // persisted; halt e
 // sets it to now, voiding pre-fix bug losses from the live risk accounting and
 // clearing every halt. The trade ledger itself is untouched (history intact).
 static std::atomic<int64_t>  g_pnl_epoch_ms{0};             // persisted; 0 = count all
+static std::atomic<uint64_t> g_pnl_epoch_baseline_bp_bits{0}; // persisted; cum seed at last reset
 static std::atomic<uint64_t> g_daily_pnl_bp_bits{0};        // rolling 24h pnl
 static std::atomic<int>      g_regime{2};                    // 0=CRASH, 1=CHOP, 2=TREND
 static std::atomic<uint64_t> g_size_throttle_bits{0};        // current sizing multiplier (0..1)
@@ -776,11 +777,12 @@ static void save_protection_state() {
         std::fprintf(stderr, "[PROTECTION] Failed to open %s for write\n", PROTECTION_FILE);
         return;
     }
-    std::fprintf(f, "{\"all_time_peak_bp\":%.4f,\"all_time_cum_bp\":%.4f,\"daily_kill_until_ms\":%lld,\"pnl_epoch_ms\":%lld}\n",
+    std::fprintf(f, "{\"all_time_peak_bp\":%.4f,\"all_time_cum_bp\":%.4f,\"daily_kill_until_ms\":%lld,\"pnl_epoch_ms\":%lld,\"pnl_epoch_baseline_bp\":%.4f}\n",
         load_dbl_atomic(g_all_time_peak_bp_bits),
         load_dbl_atomic(g_all_time_cum_bp_bits),
         (long long)g_daily_kill_until_ms.load(std::memory_order_relaxed),
-        (long long)g_pnl_epoch_ms.load(std::memory_order_relaxed));
+        (long long)g_pnl_epoch_ms.load(std::memory_order_relaxed),
+        load_dbl_atomic(g_pnl_epoch_baseline_bp_bits));
     fclose(f);
 }
 
@@ -810,11 +812,13 @@ static void load_protection_state() {
     double cum  = extract_num("all_time_cum_bp");
     int64_t kill_until = (int64_t)extract_num("daily_kill_until_ms");
     int64_t pnl_epoch  = (int64_t)extract_num("pnl_epoch_ms");
+    double  epoch_base = extract_num("pnl_epoch_baseline_bp");
 
     store_dbl_atomic(g_all_time_peak_bp_bits, peak);
     store_dbl_atomic(g_all_time_cum_bp_bits,  cum);
     g_daily_kill_until_ms.store(kill_until, std::memory_order_relaxed);
     g_pnl_epoch_ms.store(pnl_epoch, std::memory_order_relaxed);
+    store_dbl_atomic(g_pnl_epoch_baseline_bp_bits, epoch_base);
 
     std::printf("[PROTECTION] Loaded: all_time_peak=%+.1fbp  all_time_cum=%+.1fbp  daily_kill_until_ms=%lld  pnl_epoch_ms=%lld\n",
         peak, cum, (long long)kill_until, (long long)pnl_epoch);
@@ -1420,6 +1424,7 @@ static void http_server_thread(int port) {
                 g_sym_daily_blocked_until_ms[s].store(0, std::memory_order_relaxed);
                 g_sym_sl_circuit_blocked_until_ms[s].store(0, std::memory_order_relaxed);
             }
+            store_dbl_atomic(g_pnl_epoch_baseline_bp_bits, seed_cum);  // S54: baseline the recompute reads
             store_dbl_atomic(g_all_time_cum_bp_bits,  seed_cum);
             store_dbl_atomic(g_all_time_peak_bp_bits, seed_cum > 0 ? seed_cum : 0.0);
             store_dbl_atomic(g_session_cum_bp_bits,   seed_cum);
@@ -7556,11 +7561,16 @@ int main() {
                 // all_time_cum is refreshed in on_trade_callback. Recompute
                 // here from trade_log as a safety net (handles bookkeeping
                 // updates outside the callback). all_time_peak ratchets up.
-                double all_time_cum = 0.0;
+                // S54: start from the session-reset baseline + count only trades
+                // at/after the reset epoch, so a reset (which voids pre-fix bug
+                // losses) actually sticks instead of being re-summed from zero.
+                double all_time_cum = load_dbl_atomic(g_pnl_epoch_baseline_bp_bits);
+                int64_t pnl_epoch = g_pnl_epoch_ms.load(std::memory_order_relaxed);
                 {
                     std::lock_guard<std::mutex> tlk(g_trades_mtx);
                     for (auto& tr : g_trade_log) {
                         if (tr.reason == "SHUTDOWN") continue;
+                        if (pnl_epoch > 0 && tr.exit_ts_ms < pnl_epoch) continue;
                         all_time_cum += tr.net_bp;
                     }
                 }

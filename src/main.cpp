@@ -2004,8 +2004,12 @@ int main() {
         engine.set_hard_floor_bp(-170.0);
         engine.enable_volume_gate(true);
         if (engine.is_trend_following()) {
-            engine.enable_adx_filter(true);
-            engine.set_adx_threshold(25.0);
+            // S51: ADX chop filter DROPPED. Sweep (fine-fill + regime-gate, 365d)
+            // showed ADX@25 cut ~40% of profit to save only ~15% DD -> ret/DD
+            // fell 9.75 -> 7.66. Chop losses are already capped by the -170 floor
+            // + ratchet; the edge is volume. Filtering chop discards marginal
+            // winners too. ADX off = best risk-adjusted. (was: enable_adx_filter)
+            engine.enable_adx_filter(false);
         } else {
             engine.enable_vol_filter(true);
             if (engine.cfg().tf_secs < 86400) {

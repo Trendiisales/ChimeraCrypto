@@ -274,6 +274,10 @@ static size_t g_fine_cursor = 0;
 // ignores. Block new entries when the symbol's own ~10-D1 trend is DOWN. Many
 // culled engines only bled in bear windows the live bot would have sat out.
 static bool   g_regime_gate = false;
+// ADX/chop filter sweep: when >0, enable the ADX trend filter at this threshold
+// (blocks entries while ADX < threshold = ranging/chop). Matches the live filter
+// so we can measure the chop-vs-trend tradeoff. 0 = off (current harness baseline).
+static double g_adx_threshold = 0.0;
 static double g_worst_trade_bp   = 0.0;        // P3: worst single-trade bp this run
 static int    g_n_beyond_floor   = 0;          // P3: # trades worse than -170 floor
 
@@ -777,6 +781,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--signal-confirm"   && i+1 < argc) { g_signal_confirm_override = std::atoi(argv[++i]); }
         else if (a == "--fine-fill")                       { g_fine_fill = true; }
         else if (a == "--regime-gate")                     { g_regime_gate = true; }
+        else if (a == "--adx-threshold" && i+1 < argc)     { g_adx_threshold = std::atof(argv[++i]); }
         else if (a == "--realistic-gap-fill")              { g_realistic_gap_fill = true; }
         else if (a == "--gap-slip-bp"       && i+1 < argc) { g_gap_extra_slip_bp = std::atof(argv[++i]); }
         else if (a == "--inject-gap-bp"     && i+1 < argc) { g_inject_gap_bp = std::atof(argv[++i]); g_realistic_gap_fill = true; }
@@ -1151,6 +1156,7 @@ int main(int argc, char* argv[]) {
                 cfg.low_vol_avg_bars   = g_low_vol_avg_bars;
             }
             if (g_signal_confirm_override > 0) cfg.signal_confirm_bars = g_signal_confirm_override;
+            if (g_adx_threshold > 0.0) { cfg.adx_filter = true; cfg.adx_threshold = g_adx_threshold; }
             chimera::EdgeEngine eng(cfg);
             g_fine_h1 = &h1;   // FINE-FILL: real H1 path for this symbol (no-op unless --fine-fill)
             auto r = run_backtest(eng, cfg, bars);

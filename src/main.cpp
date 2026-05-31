@@ -556,6 +556,7 @@ static std::atomic<int64_t>  g_daily_kill_until_ms{0};      // persisted; halt e
 // clearing every halt. The trade ledger itself is untouched (history intact).
 static std::atomic<int64_t>  g_pnl_epoch_ms{0};             // persisted; 0 = count all
 static std::atomic<uint64_t> g_pnl_epoch_baseline_bp_bits{0}; // persisted; cum seed at last reset
+static std::atomic<bool>     g_force_ratchet_unlock{false};  // set by session_reset -> ratchet loop clears its lock
 static std::atomic<uint64_t> g_daily_pnl_bp_bits{0};        // rolling 24h pnl
 static std::atomic<int>      g_regime{2};                    // 0=CRASH, 1=CHOP, 2=TREND
 static std::atomic<uint64_t> g_size_throttle_bits{0};        // current sizing multiplier (0..1)
@@ -1413,31 +1414,46 @@ static void http_server_thread(int port) {
             std::fflush(stdout);
             body = "{\"ok\":true}";
         } else if (strstr(req, "POST /api/session_reset")) {
-            // S54: full session reset — void pre-fix bug losses from live risk
-            // accounting and clear every halt so trading resumes clean. The trade
-            // ledger (history) is NOT modified. Optional ?cum=<bp> seeds the
-            // displayed cumulative (default 0 = fresh slate).
+            // S54 WARM RESET: clear every HALT (daily-kill / cluster / symbol /
+            // SL-circuit / emergency / ratchet-lock) so trading resumes, while
+            // KEEPING the book warm — real lifetime equity + peak are preserved so
+            // the drawdown-throttle and peak ratchet stay calibrated to reality,
+            // never restarting from 0 (arms full size + re-opens bleed room) or a
+            // phantom peak (which the ratchet then defends and locks the gate).
+            // The epoch makes only the rolling 24h RISK windows forget pre-epoch
+            // trades (so a fired daily/cluster cap doesn't instantly re-trigger);
+            // lifetime cum is rebased onto its OWN current value -> continuous.
+            // Trade ledger (history) never modified.
             int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
-            double seed_cum = 0.0;
-            if (const char* q = strstr(req, "cum=")) seed_cum = std::atof(q + 4);
+            double cur_cum  = load_dbl_atomic(g_all_time_cum_bp_bits);
+            double cur_peak = load_dbl_atomic(g_all_time_peak_bp_bits);
+            // Optional ?cum=<bp> sets a deliberate warm baseline (peak>=cum so no
+            // phantom giveback). Default = keep current real equity (warm).
+            if (const char* q = strstr(req, "cum=")) {
+                cur_cum = std::atof(q + 4);
+                if (cur_peak < cur_cum) cur_peak = cur_cum;
+            }
             g_pnl_epoch_ms.store(now, std::memory_order_relaxed);
+            store_dbl_atomic(g_pnl_epoch_baseline_bp_bits, cur_cum); // rebase -> recompute stays warm+continuous
+            store_dbl_atomic(g_all_time_cum_bp_bits,  cur_cum);
+            store_dbl_atomic(g_all_time_peak_bp_bits, cur_peak);     // KEEP real peak (warm)
+            store_dbl_atomic(g_session_cum_bp_bits,   cur_cum);
+            store_dbl_atomic(g_session_peak_bp_bits,  cur_peak);
             g_daily_kill_until_ms.store(0, std::memory_order_relaxed);
+            g_emergency_halt_until_ms.store(0, std::memory_order_relaxed);
             for (int c = 0; c < CL_COUNT; ++c) g_cluster_blocked_until_ms[c].store(0, std::memory_order_relaxed);
             for (int s = 0; s < chimera::MAX_SYMBOLS; ++s) {
                 g_sym_daily_blocked_until_ms[s].store(0, std::memory_order_relaxed);
                 g_sym_sl_circuit_blocked_until_ms[s].store(0, std::memory_order_relaxed);
             }
-            store_dbl_atomic(g_pnl_epoch_baseline_bp_bits, seed_cum);  // S54: baseline the recompute reads
-            store_dbl_atomic(g_all_time_cum_bp_bits,  seed_cum);
-            store_dbl_atomic(g_all_time_peak_bp_bits, seed_cum > 0 ? seed_cum : 0.0);
-            store_dbl_atomic(g_session_cum_bp_bits,   seed_cum);
-            store_dbl_atomic(g_session_peak_bp_bits,  seed_cum > 0 ? seed_cum : 0.0);
+            g_force_ratchet_unlock.store(true, std::memory_order_relaxed);
             save_protection_state();
-            std::printf("[PROTECTION] SESSION_RESET via API: epoch=%lld seed_cum=%.1fbp — all halts cleared\n",
-                (long long)now, seed_cum);
+            std::printf("[PROTECTION] WARM SESSION_RESET: epoch=%lld warm_cum=%.1fbp peak=%.1fbp — halts cleared, equity kept warm\n",
+                (long long)now, cur_cum, cur_peak);
             std::fflush(stdout);
-            body = "{\"ok\":true,\"epoch_ms\":" + std::to_string(now) + "}";
+            body = "{\"ok\":true,\"epoch_ms\":" + std::to_string(now) +
+                   ",\"warm_cum_bp\":" + std::to_string(cur_cum) + "}";
         } else if (strstr(req, "GET /api/state2") || strstr(req, "GET /api/state")) {
             std::lock_guard<std::mutex> lk(g_engine_mtx);
             body = build_state_json();
@@ -6932,12 +6948,20 @@ int main() {
                                           (g_cluster_open_bucket[cl] < CLUSTER_MAX_PER_CLUSTER);
                     bool cluster_loss_ok = (now_ms_ck >= g_cluster_blocked_until_ms[cl].load());
                     // P2/S46: require BOTH global BTC regime AND this symbol's own
-                    // regime to be bullish (>=BULL_CHOP). Closes the "BTC coattails"
-                    // leak where a personally-collapsing alt was waved through on
-                    // BTC's regime alone. Long-only: don't long a falling name.
-                    bool btc_regime_ok = (g_regime.load(std::memory_order_relaxed) >= REGIME_MIN_FOR_ENTRY);
+                    // regime to be bullish. Closes the "BTC coattails" leak where a
+                    // personally-collapsing alt was waved through on BTC's regime
+                    // alone. Long-only: don't long a falling name.
+                    // S54 CHOP-HALT: trend/breakout kinds require BULL_TREND(3) —
+                    // they churn losses in chop (31-May -645bp from 72 micro-pop
+                    // entries that reversed). Mean-revert/session kinds keep the
+                    // BULL_CHOP(2) gate — they EARN in chop (this is also what
+                    // turns the trend-only book into a regime-diversified one).
+                    int min_reg = chimera::is_trend_kind(e->cfg().kind)
+                                      ? 3                       // BULL_TREND only
+                                      : REGIME_MIN_FOR_ENTRY;   // BULL_CHOP ok
+                    bool btc_regime_ok = (g_regime.load(std::memory_order_relaxed) >= min_reg);
                     bool sym_regime_ok = (sid < 0) ||
-                                         (g_sym_regime[sid].load(std::memory_order_relaxed) >= REGIME_MIN_FOR_ENTRY);
+                                         (g_sym_regime[sid].load(std::memory_order_relaxed) >= min_reg);
                     bool regime_ok       = btc_regime_ok && sym_regime_ok;
                     e->set_cluster_gate(concurrency_ok && cluster_loss_ok && regime_ok);
                 } else {
@@ -7606,6 +7630,11 @@ int main() {
 
                 static bool ratchet_locked = false;
                 static int64_t lock_start_ms = 0;
+                // S54: a warm session_reset requests an explicit unlock (peak stays
+                // warm so the peak<arm auto-unlock below won't fire).
+                if (g_force_ratchet_unlock.exchange(false, std::memory_order_relaxed)) {
+                    ratchet_locked = false; lock_start_ms = 0;
+                }
 
                 // ── S34 Variant C: PEAK DECAY WHILE LOCKED ───────────────
                 // Sim showed this captures +283bp more than fixed-rearm

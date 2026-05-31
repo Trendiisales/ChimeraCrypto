@@ -111,6 +111,24 @@ inline const char* strategy_name(StrategyKind k) {
     return "UNK";
 }
 
+// S54: trend/breakout kinds need a REAL trend to have edge — they churn losses
+// in chop. Mean-reversion + session kinds earn in chop (or are regime-neutral).
+// Used by the entry gate to require BULL_TREND for trend kinds but allow
+// BULL_CHOP for the rest (the "TSMOM off / mean-revert on in chop" design).
+inline bool is_trend_kind(StrategyKind k) {
+    switch (k) {
+        case StrategyKind::TSMOM:
+        case StrategyKind::DONCHIAN:
+        case StrategyKind::DUAL_THRUST:
+        case StrategyKind::ICHIMOKU:
+        case StrategyKind::SUPERTREND:
+        case StrategyKind::BREAKOUT_PULLBACK:
+            return true;
+        default:               // BOLLINGER/RSI_REVERT/KELTNER_REVERT/WILLIAMS_R/
+            return false;      // STOCH_RSI/OVERNIGHT/WEEKDAY — ok in chop
+    }
+}
+
 class EdgeEngine {
 public:
     struct Config {

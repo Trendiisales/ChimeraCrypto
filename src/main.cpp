@@ -361,7 +361,7 @@ static int tier_pyramid_max_for_tag(const std::string& tag) {
 // S44L C: per-symbol daily loss cap. Across all engines on same symbol, if
 // cumulative net_bp in last 24h <= -300, block new entries for 24h.
 static std::atomic<int64_t> g_sym_daily_blocked_until_ms[chimera::MAX_SYMBOLS]{};
-static constexpr double SYM_DAILY_CAP_BP = -300.0;
+static constexpr double SYM_DAILY_CAP_BP = -150.0;   // S54 derisk: -300->-150 (halt bleeder sooner)
 // S44M #1: per-symbol SL-COUNT circuit breaker. 3+ SL hits on same symbol
 // within 4h -> halt symbol entries for 4h. Triggers BEFORE bp threshold.
 static std::atomic<int64_t> g_sym_sl_circuit_blocked_until_ms[chimera::MAX_SYMBOLS]{};
@@ -431,7 +431,7 @@ static int g_cluster_open_bucket[CL_COUNT]          = {0};
 // after another). When a bucket's rolling-24h net <= CLUSTER_DAILY_CAP_BP, ALL
 // entries in that cluster are halted for 24h. Set in the monitor loop.
 static std::atomic<int64_t> g_cluster_blocked_until_ms[CL_COUNT]{};
-static constexpr double  CLUSTER_DAILY_CAP_BP = -250.0;  // halt whole cluster 24h below this
+static constexpr double  CLUSTER_DAILY_CAP_BP = -150.0;  // S54 derisk: -250->-150  // halt whole cluster 24h below this
 
 // P1/S46: per-trade $-risk budget. Cap each entry's notional so a worst-case
 // overnight GAP (the one thing a stop cannot price-guarantee) cannot lose more
@@ -7260,7 +7260,12 @@ int main() {
             // Tier 4: per-strategy concurrent cap (TSMOM mono-culture defence)
             // PLUS preserved: agg_kill, streak halt, per-symbol cap, 4h DD
             {
-                constexpr int MAX_CONCURRENT_POSITIONS = 25;
+                // S54 derisk: 25->14. Book is ~1.8 effective bets (avg symbol
+                // corr 0.54, BTC-beta 0.73) -> 25 concurrent longs = one oversized
+                // correlated position. 14 bounds the synchronized-bleed tail; the
+                // missed positions are correlated with the open ones so upside loss
+                // is marginal (asymmetric-favorable).
+                constexpr int MAX_CONCURRENT_POSITIONS = 14;
                 constexpr int64_t DRAWDOWN_LOOKBACK_MS = 4LL * 3600LL * 1000LL;
                 constexpr double DRAWDOWN_HALT_BP = -1500.0;
                 constexpr double AGG_KILL_BP = -2000.0;
@@ -7796,6 +7801,15 @@ int main() {
                 else if (dd_from_peak >= 300.0) size_throttle = 0.25;
                 else if (dd_from_peak >= 100.0) size_throttle = 0.5;
                 else                            size_throttle = 1.0;
+                // S54 derisk: PROACTIVE concentration throttle. The book is ~1.8
+                // effective bets, so many concurrent longs = one oversized bet a
+                // regime flip hits all at once. Scale new-entry size down past a
+                // soft cap so total gross is bounded BEFORE any drawdown shows.
+                constexpr int CONC_SOFT_CAP = 10;
+                if (open_positions > CONC_SOFT_CAP) {
+                    double conc = (double)CONC_SOFT_CAP / (double)open_positions; // 10/14=0.71
+                    if (conc < size_throttle) size_throttle = conc;              // tighter binds
+                }
                 // CRASH regime overrides to 0 (no entries)
                 // CRASH or BEAR -> no entries
                 if (regime == 0 || regime == 1) size_throttle = 0.0;

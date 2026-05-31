@@ -7624,6 +7624,18 @@ int main() {
                     }
                 }
 
+                // S54 fix: if peak fell below the arm threshold (e.g. after a
+                // session_reset or peak-decay), there is nothing left to defend —
+                // force-unlock. Without this the unlock branch below is unreachable
+                // (it lives inside the peak>=ARM guard) and the lock latches forever.
+                if (ratchet_locked && all_time_peak < RATCHET_ARM_BP) {
+                    std::printf("[RATCHET] UNLOCKED: peak=%+.1fbp < arm=%.0fbp -> nothing to defend, resume\n",
+                        all_time_peak, RATCHET_ARM_BP);
+                    std::fflush(stdout);
+                    ratchet_locked = false;
+                    lock_start_ms = 0;
+                    push_alert("RATCHET UNLOCKED — peak below arm, entries resume");
+                }
                 if (all_time_peak >= RATCHET_ARM_BP) {
                     double giveback = all_time_peak - all_time_cum;
                     bool abs_trip = giveback > RATCHET_GIVEBACK_BP;

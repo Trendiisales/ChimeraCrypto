@@ -554,6 +554,19 @@ static std::atomic<int64_t> g_last_trade_exit_ms{0};
 // PER anchored to all-time trade_log cumulative, not process start.
 // Daily loss kill, regime gate (TREND/CHOP/CRASH), DD-throttled size,
 // per-strategy concurrent cap.
+// ── S54 MACRO 200d-MA GATE ───────────────────────────────────────────────
+// A long-only spot book has NO edge below BTC's 200d MA (validated on unbiased
+// forward returns: alt fwd-24h = +17.6bp when BTC>200dMA vs +0.8bp when below,
+// i.e. < round-trip cost). So HALT ALL long entries when BTC < 200d-MA — the
+// bull/bear master switch. Seeded from REST daily closes at startup, one daily
+// sample appended live. Default FLAT (false) until seeded -> fail-safe.
+static constexpr int MACRO_MA_DAYS = 200;
+static std::atomic<uint64_t> g_btc_200dma_bits{0};         // 200d SMA of BTC daily close
+static std::atomic<bool>     g_macro_bull{false};          // btc_spot > 200d MA (default flat)
+static std::atomic<int64_t>  g_macro_last_day{0};          // UTC day index of last daily sample
+static double g_btc_daily_ring[256] = {0};                 // daily closes (regime-loop thread + startup only)
+static int    g_btc_daily_head = 0;                        // next write idx
+static int    g_btc_daily_n    = 0;                        // count appended
 static std::atomic<uint64_t> g_all_time_peak_bp_bits{0};    // persisted
 static std::atomic<uint64_t> g_all_time_cum_bp_bits{0};     // recomputed each loop
 static std::atomic<int64_t>  g_daily_kill_until_ms{0};      // persisted; halt entries until this ts
@@ -1191,6 +1204,8 @@ static std::string build_state_json() {
                        : (r == 2) ? "BULL_CHOP"
                        : "BULL_TREND";
         js << "\"regime\":\"" << rs << "\"";
+        js << ",\"macro_bull\":" << (g_macro_bull.load() ? "true" : "false");
+        js << ",\"btc_200dma\":" << (int64_t)load_dbl_atomic(g_btc_200dma_bits);
     }
     js << "},";
 
@@ -1672,6 +1687,34 @@ static void seed_engine_from_history(chimera::BinanceREST& rest,
     int kept = engine.seed_bars(seed);
     std::printf("[SEED][%s] symbol=%s interval=%s fetched=%d kept=%d\n",
                 tag.c_str(), symbol.c_str(), interval, (int)klines.size(), kept);
+    std::fflush(stdout);
+}
+
+// S54: seed the BTC 200d-MA macro gate from REST daily closes at startup.
+static void init_macro_ma(chimera::BinanceREST& rest) {
+    auto kl = rest.fetch_klines("btcusdt", "1d", MACRO_MA_DAYS + 10);
+    if ((int)kl.size() < MACRO_MA_DAYS) {
+        std::printf("[MACRO] only %d daily bars (<%d) — macro gate stays FLAT until warm\n",
+                    (int)kl.size(), MACRO_MA_DAYS);
+        std::fflush(stdout);
+        return;
+    }
+    int start = (int)kl.size() - MACRO_MA_DAYS;
+    g_btc_daily_head = 0; g_btc_daily_n = 0;
+    double sum = 0.0;
+    for (int i = start; i < (int)kl.size(); ++i) {
+        g_btc_daily_ring[g_btc_daily_head] = kl[i].c;
+        g_btc_daily_head = (g_btc_daily_head + 1) % 256;
+        g_btc_daily_n++;
+        sum += kl[i].c;
+    }
+    double ma = sum / (double)MACRO_MA_DAYS;
+    store_dbl_atomic(g_btc_200dma_bits, ma);
+    g_macro_last_day.store(kl.back().open_ts_ms / 86400000LL, std::memory_order_relaxed);
+    double last_close = kl.back().c;
+    g_macro_bull.store(last_close > ma, std::memory_order_relaxed);
+    std::printf("[MACRO] init: BTC 200d-MA=%.0f last_close=%.0f -> %s\n",
+                ma, last_close, last_close > ma ? "BULL (longs ON)" : "BEAR (longs HALTED)");
     std::fflush(stdout);
 }
 
@@ -6689,6 +6732,9 @@ int main() {
                         (int)g_slots.size());
         }
         std::fflush(stdout);
+
+        // S54: seed the BTC 200d-MA macro gate (bull/bear master switch).
+        init_macro_ma(seed_rest);
     }
 
     // ── Position resume: restore open positions after restart ────────────
@@ -6969,7 +7015,10 @@ int main() {
                     bool btc_regime_ok = (g_regime.load(std::memory_order_relaxed) >= min_reg);
                     bool sym_regime_ok = (sid < 0) ||
                                          (g_sym_regime[sid].load(std::memory_order_relaxed) >= min_reg);
-                    bool regime_ok       = btc_regime_ok && sym_regime_ok;
+                    // S54 MACRO GATE: no long entries while BTC < 200d-MA (no
+                    // long edge below it — validated). Applies to ALL kinds.
+                    bool macro_ok        = g_macro_bull.load(std::memory_order_relaxed);
+                    bool regime_ok       = btc_regime_ok && sym_regime_ok && macro_ok;
                     e->set_cluster_gate(concurrency_ok && cluster_loss_ok && regime_ok);
                 } else {
                     e->set_cluster_gate(true);
@@ -7750,6 +7799,27 @@ int main() {
                 }
                 // +0.2% over recent samples = rally override
                 bool short_rally = (btc_short_ret_pct > 0.2);
+
+                // S54 MACRO 200d-MA: at each UTC day rollover append today's BTC
+                // close to the ring + recompute the 200d MA. macro_bull is updated
+                // EVERY tick (spot vs MA) so it flips intraday on a cross.
+                if (btc_spot_now > 0.0) {
+                    int64_t day = now_ms / 86400000LL;
+                    if (day != g_macro_last_day.load(std::memory_order_relaxed) &&
+                        g_btc_daily_n >= MACRO_MA_DAYS) {
+                        g_btc_daily_ring[g_btc_daily_head] = btc_spot_now;  // today's close ~ current spot
+                        g_btc_daily_head = (g_btc_daily_head + 1) % 256;
+                        double s = 0.0;
+                        for (int j = 0; j < MACRO_MA_DAYS; ++j) {
+                            int idx = (g_btc_daily_head - 1 - j + 512) % 256;
+                            s += g_btc_daily_ring[idx];
+                        }
+                        store_dbl_atomic(g_btc_200dma_bits, s / (double)MACRO_MA_DAYS);
+                        g_macro_last_day.store(day, std::memory_order_relaxed);
+                    }
+                    double ma = load_dbl_atomic(g_btc_200dma_bits);
+                    g_macro_bull.store(ma > 0.0 && btc_spot_now > ma, std::memory_order_relaxed);
+                }
 
                 for (auto& s : g_slots) {
                     if (!s.engine) continue;

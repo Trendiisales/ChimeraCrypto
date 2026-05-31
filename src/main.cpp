@@ -450,10 +450,17 @@ static constexpr double  CLUSTER_WORST_GAP_BP[CL_COUNT] = {
 
 // S45: BEAR-REGIME entry halt. The book is spot-LONG-only — it cannot profit in
 // a falling market, so it must sit out entirely rather than feed longs into a
-// downtrend. Block all new entries unless BTC regime is BULL_CHOP(2)/BULL_TREND(3).
+// downtrend. Block all new entries unless BTC regime is BULL_TREND(3).
 // (Cutting EXISTING losers is handled by the real -170 hard floor + emergency
 // flatten; this only gates new entries.) g_regime: 0=CRASH 1=BEAR 2=BULL_CHOP 3=BULL_TREND.
-static constexpr int REGIME_MIN_FOR_ENTRY = 2;
+// S54: 2->3. CHOP TRADING DISABLED — backtest-verified unprofitable: every
+// mean-rev kind (BOLLINGER/KELTNER/RSI/STOCH) x liquid syms x H2/H4, recent +
+// held-out, best-cell-per-combo summed to -4173bp, 0/12 reached PF>=1.3. Long-
+// only spot has no chop edge (dips keep dropping, cost eats the bounce; reversal
+// edge needs shorts). So NOTHING trades in BULL_CHOP now — only BULL_TREND.
+// (is_trend_kind() gate kept for structure; both branches now require 3. To
+// re-enable a chop sleeve later, lower this to 2 AFTER a viable edge is proven.)
+static constexpr int REGIME_MIN_FOR_ENTRY = 3;
 
 // S44L D: regime-conditional pyramid. Disable pyramid adds when regime is
 // BULL_CHOP (2), BEAR (1), or CRASH (0). Only allow in BULL_TREND (3).

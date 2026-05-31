@@ -485,8 +485,12 @@ static void engine_check_cooldown_expiry(chimera::EdgeEngine* e, int64_t now_ms)
 static std::atomic<int64_t> g_emergency_halt_until_ms{0};
 static std::atomic<int> g_recent_sl_count{0};  // SLs in last 30 min, updated by detector
 static constexpr int64_t EMERGENCY_HALT_DURATION_MS = 4 * 3600 * 1000;
-static constexpr int     EMERGENCY_SL_THRESHOLD     = 10;   // 10+ SLs in 30 min
-static constexpr double  EMERGENCY_DD_BP_THRESHOLD  = 300.0; // -300 bp in 30 min
+static constexpr int     EMERGENCY_SL_THRESHOLD     = 7;    // S54: 10->7 (catch chop churn faster)
+static constexpr double  EMERGENCY_DD_BP_THRESHOLD  = 150.0; // S54: 300->150 (halt at -150 not -300; the
+                                                             // book is ~1.8 effective bets so a chop bleed
+                                                             // is correlated + fast — 31-May churned -645
+                                                             // via 72 small-loss trades before the old -300
+                                                             // gate caught it)
 static constexpr double  EMERGENCY_BTC_PCT          = -3.0;  // -3% in 15 min
 
 // S44f #3: confluence detector — when >=3 engines on same symbol fire same

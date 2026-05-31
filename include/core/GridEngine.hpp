@@ -22,13 +22,17 @@ public:
         int    max_lots      = 12;      // inventory cap
         double maker_fee     = 0.0005;  // round-trip maker (~5bp)
         double crash_dd_stop = 0.25;    // halt+flatten if equity DD > 25%
+        double runner_trail  = 0.05;    // S55: first +g lot becomes a RUNNER, trails this
+                                        // % from peak instead of selling at +g (rides the
+                                        // sustained move). 0 = plain grid. Validated: +2-4%/90d.
         bool   shadow        = true;
     };
     explicit GridEngine(const Config& c) : cfg_(c) {}
 
     const Config& cfg() const { return cfg_; }
     int    fills()   const { return fills_; }
-    int    open_lots() const { return (int)lots_.size(); }
+    int    open_lots() const { return (int)lots_.size() + (has_runner_ ? 1 : 0); }
+    bool   has_runner() const { return has_runner_; }
     double total_bp() const { return realized_bp_; }   // realized only (closed cycles)
     bool   halted()  const { return halted_; }
 
@@ -43,23 +47,39 @@ public:
         if (eq > peak_eq_) peak_eq_ = eq;
         if (ref_px_ <= 0) ref_px_ = px;
 
+        // S55 RUNNER: trail the runner lot (rides the sustained move), exit on pullback.
+        if (has_runner_) {
+            if (px > run_peak_) run_peak_ = px;
+            if (px <= run_peak_ * (1.0 - cfg_.runner_trail)) {
+                realized_bp_ += (px / run_entry_ - 1.0 - cfg_.maker_fee) * 1e4 / cfg_.max_lots;
+                has_runner_ = false; fills_++;
+                if (on_order) on_order(cfg_.tag, cfg_.symbol, false, px, ts_ms);
+            }
+        }
+
         // Protection is the MACRO GATE (caller passes macro_ok = BTC>200d-MA): in a
         // SUSTAINED bear we stop BUYING (no new lots) but HOLD existing inventory —
         // flattening on a dip just sells the bottom (validated: hurt SOL/ETH). The
         // inventory recovers on the bounce; max_lots caps exposure. The bear is sat
         // out at the macro level, not by panic-selling intra-trend.
-        // BUY on g-drop (maker), if slot free + macro_ok
-        if (macro_ok && (int)lots_.size() < cfg_.max_lots && px <= ref_px_ * (1.0 - cfg_.grid_pct)) {
+        // BUY on g-drop (maker), if slot free (incl runner) + macro_ok
+        if (macro_ok && (int)(lots_.size() + (has_runner_ ? 1 : 0)) < cfg_.max_lots
+                     && px <= ref_px_ * (1.0 - cfg_.grid_pct)) {
             lots_.push_back(px); ref_px_ = px; fills_++;
             if (on_order) on_order(cfg_.tag, cfg_.symbol, true, px, ts_ms);
         }
-        // SELL lots that rose g above entry (maker), lowest-entry first
+        // SELL lots that rose g above entry (maker), lowest-entry first. With the
+        // hybrid, the FIRST +g lot (when no runner) becomes the runner instead.
         std::sort(lots_.begin(), lots_.end());
         for (size_t k = 0; k < lots_.size();) {
             if (px >= lots_[k] * (1.0 + cfg_.grid_pct)) {
-                realized_bp_ += (px / lots_[k] - 1.0 - cfg_.maker_fee) * 1e4 / cfg_.max_lots;
+                if (cfg_.runner_trail > 0.0 && !has_runner_) {
+                    has_runner_ = true; run_entry_ = lots_[k]; run_peak_ = px;
+                } else {
+                    realized_bp_ += (px / lots_[k] - 1.0 - cfg_.maker_fee) * 1e4 / cfg_.max_lots;
+                    if (on_order) on_order(cfg_.tag, cfg_.symbol, false, px, ts_ms);
+                }
                 ref_px_ = px; fills_++;
-                if (on_order) on_order(cfg_.tag, cfg_.symbol, false, px, ts_ms);
                 lots_.erase(lots_.begin() + k);
             } else k++;
         }
@@ -69,6 +89,7 @@ public:
     double equity_(double px) const {
         double e = 1.0;
         for (double lp : lots_) e += (px / lp - 1.0) / cfg_.max_lots;
+        if (has_runner_) e += (px / run_entry_ - 1.0) / cfg_.max_lots;
         return e + realized_bp_ / 1e4;
     }
 
@@ -78,6 +99,8 @@ private:
     double ref_px_ = 0, last_px_ = 0, peak_eq_ = 1.0, realized_bp_ = 0;
     int fills_ = 0;
     bool halted_ = false;
+    bool has_runner_ = false;
+    double run_entry_ = 0, run_peak_ = 0;
 };
 
 } // namespace chimera

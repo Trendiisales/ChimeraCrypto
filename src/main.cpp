@@ -6197,6 +6197,7 @@ int main() {
 #include "engines_s43b_holdout.cpp"         // 142 fresh-discover holdout-validated
 #include "engines_gems.cpp"                  // S52: 13 strict-validated salvaged gems (s41/s42)
 #include "engines_mr.cpp"                    // S53: 34 mean-reversion dip-buyers (spot-long, profit in chop)
+#include "engines_lowturn.cpp"               // S54m: 8 low-turnover trend engines (wide stop/no ratchet, macro-gated, shadow)
 
     // ── S42b: SYMBOL WHITELIST FILTER (Binance 50-sym cap) ────────────────
     // Reads config/symbol_whitelist.json, drops g_slots entries for non-
@@ -6316,6 +6317,20 @@ int main() {
         int n_floor = 0;
         for (auto* e : g_all_wired) {
             if (!e) continue;
+            // S54m: LOW-TURNOVER sleeve (tag "LT-") is EXEMPT from the standard
+            // tight-stop/ratchet override. It deliberately uses wide stops, NO
+            // ratchet, long hold -> ~71% fewer trades -> less cost drag. Validated
+            // 2.25x better than the standard config in bull slices (the only regime
+            // it trades, via the macro-gate). Its params come from its Config; here
+            // we only widen the floor so the wide stop is the real exit.
+            if (e->cfg().tag.rfind("LT-", 0) == 0) {
+                e->set_hard_floor_bp(-800.0);     // wide; the 8-ATR stop is the exit
+                e->set_signal_confirm_bars(2);
+                e->set_ratchet_start_bp(0.0);     // ratchet OFF (no churn)
+                e->set_be_arm_bp(1e9);            // BE-lock OFF (hold the trend)
+                n_floor++;
+                continue;
+            }
             e->set_hard_floor_bp(-170.0);     // real SL tightened to -170bp at entry
             e->set_signal_confirm_bars(2);    // 2-bar confirm — fewer chop entries
             // S54: close the "no protection below cost-MFE" gap. The ratchet only

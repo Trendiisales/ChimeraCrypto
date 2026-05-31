@@ -152,6 +152,7 @@
 #include "live/BinanceREST.hpp"
 #include "live/SpotExecutor.hpp"
 #include "core/EdgeEngine.hpp"
+#include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/SymbolIndex.hpp"
 #include "core/PortfolioOverlay.hpp"  // AUDIT-2026: cross-sec mom + vol-scale overlay
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
@@ -163,6 +164,8 @@
 
 // Required by BinanceWSFeed.cpp (extern declaration)
 chimera::ExchangeLatencyEngine g_exchange_latency;
+
+#include "engines_grid.cpp"               // S55: file-scope g_grids + init_grids()
 #ifndef BUILD_VERSION
 #  define BUILD_VERSION "dev"
 #endif
@@ -563,6 +566,12 @@ static std::atomic<int64_t> g_last_trade_exit_ms{0};
 static constexpr int MACRO_MA_DAYS = 200;
 static std::atomic<uint64_t> g_btc_200dma_bits{0};         // 200d SMA of BTC daily close
 static std::atomic<bool>     g_macro_bull{false};          // btc_spot > 200d MA (default flat)
+// S55: idle-capital yield. Operationally = park flat USDT in exchange Earn (~6%
+// APY). Modeled here as a SEPARATE accrual (NOT mixed into trading PnL) so the
+// dashboard shows the real opportunity cost of sitting flat (esp in a macro-bear).
+static constexpr double      IDLE_YIELD_APY = 0.06;
+static std::atomic<uint64_t> g_yield_cum_bp_bits{0};       // accrued idle yield (bp), persisted-worthy
+static std::atomic<int64_t>  g_yield_last_ms{0};
 static std::atomic<int64_t>  g_macro_last_day{0};          // UTC day index of last daily sample
 static double g_btc_daily_ring[256] = {0};                 // daily closes (regime-loop thread + startup only)
 static int    g_btc_daily_head = 0;                        // next write idx
@@ -1208,6 +1217,24 @@ static std::string build_state_json() {
         js << ",\"btc_200dma\":" << (int64_t)load_dbl_atomic(g_btc_200dma_bits);
     }
     js << "},";
+
+    // S55: grid sleeve summary (shadow maker market-making)
+    {
+        double gsum = 0; int gfills = 0, glots = 0;
+        js << "\"grid_sleeve\":{\"grids\":[";
+        bool first = true;
+        for (auto* gr : g_grids) {
+            if (!first) js << ",";
+            js << "{\"tag\":\"" << gr->cfg().tag << "\",\"realized_bp\":" << (int64_t)gr->total_bp()
+               << ",\"fills\":" << gr->fills() << ",\"open_lots\":" << gr->open_lots() << "}";
+            gsum += gr->total_bp(); gfills += gr->fills(); glots += gr->open_lots();
+            first = false;
+        }
+        js << "],\"total_realized_bp\":" << (int64_t)gsum << ",\"total_fills\":" << gfills
+           << ",\"total_open_lots\":" << glots << "},";
+    }
+    js << "\"idle_yield\":{\"apy\":" << IDLE_YIELD_APY
+       << ",\"accrued_bp\":" << (int64_t)load_dbl_atomic(g_yield_cum_bp_bits) << "},";
 
     // ── AUDIT-2026 portfolio overlay (xsec mom + vol scaling) ───────────────
     g_portfolio_overlay.to_json(js);
@@ -6750,6 +6777,7 @@ int main() {
 
         // S54: seed the BTC 200d-MA macro gate (bull/bear master switch).
         init_macro_ma(seed_rest);
+        init_grids();                         // S55: maker grid sleeve (shadow)
     }
 
     // ── Position resume: restore open positions after restart ────────────
@@ -6928,6 +6956,15 @@ int main() {
         if (mid <= 0.0) return;
 
         store_dbl_atomic(g_last_spot_px_bits[id], mid);
+
+        // S55: tick the maker-grid sleeve (shadow). Buys gated by macro 200d-MA.
+        if (!g_grids.empty()) {
+            int64_t gnow = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            bool mb = g_macro_bull.load(std::memory_order_relaxed);
+            for (auto* gr : g_grids)
+                if (chimera::sym_id(gr->cfg().symbol) == id) gr->on_tick(mid, gnow, mb);
+        }
 
         // AUDIT-2026: feed overlay so it can roll daily-close deque per symbol.
         g_portfolio_overlay.on_tick(id, mid,
@@ -7425,6 +7462,22 @@ int main() {
                     if (!fam.empty() && s.symbol_id >= 0) {
                         per_sym_fam_open[std::to_string(s.symbol_id) + "|" + fam]++;
                     }
+                }
+
+                // S55: accrue idle-capital yield on the FLAT fraction (1 - open/MAX).
+                // Models parking unused USDT in exchange Earn. Separate from trading PnL.
+                {
+                    int64_t ynow = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    int64_t ylast = g_yield_last_ms.load(std::memory_order_relaxed);
+                    if (ylast > 0 && ynow > ylast) {
+                        double dt_yr = (ynow - ylast) / 1000.0 / 31557600.0;
+                        double flat_frac = 1.0 - (double)open_positions / (double)MAX_CONCURRENT_POSITIONS;
+                        if (flat_frac < 0) flat_frac = 0;
+                        double add_bp = IDLE_YIELD_APY * dt_yr * flat_frac * 1e4;
+                        store_dbl_atomic(g_yield_cum_bp_bits, load_dbl_atomic(g_yield_cum_bp_bits) + add_bp);
+                    }
+                    g_yield_last_ms.store(ynow, std::memory_order_relaxed);
                 }
 
                 // 4h rolling DD + 24h daily P&L

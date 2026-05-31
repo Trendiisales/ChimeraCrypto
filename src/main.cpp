@@ -153,6 +153,7 @@
 #include "live/SpotExecutor.hpp"
 #include "core/EdgeEngine.hpp"
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
+#include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
 #include "core/PortfolioOverlay.hpp"  // AUDIT-2026: cross-sec mom + vol-scale overlay
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
@@ -1235,6 +1236,14 @@ static std::string build_state_json() {
     }
     js << "\"idle_yield\":{\"apy\":" << IDLE_YIELD_APY
        << ",\"accrued_bp\":" << (int64_t)load_dbl_atomic(g_yield_cum_bp_bits) << "},";
+    if (g_macro_base) {
+        js << "\"macro_base\":{\"invested\":" << (g_macro_base->invested() ? "true" : "false")
+           << ",\"dd_locked\":" << (g_macro_base->dd_locked() ? "true" : "false")
+           << ",\"nav\":" << g_macro_base->nav()
+           << ",\"peak\":" << g_macro_base->peak()
+           << ",\"ret_bp\":" << (int64_t)g_macro_base->ret_bp()
+           << ",\"flips\":" << g_macro_base->flips() << "},";
+    }
 
     // ── AUDIT-2026 portfolio overlay (xsec mom + vol scaling) ───────────────
     g_portfolio_overlay.to_json(js);
@@ -6778,6 +6787,7 @@ int main() {
         // S54: seed the BTC 200d-MA macro gate (bull/bear master switch).
         init_macro_ma(seed_rest);
         init_grids();                         // S55: maker grid sleeve (shadow)
+        init_macro_base();                    // S55: macro-bull base / bull-beta core (shadow)
     }
 
     // ── Position resume: restore open positions after restart ────────────
@@ -6964,6 +6974,16 @@ int main() {
             bool mb = g_macro_bull.load(std::memory_order_relaxed);
             for (auto* gr : g_grids)
                 if (chimera::sym_id(gr->cfg().symbol) == id) gr->on_tick(mid, gnow, mb);
+            // S55: update the macro-base NAV once per BTC tick (drives the macro signal)
+            if (g_macro_base && id == chimera::sym_id("btcusdt")) {
+                double bma = load_dbl_atomic(g_btc_200dma_bits);
+                std::vector<double> bspot;
+                for (const auto& s : g_macro_base->cfg().symbols) {
+                    int sid2 = chimera::sym_id(s);
+                    bspot.push_back(sid2 >= 0 ? load_dbl_atomic(g_last_spot_px_bits[sid2]) : 0.0);
+                }
+                g_macro_base->update(mid, bma, bspot, gnow);
+            }
         }
 
         // AUDIT-2026: feed overlay so it can roll daily-close deque per symbol.

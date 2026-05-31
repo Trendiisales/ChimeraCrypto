@@ -19,3 +19,14 @@ static void init_grids() {
     std::printf("[GRID] initialised %zu shadow grid engines (g=2%%, 12 lots, macro-gated)\n", g_grids.size());
     std::fflush(stdout);
 }
+
+// S55: macro-bull base — bull-beta core (95% basket, hyst 3%, hard -20% DD). Shadow.
+static chimera::MacroBaseEngine* g_macro_base = nullptr;
+static void init_macro_base() {
+    chimera::MacroBaseEngine::Config c;
+    c.symbols = {"btcusdt","ethusdt","solusdt","bnbusdt","linkusdt"};
+    c.alloc = 0.95; c.enter_band = 0.03; c.exit_band = 0.03; c.dd_stop = 0.20;
+    g_macro_base = new chimera::MacroBaseEngine(c);
+    std::printf("[MACRO-BASE] initialised: 5-asset equal-weight, 95%% alloc, hyst 3%%, hard-DD 20%% (shadow)\n");
+    std::fflush(stdout);
+}

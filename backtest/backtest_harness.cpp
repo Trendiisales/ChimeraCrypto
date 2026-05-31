@@ -241,6 +241,7 @@ static int g_last_days = 0;  // 0 = ignore; >0 = last N days (converted via tf_s
 static int g_end_days_ago = 0; // >0: drop last N days from klines before split (holdout sim)
 static double g_hard_floor_bp_override = 1.0; // 1.0 = no override; <=0 = applies after preset
 static double g_ppb_be_arm_override = -1.0;    // <0 = no override
+static double g_extra_cost_bp = 0.0;           // S54: bp added to round-trip (realistic spread+slippage)
 static double g_ppb_ratchet_start_override = -1.0;  // <0 = no override (mfe threshold for ANY ratchet)
 static double g_ppb_lock_pct_override = -1.0;  // <0 = no override
 static double g_engine_daily_cap_bp  = 0.0;    // 0 = off; positive N = block entries when -bp in 24h >= N
@@ -418,13 +419,14 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                 engine.on_tick(k.o * (1.0 + g_inject_gap_bp / 1e4), bar_start_ms);
             }
             engine.on_tick(k.o, bar_start_ms);                       // Open
-            if (bullish) {
-                engine.on_tick(k.l, bar_start_ms + tick_step);       // Low (test SL first)
-                engine.on_tick(k.h, bar_start_ms + tick_step * 2);   // High
-            } else {
-                engine.on_tick(k.h, bar_start_ms + tick_step);       // High (test trail arm first)
-                engine.on_tick(k.l, bar_start_ms + tick_step * 2);   // Low (test SL)
-            }
+            // FIDELITY FIX (S54): LONG-ONLY book -> ALWAYS test the LOW (adverse)
+            // before the HIGH (favorable). The old code fed HIGH-first on bearish
+            // bars, letting a long arm its trail / set MFE / lock the ratchet at the
+            // bar high BEFORE the low could stop it — pure look-ahead optimism, and
+            // it bit hardest in a bear (mostly down bars). Pessimistic intrabar
+            // assumption: assume the drawdown happens first.
+            engine.on_tick(k.l, bar_start_ms + tick_step);           // Low  (test SL first, always)
+            engine.on_tick(k.h, bar_start_ms + tick_step * 2);       // High (favorable, after)
             // Tick 4: true close as last in-bar tick (indicators read real closes).
             engine.on_tick(k.c, bar_start_ms + tick_step * 3);
         }
@@ -771,6 +773,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--end-days-ago" && i+1 < argc) { g_end_days_ago = std::atoi(argv[++i]); }
         else if (a == "--hard-floor-bp" && i+1 < argc) { g_hard_floor_bp_override = std::atof(argv[++i]); }
         else if (a == "--ppb-be-arm" && i+1 < argc) { g_ppb_be_arm_override = std::atof(argv[++i]); }
+        else if (a == "--extra-cost-bp" && i+1 < argc) { g_extra_cost_bp = std::atof(argv[++i]); }
         else if (a == "--ppb-ratchet-start" && i+1 < argc) { g_ppb_ratchet_start_override = std::atof(argv[++i]); }
         else if (a == "--ppb-lock-pct" && i+1 < argc) { g_ppb_lock_pct_override = std::atof(argv[++i]); }
         else if (a == "--engine-daily-cap-bp" && i+1 < argc) { g_engine_daily_cap_bp = std::atof(argv[++i]); }
@@ -877,11 +880,13 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                // Cost (mirror main.cpp / sweep mode)
-                double rt = 22.0;
+                // Cost (S54 HONEST all-in round-trip — see sweep block)
+                double rt = 50.0;
                 std::string ss = sym;
-                if (ss == "btcusdt" || ss == "ethusdt") rt = 17.0;
-                else if (ss == "solusdt" || ss == "bnbusdt" || ss == "dogeusdt" || ss == "xrpusdt") rt = 20.0;
+                if (ss == "btcusdt" || ss == "ethusdt") rt = 28.0;
+                else if (ss == "solusdt" || ss == "bnbusdt" || ss == "dogeusdt" ||
+                         ss == "xrpusdt" || ss == "linkusdt" || ss == "avaxusdt") rt = 38.0;
+                rt += g_extra_cost_bp;
 
                 for (auto kind : kKinds) {
                     // OVERNIGHT requires H1 + UTC hour gate; skip non-H1.
@@ -969,10 +974,15 @@ int main(int argc, char* argv[]) {
             auto m15 = load_all_parts(data_dir_local, sym + "_m15_part");
             if (tf_secs == 900) bars = m15;
             else                bars = synthesize_bars(m15, tf_secs);
-        } else {
-            auto h1 = load_all_parts(data_dir_local, base + "_h1_part");
-            if (tf_secs == 3600) bars = h1;
-            else                 bars = synthesize_bars(h1, tf_secs);
+        }
+        // S54: keep H1 at sweep scope so --fine-fill actually works here (was a
+        // silent no-op in sweep mode — g_fine_h1 only got set in roster mode).
+        static std::vector<Kline> sweep_h1;
+        if (!(tf_secs < 3600 && have_m15)) {
+            sweep_h1 = load_all_parts(data_dir_local, base + "_h1_part");
+            if (tf_secs == 3600) bars = sweep_h1;
+            else                 bars = synthesize_bars(sweep_h1, tf_secs);
+            if (g_fine_fill && tf_secs > 3600) g_fine_h1 = &sweep_h1;
         }
         if (bars.size() < 100) {
             std::fprintf(stderr, "ERROR: insufficient bars (%zu) for %s tf=%d\n", bars.size(), sym.c_str(), tf_secs);
@@ -983,9 +993,17 @@ int main(int argc, char* argv[]) {
             preset_name.empty() ? "defaults" : preset_name.c_str());
 
         // Cost per symbol (mirror main.cpp)
-        double rt = 22.0;
-        if (sym == "btcusdt" || sym == "ethusdt") rt = 17.0;
-        else if (sym == "solusdt" || sym == "bnbusdt" || sym == "dogeusdt" || sym == "xrpusdt") rt = 20.0;
+        // S54 HONEST COSTS: old 17-22bp modeled fees+tight-spread ONLY and made PF
+        // wildly optimistic (SOL PF 5.8@20bp -> 1.4@50bp). Real all-in round-trip =
+        // Binance taker ~20bp + spread + slippage. These reflect that. Cost-
+        // sensitive: ALWAYS check PF at base AND +20 (--extra-cost-bp) — an edge
+        // that dies by +20bp is a cost artifact, not a real edge.
+        double rt = 50.0;                                                        // illiquid alts
+        if (sym == "btcusdt" || sym == "ethusdt") rt = 28.0;                     // tightest
+        else if (sym == "solusdt" || sym == "bnbusdt" || sym == "dogeusdt" ||
+                 sym == "xrpusdt" || sym == "linkusdt" || sym == "avaxusdt") rt = 38.0;  // liquid alts
+        rt += g_extra_cost_bp;   // realistic-cost override (extra spread+slippage)
+        std::fprintf(stderr, "[COST] %s round-trip=%.0fbp (honest all-in; was 17-22). PF is cost-sensitive — verify with --extra-cost-bp 20.\n", sym.c_str(), rt);
 
         std::printf("lookback,hold,sl_atr,trail_arm,trail_dist,trades,wins,wr,net_bp,pf,sharpe,maxdd_bp\n");
         chimera::StrategyKind kind = chimera::StrategyKind::TSMOM;
@@ -1147,6 +1165,7 @@ int main(int argc, char* argv[]) {
             if (g_hard_floor_bp_override <= 0.0) cfg.hard_floor_bp = g_hard_floor_bp_override;
             if (g_ppb_be_arm_override   > 0.0) cfg.be_arm_bp        = g_ppb_be_arm_override;
             if (g_ppb_ratchet_start_override > 0.0) cfg.ratchet_start_bp = g_ppb_ratchet_start_override;
+            cfg.round_trip_bp += g_extra_cost_bp;   // S54: honest-cost override in roster mode too
             if (g_ppb_lock_pct_override > 0.0) cfg.ratchet_lock_pct = g_ppb_lock_pct_override;
             if (g_sl_mult_scale != 1.0) cfg.sl_atr_mult *= g_sl_mult_scale;
             if (g_mfe_trail_retain > 0.0) {

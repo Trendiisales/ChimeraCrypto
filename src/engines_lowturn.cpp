@@ -25,5 +25,11 @@ LT_CFG(lt_link_d1, "linkusdt","LT-LINK-TSMOM-D1", 86400, 20)
 LT_CFG(lt_doge_d1, "dogeusdt","LT-DOGE-TSMOM-D1", 86400, 20)
 LT_CFG(lt_btc_h12, "btcusdt", "LT-BTC-TSMOM-H12", 43200, 17)
 LT_CFG(lt_sol_h12, "solusdt", "LT-SOL-TSMOM-H12", 43200, 20)
+// S56 expansion: BULL-slice validated (expansion_sweep.cpp lt mode, fine-fill D1,
+// 38bp cost): NEAR n=7 pos=6 +34408bp both halves+; XRP n=8 pos=6 +8077 both
+// halves+; UNI n=4 pos=3 +7553 both halves+. Macro-gated like the rest of sleeve.
+LT_CFG(lt_near_d1, "nearusdt","LT-NEAR-TSMOM-D1", 86400, 20)
+LT_CFG(lt_xrp_d1,  "xrpusdt", "LT-XRP-TSMOM-D1",  86400, 20)
+LT_CFG(lt_uni_d1,  "uniusdt", "LT-UNI-TSMOM-D1",  86400, 20)
 
 #undef LT_CFG

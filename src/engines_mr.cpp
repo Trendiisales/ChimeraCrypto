@@ -152,15 +152,16 @@ chimera::EdgeEngine::Config mr_ldo_rsir14t35_h1_cfg{
 chimera::EdgeEngine mr_ldo_rsir14t35_h1(mr_ldo_rsir14t35_h1_cfg);
 wire_engine(mr_ldo_rsir14t35_h1);
 
-// LINK-BOLL30k20-H1
-chimera::EdgeEngine::Config mr_link_boll30k20_h1_cfg{
-    .symbol="linkusdt", .tag="LINK-BOLL30k20-H1", .kind=chimera::StrategyKind::BOLLINGER,
-    .tf_secs=3600, .lookback=30, .hold_bars=15, .sl_atr_mult=2.5, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine mr_link_boll30k20_h1(mr_link_boll30k20_h1_cfg);
-wire_engine(mr_link_boll30k20_h1);
+// CULLED-S56: LINK-BOLL30k20-H1 — FAILED re-gate on BOTH 365d and 730d windows
+// (fine-fill + regime-gate, 2026-06-10 data refresh). See backtest/regate_*.txt.
+// chimera::EdgeEngine::Config mr_link_boll30k20_h1_cfg{
+//     .symbol="linkusdt", .tag="LINK-BOLL30k20-H1", .kind=chimera::StrategyKind::BOLLINGER,
+//     .tf_secs=3600, .lookback=30, .hold_bars=15, .sl_atr_mult=2.5, .atr_period=14,
+//     .bb_k=2.0, .rsi_threshold=30, .round_trip_bp=22, .max_history=128,
+//     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+// };
+// chimera::EdgeEngine mr_link_boll30k20_h1(mr_link_boll30k20_h1_cfg);
+// wire_engine(mr_link_boll30k20_h1);
 
 // NEAR-BOLL20k20-H1
 chimera::EdgeEngine::Config mr_near_boll20k20_h1_cfg{
@@ -252,15 +253,16 @@ chimera::EdgeEngine::Config mr_sei_boll30k20_h1_cfg{
 chimera::EdgeEngine mr_sei_boll30k20_h1(mr_sei_boll30k20_h1_cfg);
 wire_engine(mr_sei_boll30k20_h1);
 
-// SUI-BOLL20k20-H1
-chimera::EdgeEngine::Config mr_sui_boll20k20_h1_cfg{
-    .symbol="suiusdt", .tag="SUI-BOLL20k20-H1", .kind=chimera::StrategyKind::BOLLINGER,
-    .tf_secs=3600, .lookback=20, .hold_bars=15, .sl_atr_mult=2.5, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine mr_sui_boll20k20_h1(mr_sui_boll20k20_h1_cfg);
-wire_engine(mr_sui_boll20k20_h1);
+// CULLED-S56: SUI-BOLL20k20-H1 — FAILED re-gate on BOTH 365d and 730d windows
+// (fine-fill + regime-gate, 2026-06-10 data refresh); also -535bp on recent 90d.
+// chimera::EdgeEngine::Config mr_sui_boll20k20_h1_cfg{
+//     .symbol="suiusdt", .tag="SUI-BOLL20k20-H1", .kind=chimera::StrategyKind::BOLLINGER,
+//     .tf_secs=3600, .lookback=20, .hold_bars=15, .sl_atr_mult=2.5, .atr_period=14,
+//     .bb_k=2.0, .rsi_threshold=30, .round_trip_bp=22, .max_history=128,
+//     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+// };
+// chimera::EdgeEngine mr_sui_boll20k20_h1(mr_sui_boll20k20_h1_cfg);
+// wire_engine(mr_sui_boll20k20_h1);
 
 // TIA-BOLL20k20-H1
 chimera::EdgeEngine::Config mr_tia_boll20k20_h1_cfg{
@@ -312,15 +314,16 @@ chimera::EdgeEngine::Config mr_wif_boll20k25_h1_cfg{
 chimera::EdgeEngine mr_wif_boll20k25_h1(mr_wif_boll20k25_h1_cfg);
 wire_engine(mr_wif_boll20k25_h1);
 
-// ZRO-BOLL20k20-H1
-chimera::EdgeEngine::Config mr_zro_boll20k20_h1_cfg{
-    .symbol="zrousdt", .tag="ZRO-BOLL20k20-H1", .kind=chimera::StrategyKind::BOLLINGER,
-    .tf_secs=3600, .lookback=20, .hold_bars=15, .sl_atr_mult=2.5, .atr_period=14,
-    .bb_k=2.0, .rsi_threshold=30, .round_trip_bp=22, .max_history=128,
-    .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
-};
-chimera::EdgeEngine mr_zro_boll20k20_h1(mr_zro_boll20k20_h1_cfg);
-wire_engine(mr_zro_boll20k20_h1);
+// CULLED-S56: ZRO-BOLL20k20-H1 — FAILED re-gate on BOTH 365d and 730d windows
+// (fine-fill + regime-gate, 2026-06-10 data refresh).
+// chimera::EdgeEngine::Config mr_zro_boll20k20_h1_cfg{
+//     .symbol="zrousdt", .tag="ZRO-BOLL20k20-H1", .kind=chimera::StrategyKind::BOLLINGER,
+//     .tf_secs=3600, .lookback=20, .hold_bars=15, .sl_atr_mult=2.5, .atr_period=14,
+//     .bb_k=2.0, .rsi_threshold=30, .round_trip_bp=22, .max_history=128,
+//     .trail_arm_atr=1.0, .trail_dist_atr=0.5, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+// };
+// chimera::EdgeEngine mr_zro_boll20k20_h1(mr_zro_boll20k20_h1_cfg);
+// wire_engine(mr_zro_boll20k20_h1);
 
 // ZRO-BOLL20k25-H1
 chimera::EdgeEngine::Config mr_zro_boll20k25_h1_cfg{

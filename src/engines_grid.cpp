@@ -9,6 +9,11 @@ static void init_grids() {
     static const GS specs[] = {
         {"btcusdt","GRID-BTC"}, {"ethusdt","GRID-ETH"}, {"linkusdt","GRID-LINK"},
         {"solusdt","GRID-SOL"}, {"dogeusdt","GRID-DOGE"}, {"bnbusdt","GRID-BNB"},
+        // S56 expansion: BTC-200dMA-gated continuous sim 2022->2026-06, both halves
+        // positive, bounded DD (expansion_sweep.cpp): LTC +11.6%/yr DD12%,
+        // FIL +9.3%/16%, UNI +9.2%/17%, ADA +6.3%/15%, XRP +5.9%/25%.
+        {"ltcusdt","GRID-LTC"}, {"filusdt","GRID-FIL"}, {"uniusdt","GRID-UNI"},
+        {"adausdt","GRID-ADA"}, {"xrpusdt","GRID-XRP"},
     };
     for (const auto& s : specs) {
         chimera::GridEngine::Config c;

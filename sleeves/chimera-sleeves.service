@@ -1,0 +1,12 @@
+[Unit]
+Description=Chimera Shadow Portfolio Sleeves (daily target compute, no orders)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jo
+WorkingDirectory=/home/jo/ChimeraCrypto/sleeves
+ExecStart=/bin/bash /home/jo/ChimeraCrypto/sleeves/run_daily.sh
+StandardOutput=journal
+StandardError=journal

@@ -74,7 +74,23 @@ def realized_vol(series, i, n=30):
     m=sum(rs)/len(rs); var=sum((x-m)**2 for x in rs)/len(rs)
     return math.sqrt(var) if var>0 else None
 
-def run(days, syms, close, lb, K, rebal, weighting, macro_gate):
+def signal_score(series, i, lb, signal, skip=0):
+    """Ranking signal. Higher = more preferred for a LONG.
+    momentum: trailing lb-day return (skip last `skip` days).
+    reversal: NEGATIVE of short-term lb-day return (buy losers).
+    momskip : return from t-lb to t-skip (classic 12-1 style, skip recent reversal)."""
+    if signal == "reversal":
+        tr = trailing_ret(series, i, lb)
+        return (-tr) if tr is not None else None
+    if signal == "momskip":
+        if i < lb or i-skip < 0: return None
+        a, b = series[i-lb], series[i-skip]
+        if a!=a or b!=b or a<=0: return None
+        return b/a - 1.0
+    tr = trailing_ret(series, i, lb)  # momentum
+    return tr
+
+def run(days, syms, close, lb, K, rebal, weighting, macro_gate, signal="momentum", skip=0):
     n = len(days)
     btc = close.get("BTC")
     weights = {s: 0.0 for s in syms}   # current portfolio weights
@@ -103,9 +119,9 @@ def run(days, syms, close, lb, K, rebal, weighting, macro_gate):
         if bull:
             scores = []
             for s in syms:
-                tr = trailing_ret(close[s], i, lb)
-                if tr is None or tr <= 0: continue   # long-only: only positive momentum
-                scores.append((tr, s))
+                sc = signal_score(close[s], i, lb, signal, skip)
+                if sc is None or sc <= 0: continue   # long-only: only positive-score names
+                scores.append((sc, s))
             scores.sort(reverse=True)
             picks = [s for _, s in scores[:K]]
             if picks:
@@ -151,33 +167,38 @@ def main():
     print(f"loaded {len(syms)} symbols, {len(days)} days "
           f"({datetime.datetime.utcfromtimestamp(days[0]*86400).date()} -> "
           f"{datetime.datetime.utcfromtimestamp(days[-1]*86400).date()})\n")
-    grid = list(itertools.product(
-        [14,30,60,90],          # lookback days
-        [3,5,8],                # top-K
-        [7,14],                 # rebalance days
-        ["equal","invvol"],     # weighting
-        [True],                 # macro gate (always on for bull-only mandate)
-    ))
+    import sys
+    which = sys.argv[1] if len(sys.argv)>1 else "momentum"
+    # (signal, lookback list, skip) specs
+    specs = {
+        "momentum": [("momentum", [14,30,60,90], 0)],
+        "reversal": [("reversal", [3,5,7,14], 0)],
+        "momskip":  [("momskip",  [30,60,90], 3), ("momskip", [30,60,90], 7)],
+    }
     rows = []
-    for lb,K,rb,wt,mg in grid:
-        dr = run(days, syms, close, lb, K, rb, wt, mg)
-        st = {w[0]: window_stats(dr, w[1], w[2]) for w in WINS}
-        if not all(st[w] for w in ["21bull","23rec","24bull"]): continue
-        gate = all(st[w]["sharpe"]>=1.0 and st[w]["ret"]>0 for w in ["21bull","23rec","24bull"])
-        rows.append((lb,K,rb,wt,mg,st,gate))
-    # report
-    print(f"{'lb':>3}{'K':>3}{'rb':>4} {'wt':<7} | "
-          f"{'21bull':>16}{'23rec':>16}{'24bull':>16} | {'25hold':>16} GATE")
-    print("-"*110)
+    for sig, lbs, skip in specs.get(which, specs["momentum"]):
+        for lb in lbs:
+            for K in [3,5,8]:
+                for rb in [7,14]:
+                    for wt in ["equal","invvol"]:
+                        dr = run(days, syms, close, lb, K, rb, wt, True, sig, skip)
+                        st = {w[0]: window_stats(dr, w[1], w[2]) for w in WINS}
+                        if not all(st[w] for w in ["21bull","23rec","24bull"]): continue
+                        gate = all(st[w]["sharpe"]>=1.0 and st[w]["ret"]>0 for w in ["21bull","23rec","24bull"])
+                        rows.append((sig,lb,K,rb,wt,skip,st,gate))
+    print(f"SIGNAL={which}  universe={len(syms)} symbols  cost={COST_BP}bp/side")
+    print(f"{'sig':<9}{'lb':>3}{'K':>3}{'rb':>4}{'sk':>3} {'wt':<7} | "
+          f"{'21bull':>15}{'23rec':>15}{'24bull':>15} | {'25hold':>15} GATE")
+    print("-"*116)
     def cell(s): return f"{s['ret']:+5.0f}% Sh{s['sharpe']:+.2f}" if s else "  --"
-    rows.sort(key=lambda r: -min(r[5]["21bull"]["sharpe"], r[5]["23rec"]["sharpe"], r[5]["24bull"]["sharpe"]))
+    rows.sort(key=lambda r: -min(r[6]["21bull"]["sharpe"], r[6]["23rec"]["sharpe"], r[6]["24bull"]["sharpe"]))
     passes=0
-    for lb,K,rb,wt,mg,st,gate in rows:
+    for sig,lb,K,rb,wt,skip,st,gate in rows:
         flag = "** PASS **" if gate else ""
         if gate: passes+=1
-        print(f"{lb:>3}{K:>3}{rb:>4} {wt:<7} | {cell(st['21bull']):>16}{cell(st['23rec']):>16}"
-              f"{cell(st['24bull']):>16} | {cell(st['25hold']):>16} {flag}")
-    print("-"*110)
+        print(f"{sig:<9}{lb:>3}{K:>3}{rb:>4}{skip:>3} {wt:<7} | {cell(st['21bull']):>15}{cell(st['23rec']):>15}"
+              f"{cell(st['24bull']):>15} | {cell(st['25hold']):>15} {flag}")
+    print("-"*116)
     print(f"{passes} configs PASS the 3-bull-window OOS gate (Sharpe>=1 + positive each)")
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ Same code path produces the backtest AND the live shadow target (no backtest/liv
 drift). Two sleeves, locked from the timeframe+lever sweep (2026-06-14):
 
   MOMENTUM : cross-sectional, lb30 trailing return, top-5, rebal 14d, inverse-vol,
-             BTC>200d macro gate.  bull-Sharpe 1.53, 2025 holdout +0.65.
+             dual-50/200 macro gate. PASS; holdout Sh0.97.
   BREAKOUT : Donchian N40 + 2x volume confirm, top-5, rebal 14d, equal weight,
-             BTC>200d macro gate.  bull-Sharpe 1.02, 2025 holdout +0.91.
+             dual-50/200 macro gate. PASS; holdout Sh0.91.
 
 corr(momentum, breakout) ~0.53 -> combined Sharpe 1.54 > both, DD 50% < both.
 Both sleeves long-only spot, macro-gated (flat in bear). Run modes:
@@ -17,7 +17,7 @@ Both sleeves long-only spot, macro-gated (flat in bear). Run modes:
 """
 import os, sys, math, datetime, csv
 from breakout_portfolio import (load_daily, run, WINS, COST_BP,
-                                 sma, rvol, breakout_score, momentum_score)
+                                 sma, rvol, breakout_score, momentum_score, macro_bull)
 
 SLEEVES = {
     # locked from sweep: momentum best at K=3 (holdout +0.94), breakout best at K=5.
@@ -42,8 +42,7 @@ def series_for(days,syms,close,vol,btc,name):
 def compute_target(days,syms,close,vol,btc,name,i):
     """Point-in-time target weights for sleeve `name` as of bar index i. Live shadow."""
     s=SLEEVES[name]
-    m=sma(btc,i,200)
-    bull=(m is not None and btc[i]==btc[i] and btc[i]>m)
+    bull=macro_bull(btc,i)
     if not bull: return {}, False
     sc=[]
     for sym in syms:

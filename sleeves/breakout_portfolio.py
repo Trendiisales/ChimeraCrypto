@@ -83,7 +83,7 @@ def run(days,syms,close,vol,btc,kind,K,rebal,weighting,**p):
         last=days[i]
         bull=True
         if btc is not None:
-            m=sma(btc,i,200); bull=(m is not None and btc[i]==btc[i] and btc[i]>m)
+            bull=macro_bull(btc,i)
         nw={s:0.0 for s in syms}
         if bull:
             sc=[]

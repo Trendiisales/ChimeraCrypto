@@ -75,7 +75,18 @@
   </div>
 </div>
 
-<div class="panel"><h3>Monthly Returns — Combined (%)</h3><canvas id="mon" style="max-height:160px"></canvas></div>
+<div class="panel" style="margin-bottom:14px"><h3>Live Paper Ledger — simulated fills (same format as live system)</h3>
+  <div class="strip" id="lstrip" style="margin-bottom:14px"></div>
+  <div id="openpos"></div>
+</div>
+
+<div class="grid">
+  <div class="panel"><h3>Trade History (paper)</h3>
+    <div style="max-height:340px;overflow:auto"><table id="thist"></table></div></div>
+  <div class="panel"><h3>Last 20 Trades — Win / Loss (bp)</h3><canvas id="wl" style="max-height:300px"></canvas></div>
+</div>
+
+<div class="panel"><h3>Monthly Returns — Combined backtest (%)</h3><canvas id="mon" style="max-height:160px"></canvas></div>
 
 <script>
 const G=getComputedStyle(document.documentElement);
@@ -129,6 +140,33 @@ async function load(){
   for(const[n,x]of Object.entries(d.metrics))
     t+=`<tr><td>${n}</td><td>${x.pf}</td><td>${x.wr}%</td><td>${x.sharpe}</td><td class="neg">${x.dd}%</td><td class="pos">${x.cagr}%</td></tr>`;
   document.getElementById('mtable').innerHTML=t;
+
+  // ── live paper ledger ──
+  const L=d.ledger||{};
+  const npos=(L.net_bp||0)>=0;
+  document.getElementById('lstrip').innerHTML=
+    card('Net P&L',((L.net_bp||0)>=0?'+':'')+(L.net_bp||0).toLocaleString()+' bp',npos?'pos':'neg')+
+    card('Trades',L.n_trades||0)+card('Win Rate',(L.wr||0)+'%')+
+    card('Profit Factor',L.pf||0,'acc')+card('Open Now',L.open_count||0,(L.open_count>0)?'pos':'');
+  // open positions
+  const ops=L.positions||[];
+  document.getElementById('openpos').innerHTML = ops.length? '<div class="alloc">'+ops.map(p=>
+      `<span class="chip"><b>${p.engine}</b> entry ${p.entry_px} · spot ${p.spot} · <span class="${p.unreal_bp>=0?'pos':'neg'}">${p.unreal_bp>=0?'+':''}${p.unreal_bp}bp</span></span>`).join('')+'</div>'
+    : '<span class="cash">⏸ No open positions — macro gate bear / waiting for next rebalance</span>';
+  // trade history
+  const fmtd=ts=>ts?new Date(ts).toISOString().slice(0,10):'--';
+  const dur=(a,b)=>(a&&b)?Math.round((b-a)/86400000)+'d':'--';
+  let th='<tr><th>Date</th><th>Engine</th><th>Reason</th><th>Entry</th><th>Exit</th><th>Net bp</th><th>MFE</th><th>Held</th></tr>';
+  (L.recent||[]).forEach(x=>{ const c=(x.net_bp||0)>0?'pos':'neg';
+    th+=`<tr><td>${fmtd(x.exit_ts)}</td><td>${x.engine}</td><td>${x.reason}</td><td>${x.entry_px}</td><td>${x.exit_px}</td>`+
+        `<td class="${c}" style="font-weight:700">${(x.net_bp||0)>0?'+':''}${x.net_bp}</td><td class="pos">+${x.mfe_bp}</td><td>${dur(x.entry_ts,x.exit_ts)}</td></tr>`;});
+  document.getElementById('thist').innerHTML=th;
+  // win/loss last 20
+  const wlv=L.winloss||[];
+  new Chart(wl,{type:'bar',data:{labels:wlv.map((_,i)=>i+1),datasets:[
+    {data:wlv,backgroundColor:wlv.map(v=>v>0?C('--green'):C('--red'))}]},
+    options:{plugins:{legend:{display:false}},scales:{y:{ticks:{color:C('--dim'),font:{size:9}},grid:{color:C('--line')}},
+      x:{ticks:{display:false},grid:{display:false}}}}});
 }
 load(); setInterval(load,300000);
 </script>

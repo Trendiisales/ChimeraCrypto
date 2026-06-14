@@ -6,6 +6,28 @@ from breakout_portfolio import load_daily, WINS, sma
 from chimera_sleeves import SLEEVES, series_for, compute_target
 
 OUT = os.path.join(os.path.dirname(__file__), "gui_data.json")
+DATADIR = os.path.join(os.path.dirname(__file__), "data")
+
+def load_ledger():
+    """Read the paper-trade ledger (trades.json + open_positions.json) and build
+    the live-trading summary, matching the old system's Net P&L / PF / WR."""
+    tp=os.path.join(DATADIR,"trades.json"); op=os.path.join(DATADIR,"open_positions.json")
+    trades=json.load(open(tp)) if os.path.exists(tp) else []
+    opos=json.load(open(op)) if os.path.exists(op) else {"positions":[],"open_count":0}
+    net=sum(t.get("net_bp",0) for t in trades)
+    wins=sum(1 for t in trades if t.get("net_bp",0)>0)
+    gw=sum(t["net_bp"] for t in trades if t.get("net_bp",0)>0)
+    gl=-sum(t["net_bp"] for t in trades if t.get("net_bp",0)<=0)
+    pf=round(gw/gl,2) if gl>0 else (99 if gw>0 else 0)
+    recent=sorted(trades,key=lambda t:t.get("exit_ts",0),reverse=True)[:60]
+    return dict(
+        net_bp=round(net), n_trades=len(trades),
+        wr=round(100*wins/max(1,len(trades))), pf=pf,
+        open_count=opos.get("open_count",0),
+        positions=opos.get("positions",[]),
+        recent=recent,
+        winloss=[round(t.get("net_bp",0),1) for t in sorted(trades,key=lambda t:t.get("exit_ts",0))[-20:]],
+    )
 
 def metrics(dr,a=None,b=None):
     rs=[r for d,r in dr if (a is None or a<=d<b)]
@@ -65,6 +87,7 @@ def main():
         equity={"dates":equity(comb)[0],
                 "COMBINED":equity(comb)[1],"MOMENTUM":equity(mom)[1],"BREAKOUT":equity(brk)[1]},
         monthly=monthly(comb),
+        ledger=load_ledger(),
     )
     with open(OUT,"w") as f: json.dump(data,f)
     print(f"wrote {OUT} ({len(data['equity']['dates'])} equity points, gate={'BULL' if bull else 'BEAR'})")

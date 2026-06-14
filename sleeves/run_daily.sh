@@ -13,5 +13,6 @@ if ! python3 validate_dataset.py data/multiyr --require-cycles 2022,2023,2024 >/
 fi
 tail -1 /tmp/sleeve_validate.log
 python3 chimera_sleeves.py shadow 2>&1
+python3 paper_trader.py 2>&1 | tail -1
 python3 gui_data.py 2>&1 | tail -1
 echo "===== done ====="

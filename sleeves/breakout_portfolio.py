@@ -69,6 +69,20 @@ def momentum_score(close,i,lb):
     if a!=a or b!=b or a<=0: return None
     return b/a-1.0
 
+def macro_bull(btc,i):
+    """Regime gate (dual_50_200): catch recoveries earlier than pure 200d while
+    bounding bear bleed. LONG when BTC > 50d SMA AND (BTC > 200d SMA OR 200d rising).
+    Validated (regime_gate.py): holdout +63% vs 200d's +44%, 2022 bear -19% DD23%
+    vs 50d's -56%. Beats both pure-200d (too slow) and pure-50d (bleeds in bear)."""
+    if btc is None or i<200: return False
+    px=btc[i]
+    if px!=px: return False
+    m50=sma(btc,i,50); m200=sma(btc,i,200)
+    if m50 is None or m200 is None: return False
+    m200_prev=sma(btc,i-20,200) if i>=220 else None
+    rising = m200_prev is not None and m200>m200_prev
+    return px>m50 and (px>m200 or rising)
+
 def run(days,syms,close,vol,btc,kind,K,rebal,weighting,**p):
     n=len(days); weights={s:0.0 for s in syms}; dr=[]; last=-10**9
     for i in range(1,n):

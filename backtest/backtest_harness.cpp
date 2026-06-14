@@ -49,8 +49,10 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
+#include <map>
 #include <numeric>
 
+#include <unistd.h>
 #include "core/EdgeEngine.hpp"
 
 namespace fs = std::filesystem;
@@ -234,6 +236,10 @@ struct BacktestResult {
     double      cost_bp;
 };
 
+static int g_last_bars = 0;  // 0 = use 80/20 split; >0 = last N bars
+static int g_last_days = 0;  // 0 = ignore; >0 = last N days (converted via tf_secs)
+static int g_end_days_ago = 0; // >0: drop last N days from klines before split (holdout sim)
+
 static BacktestResult run_backtest(chimera::EdgeEngine& engine,
                                     const chimera::EdgeEngine::Config& cfg,
                                     const std::vector<Kline>& klines) {
@@ -249,21 +255,47 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
         return r;
     }
 
-    // Seed with first 80% of bars, backtest on remaining 20% (OOS)
-    int total = (int)klines.size();
-    int seed_count = (int)(total * 0.8);
-    int oos_start  = seed_count;
+    // Holdout sim: drop last g_end_days_ago days so we score on data preceding
+    // some recent window the optimizer "couldn't see".
+    std::vector<Kline> klines_trimmed;
+    const std::vector<Kline>* klines_use = &klines;
+    if (g_end_days_ago > 0) {
+        int trim_bars = (int)((int64_t)g_end_days_ago * 86400 / cfg.tf_secs);
+        if (trim_bars > 0 && trim_bars < (int)klines.size()) {
+            klines_trimmed.assign(klines.begin(), klines.end() - trim_bars);
+            klines_use = &klines_trimmed;
+        }
+    }
+
+    // Seed/OOS split: default 80/20. If g_last_days or g_last_bars > 0, OOS
+    // = last N bars (seed = everything before). Lets us test "live era".
+    int total = (int)klines_use->size();
+    int oos_bars = 0;
+    if (g_last_days > 0) {
+        // Convert days -> bars via this engine's TF.
+        oos_bars = (int)((int64_t)g_last_days * 86400 / cfg.tf_secs);
+    } else if (g_last_bars > 0) {
+        oos_bars = g_last_bars;
+    }
+    int seed_count, oos_start;
+    if (oos_bars > 0 && oos_bars < total) {
+        oos_start  = total - oos_bars;
+        seed_count = oos_start;
+    } else {
+        seed_count = (int)(total * 0.8);
+        oos_start  = seed_count;
+    }
 
     // Seed bars
     std::vector<chimera::EdgeEngine::SeedBar> seeds;
     seeds.reserve(seed_count);
     for (int i = 0; i < seed_count; ++i) {
         chimera::EdgeEngine::SeedBar sb;
-        sb.open_ts_ms = klines[i].open_ts_ms;
-        sb.o = klines[i].o;
-        sb.h = klines[i].h;
-        sb.l = klines[i].l;
-        sb.c = klines[i].c;
+        sb.open_ts_ms = (*klines_use)[i].open_ts_ms;
+        sb.o = (*klines_use)[i].o;
+        sb.h = (*klines_use)[i].h;
+        sb.l = (*klines_use)[i].l;
+        sb.c = (*klines_use)[i].c;
         seeds.push_back(sb);
     }
     engine.seed_bars(seeds);
@@ -278,27 +310,33 @@ static BacktestResult run_backtest(chimera::EdgeEngine& engine,
 
     // Feed OOS bars as ticks
     r.total_bars = total - oos_start;
+    // S38: D1 trend feed for kinds that gate on it (e.g. BREAKOUT_PULLBACK).
+    // D1 TSMOM lookback=10 is the production BTC-TSMOM-D1 setting; on the
+    // bar TF that's `bars_per_d1 * 10` bars back.
+    int bars_per_d1 = (cfg.tf_secs > 0) ? (int)(86400 / cfg.tf_secs) : 1;
+    if (bars_per_d1 < 1) bars_per_d1 = 1;
+    int d1_lookback_bars = bars_per_d1 * 10;
     for (int i = oos_start; i < total; ++i) {
-        const Kline& k = klines[i];
+        const Kline& k = (*klines_use)[i];
         int64_t bar_start_ms = k.open_ts_ms;
         int64_t tick_step    = (cfg.tf_secs * 1000) / 4;
 
-        bool bullish = (k.c >= k.o);
+        // Feed D1 trend state to the engine (no-op for kinds that ignore it).
+        if (i >= d1_lookback_bars) {
+            bool d1_bull = (*klines_use)[i].c > (*klines_use)[i - d1_lookback_bars].c;
+            engine.set_d1_bullish(d1_bull);
+        }
 
         // Tick 1: Open
         engine.on_tick(k.o, bar_start_ms);
-
-        if (bullish) {
-            // Tick 2: Low (test SL first)
-            engine.on_tick(k.l, bar_start_ms + tick_step);
-            // Tick 3: High
-            engine.on_tick(k.h, bar_start_ms + tick_step * 2);
-        } else {
-            // Tick 2: High (test trail arm first)
-            engine.on_tick(k.h, bar_start_ms + tick_step);
-            // Tick 3: Low (test SL)
-            engine.on_tick(k.l, bar_start_ms + tick_step * 2);
-        }
+        // HONEST FILL (S-2026-06-14): long-only book -> ALWAYS test the adverse
+        // extreme (Low) BEFORE the favorable (High), regardless of candle colour.
+        // The old colour-conditional fed High-first on RED bars, letting longs
+        // hit TP/trail-arm at the high before the SL at the low on a DOWN bar --
+        // systematic optimism that produced positive PF in bear markets
+        // (impossible for a long-only book). SL-first = trustworthy fills.
+        engine.on_tick(k.l, bar_start_ms + tick_step);      // adverse first (SL)
+        engine.on_tick(k.h, bar_start_ms + tick_step * 2);  // favorable second (TP/trail)
 
         // Tick 4: Close (triggers bar close via next bar boundary)
         // We don't send the close as the last tick of this bar — instead
@@ -405,9 +443,593 @@ static void print_verdict(const std::vector<BacktestResult>& results) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Disable all post-Session32 exit protections (giveback cap, staged ratchet,
+// hard floor, early kill). Pre-S32 simple ATR-trail + hold-bars baseline.
+static void disable_s32_protections(chimera::EdgeEngine::Config& c) {
+    c.hard_floor_bp     =  0.0;   // disabled (code: < 0 = active)
+    c.ratchet_start_bp  =  0.0;   // disabled (code: > 0 = active)
+    c.be_arm_bp         =  0.0;
+    c.giveback_arm_bp   =  0.0;   // disabled (code: > 0 = active)
+    c.early_kill_bp     =  0.0;   // disabled (code: < 0 = active)
+    c.early_kill_mfe    =  0.0;
+    c.trail_tighten_atr =  0.0;   // already default 0
+    c.signal_confirm_bars = 1;    // back to single-bar confirm
+}
+
+// Mirror EdgeEngine::apply_protection_only_preset (EdgeEngine.hpp post-S36
+// rewrite — staged-ratchet ONLY). Destructive layers disabled.
+static void mirror_protection_only_preset(chimera::EdgeEngine::Config& c) {
+    c.hard_floor_bp           =  0.0;
+    c.early_kill_bp           =  0.0;
+    c.early_kill_mfe          =  0.0;
+    c.early_kill_min_hold_ms  =  0;
+    c.giveback_arm_bp         =  0.0;
+    c.signal_confirm_bars     =  1;
+    double rt = c.round_trip_bp;
+    c.ratchet_start_bp  = rt;
+    c.be_arm_bp         = rt + 10.0;
+    c.ratchet_lock_pct  = 0.75;
+    c.prog_lock_pct_2   = 0.85;
+    c.prog_lock_pct_3   = 0.90;
+    c.prog_lock_pct_4   = 0.95;
+    // intentionally NOT touching trail params — preserves bespoke
+}
+
+// Mirror EdgeEngine::apply_safety_preset (EdgeEngine.hpp post-S36) — same
+// layer logic as protection_only + uniform S14-baseline trail override.
+static void mirror_safety_preset(chimera::EdgeEngine::Config& c) {
+    mirror_protection_only_preset(c);
+    c.trail_arm_atr          = 1.0;
+    c.trail_dist_atr         = 0.4;
+    c.trail_tighten_atr      = 0.0;
+    c.trail_tighten_dist_atr = 0.3;
+}
+
+// Tier per known historical PF (matches main.cpp:5251-5270 logic).
+static void apply_prod_tiered(chimera::EdgeEngine::Config& c, double historical_pf) {
+    if (historical_pf >= 2.0) mirror_protection_only_preset(c);
+    else                       mirror_safety_preset(c);
+}
+
+// Per-engine historical PF lookup (matches main.cpp:5251-5270 tier logic).
+static double pf_lookup(const std::string& tag) {
+    if (tag == "BTC-TSMOM-D1")  return 1.92;
+    if (tag == "ETH-TSMOM-D1")  return 3.15;
+    if (tag == "SOL-TSMOM-D1")  return 2.25;
+    if (tag == "LINK-TSMOM-D1") return 2.18;
+    if (tag == "BNB-TSMOM-D1")  return 3.16;
+    if (tag == "XRP-TSMOM-H4")  return 2.43;
+    if (tag == "BNB-TSMOM-H4")  return 1.91;
+    if (tag == "LINK-TSMOM-H4") return 1.91;
+    if (tag == "SOL-TSMOM-H4")  return 1.89;
+    if (tag == "BTC-TSMOM-H4")  return 1.82;
+    if (tag == "ETH-TSMOM-H4")  return 1.76;
+    if (tag == "AVAX-TSMOM-H4") return 1.47;
+    if (tag == "BTC-TSMOM-H12") return 3.63;
+    if (tag == "DOGE-TSMOM-H12")return 2.78;
+    if (tag == "AVAX-TSMOM-H12")return 2.61;
+    if (tag == "DOGE-TSMOM-D3") return 3.72;
+    if (tag == "APT-TSMOM-H8")  return 1.49;
+    return 1.5;
+}
+
+static void apply_preset_named(chimera::EdgeEngine::Config& c, const std::string& p);
+
+// Loosened variant — minimal protection, lets trends breathe.
+static void apply_loose_preset(chimera::EdgeEngine::Config& c) {
+    double rt = c.round_trip_bp;
+    c.hard_floor_bp     = -200.0;          // still caps catastrophe, not winners
+    c.ratchet_start_bp  = rt;              // BE ramp start
+    c.be_arm_bp         = rt + 10.0;       // BE lock
+    c.ratchet_lock_pct  = 0.50;            // looser lock %
+    c.prog_lock_pct_2   = 0.60;
+    c.prog_lock_pct_3   = 0.70;
+    c.prog_lock_pct_4   = 0.80;
+    c.giveback_arm_bp   = rt + 200.0;      // arm only on big peaks
+    c.giveback_pct      = 0.50;            // 50% pullback before exit
+    c.early_kill_bp     = 0.0;             // disable
+    c.early_kill_mfe    = 0.0;
+    c.signal_confirm_bars = 1;             // single-bar confirm
+}
+
+// Apply named preset to a Config (mirrors main.cpp tiered logic).
+static void apply_preset_named(chimera::EdgeEngine::Config& c, const std::string& p) {
+    double hpf = pf_lookup(c.tag);
+    if (p == "" || p == "defaults") return;
+    if (p == "legacy")               { disable_s32_protections(c); return; }
+    if (p == "staged_only") {
+        disable_s32_protections(c);
+        c.ratchet_start_bp = 15.0; c.be_arm_bp = 50.0; c.ratchet_lock_pct = 0.75;
+        return;
+    }
+    if (p == "prod_safety")          { mirror_safety_preset(c); return; }
+    if (p == "prod_protection_only") { mirror_protection_only_preset(c); return; }
+    if (p == "prod_tiered")          { apply_prod_tiered(c, hpf); return; }
+    if (p == "loose")                { apply_loose_preset(c); return; }
+    if (p == "no_giveback")          { apply_prod_tiered(c, hpf); c.giveback_arm_bp = 0.0; return; }
+    if (p == "no_early_kill")        { apply_prod_tiered(c, hpf); c.early_kill_bp = 0.0; c.early_kill_mfe = 0.0; return; }
+    if (p == "no_signal_confirm")    { apply_prod_tiered(c, hpf); c.signal_confirm_bars = 1; return; }
+    if (p == "no_hard_floor")        { apply_prod_tiered(c, hpf); c.hard_floor_bp = 0.0; return; }
+    if (p == "prod_tiered_with_ek")  {
+        // S36 baseline + re-enable early_kill (old behavior on dead-on-arrival)
+        apply_prod_tiered(c, hpf);
+        c.early_kill_bp           = -25.0;
+        c.early_kill_mfe          =  15.0;
+        c.early_kill_min_hold_ms  =  0;
+        return;
+    }
+    if (p == "prod_tiered_with_ek_hf") {
+        // S36 baseline + early_kill + hard_floor (closer to old prod behavior)
+        apply_prod_tiered(c, hpf);
+        c.early_kill_bp           = -25.0;
+        c.early_kill_mfe          =  15.0;
+        c.early_kill_min_hold_ms  =  0;
+        c.hard_floor_bp           = -50.0;
+        return;
+    }
+    if (p == "prod_tiered_pyramid") {
+        // S38: prod_tiered + pyramid + tight trail + giveback. Only arms
+        // pyramid AFTER trail-armed (BE locked), so bounded downside.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 2.5;
+        c.pyramid_step_atr      = 1.5;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        c.trail_tighten_atr     = 2.0;
+        c.trail_tighten_dist_atr = 0.2;
+        c.giveback_arm_bp       = 100.0;
+        c.giveback_pct          = 0.30;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_pure") {
+        // S38b: pyramid only — keep prod_tiered exits as-is, just enable adds.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 2.5;
+        c.pyramid_step_atr      = 1.5;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_low") {
+        // S38c: pyramid_arm at +1.0 ATR (typical TSMOM winner ~1-1.5 ATR MFE).
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 1.0;
+        c.pyramid_step_atr      = 0.7;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 2;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_xlow") {
+        // S38d: pyramid_arm at +0.5 ATR — aggressive.
+        // NOTE: live enable_pyramid_xlow() uses max_adds=1, NOT 2 — keep aligned.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 0.5;
+        c.pyramid_step_atr      = 0.3;
+        c.pyramid_size_mult     = 0.5;
+        c.pyramid_max_adds      = 1;
+        return;
+    }
+    if (p == "prod_tiered_pyramid_elite") {
+        // S44 candidate: ELITE-tier preset. arm earlier, larger adds, more adds.
+        apply_prod_tiered(c, hpf);
+        c.pyramid_enabled       = true;
+        c.pyramid_arm_atr       = 0.5;
+        c.pyramid_step_atr      = 0.3;
+        c.pyramid_size_mult     = 0.75;  // up from 0.5
+        c.pyramid_max_adds      = 4;     // up from 2
+        return;
+    }
+}
+
 int main(int argc, char* argv[]) {
-    bool csv_mode = (argc > 1 && std::string(argv[1]) == "--csv");
-    bool run_all  = (argc > 1 && std::string(argv[1]) == "--all");
+    bool csv_mode      = false;
+    bool run_all       = false;
+    bool legacy_exits  = false;
+    bool prod_presets  = false;   // legacy alias for --preset prod_tiered
+    std::string preset_name = "";  // "", "legacy", "defaults", "prod_tiered",
+                                    // "prod_safety", "prod_protection_only",
+                                    // "loose", "no_giveback", "no_early_kill",
+                                    // "no_signal_confirm", "staged_only"
+    // Bisection flags (used with --legacy-exits)
+    bool enable_giveback   = false;
+    bool enable_staged     = false;
+    bool enable_early_kill = false;
+    bool enable_hard_floor = false;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if      (a == "--csv")              csv_mode          = true;
+        else if (a == "--all")              run_all           = true;
+        else if (a == "--legacy-exits")     legacy_exits      = true;
+        else if (a == "--prod-presets")   { prod_presets = true; preset_name = "prod_tiered"; }
+        else if (a == "--add-giveback")     enable_giveback   = true;
+        else if (a == "--add-staged")       enable_staged     = true;
+        else if (a == "--add-early-kill")   enable_early_kill = true;
+        else if (a == "--add-hard-floor")   enable_hard_floor = true;
+        else if (a == "--preset" && i+1 < argc) { preset_name = argv[++i]; }
+        else if (a == "--last-bars" && i+1 < argc) { g_last_bars = std::atoi(argv[++i]); }
+        else if (a == "--last-days" && i+1 < argc) { g_last_days = std::atoi(argv[++i]); }
+        else if (a == "--end-days-ago" && i+1 < argc) { g_end_days_ago = std::atoi(argv[++i]); }
+    }
+    if (!preset_name.empty()) {
+        std::fprintf(stderr, "[MODE] --preset %s\n", preset_name.c_str());
+    }
+    if (g_last_bars > 0) {
+        std::fprintf(stderr, "[MODE] --last-bars %d (OOS = last N bars per engine)\n", g_last_bars);
+    }
+    if (g_last_days > 0) {
+        std::fprintf(stderr, "[MODE] --last-days %d (OOS = last N days per engine; converted to bars via tf_secs)\n", g_last_days);
+    }
+    if (g_end_days_ago > 0) {
+        std::fprintf(stderr, "[MODE] --end-days-ago %d (holdout sim: drop last N days from klines before split)\n", g_end_days_ago);
+    }
+
+    // ── DISCOVER MODE: full matrix (symbol × tf × kind × params) ─────────
+    // Usage: ./backtest_mac --discover [--preset prod_tiered] [--last-days 180]
+    // Static C++ arrays; one binary run; writes one CSV row per backtest.
+    bool discover_mode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--discover") { discover_mode = true; break; }
+    }
+    if (discover_mode) {
+        static constexpr const char* kSymbols[] = {
+            "btcusdt","ethusdt","solusdt","linkusdt","bnbusdt","xrpusdt",
+            "avaxusdt","dogeusdt","aptusdt","arbusdt","fetusdt","nearusdt",
+            "ondousdt","pepeusdt","suiusdt","tiausdt","wifusdt",
+            "hbarusdt","injusdt","adausdt","trxusdt","seiusdt",
+            "opusdt","maticusdt","atomusdt","filusdt","aaveusdt","uniusdt",
+            "ldousdt","enausdt","jupusdt",
+            "tonusdt","dotusdt","icpusdt","renderusdt","pythusdt","grtusdt",
+            "sandusdt","manausdt","crvusdt","compusdt","mkrusdt","imxusdt",
+            "stxusdt","arkmusdt","maskusdt",
+            "runeusdt","jtousdt","wusdt","turbousdt","bomeusdt","flokiusdt",
+            "ethfiusdt","eigenusdt","zrousdt","gmtusdt","shibusdt","bchusdt",
+            "ltcusdt","etcusdt","xlmusdt","vetusdt"
+        };
+        // S38c WIDER NET: 10 TFs (H1, H2, H3, H4, H6, H8, H12, D1, D2, D3).
+        static constexpr int kTfSecs[]   = { 3600, 7200, 10800, 14400, 21600, 28800, 43200, 86400, 172800, 259200 };
+        static constexpr const char* kTfNames[] = { "H1","H2","H3","H4","H6","H8","H12","D1","D2","D3" };
+        static constexpr chimera::StrategyKind kKinds[] = {
+            chimera::StrategyKind::TSMOM,
+            chimera::StrategyKind::DONCHIAN,
+            chimera::StrategyKind::BOLLINGER,
+            chimera::StrategyKind::RSI_REVERT,
+            chimera::StrategyKind::OVERNIGHT,
+            chimera::StrategyKind::WEEKDAY,
+            chimera::StrategyKind::KELTNER_REVERT,
+            chimera::StrategyKind::DUAL_THRUST,
+            chimera::StrategyKind::ICHIMOKU,
+            chimera::StrategyKind::SUPERTREND,
+            chimera::StrategyKind::WILLIAMS_R,
+            chimera::StrategyKind::STOCH_RSI,
+            chimera::StrategyKind::BREAKOUT_PULLBACK,
+        };
+        // S38d ULTRA WIDE: finest grid (6×6×4 = 144 combos).
+        static constexpr int    kLookbacks[] = { 6, 12, 18, 30, 45, 60 };
+        static constexpr int    kHolds[]     = { 3, 5, 8, 12, 18, 24 };
+        static constexpr double kSlAtrs[]    = { 1.0, 2.0, 3.0, 4.0 };
+
+        std::string data_dir_local;
+        if (fs::exists("data/btc_h1_part0.json"))           data_dir_local = "data";
+        else if (fs::exists("backtest/data/btc_h1_part0.json")) data_dir_local = "backtest/data";
+        else { std::fprintf(stderr, "ERROR: no data dir\n"); return 1; }
+
+        std::printf("symbol,tf_name,tf_secs,kind,lookback,hold,sl_atr,trades,wins,wr,net_bp,pf,sharpe,maxdd_bp,bars\n");
+
+        long total_runs = 0;
+        for (const char* sym : kSymbols) {
+            // Resolve data prefix: btcusdt -> btc, others -> <sym>
+            std::string base = sym;
+            if (std::string(sym) == "btcusdt") base = "btc";
+            std::string h1_probe = data_dir_local + "/" + base + "_h1_part0.json";
+            if (!fs::exists(h1_probe)) {
+                std::fprintf(stderr, "[SKIP] %s — no H1 data\n", sym);
+                continue;
+            }
+            auto h1 = load_all_parts(data_dir_local, base + "_h1_part");
+            std::fprintf(stderr, "[DISCOVER] %s H1=%zu bars\n", sym, h1.size());
+
+            for (size_t ti = 0; ti < sizeof(kTfSecs)/sizeof(kTfSecs[0]); ++ti) {
+                int tf_secs = kTfSecs[ti];
+                std::vector<Kline> bars;
+                if (tf_secs == 3600) bars = h1;
+                else                 bars = synthesize_bars(h1, tf_secs);
+                if ((int)bars.size() < 300) {
+                    std::fprintf(stderr, "  [SKIP] %s %s — only %zu bars\n", sym, kTfNames[ti], bars.size());
+                    continue;
+                }
+
+                // Cost (mirror main.cpp / sweep mode)
+                double rt = 22.0;
+                std::string ss = sym;
+                if (ss == "btcusdt" || ss == "ethusdt") rt = 17.0;
+                else if (ss == "solusdt" || ss == "bnbusdt" || ss == "dogeusdt" || ss == "xrpusdt") rt = 20.0;
+
+                for (auto kind : kKinds) {
+                    // OVERNIGHT requires H1 + UTC hour gate; skip non-H1.
+                    if (kind == chimera::StrategyKind::OVERNIGHT && tf_secs != 3600) continue;
+                    // WEEKDAY requires D1; skip non-D1.
+                    if (kind == chimera::StrategyKind::WEEKDAY && tf_secs != 86400) continue;
+
+                    for (int lb : kLookbacks)
+                    for (int hold : kHolds)
+                    for (double sl : kSlAtrs) {
+                        chimera::EdgeEngine::Config c{
+                            .symbol = ss, .tag = "DISC", .kind = kind, .tf_secs = tf_secs,
+                            .lookback = lb, .hold_bars = hold, .sl_atr_mult = sl,
+                            .atr_period = 14, .bb_k = 2.0, .rsi_threshold = 30.0,
+                            .round_trip_bp = rt, .max_history = 128,
+                            .trail_arm_atr = 1.0, .trail_dist_atr = 0.5,
+                            .trail_tighten_atr = 3.0, .trail_tighten_dist_atr = 0.25,
+                        };
+                        apply_preset_named(c, preset_name);
+                        chimera::EdgeEngine eng(c);
+                        // Suppress engine internal printf during backtest
+                        std::fflush(stdout);
+                        int _saved_stdout = dup(fileno(stdout));
+                        FILE* _devnull = fopen("/dev/null", "w");
+                        dup2(fileno(_devnull), fileno(stdout));
+                        auto r = run_backtest(eng, c, bars);
+                        std::fflush(stdout);
+                        dup2(_saved_stdout, fileno(stdout));
+                        close(_saved_stdout);
+                        fclose(_devnull);
+                        std::printf("%s,%s,%d,%s,%d,%d,%.1f,%d,%d,%.1f,%.1f,%.3f,%.2f,%.0f,%d\n",
+                            ss.c_str(), kTfNames[ti], tf_secs,
+                            chimera::strategy_name(kind),
+                            lb, hold, sl,
+                            r.trades, r.wins, r.win_rate, r.total_bp,
+                            r.pf, r.sharpe, r.max_dd_bp, r.total_bars);
+                        std::fflush(stdout);
+                        ++total_runs;
+                    }
+                }
+            }
+        }
+        std::fprintf(stderr, "[DISCOVER] DONE — %ld backtests\n", total_runs);
+        return 0;
+    }
+
+    // ── SWEEP MODE: param search for a (symbol, tf, strategy) triple ─────
+    // Usage: ./backtest_mac --sweep dogeusdt:259200:TSMOM [--preset staged_only]
+    // Iterates lookback × hold × sl × trail combos, applies preset, prints
+    // CSV sorted by PF descending. Use to rescue a weak engine or confirm dead.
+    std::string sweep_spec;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--sweep" && i+1 < argc) {
+            sweep_spec = argv[++i];
+            break;
+        }
+    }
+    if (!sweep_spec.empty()) {
+        // Parse "SYMBOL:TF_SECS:STRATEGY"
+        size_t p1 = sweep_spec.find(':');
+        size_t p2 = sweep_spec.find(':', p1+1);
+        if (p1 == std::string::npos || p2 == std::string::npos) {
+            std::fprintf(stderr, "ERROR: --sweep needs SYMBOL:TF_SECS:STRATEGY (e.g. dogeusdt:259200:TSMOM)\n");
+            return 1;
+        }
+        std::string sym  = sweep_spec.substr(0, p1);
+        int tf_secs      = std::atoi(sweep_spec.substr(p1+1, p2-p1-1).c_str());
+        std::string strat = sweep_spec.substr(p2+1);
+
+        // Load + synthesize bars for this symbol/TF
+        // Map symbol to base name in data dir (btcusdt -> btc_h1, ethusdt -> ethusdt_h1)
+        std::string base = sym;
+        if (sym == "btcusdt") base = "btc";
+        std::string data_dir_local;
+        if (fs::exists("data/btc_h1_part0.json"))           data_dir_local = "data";
+        else if (fs::exists("backtest/data/btc_h1_part0.json")) data_dir_local = "backtest/data";
+        else { std::fprintf(stderr, "ERROR: no data dir\n"); return 1; }
+
+        // For sub-H1 timeframes, load native M15 parts (btcusdt_m15_part*) and
+        // synthesize anything coarser from M15 if requested. Otherwise use H1.
+        std::vector<Kline> bars;
+        bool have_m15 = fs::exists(data_dir_local + "/" + sym + "_m15_part0.json");
+        if (tf_secs < 3600 && have_m15) {
+            auto m15 = load_all_parts(data_dir_local, sym + "_m15_part");
+            if (tf_secs == 900) bars = m15;
+            else                bars = synthesize_bars(m15, tf_secs);
+        } else {
+            auto h1 = load_all_parts(data_dir_local, base + "_h1_part");
+            if (tf_secs == 3600) bars = h1;
+            else                 bars = synthesize_bars(h1, tf_secs);
+        }
+        if (bars.size() < 100) {
+            std::fprintf(stderr, "ERROR: insufficient bars (%zu) for %s tf=%d\n", bars.size(), sym.c_str(), tf_secs);
+            return 1;
+        }
+        std::fprintf(stderr, "[SWEEP] %s tf=%d strat=%s bars=%zu preset=%s\n",
+            sym.c_str(), tf_secs, strat.c_str(), bars.size(),
+            preset_name.empty() ? "defaults" : preset_name.c_str());
+
+        // Cost per symbol (mirror main.cpp)
+        double rt = 22.0;
+        if (sym == "btcusdt" || sym == "ethusdt") rt = 17.0;
+        else if (sym == "solusdt" || sym == "bnbusdt" || sym == "dogeusdt" || sym == "xrpusdt") rt = 20.0;
+
+        std::printf("lookback,hold,sl_atr,trail_arm,trail_dist,trades,wins,wr,net_bp,pf,sharpe,maxdd_bp\n");
+        chimera::StrategyKind kind = chimera::StrategyKind::TSMOM;
+        if (strat == "DONCHIAN")   kind = chimera::StrategyKind::DONCHIAN;
+        else if (strat == "BOLLINGER") kind = chimera::StrategyKind::BOLLINGER;
+        else if (strat == "RSI_REVERT") kind = chimera::StrategyKind::RSI_REVERT;
+        else if (strat == "KELTNER_REVERT") kind = chimera::StrategyKind::KELTNER_REVERT;
+        else if (strat == "SUPERTREND") kind = chimera::StrategyKind::SUPERTREND;
+        else if (strat == "WILLIAMS_R") kind = chimera::StrategyKind::WILLIAMS_R;
+        else if (strat == "ICHIMOKU") kind = chimera::StrategyKind::ICHIMOKU;
+        else if (strat == "DUAL_THRUST") kind = chimera::StrategyKind::DUAL_THRUST;
+        else if (strat == "BREAKOUT_PULLBACK") kind = chimera::StrategyKind::BREAKOUT_PULLBACK;
+
+        for (int lookback : {8, 10, 15, 20, 25, 30, 40, 50}) {
+        for (int hold : {3, 4, 6, 8, 12, 20}) {
+        for (double sl : {1.5, 2.0, 2.5, 3.0, 4.0}) {
+        for (double tarm : {0.5, 0.7, 1.0, 1.5}) {
+        for (double tdist : {0.3, 0.4, 0.5}) {
+            chimera::EdgeEngine::Config c{
+                .symbol = sym, .tag = "SWEEP", .kind = kind, .tf_secs = tf_secs,
+                .lookback = lookback, .hold_bars = hold, .sl_atr_mult = sl,
+                .atr_period = 14, .bb_k = 2.0, .rsi_threshold = 30.0,
+                .round_trip_bp = rt, .max_history = 64,
+                .trail_arm_atr = tarm, .trail_dist_atr = tdist,
+                .trail_tighten_atr = 3.0, .trail_tighten_dist_atr = 0.25,
+            };
+            apply_preset_named(c, preset_name);
+            chimera::EdgeEngine eng(c);
+            auto r = run_backtest(eng, c, bars);
+            std::printf("%d,%d,%.1f,%.1f,%.1f,%d,%d,%.1f,%.1f,%.3f,%.2f,%.0f\n",
+                lookback, hold, sl, tarm, tdist,
+                r.trades, r.wins, r.win_rate, r.total_bp, r.pf, r.sharpe, r.max_dd_bp);
+        }}}}}
+        return 0;
+    }
+
+    // ── ROSTER MODE: bulk-validate engine list from CSV ──────────────────
+    // Usage: ./backtest_mac --roster engine_roster.csv [--preset prod_tiered]
+    std::string roster_path;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--roster" && i+1 < argc) {
+            roster_path = argv[++i];
+            break;
+        }
+    }
+    if (!roster_path.empty()) {
+        std::ifstream rf(roster_path);
+        if (!rf.is_open()) {
+            std::fprintf(stderr, "ERROR: cannot open roster CSV %s\n", roster_path.c_str());
+            return 1;
+        }
+        std::string data_dir_local;
+        if      (fs::exists("data/btc_h1_part0.json"))           data_dir_local = "data";
+        else if (fs::exists("backtest/data/btc_h1_part0.json"))  data_dir_local = "backtest/data";
+        else { std::fprintf(stderr, "ERROR: no data dir\n"); return 1; }
+
+        std::map<std::string, std::vector<Kline>> h1_cache;
+        auto get_h1 = [&](const std::string& sym) -> std::vector<Kline>& {
+            auto it = h1_cache.find(sym);
+            if (it != h1_cache.end()) return it->second;
+            std::string base = (sym == "btcusdt") ? "btc" : sym;
+            auto v = load_all_parts(data_dir_local, base + "_h1_part");
+            return h1_cache.emplace(sym, std::move(v)).first->second;
+        };
+
+        std::string line;
+        std::getline(rf, line); // header
+        std::vector<std::string> headers;
+        {
+            std::stringstream ss(line); std::string col;
+            while (std::getline(ss, col, ',')) headers.push_back(col);
+        }
+        auto col_idx = [&](const std::string& n) {
+            for (size_t i = 0; i < headers.size(); ++i) if (headers[i] == n) return (int)i;
+            return -1;
+        };
+        int ci_tag = col_idx("tag"), ci_sym = col_idx("symbol"), ci_kind = col_idx("kind"),
+            ci_tf = col_idx("tf_secs"), ci_lb = col_idx("lookback"), ci_hb = col_idx("hold_bars"),
+            ci_sl = col_idx("sl_atr_mult"), ci_rt = col_idx("round_trip_bp"),
+            ci_ta = col_idx("trail_arm_atr"), ci_td = col_idx("trail_dist_atr"),
+            ci_tta = col_idx("trail_tighten_atr"), ci_ttd = col_idx("trail_tighten_dist_atr"),
+            ci_bb = col_idx("bb_k"), ci_rsi = col_idx("rsi_threshold"),
+            // S44: ICHI + KELT strategy-specific overrides (optional)
+            ci_itk = col_idx("ichi_tenkan_period"),
+            ci_ikj = col_idx("ichi_kijun_period"),
+            ci_isb = col_idx("ichi_senkou_b_period"),
+            ci_kel = col_idx("keltner_ema_len"),
+            ci_kam = col_idx("keltner_atr_mult");
+
+        std::printf("tag,symbol,strategy,tf_secs,trades,wins,wr,total_bp,pf,sharpe,maxdd_bp,verdict\n");
+        int passed = 0, failed = 0, skipped = 0;
+        double sum_bp = 0;
+        while (std::getline(rf, line)) {
+            if (line.empty()) continue;
+            std::vector<std::string> cols;
+            std::stringstream ss(line); std::string c;
+            while (std::getline(ss, c, ',')) cols.push_back(c);
+            if ((int)cols.size() < (int)headers.size()) continue;
+
+            std::string tag = cols[ci_tag];
+            std::string sym = cols[ci_sym];
+            std::string kind_s = cols[ci_kind];
+            int tf_secs = std::atoi(cols[ci_tf].c_str());
+
+            auto& h1 = get_h1(sym);
+            if (h1.size() < 200) {
+                std::printf("%s,%s,%s,%d,0,0,0,0,0,0,0,SKIP_NO_DATA\n",
+                    tag.c_str(), sym.c_str(), kind_s.c_str(), tf_secs);
+                ++skipped;
+                continue;
+            }
+            std::vector<Kline> bars = (tf_secs == 3600) ? h1 : synthesize_bars(h1, tf_secs);
+            if (bars.size() < 100) {
+                std::printf("%s,%s,%s,%d,0,0,0,0,0,0,0,SKIP_NO_BARS\n",
+                    tag.c_str(), sym.c_str(), kind_s.c_str(), tf_secs);
+                ++skipped;
+                continue;
+            }
+
+            chimera::StrategyKind kind = chimera::StrategyKind::TSMOM;
+            if      (kind_s == "DONCHIAN")        kind = chimera::StrategyKind::DONCHIAN;
+            else if (kind_s == "BOLLINGER")       kind = chimera::StrategyKind::BOLLINGER;
+            else if (kind_s == "RSI_REVERT")      kind = chimera::StrategyKind::RSI_REVERT;
+            else if (kind_s == "KELTNER_REVERT")  kind = chimera::StrategyKind::KELTNER_REVERT;
+            else if (kind_s == "SUPERTREND")      kind = chimera::StrategyKind::SUPERTREND;
+            else if (kind_s == "WILLIAMS_R")      kind = chimera::StrategyKind::WILLIAMS_R;
+            else if (kind_s == "ICHIMOKU")        kind = chimera::StrategyKind::ICHIMOKU;
+            else if (kind_s == "DUAL_THRUST")     kind = chimera::StrategyKind::DUAL_THRUST;
+            else if (kind_s == "STOCH_RSI")       kind = chimera::StrategyKind::STOCH_RSI;
+            else if (kind_s == "BREAKOUT_PULLBACK") kind = chimera::StrategyKind::BREAKOUT_PULLBACK;
+
+            chimera::EdgeEngine::Config cfg{
+                .symbol = sym, .tag = tag, .kind = kind, .tf_secs = tf_secs,
+                .lookback = std::atoi(cols[ci_lb].c_str()),
+                .hold_bars = std::atoi(cols[ci_hb].c_str()),
+                .sl_atr_mult = std::atof(cols[ci_sl].c_str()),
+                .atr_period = 14,
+                .bb_k = std::atof(cols[ci_bb].c_str()),
+                .rsi_threshold = std::atof(cols[ci_rsi].c_str()),
+                .round_trip_bp = std::atof(cols[ci_rt].c_str()),
+                .max_history = 64,
+                .trail_arm_atr = std::atof(cols[ci_ta].c_str()),
+                .trail_dist_atr = std::atof(cols[ci_td].c_str()),
+                .trail_tighten_atr = std::atof(cols[ci_tta].c_str()),
+                .trail_tighten_dist_atr = std::atof(cols[ci_ttd].c_str()),
+            };
+            // S44: apply optional strategy-specific overrides if present in CSV
+            if (ci_itk >= 0 && ci_itk < (int)cols.size() && !cols[ci_itk].empty())
+                cfg.ichi_tenkan_period = std::atoi(cols[ci_itk].c_str());
+            if (ci_ikj >= 0 && ci_ikj < (int)cols.size() && !cols[ci_ikj].empty())
+                cfg.ichi_kijun_period = std::atoi(cols[ci_ikj].c_str());
+            if (ci_isb >= 0 && ci_isb < (int)cols.size() && !cols[ci_isb].empty())
+                cfg.ichi_senkou_b_period = std::atoi(cols[ci_isb].c_str());
+            if (ci_kel >= 0 && ci_kel < (int)cols.size() && !cols[ci_kel].empty())
+                cfg.keltner_ema_len = std::atoi(cols[ci_kel].c_str());
+            if (ci_kam >= 0 && ci_kam < (int)cols.size() && !cols[ci_kam].empty())
+                cfg.keltner_atr_mult = std::atof(cols[ci_kam].c_str());
+            apply_preset_named(cfg, preset_name);
+            chimera::EdgeEngine eng(cfg);
+            auto r = run_backtest(eng, cfg, bars);
+            const char* verdict = (r.pf >= 1.3 && r.sharpe >= 0.3 && r.trades >= 5)
+                ? "PASS" : "FAIL";
+            if (std::string(verdict) == "PASS") ++passed; else ++failed;
+            sum_bp += r.total_bp;
+            std::printf("%s,%s,%s,%d,%d,%d,%.1f,%.1f,%.3f,%.2f,%.0f,%s\n",
+                tag.c_str(), sym.c_str(), kind_s.c_str(), tf_secs,
+                r.trades, r.wins, r.win_rate, r.total_bp, r.pf, r.sharpe, r.max_dd_bp, verdict);
+        }
+        std::fprintf(stderr, "\n[ROSTER] passed=%d failed=%d skipped=%d sum_bp=%.0f\n",
+            passed, failed, skipped, sum_bp);
+        return 0;
+    }
+
+    if (legacy_exits) {
+        std::fprintf(stderr, "[MODE] --legacy-exits: disabling hard_floor/ratchet/giveback/early_kill on all configs\n");
+        if (enable_giveback)   std::fprintf(stderr, "[MODE] +giveback (arm=100bp, pct=0.30)\n");
+        if (enable_staged)     std::fprintf(stderr, "[MODE] +staged_ratchet (start=15bp, be_arm=50bp, lock=0.75)\n");
+        if (enable_early_kill) std::fprintf(stderr, "[MODE] +early_kill (-50bp if mfe<10bp)\n");
+        if (enable_hard_floor) std::fprintf(stderr, "[MODE] +hard_floor (-100bp)\n");
+    }
 
     std::string data_dir = "data";
 
@@ -744,6 +1366,27 @@ int main(int argc, char* argv[]) {
         .trail_dist_atr = 0.4,
     };
 
+    auto apply_preset = [&](chimera::EdgeEngine::Config& c) {
+        apply_preset_named(c, preset_name);
+    };
+
+    // Back-compat: --legacy-exits maps to preset=legacy with bisection adds.
+    if (legacy_exits && preset_name.empty()) preset_name = "legacy";
+
+    for (auto* c : { &btc_d1_cfg, &eth_d1_cfg, &sol_d1_cfg, &link_d1_cfg, &bnb_d1_cfg,
+                     &xrp_h4_cfg, &bnb_h4_cfg, &link_h4_cfg, &sol_h4_cfg, &btc_h4_cfg,
+                     &eth_h4_cfg, &avax_h4_cfg,
+                     &btc_h12_cfg, &doge_h12_cfg, &avax_h12_cfg }) {
+        apply_preset(*c);
+        // Bisection adds (only meaningful with --preset legacy)
+        if (legacy_exits) {
+            if (enable_giveback)    { c->giveback_arm_bp = 100.0; c->giveback_pct = 0.30; }
+            if (enable_staged)      { c->ratchet_start_bp = 15.0; c->be_arm_bp = 50.0; c->ratchet_lock_pct = 0.75; }
+            if (enable_early_kill)  { c->early_kill_bp = -50.0; c->early_kill_mfe = 10.0; }
+            if (enable_hard_floor)  { c->hard_floor_bp = -100.0; }
+        }
+    }
+
     // ── Instantiate all 18 active engines ──────────────────────────────────
     chimera::EdgeEngine e_btc_d1(btc_d1_cfg);
     chimera::EdgeEngine e_eth_d1(eth_d1_cfg);
@@ -762,6 +1405,58 @@ int main(int argc, char* argv[]) {
     chimera::EdgeEngine e_btc_h12(btc_h12_cfg);
     chimera::EdgeEngine e_doge_h12(doge_h12_cfg);
     chimera::EdgeEngine e_avax_h12(avax_h12_cfg);
+
+    // ── OPEN-POSITION ENGINES (live as of 2026-05-28) ──────────────────────
+    // Exact configs copied from main.cpp:3482-3499 and main.cpp:4719-4736.
+    chimera::EdgeEngine::Config doge_d3_cfg{
+        .symbol         = "dogeusdt",
+        .tag            = "DOGE-TSMOM-D3",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 259200,
+        .lookback       = 50,   // S36-RETUNE
+        .hold_bars      = 3,    // S36-RETUNE
+        .sl_atr_mult    = 1.5,  // S36-RETUNE
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 17.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,  // S36
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr      = 3.0,
+        .trail_tighten_dist_atr = 0.25,
+    };
+    chimera::EdgeEngine::Config apt_h8_cfg{
+        .symbol         = "aptusdt",
+        .tag            = "APT-TSMOM-H8",
+        .kind           = chimera::StrategyKind::TSMOM,
+        .tf_secs        = 28800,
+        .lookback       = 40,   // S36-RETUNE
+        .hold_bars      = 3,    // S36-RETUNE
+        .sl_atr_mult    = 1.5,  // S36-RETUNE
+        .atr_period     = 14,
+        .bb_k           = 2.0,
+        .rsi_threshold  = 30.0,
+        .round_trip_bp  = 22.0,
+        .max_history    = 64,
+        .trail_arm_atr  = 0.5,
+        .trail_dist_atr = 0.3,
+        .trail_tighten_atr      = 1.5,
+        .trail_tighten_dist_atr = 0.15,
+    };
+    apply_preset(doge_d3_cfg);
+    apply_preset(apt_h8_cfg);
+    // Load + synthesize data for new symbols
+    auto apt_h1 = load_all_parts(data_dir, "aptusdt_h1_part");
+    auto apt_h8 = synthesize_bars(apt_h1, 28800);   // 8h
+    auto doge_d3 = synthesize_bars(doge_h1, 259200); // 3d
+    chimera::EdgeEngine e_doge_d3(doge_d3_cfg);
+    chimera::EdgeEngine e_apt_h8(apt_h8_cfg);
+
+    // [Old --prod-presets post-ctor block removed — preset dispatch now
+    //  happens via apply_preset() on Configs BEFORE ctor, mirroring the
+    //  exact same EdgeEngine.hpp preset values for byte-identical behavior.]
+    (void)prod_presets;  // back-compat flag, mapped via preset_name
 
     // ── Run active backtests ────────────────────────────────────────────
     std::printf("\n[RUN] Running OOS backtests (seed 80%%, test 20%%) for 18 engines ...\n\n");
@@ -786,6 +1481,8 @@ int main(int argc, char* argv[]) {
     h12_results.push_back(run_backtest(e_btc_h12,  btc_h12_cfg,  btc_h12));
     h12_results.push_back(run_backtest(e_doge_h12, doge_h12_cfg, doge_h12));
     h12_results.push_back(run_backtest(e_avax_h12, avax_h12_cfg, avax_h12));
+    h12_results.push_back(run_backtest(e_doge_d3,  doge_d3_cfg,  doge_d3));
+    h12_results.push_back(run_backtest(e_apt_h8,   apt_h8_cfg,   apt_h8));
 
     // Combine all for CSV and verdict
     std::vector<BacktestResult> all_results;

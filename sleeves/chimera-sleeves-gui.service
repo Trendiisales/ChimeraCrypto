@@ -1,0 +1,18 @@
+[Unit]
+Description=Chimera Sleeves Dashboard (paper, localhost:9444, nginx-fronted on 9443)
+After=network.target
+
+[Service]
+Type=simple
+User=jo
+WorkingDirectory=/home/jo/ChimeraCrypto/sleeves
+Environment=SLEEVE_GUI_BIND=127.0.0.1
+Environment=SLEEVE_GUI_PORT=9444
+ExecStart=/usr/bin/python3 /home/jo/ChimeraCrypto/sleeves/gui_server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

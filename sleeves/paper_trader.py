@@ -21,6 +21,10 @@ DATADIR = os.path.join(os.path.dirname(__file__), "data")
 COST_RT_BP = 30.0   # 15bp/side round trip
 REBAL_DAYS = 14
 WARMUP = 205        # need 200d SMA + lookback
+# LIVE paper ledger starts FRESH at go-live — only book trades on/after this date.
+# Position state still warms from full history; we just don't record old fills.
+# (Override with env LIVE_START_MS to backfill.) 2026-06-14 = fresh start.
+LIVE_START_MS = int(os.environ.get("LIVE_START_MS", "1781395200000"))
 
 def picks_for(days, syms, close, vol, btc, name, i):
     w,_ = compute_target(days, syms, close, vol, btc, name, i)
@@ -54,11 +58,12 @@ def main():
                 p=open_pos.pop(k); px=close[p["sym"]][i]
                 if px!=px: px=p["entry_px"]
                 gross=(px/p["entry_px"]-1)*1e4
-                trades.append(dict(engine=k, symbol=p["sym"],
-                    reason=("MACRO_FLAT" if not bull else "REBAL"),
-                    entry_ts=p["entry_ts"], exit_ts=ts,
-                    entry_px=p["entry_px"], exit_px=round(px,8),
-                    net_bp=round(gross-COST_RT_BP,1), mfe_bp=round(p["mfe_bp"],1)))
+                if ts >= LIVE_START_MS:   # fresh live ledger — only book go-live-forward fills
+                    trades.append(dict(engine=k, symbol=p["sym"],
+                        reason=("MACRO_FLAT" if not bull else "REBAL"),
+                        entry_ts=p["entry_ts"], exit_ts=ts,
+                        entry_px=p["entry_px"], exit_px=round(px,8),
+                        net_bp=round(gross-COST_RT_BP,1), mfe_bp=round(p["mfe_bp"],1)))
         # OPEN new desired positions
         for k,(name,sym) in desired.items():
             if k not in open_pos:

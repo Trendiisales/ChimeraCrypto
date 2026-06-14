@@ -11,22 +11,38 @@ namespace chimera {
 // All others are followers. Adding a new symbol = add entry here + main.cpp.
 //
 // Session 30: Added PEPE, WIF, FET, ONDO, TIA (5 new meme/AI/RWA symbols)
+// Session 35 (AUDIT-2026-S35): Added HBAR, INJ, ADA, TRX, SEI (5 L1/DeFi)
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 17;
+static constexpr int MAX_SYMBOLS = 62;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "BTC", "ETH", "SOL", "BNB", "AVAX", "LINK", "XRP", "DOGE",
     "SUI", "APT", "NEAR", "ARB",
-    "PEPE", "WIF", "FET", "ONDO", "TIA"
+    "PEPE", "WIF", "FET", "ONDO", "TIA",
+    "HBAR", "INJ", "ADA", "TRX", "SEI",
+    "OP", "MATIC", "ATOM", "FIL", "AAVE", "UNI", "LDO", "ENA", "JUP",
+    "TON", "DOT", "ICP", "RENDER", "PYTH", "GRT", "SAND", "MANA",
+    "CRV", "COMP", "MKR", "IMX", "STX", "ARKM", "MASK",
+    "RUNE", "JTO", "W", "TURBO", "BOME", "FLOKI",
+    "ETHFI", "EIGEN", "ZRO", "GMT", "SHIB", "BCH",
+    "LTC", "ETC", "XLM", "VET"
 };
 
 // Full Binance stream names (lowercase)
 static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "btcusdt", "ethusdt", "solusdt", "bnbusdt", "avaxusdt", "linkusdt", "xrpusdt", "dogeusdt",
     "suiusdt", "aptusdt", "nearusdt", "arbusdt",
-    "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt"
+    "pepeusdt", "wifusdt", "fetusdt", "ondousdt", "tiausdt",
+    "hbarusdt", "injusdt", "adausdt", "trxusdt", "seiusdt",
+    "opusdt", "maticusdt", "atomusdt", "filusdt", "aaveusdt", "uniusdt",
+    "ldousdt", "enausdt", "jupusdt",
+    "tonusdt", "dotusdt", "icpusdt", "renderusdt", "pythusdt", "grtusdt", "sandusdt", "manausdt",
+    "crvusdt", "compusdt", "mkrusdt", "imxusdt", "stxusdt", "arkmusdt", "maskusdt",
+    "runeusdt", "jtousdt", "wusdt", "turbousdt", "bomeusdt", "flokiusdt",
+    "ethfiusdt", "eigenusdt", "zrousdt", "gmtusdt", "shibusdt", "bchusdt",
+    "ltcusdt", "etcusdt", "xlmusdt", "vetusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -64,6 +80,51 @@ enum SymbolId : uint8_t {
     SYM_FET  = 14,
     SYM_ONDO = 15,
     SYM_TIA  = 16,
+    SYM_HBAR = 17,
+    SYM_INJ  = 18,
+    SYM_ADA  = 19,
+    SYM_TRX  = 20,
+    SYM_SEI  = 21,
+    SYM_OP    = 22,
+    SYM_MATIC = 23,
+    SYM_ATOM  = 24,
+    SYM_FIL   = 25,
+    SYM_AAVE  = 26,
+    SYM_UNI   = 27,
+    SYM_LDO   = 28,
+    SYM_ENA   = 29,
+    SYM_JUP   = 30,
+    SYM_TON   = 31,
+    SYM_DOT   = 32,
+    SYM_ICP   = 33,
+    SYM_RENDER = 34,
+    SYM_PYTH  = 35,
+    SYM_GRT   = 36,
+    SYM_SAND  = 37,
+    SYM_MANA  = 38,
+    SYM_CRV   = 39,
+    SYM_COMP  = 40,
+    SYM_MKR   = 41,
+    SYM_IMX   = 42,
+    SYM_STX   = 43,
+    SYM_ARKM  = 44,
+    SYM_MASK  = 45,
+    SYM_RUNE  = 46,
+    SYM_JTO   = 47,
+    SYM_W     = 48,
+    SYM_TURBO = 49,
+    SYM_BOME  = 50,
+    SYM_FLOKI = 51,
+    SYM_ETHFI = 52,
+    SYM_EIGEN = 53,
+    SYM_ZRO   = 54,
+    SYM_GMT   = 55,
+    SYM_SHIB  = 56,
+    SYM_BCH   = 57,
+    SYM_LTC   = 58,
+    SYM_ETC   = 59,
+    SYM_XLM   = 60,
+    SYM_VET   = 61,
     SYM_COUNT = MAX_SYMBOLS
 };
 

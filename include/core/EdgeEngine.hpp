@@ -88,7 +88,8 @@ enum class StrategyKind {
     ICHIMOKU,       // cloud breakout + Tenkan/Kijun cross (Session 29)
     SUPERTREND,     // ATR-based trailing trend flip (Session 29)
     WILLIAMS_R,     // Williams %R cross up from oversold (Session 29b)
-    STOCH_RSI       // Stochastic RSI cross up from oversold (Session 29b)
+    STOCH_RSI,      // Stochastic RSI cross up from oversold (Session 29b)
+    BREAKOUT_PULLBACK // S38: N-bar high breakout, enter on pullback that holds the breakout level
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -105,8 +106,27 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::SUPERTREND:     return "SUPERTREND";
         case StrategyKind::WILLIAMS_R:     return "WILLIAMS_R";
         case StrategyKind::STOCH_RSI:      return "STOCH_RSI";
+        case StrategyKind::BREAKOUT_PULLBACK: return "BREAKOUT_PULLBACK";
     }
     return "UNK";
+}
+
+// S54: trend/breakout kinds need a REAL trend to have edge — they churn losses
+// in chop. Mean-reversion + session kinds earn in chop (or are regime-neutral).
+// Used by the entry gate to require BULL_TREND for trend kinds but allow
+// BULL_CHOP for the rest (the "TSMOM off / mean-revert on in chop" design).
+inline bool is_trend_kind(StrategyKind k) {
+    switch (k) {
+        case StrategyKind::TSMOM:
+        case StrategyKind::DONCHIAN:
+        case StrategyKind::DUAL_THRUST:
+        case StrategyKind::ICHIMOKU:
+        case StrategyKind::SUPERTREND:
+        case StrategyKind::BREAKOUT_PULLBACK:
+            return true;
+        default:               // BOLLINGER/RSI_REVERT/KELTNER_REVERT/WILLIAMS_R/
+            return false;      // STOCH_RSI/OVERNIGHT/WEEKDAY — ok in chop
+    }
 }
 
 class EdgeEngine {
@@ -129,6 +149,16 @@ public:
         double       round_trip_bp = 10.0;
         // Max bar buffer history kept (must be >= max(lookback, bb_len, atr_period)+5)
         int          max_history = 64;
+
+        // ── P0/S46: gap-honest exit fill ──────────────────────────────────
+        // A stop guarantees you EXIT, never the PRICE. If a tick gaps BELOW the
+        // effective stop, the real fill is at that penetrating price, not the
+        // stop level. Recording the stop level was the optimism that booked SEI
+        // at -170 when it actually traded -422. Default true = fill honestly at
+        // the breaching price. gap_extra_slip_bp adds book-depth slippage on top.
+        // Harness --legacy-stop-fill sets this false to reproduce old numbers.
+        bool         realistic_gap_fill = true;
+        double       gap_extra_slip_bp  = 0.0;
 
         // ── Trailing stop parameters ──────────────────────────────────────
         // trail_arm_atr: profit (in ATR multiples) required before trail
@@ -153,6 +183,67 @@ public:
         // entry. A winner can NEVER become a loser once the trail arms.
         // Always on — no toggle needed. Uses round_trip_bp for the BE level.
 
+        // ── BP-based staged ratchet (Session 32b — tighter profit lock) ────
+        // Three-stage profit-protection runs in parallel with ATR trail.
+        // Whichever stop is tighter wins. Stages:
+        //
+        // 1. HARD FLOOR (mfe < ratchet_start_bp):
+        //    sl = max(atr_sl, entry * (1 + hard_floor_bp/1e4))
+        //
+        // 2. EARLY RAMP (ratchet_start_bp <= mfe < be_arm_bp):
+        //    Linear ramp from -50bp to 0bp (BE) as MFE traverses
+        //    [ratchet_start_bp, be_arm_bp]. Rescues "almost made it" trades
+        //    that previously died at -100 floor.
+        //
+        // 3. FULL LOCK (mfe >= be_arm_bp):
+        //    locked_bp = round_trip_bp + (mfe - be_arm_bp) * ratchet_lock_pct
+        //
+        // PLUS first-bar reversal kill (independent of stage): if MFE
+        // never crossed early_kill_mfe AND unrealised < early_kill_bp,
+        // exit immediately (catches dead-on-arrival dumps).
+        double       hard_floor_bp     = -100.0;  // absolute per-position loss cap
+        // S44L G: MFE-trail standalone. Exit when current_bp / mfe_bp < retain
+        // AND mfe_bp >= min_mfe. 0 = off.
+        double       mfe_trail_retain  = 0.0;   // e.g., 0.50 = exit if give back 50% of MFE
+        double       mfe_trail_min_bp  = 50.0;  // only active once MFE crosses this
+        // S44L H: swing-low SL — set SL = max(atr_sl, swing_low_N). 0 = off.
+        int          swing_low_bars    = 0;     // lookback bars for swing-low
+        // S44M #2: low-vol entry filter. If current ATR < ratio × avg_ATR_N,
+        // skip entry (chop suppression). 0 = off.
+        double       low_vol_skip_ratio = 0.0;
+        int          low_vol_avg_bars   = 20;
+        double       ratchet_start_bp  = 15.0;    // earliest partial protection (Stage 2 begins)
+        double       be_arm_bp         = 50.0;    // BE lock threshold (Stage 3 begins)
+        double       ratchet_lock_pct  = 0.75;    // base lock_pct (mfe 50-100 band)
+        double       early_kill_bp     = -50.0;   // exit if unrealised < this AND mfe < early_kill_mfe
+        double       early_kill_mfe    = 10.0;    // MFE threshold below which early-kill arms
+        // S35-cluster: minimum hold time before EARLY_KILL can fire (ms).
+        // Lets fresh entries breathe past initial spread/noise. hard_floor
+        // still catches catastrophe. Tape showed kills at 0-2m post-entry
+        // wiping high-correlation alt baskets — this throttles that.
+        int64_t      early_kill_min_hold_ms = 0;  // 0 = disabled (back-compat)
+
+        // ── BIG WINNER PROTECTION (Session 32c) ─────────────────────────
+        // Two extra layers stacked on top of staged ratchet, protecting
+        // trades that reach big MFE from giving back too much.
+        //
+        // A. PROGRESSIVE LOCK_PCT — lock fraction grows with MFE.
+        //    mfe band   lock_pct
+        //    50-100     ratchet_lock_pct (base, default 0.75)
+        //    100-200    prog_lock_pct_2 (default 0.85)
+        //    200-300    prog_lock_pct_3 (default 0.90)
+        //    300+       prog_lock_pct_4 (default 0.95)
+        double       prog_lock_pct_2 = 0.85;  // mfe 100-200 lock fraction
+        double       prog_lock_pct_3 = 0.90;  // mfe 200-300 lock fraction
+        double       prog_lock_pct_4 = 0.95;  // mfe 300+    lock fraction
+        //
+        // B. GIVEBACK CAP — once MFE crosses giveback_arm_bp, force exit
+        //    when current unrealised drops by giveback_pct * peak_mfe.
+        //    Catches sharp reversals that ratchet doesn't keep up with.
+        //    Set giveback_arm_bp = 0 to disable.
+        double       giveback_arm_bp = 100.0;  // arm at peak MFE >= 100bp
+        double       giveback_pct    = 0.30;   // exit if pullback >= 30% of peak
+
         // ── Smart Pyramid (Session 31) ──────────────────────────────────
         // Adds to position ONLY after trail is armed (BE locked) and profit
         // exceeds pyramid_arm_atr. Each add is pyramid_size_mult * base size.
@@ -160,6 +251,12 @@ public:
         // All pyramid adds exit with the base trade (shared trail stop).
         // Pyramid P&L is tracked separately and reported on exit.
         bool         pyramid_enabled   = false;    // master switch
+
+        // ── S34: confirmation bar gate ──────────────────────────────────────
+        // Number of consecutive bars with signal required before entering.
+        // 1 = no confirmation (legacy). 2 = wait 1 extra bar for follow-through.
+        // Filters DOA setups (signal fires on noise spike then reverts).
+        int          signal_confirm_bars = 1;
         double       pyramid_arm_atr   = 2.5;      // first add at +2.5 ATR profit
         double       pyramid_step_atr  = 1.5;      // subsequent adds every +1.5 ATR after
         double       pyramid_size_mult = 0.5;      // 50% of base size per add
@@ -187,6 +284,14 @@ public:
         double       dt_k1 = 0.5;
         // dt_range_bars: number of prior bars to compute the range (default 4)
         int          dt_range_bars = 4;
+
+        // ── BREAKOUT_PULLBACK parameters (S38) ──────────────────────────
+        // Wait for a close above the prior `lookback`-bar high (the breakout),
+        // then enter on a later bar that pulls back to the breakout level
+        // and reclaims it (low <= level, close > level, close > open).
+        // bp_max_age: max bars since the breakout to still accept the pullback
+        // entry. Stops you chasing breakouts that have already extended too far.
+        int          bp_max_age = 5;
 
         // ── Volatility regime filter (Session 28) ────────────────────────
         // When enabled, suppresses counter-trend entries (RSI/BOLL/KELTNER)
@@ -352,6 +457,10 @@ public:
         bool        is_buy = true;
         double      ref_px = 0.0;
         int64_t     ts_ms  = 0;
+        // P1/S46: safety size multiplier (DD-throttle x vol-overlay), carried to
+        // main.cpp so the live qty calc finally applies them. Was previously
+        // computed into sizing_mult_ and discarded (never reached order qty).
+        double      risk_mult = 1.0;
     };
 
     using OrderIntentCallback = std::function<void(const OrderIntentRecord&)>;
@@ -675,6 +784,17 @@ public:
         js << "\"pyramid_enabled\":" << (cfg_.pyramid_enabled ? "true" : "false") << ",";
         js << "\"pyramid_count\":" << pyramid_count_ << ",";
         js << "\"pyramid_max_adds\":" << cfg_.pyramid_max_adds << ",";
+        js << "\"pyramid_arm_atr\":" << std::setprecision(2) << cfg_.pyramid_arm_atr << ",";
+        js << "\"pyramid_step_atr\":" << cfg_.pyramid_step_atr << ",";
+        js << "\"pyramid_size_mult\":" << cfg_.pyramid_size_mult << ",";
+        // S44d audit: expose ALL filter flags + safety preset values so
+        // dashboard/API can verify overlays per-engine.
+        js << "\"vol_filter\":" << (cfg_.vol_filter ? "true" : "false") << ",";
+        js << "\"mtf_gate\":" << (cfg_.mtf_gate ? "true" : "false") << ",";
+        js << "\"corr_filter\":" << (cfg_.corr_filter ? "true" : "false") << ",";
+        js << "\"ratchet_start_bp\":" << std::setprecision(1) << cfg_.ratchet_start_bp << ",";
+        js << "\"be_arm_bp\":" << cfg_.be_arm_bp << ",";
+        js << "\"ratchet_lock_pct\":" << std::setprecision(2) << cfg_.ratchet_lock_pct << ",";
 
         // Momentum: close[now] vs close[now - lookback]
         bool signal_ready = ((int)closes_.size() >= cfg_.lookback + 1);
@@ -706,15 +826,165 @@ public:
     double total_bp() const { return total_bp_; }
     bool in_position() const { return in_position_; }
     int bars_in_buffer() const { return (int)closes_.size(); }
+
+    // Unrealised P&L (bp) at given spot price. Returns 0 if flat.
+    // Used by main.cpp aggregate drawdown circuit (Session 32).
+    double unrealised_bp(double spot_px) const {
+        if (!in_position_ || entry_px_ <= 0.0 || spot_px <= 0.0) return 0.0;
+        return (spot_px / entry_px_ - 1.0) * 1e4;
+    }
+    double entry_px() const { return entry_px_; }
+    double last_close() const { return last_close_; }
     int max_history_needed() const { return cfg_.max_history; }
 
     // Runtime filter activation (can be called after construction)
     void enable_vol_filter(bool b) { cfg_.vol_filter = b; }
     void enable_mtf_gate(bool b)   { cfg_.mtf_gate = b; }
     void enable_adx_filter(bool b) { cfg_.adx_filter = b; }
+    void set_adx_threshold(double t) { cfg_.adx_threshold = t; }
     void enable_volume_gate(bool b) { cfg_.volume_gate = b; }
     void enable_corr_filter(bool b) { cfg_.corr_filter = b; }
     void enable_session_filter(bool b) { cfg_.session_filter = b; }
+
+    // ── S34: uniform safety preset ──────────────────────────────────────
+    // Force-applies tight protection across all active engines so each one
+    // has identical: hard floor, BE lock, tight trail, giveback cap,
+    // early-kill. Used by main.cpp at startup to override bespoke per-engine
+    // configs that may have been wider than wanted.
+    //
+    // Spot-only constraint: this codebase only buys (long). No short path
+    // exists in maybe_enter_/exit_position_/SpotExecutor.
+    // ── S34: PROTECTION-ONLY preset (elite engines, PF >= 2.0) ──────────
+    // Keep this engine's bespoke trail_arm/trail_dist/trail_tighten config
+    // (those drove the validated PF). Override ONLY the per-trade loss
+    // caps + BE lock + giveback so a winner can't turn into a loser and
+    // a deadweight trade can't bleed.
+    // ── S36 PRESETS — staged-ratchet ONLY ────────────────────────────────
+    // Backtest matrix (2026-05-28) over 15 TSMOM engines × 5yr OOS proved:
+    //   prod_tiered (giveback 10%@rt+10 + early_kill -25@<15mfe + hard_floor
+    //   -50 + signal_confirm=2) = -753,182bp / 0 of 15 engines profitable.
+    //   staged_only (BE-ratchet + progressive lock 75/85/90/95% ONLY) =
+    //   +274,840bp / 15 of 15 profitable, avg PF 2.44.
+    //
+    // Per-layer bisection cost vs legacy ATR-trail baseline:
+    //   giveback_cap @ rt+10/10%: -942k bp (catastrophic — exits winners at
+    //     +24bp before trend extends)
+    //   early_kill @ -25bp/<15mfe: -178k bp (kills DOA + valid early dips
+    //     indiscriminately)
+    //   hard_floor @ -50bp:        -28k bp (cuts winners too small)
+    //   signal_confirm_bars=2:     marginally +ve (cuts noise entries) but
+    //     does NOT compensate for the three above
+    //   staged_ratchet (BE-lock + 75/85/90/95 prog lock): +86k bp (the ONE
+    //     beneficial layer — locks profit at correct MFE thresholds without
+    //     forcing exit on noise pullbacks)
+    //
+    // Both presets now DISABLE giveback / early_kill / hard_floor and KEEP
+    // staged-ratchet only. signal_confirm_bars=1 (was 2 — marginal benefit
+    // not worth code path complexity).
+    void apply_protection_only_preset() {
+        // Disable destructive layers
+        cfg_.hard_floor_bp           =  0.0;   // < 0 = active → 0 = off
+        cfg_.early_kill_bp           =  0.0;
+        cfg_.early_kill_mfe          =  0.0;
+        cfg_.early_kill_min_hold_ms  =  0;
+        cfg_.giveback_arm_bp         =  0.0;   // > 0 = active → 0 = off
+        cfg_.signal_confirm_bars     =  1;
+
+        // KEEP staged BE-ratchet (the one beneficial layer)
+        double rt = cfg_.round_trip_bp;
+        cfg_.ratchet_start_bp  = rt;
+        cfg_.be_arm_bp         = rt + 10.0;
+        cfg_.ratchet_lock_pct  = 0.75;
+        cfg_.prog_lock_pct_2   = 0.85;
+        cfg_.prog_lock_pct_3   = 0.90;
+        cfg_.prog_lock_pct_4   = 0.95;
+
+        // INTENTIONALLY NOT touched: trail_arm_atr, trail_dist_atr,
+        // trail_tighten_atr, trail_tighten_dist_atr — preserve bespoke
+        // per-engine trail tuning that drove validated PF.
+    }
+
+    // ── S38b: enable_pyramid_xlow ─────────────────────────────────────────
+    // Switches pyramid ON with aggressive arm threshold (0.5 ATR profit
+    // triggers first add). Backtested across all 4 WF windows on 26k
+    // configs: 99.2% of high-PF (>=1.5) candidates gain bp, 0 lose >500bp.
+    // Mean lift ~+5-10% on net bp. Pyramid adds only after trail-armed
+    // (BE locked) so worst case = adds give back to BE.
+    void enable_pyramid_xlow() {
+        cfg_.pyramid_enabled    = true;
+        cfg_.pyramid_arm_atr    = 0.5;
+        cfg_.pyramid_step_atr   = 0.3;
+        cfg_.pyramid_size_mult  = 0.5;
+        cfg_.pyramid_max_adds   = 1;   // S38b: conservative — 1 add = 1.5x max
+    }
+
+    // ── S44: enable_pyramid_elite — validated on 405-engine 180d OOS ──────
+    // +2.8% portfolio bp vs xlow, DD -0.1%, 343/405 engines improved bp,
+    // 405/405 retained PF >=90%. arm 0.5 ATR, step 0.3 ATR, mult 0.75, 4 adds.
+    // Worst case = pyramid adds give back to BE (BE-locked before first add).
+    void enable_pyramid_elite() {
+        cfg_.pyramid_enabled    = true;
+        cfg_.pyramid_arm_atr    = 0.5;
+        cfg_.pyramid_step_atr   = 0.3;
+        cfg_.pyramid_size_mult  = 0.75;
+        cfg_.pyramid_max_adds   = 4;
+    }
+    // S44f: per-tier pyramid_max override (TOP_ELITE=3, STRONG=3, STANDARD=2)
+    void set_pyramid_max_adds(int n) { cfg_.pyramid_max_adds = n; }
+    // S44i: per-trade hard floor — tighten SL inward to cap loss at N bp.
+    // Sign convention: pass negative bp (e.g., -50.0 for 50bp loss cap).
+    // Acts as upper bound on per-position drawdown when atr_sl is wider.
+    void set_hard_floor_bp(double bp) { cfg_.hard_floor_bp = bp; }
+    void set_realistic_gap_fill(bool b) { cfg_.realistic_gap_fill = b; }
+    void set_gap_extra_slip_bp(double bp) { cfg_.gap_extra_slip_bp = bp; }
+    // S44k: tune profit-protection bands. be_arm = MFE bp at which BE locks.
+    // lock_pct = fraction of MFE above be_arm that's protected.
+    void set_be_arm_bp(double bp)     { cfg_.be_arm_bp = bp; }
+    void set_ratchet_start_bp(double bp) { cfg_.ratchet_start_bp = bp; }
+    void set_ratchet_lock_pct(double p) { cfg_.ratchet_lock_pct = p; }
+    void set_mfe_trail(double retain, double min_bp) {
+        cfg_.mfe_trail_retain = retain; cfg_.mfe_trail_min_bp = min_bp;
+    }
+    void set_swing_low_bars(int n) { cfg_.swing_low_bars = n; }
+    void set_low_vol_filter(double ratio, int avg_bars) {
+        cfg_.low_vol_skip_ratio = ratio; cfg_.low_vol_avg_bars = avg_bars;
+    }
+    void set_signal_confirm_bars(int n) { cfg_.signal_confirm_bars = n; }
+    // S44L F: vol-adaptive SL. When set > 0, on entry compare ATR to its
+    // rolling average; if ATR > avg × ratio_threshold, tighten SL by mult.
+    double vol_adaptive_ratio_ = 0.0;    // 0 = off
+    double vol_adaptive_mult_  = 1.0;    // SL multiplier when triggered
+    void set_vol_adaptive(double ratio, double sl_mult) {
+        vol_adaptive_ratio_ = ratio; vol_adaptive_mult_ = sl_mult;
+    }
+
+    void apply_safety_preset() {
+        // Same layer logic as protection_only — destructive layers off,
+        // staged ratchet on. Difference vs protection_only: this preset
+        // ALSO overrides bespoke trail params with a single uniform set
+        // (was tighter trail; now matches Session-14 baseline since trail
+        // is dominated by BE-ratchet anyway under staged-only).
+        cfg_.hard_floor_bp           =  0.0;
+        cfg_.early_kill_bp           =  0.0;
+        cfg_.early_kill_mfe          =  0.0;
+        cfg_.early_kill_min_hold_ms  =  0;
+        cfg_.giveback_arm_bp         =  0.0;
+        cfg_.signal_confirm_bars     =  1;
+
+        double rt = cfg_.round_trip_bp;
+        cfg_.ratchet_start_bp  = rt;
+        cfg_.be_arm_bp         = rt + 10.0;
+        cfg_.ratchet_lock_pct  = 0.75;
+        cfg_.prog_lock_pct_2   = 0.85;
+        cfg_.prog_lock_pct_3   = 0.90;
+        cfg_.prog_lock_pct_4   = 0.95;
+
+        // Uniform trail (S14 baseline values — proven across roster)
+        cfg_.trail_arm_atr          = 1.0;
+        cfg_.trail_dist_atr         = 0.4;
+        cfg_.trail_tighten_atr      = 0.0;   // disabled (default)
+        cfg_.trail_tighten_dist_atr = 0.3;
+    }
 
     // Correlation regime: set by main.cpp when rolling corr(symbol, BTC) > threshold
     void set_corr_high(bool b) { corr_high_ = b; }
@@ -723,6 +993,12 @@ public:
     // Portfolio gate: set by main.cpp when max positions reached or drawdown breaker fires
     void set_portfolio_gate(bool allowed) { portfolio_entry_allowed_ = allowed; }
     bool portfolio_entry_allowed() const { return portfolio_entry_allowed_; }
+    // ── Correlation-cluster exposure gate (independent of portfolio_gate) ──
+    // main.cpp recomputes this every tick from live per-symbol / per-cluster
+    // open-position counts. Self-resetting: re-opens automatically when a
+    // correlated position exits. ANDed with portfolio_entry_allowed_ at entry.
+    void set_cluster_gate(bool allowed) { cluster_gate_ = allowed; }
+    bool cluster_gate() const { return cluster_gate_; }
 
     // MTF gate: called externally when D1 TSMOM trend state changes.
     // true = D1 bullish (allow all entries), false = D1 bearish (suppress counter-trend).
@@ -743,7 +1019,8 @@ public:
     bool is_trend_following() const {
         return cfg_.kind == StrategyKind::TSMOM || cfg_.kind == StrategyKind::DONCHIAN ||
                cfg_.kind == StrategyKind::DUAL_THRUST || cfg_.kind == StrategyKind::ICHIMOKU ||
-               cfg_.kind == StrategyKind::SUPERTREND;
+               cfg_.kind == StrategyKind::SUPERTREND ||
+               cfg_.kind == StrategyKind::BREAKOUT_PULLBACK;
     }
 
     // Returns the TSMOM trend direction: true = bullish (close > close[lookback]).
@@ -779,6 +1056,9 @@ public:
     // Reduced during high vol, boosted during funding tailwind.
     // Applied by main.cpp at execution time (not inside engine signal logic).
     void set_sizing_mult(double m) { sizing_mult_ = m; }
+    // P1/S46: safety size mult (DD-throttle x vol-overlay) actually applied to qty
+    void set_risk_mult(double m) { risk_mult_ = m; }
+    double risk_mult() const { return risk_mult_; }
     double sizing_mult() const { return sizing_mult_; }
 
     // ── Session 30: Cross-TF momentum score (Edge 5) ────────────────────────
@@ -825,6 +1105,7 @@ private:
 
     // Portfolio gate state (fed by main.cpp)
     bool    portfolio_entry_allowed_ = true;  // false = max positions or drawdown breaker active
+    bool    cluster_gate_            = true;   // false = correlated-cluster exposure cap hit
 
     // Session 30: Funding filter state
     bool    funding_tailwind_ = false;  // negative funding = carry edge for longs
@@ -835,6 +1116,7 @@ private:
 
     // Session 30: Position sizing multiplier (base=1.0)
     double  sizing_mult_ = 1.0;
+    double  risk_mult_   = 1.0;   // P1: DD-throttle x vol-overlay, applied to live qty
 
     // Session 30: Cross-TF momentum score (0.0-1.0)
     double  cross_tf_score_ = 0.0;
@@ -942,50 +1224,45 @@ private:
     }
 
     // ── ADX (Average Directional Index) ─────────────────────────────────────
-    // Simplified ADX: average of DX values over N bars.
-    // DX = |+DI - -DI| / (+DI + -DI) * 100
-    // where +DI and -DI are computed per-bar from directional movement / TR.
+    // FIXED Session 32d: prior version zeroed the smaller DM before computing
+    // DX, which forced per-bar DX to always be 0 or 100. Real ADX keeps both
+    // DMs and uses smoothed sums. We use simple averaging over n bars (not
+    // full Wilder smoothing) but keep both DMs — gives a useful 0-100 range.
     // Returns 25.0 (neutral) if insufficient data.
     double adx_(int n) const {
-        // Need n+1 bars to compute n DX values (each DX needs current + prior bar)
         if ((int)closes_.size() < n + 2) return 25.0;
         const int sz = (int)closes_.size();
 
-        // Compute average DX over last n bars
-        double sum_dx = 0.0;
-        int valid = 0;
+        // Accumulate +DM, -DM, TR over the window; compute DX from the sums.
+        double sum_plus_dm = 0.0, sum_minus_dm = 0.0, sum_tr = 0.0;
         for (int i = sz - n; i < sz; ++i) {
-            double hi     = highs_[i];
-            double lo     = lows_[i];
+            double hi      = highs_[i];
+            double lo      = lows_[i];
             double prev_hi = highs_[i - 1];
             double prev_lo = lows_[i - 1];
             double prev_c  = closes_[i - 1];
 
-            double plus_dm  = hi - prev_hi;
-            double minus_dm = prev_lo - lo;
+            double up_move   = hi - prev_hi;
+            double down_move = prev_lo - lo;
 
-            if (plus_dm < 0.0) plus_dm = 0.0;
-            if (minus_dm < 0.0) minus_dm = 0.0;
-
-            // Only the larger DM survives
-            if (plus_dm > minus_dm) { minus_dm = 0.0; }
-            else if (minus_dm > plus_dm) { plus_dm = 0.0; }
-            else { plus_dm = 0.0; minus_dm = 0.0; }
+            double plus_dm  = (up_move > down_move && up_move > 0.0)   ? up_move   : 0.0;
+            double minus_dm = (down_move > up_move && down_move > 0.0) ? down_move : 0.0;
 
             double tr = std::max({hi - lo,
                                   std::fabs(hi - prev_c),
                                   std::fabs(lo - prev_c)});
-            if (tr <= 0.0) continue;
 
-            double plus_di  = plus_dm / tr;
-            double minus_di = minus_dm / tr;
-            double di_sum   = plus_di + minus_di;
-            double dx = (di_sum > 0.0) ? (std::fabs(plus_di - minus_di) / di_sum * 100.0) : 0.0;
-            sum_dx += dx;
-            valid++;
+            sum_plus_dm  += plus_dm;
+            sum_minus_dm += minus_dm;
+            sum_tr       += tr;
         }
-        if (valid == 0) return 25.0;
-        return sum_dx / (double)valid;
+        if (sum_tr <= 0.0) return 25.0;
+
+        double plus_di  = (sum_plus_dm  / sum_tr) * 100.0;
+        double minus_di = (sum_minus_dm / sum_tr) * 100.0;
+        double di_sum   = plus_di + minus_di;
+        if (di_sum <= 0.0) return 0.0;
+        return std::fabs(plus_di - minus_di) / di_sum * 100.0;
     }
 
     // ── Williams %R (Session 29b) ──────────────────────────────────────────
@@ -1298,22 +1575,39 @@ private:
     }
 
     // ── Signal evaluation on the just-closed bar ─────────────────────────────
-    bool signal_tsmom_() const {
-        if ((int)closes_.size() < cfg_.lookback + 1) return false;
-        double now = closes_.back();
-        double ref = closes_[closes_.size() - 1 - cfg_.lookback];
+    bool signal_tsmom_() const { return signal_tsmom_at_(0); }
+    bool signal_donchian_() const { return signal_donchian_at_(0); }
+
+    // S34: signal at bar `back` bars ago (0 = current). Used by confirmation
+    // gate to look backward through history (no time wait needed).
+    bool signal_tsmom_at_(int back) const {
+        int sz = (int)closes_.size();
+        if (sz < cfg_.lookback + 1 + back) return false;
+        double now = closes_[sz - 1 - back];
+        double ref = closes_[sz - 1 - back - cfg_.lookback];
         return now > ref;
     }
 
-    bool signal_donchian_() const {
-        // Long breakout: close > rolling N-bar PRIOR high (excludes current bar)
-        if ((int)highs_.size() < cfg_.lookback + 1) return false;
-        const int sz = (int)highs_.size();
+    bool signal_donchian_at_(int back) const {
+        int sz = (int)highs_.size();
+        if (sz < cfg_.lookback + 1 + back) return false;
         double prior_high = 0.0;
-        for (int i = sz - cfg_.lookback - 1; i < sz - 1; ++i) {
+        int start = sz - back - cfg_.lookback - 1;
+        int end   = sz - back - 1;
+        for (int i = start; i < end; ++i) {
             if (highs_[i] > prior_high) prior_high = highs_[i];
         }
-        return closes_.back() > prior_high;
+        return closes_[sz - 1 - back] > prior_high;
+    }
+
+    // S34: dispatcher for backward signal check on supported strategies.
+    // Returns -1 if strategy doesn't support back-check (caller falls back).
+    int signal_at_back(int back) const {
+        switch (cfg_.kind) {
+            case StrategyKind::TSMOM:    return signal_tsmom_at_(back) ? 1 : 0;
+            case StrategyKind::DONCHIAN: return signal_donchian_at_(back) ? 1 : 0;
+            default: return -1;  // unsupported -> caller skips confirm check
+        }
     }
 
     bool signal_bollinger_() const {
@@ -1337,6 +1631,45 @@ private:
         double lower = keltner_lower_();
         if (lower <= 0.0) return false;
         return (lows_.back() <= lower) && (closes_.back() > lower);
+    }
+
+    // ── BREAKOUT_PULLBACK (S38): N-bar high breakout, enter on pullback ────
+    // Search the last [1..bp_max_age] bars for a prior bar whose close
+    // exceeded the highest high over the `lookback` bars ending just before it
+    // (the "breakout bar"). That window's high is the `breakout_level`.
+    // Enter on the current bar only if it pulled back to or below that level
+    // (low <= level), reclaimed it (close > level), and closed bullish
+    // (close > open). Earliest qualifying breakout wins.
+    bool signal_breakout_pullback_() const {
+        // S38: BO_PB is bull-only. Suppress when externally-fed D1 trend is
+        // bearish (set via set_d1_bullish() by main.cpp / sweep harness).
+        // Without this, false-breakout-in-bear murders the strategy.
+        if (!d1_bullish_) return false;
+
+        int sz = (int)highs_.size();
+        int lb = cfg_.lookback;
+        int max_age = cfg_.bp_max_age > 0 ? cfg_.bp_max_age : 5;
+        if (sz < lb + max_age + 2) return false;
+        if ((int)opens_.size() != sz) return false;
+
+        for (int b = 1; b <= max_age; ++b) {
+            int bar_idx = sz - 1 - b;
+            int win_end = bar_idx;            // exclusive
+            int win_start = win_end - lb;
+            if (win_start < 0) continue;
+            double prior_high = 0.0;
+            for (int i = win_start; i < win_end; ++i) {
+                if (highs_[i] > prior_high) prior_high = highs_[i];
+            }
+            if (prior_high <= 0.0) continue;
+            if (closes_[bar_idx] > prior_high) {
+                double level = prior_high;
+                return (lows_.back()   <= level)
+                    && (closes_.back() >  level)
+                    && (closes_.back() >  opens_.back());
+            }
+        }
+        return false;
     }
 
     // ── DUAL_THRUST: range breakout entry ───────────────────────────────────
@@ -1476,6 +1809,7 @@ private:
             case StrategyKind::SUPERTREND:     fire = signal_supertrend_(st_flip); break;
             case StrategyKind::WILLIAMS_R:     fire = signal_williams_r_();        break;
             case StrategyKind::STOCH_RSI:      fire = signal_stoch_rsi_();         break;
+            case StrategyKind::BREAKOUT_PULLBACK: fire = signal_breakout_pullback_(); break;
         }
         if (!fire) return;
 
@@ -1487,6 +1821,44 @@ private:
                 cfg_.tag.c_str());
             std::fflush(stdout);
             return;
+        }
+
+        // ── Correlation-cluster exposure cap (Session 45) ───────────────────
+        // Blocks a fresh entry when too many correlated positions are already
+        // open (per-symbol and per-cluster caps enforced in main.cpp). Prevents
+        // the May-30 failure: 6 same-symbol engines firing together, all
+        // stopped out on one adverse beta move for an amplified loss.
+        if (!cluster_gate_) {
+            std::printf("[%s] CLUSTER_GATE: correlated exposure cap hit — signal SUPPRESSED\n",
+                cfg_.tag.c_str());
+            std::fflush(stdout);
+            return;
+        }
+
+        // ── S34: CONFIRMATION BAR (backward look — no time wait) ───────────
+        // Require signal_confirm_bars consecutive bars with signal direction.
+        // Looks BACKWARD through history rather than forward-waiting — if
+        // the prior (N-1) bars already showed signal, enter NOW.
+        // Filters DOA setups where 1-bar signal didn't follow through.
+        if (cfg_.signal_confirm_bars > 1) {
+            int needed = cfg_.signal_confirm_bars - 1;
+            int prior_ok = 0;
+            int prior_unknown = 0;
+            for (int k = 1; k <= needed; k++) {
+                int r = signal_at_back(k);
+                if (r == 1) prior_ok++;
+                else if (r == -1) prior_unknown++;
+                else break;  // r == 0 -> broke confirmation
+            }
+            // If strategy doesn't support back-check (mean-revert kinds),
+            // skip confirmation entirely — single-bar signal is fine for them.
+            bool unsupported = (prior_unknown == needed);
+            if (!unsupported && prior_ok < needed) {
+                std::printf("[%s] CONFIRMATION_BAR: prior_ok=%d/%d — wait\n",
+                    cfg_.tag.c_str(), prior_ok, needed);
+                std::fflush(stdout);
+                return;
+            }
         }
 
         // ── Funding headwind filter (Session 30, Edge 1) ────────────────────
@@ -1642,6 +2014,23 @@ private:
 
         double a = atr_(cfg_.atr_period);
         if (a <= 0.0) return;
+        // S44M #2: low-vol entry filter. Compare current ATR to rolling avg.
+        // When ATR is suppressed (chop), skip entry — TSMOM bait into reversal.
+        if (cfg_.low_vol_skip_ratio > 0.0 && cfg_.low_vol_avg_bars > 0
+            && (int)closes_.size() > cfg_.low_vol_avg_bars + cfg_.atr_period) {
+            double sum_atr = 0.0;
+            int n_atr = std::min((int)closes_.size() - cfg_.atr_period, cfg_.low_vol_avg_bars);
+            for (int i = 0; i < n_atr; ++i) {
+                int idx = (int)closes_.size() - n_atr + i;
+                if (idx >= cfg_.atr_period) {
+                    sum_atr += std::abs(highs_[idx] - lows_[idx]);
+                }
+            }
+            double avg_atr = (n_atr > 0) ? sum_atr / n_atr : a;
+            if (avg_atr > 0.0 && a < cfg_.low_vol_skip_ratio * avg_atr) {
+                return;  // chop suppression
+            }
+        }
 
         // Entry will materialise on the NEXT bar's open — but in a live tick
         // stream, "next bar open" = current price right now (we're at the bar
@@ -1653,6 +2042,25 @@ private:
         entry_px_     = last_close_;
         atr_at_entry_ = a;
         sl_px_        = entry_px_ - cfg_.sl_atr_mult * a;
+        // S44L H: swing-low SL — find min(low) over last N bars, use as
+        // tighter bound. SL = max(atr_sl, swing_low) so we never go wider.
+        if (cfg_.swing_low_bars > 0 && (int)lows_.size() >= cfg_.swing_low_bars) {
+            double swing = lows_[lows_.size() - cfg_.swing_low_bars];
+            for (size_t i = lows_.size() - cfg_.swing_low_bars; i < lows_.size(); ++i) {
+                if (lows_[i] < swing) swing = lows_[i];
+            }
+            if (swing > sl_px_) sl_px_ = swing;  // tighter (closer to entry)
+        }
+        // ── HARD FLOOR (Session 32) — never lose more than hard_floor_bp ──
+        if (cfg_.hard_floor_bp < 0.0) {
+            double floor_px = entry_px_ * (1.0 + cfg_.hard_floor_bp / 1e4);
+            if (sl_px_ < floor_px) {
+                std::printf("[%s] HARD_FLOOR  atr_sl=%.6f  floor=%.6f(%.0fbp)  -> tighten\n",
+                    cfg_.tag.c_str(), sl_px_, floor_px, cfg_.hard_floor_bp);
+                std::fflush(stdout);
+                sl_px_ = floor_px;
+            }
+        }
         entry_ts_ms_  = cur_open_ts_ms_ + cfg_.tf_secs * 1000;
         time_exit_ts_ms_ = entry_ts_ms_ + (int64_t)cfg_.hold_bars * cfg_.tf_secs * 1000;
         in_position_  = true;
@@ -1688,6 +2096,7 @@ private:
             intent.is_buy = true;
             intent.ref_px = entry_px_;
             intent.ts_ms  = entry_ts_ms_;
+            intent.risk_mult = risk_mult_;   // P1: carry DD-throttle x vol-overlay to qty calc
             on_order_intent_(intent);
         }
     }
@@ -1705,6 +2114,82 @@ private:
         // This is the floor for the trail stop once armed. A winner can
         // NEVER become a loser after the trail arms.
         double be_px = entry_px_ * (1.0 + cfg_.round_trip_bp / 1e4);
+
+        // ── STAGED BP RATCHET + PROGRESSIVE LOCK (Session 32b/c) ────────
+        // Stage 2 (mfe in [ratchet_start_bp, be_arm_bp]): linear ramp -50bp -> 0bp.
+        // Stage 3 (mfe >= be_arm_bp): lock = round_trip + (mfe-arm) * lock_pct
+        //   where lock_pct grows progressively with MFE:
+        //     50-100: ratchet_lock_pct (0.75)
+        //     100-200: prog_lock_pct_2 (0.85)
+        //     200-300: prog_lock_pct_3 (0.90)
+        //     300+:    prog_lock_pct_4 (0.95)
+        if (cfg_.ratchet_start_bp > 0.0 && mfe_bp_ >= cfg_.ratchet_start_bp) {
+            double locked_bp;
+            if (mfe_bp_ < cfg_.be_arm_bp) {
+                // Stage 2: ramp -50bp -> 0bp linearly between start and arm
+                double range = cfg_.be_arm_bp - cfg_.ratchet_start_bp;
+                if (range > 0.0) {
+                    locked_bp = -50.0 + (mfe_bp_ - cfg_.ratchet_start_bp) / range * 50.0;
+                } else {
+                    locked_bp = 0.0;
+                }
+            } else {
+                // Stage 3: progressive lock_pct grows with MFE
+                double lock_pct;
+                if      (mfe_bp_ < 100.0) lock_pct = cfg_.ratchet_lock_pct;
+                else if (mfe_bp_ < 200.0) lock_pct = cfg_.prog_lock_pct_2;
+                else if (mfe_bp_ < 300.0) lock_pct = cfg_.prog_lock_pct_3;
+                else                       lock_pct = cfg_.prog_lock_pct_4;
+                locked_bp = cfg_.round_trip_bp + (mfe_bp_ - cfg_.be_arm_bp) * lock_pct;
+            }
+            double ratchet_sl = entry_px_ * (1.0 + locked_bp / 1e4);
+            if (ratchet_sl > sl_px_) {
+                double prev = sl_px_;
+                sl_px_ = ratchet_sl;
+                std::printf("[%s] STAGED_RATCHET  mfe=+%.1fbp  locked=%+.1fbp  sl: %.6f -> %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, locked_bp, prev, sl_px_);
+                std::fflush(stdout);
+            }
+            if (trail_armed_ && ratchet_sl > trail_stop_px_) {
+                trail_stop_px_ = ratchet_sl;
+            }
+        }
+
+        // ── EARLY-KILL: dead-on-arrival dump exit (Session 32b) ─────────
+        // If MFE never crossed early_kill_mfe AND price is currently deeper
+        // than early_kill_bp, exit before the full hard floor kicks in.
+        if (cfg_.early_kill_bp < 0.0 && mfe_bp_ < cfg_.early_kill_mfe) {
+            int64_t held_ms = (entry_ts_ms_ > 0) ? (ts_ms - entry_ts_ms_) : 0;
+            bool min_hold_ok = (cfg_.early_kill_min_hold_ms <= 0) ||
+                               (held_ms >= cfg_.early_kill_min_hold_ms);
+            double unreal_bp = (price / entry_px_ - 1.0) * 1e4;
+            if (min_hold_ok && unreal_bp <= cfg_.early_kill_bp) {
+                std::printf("[%s] EARLY_KILL  mfe=+%.1fbp(<%.0f)  unreal=%+.1fbp  held=%llds  exit @ %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, cfg_.early_kill_mfe, unreal_bp,
+                    (long long)(held_ms / 1000), price);
+                std::fflush(stdout);
+                exit_position_(price, ts_ms, "EARLY_KILL");
+                return;
+            }
+        }
+
+        // ── GIVEBACK CAP (Session 32c) ──────────────────────────────────
+        // Once MFE crosses giveback_arm_bp, force exit when current
+        // unrealised drops by giveback_pct of the peak. Catches sharp
+        // reversals that the ratchet's incremental updates miss.
+        // Example: peak +200bp, giveback_pct=0.30 -> exit if cur <= +140bp.
+        if (cfg_.giveback_arm_bp > 0.0 && mfe_bp_ >= cfg_.giveback_arm_bp) {
+            double cur_bp = (price / entry_px_ - 1.0) * 1e4;
+            double giveback_bp = mfe_bp_ - cur_bp;
+            if (giveback_bp >= mfe_bp_ * cfg_.giveback_pct) {
+                std::printf("[%s] GIVEBACK_CAP  peak_mfe=+%.1fbp  cur=%+.1fbp  giveback=%.1fbp(>=%.0f%%)  exit @ %.6f\n",
+                    cfg_.tag.c_str(), mfe_bp_, cur_bp, giveback_bp,
+                    cfg_.giveback_pct * 100.0, price);
+                std::fflush(stdout);
+                exit_position_(price, ts_ms, "GIVEBACK");
+                return;
+            }
+        }
 
         // Trailing stop logic: arm when price reaches the arm level,
         // then ratchet the trail stop up as price makes new highs.
@@ -1743,7 +2228,11 @@ private:
             }
 
             // ── Smart Pyramid: add size when profit deep enough (Session 31) ─
-            if (cfg_.pyramid_enabled && pyramid_count_ < cfg_.pyramid_max_adds) {
+            // S38b: gate on portfolio_entry_allowed_ — if DD breaker or max-pos
+            // tripped, suppress pyramid adds too. Prevents exposure growth
+            // during a portfolio-level adverse event.
+            if (cfg_.pyramid_enabled && pyramid_count_ < cfg_.pyramid_max_adds
+                && portfolio_entry_allowed_) {
                 double live_profit_atr = (price - entry_px_) / atr_at_entry_;
                 if (live_profit_atr >= pyramid_next_atr_) {
                     PyramidAdd pa;
@@ -1775,8 +2264,32 @@ private:
         double eff_stop = effective_stop_();
         if (price <= eff_stop) {
             const char* reason = (trail_armed_ && trail_stop_px_ >= sl_px_) ? "TRAIL" : "SL";
-            exit_position_(eff_stop, ts_ms, reason);
+            // P0/S46: gap-honest fill. In LIVE the engine sees dense (~5s) ticks,
+            // so the breaching tick `price` IS the real next-available fill — a
+            // stop crossed by continuous trade fills within a few bp of the stop,
+            // and a genuine gap fills at the jumped price. Default ON for live.
+            // NOTE for backtest: the path-sim feeds only O/H/L/C, so `price` can be
+            // a coarse-bar low that live would never ride down to — that is why the
+            // HARNESS leaves this OFF for the baseline edge measure (fills at
+            // eff_stop, correct for continuous liquid pairs) and only turns it ON
+            // for the explicit --inject-gap stress test. gap_extra_slip_bp pads
+            // book-depth slippage on thin names.
+            double fill = eff_stop;
+            if (cfg_.realistic_gap_fill && price < eff_stop) {
+                fill = price * (1.0 - cfg_.gap_extra_slip_bp / 1e4);
+            }
+            exit_position_(fill, ts_ms, reason);
             return;
+        }
+
+        // S44L G: MFE-trail standalone. Once MFE crosses min_bp, exit if
+        // current bp pulls back to retain% of MFE peak.
+        if (cfg_.mfe_trail_retain > 0.0 && mfe_bp_ >= cfg_.mfe_trail_min_bp) {
+            double current_bp = (price / entry_px_ - 1.0) * 1e4;
+            if (current_bp < mfe_bp_ * cfg_.mfe_trail_retain) {
+                exit_position_(price, ts_ms, "MFE_TRAIL");
+                return;
+            }
         }
 
         // Time exit: held long enough.

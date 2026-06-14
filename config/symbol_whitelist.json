@@ -1,0 +1,11 @@
+{
+  "_comment": "Binance whitelist (50-sym cap). Optimized by composite avg_PF * sqrt(engine_count). Update + restart to change.",
+  "whitelisted": [
+    "btcusdt","ethusdt","solusdt","bnbusdt","linkusdt","xrpusdt","dogeusdt","adausdt","trxusdt",
+    "aptusdt","arbusdt","suiusdt","nearusdt","injusdt","hbarusdt","seiusdt","jtousdt","jupusdt","pythusdt",
+    "atomusdt","compusdt","crvusdt","dotusdt","grtusdt","icpusdt","ltcusdt","manausdt","runeusdt",
+    "uniusdt","xlmusdt","ldousdt","opusdt","flokiusdt","bomeusdt","ethfiusdt","enausdt","renderusdt","tonusdt",
+    "turbousdt","eigenusdt","zrousdt",
+    "fetusdt","tiausdt","ondousdt","pepeusdt","imxusdt","avaxusdt","wifusdt","stxusdt","arkmusdt","maskusdt"
+  ]
+}

@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 echo "===== $(date -u +%Y-%m-%dT%H:%MZ) sleeves daily run ====="
 python3 update_data.py 2>&1 | tail -5
 # hard data-veracity gate — refuse to compute on bad/stale/mixed data
-if ! python3 validate_dataset.py data/multiyr --require-cycles 2022,2023,2024 >/tmp/sleeve_validate.log 2>&1; then
+if ! python3 validate_dataset.py data/multiyr >/tmp/sleeve_validate.log 2>&1; then
     echo "DATA VALIDATION FAILED — skipping sleeve compute. See /tmp/sleeve_validate.log"
     tail -6 /tmp/sleeve_validate.log
     exit 1

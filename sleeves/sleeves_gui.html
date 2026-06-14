@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chimera Sleeves — Validated Edges</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0a0e15;--panel:#111722;--panel2:#161e2c;--line:#1e2738;--text:#cfd5e1;
+    --dim:#6f7a8c;--accent:#4ad6c5;--green:#3ce088;--red:#ff5d7a;--amber:#f8b94c;
+    --blue:#5b9cf5;--purple:#a78bfa;--shadow:0 1px 0 #1e2738,0 8px 24px rgba(0,0,0,.45);}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;}
+  body{padding:16px 22px;min-height:100vh;}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 0 14px;border-bottom:1px solid var(--line);margin-bottom:16px;}
+  .logo{font-weight:900;letter-spacing:.18em;font-size:22px;color:var(--accent);}
+  .sub{font-size:11px;color:var(--dim);letter-spacing:.08em;}
+  .hr{margin-left:auto;display:flex;align-items:center;gap:14px;}
+  .gate{font-size:11px;font-weight:800;letter-spacing:.1em;padding:5px 12px;border-radius:4px;text-transform:uppercase;}
+  .gate.bull{color:var(--green);border:1px solid var(--green);}
+  .gate.bear{color:var(--amber);border:1px solid var(--amber);}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--green);box-shadow:0 0 6px rgba(60,224,136,.5);}
+  .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;box-shadow:var(--shadow);}
+  .card .l{font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  .card .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .pos{color:var(--green);}.neg{color:var(--red);}.acc{color:var(--accent);}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px;}
+  @media(max-width:900px){.grid{grid-template-columns:1fr;}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow);}
+  .panel h3{font-size:11px;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;font-weight:700;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--dim);font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;}
+  .alloc{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 12px;font-size:12px;}
+  .chip b{color:var(--accent);}
+  .cash{font-size:15px;font-weight:800;color:var(--amber);letter-spacing:.04em;}
+  .why{font-size:12px;color:var(--dim);line-height:1.7;}
+  .why b{color:var(--text);}
+  .foot{font-size:10px;color:var(--dim);margin-top:8px;letter-spacing:.05em;}
+  canvas{max-height:300px;}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">CHIMERA SLEEVES</span>
+  <span class="sub" id="ver">validated edges · shadow</span>
+  <div class="hr">
+    <span id="gate" class="gate">—</span>
+    <span class="dot"></span><span class="sub" id="asof">—</span>
+  </div>
+</header>
+
+<div class="strip" id="strip"></div>
+
+<div class="grid">
+  <div class="panel"><h3>Equity Curve — log scale (2020-2026, cost-inclusive)</h3><canvas id="eq"></canvas></div>
+  <div class="panel"><h3>Today's Target Portfolio (shadow)</h3><div id="alloc"></div>
+    <h3 style="margin-top:18px">Why it works</h3>
+    <div class="why">
+      <b>Cross-sectional selection</b> — hold only the strongest 3-5 of <span id="uni">—</span> coins.<br>
+      <b>Macro gate</b> — flat in bear (no bleed). <br>
+      <b>Payoff &gt; hit-rate</b> — wins run, losses capped → PF&gt;1 at ~52% WR.<br>
+      <b>Two families</b> — momentum + breakout (~0.5 corr) → combined beats both.
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel"><h3>Returns by Market Cycle — Combined</h3><canvas id="cyc"></canvas></div>
+  <div class="panel"><h3>Sleeve Metrics</h3><table id="mtable"></table>
+    <div class="foot" id="foot">SHADOW — logs targets, places no orders.</div>
+  </div>
+</div>
+
+<div class="panel"><h3>Monthly Returns — Combined (%)</h3><canvas id="mon" style="max-height:160px"></canvas></div>
+
+<script>
+const G=getComputedStyle(document.documentElement);
+const C=k=>G.getPropertyValue(k).trim();
+function card(l,v,cls){return `<div class="card"><div class="l">${l}</div><div class="v ${cls||''}">${v}</div></div>`;}
+async function load(){
+  const d=await (await fetch('gui_data.json?_='+Date.now())).json();
+  const m=d.metrics.COMBINED;
+  document.getElementById('ver').textContent=`validated edges · shadow · gen ${d.generated}`;
+  document.getElementById('asof').textContent=`as of ${d.asof}`;
+  document.getElementById('uni').textContent=d.universe;
+  const g=document.getElementById('gate');
+  g.textContent=d.macro.bull?'MACRO: BULL — DEPLOYED':'MACRO: BEAR — CASH';
+  g.className='gate '+(d.macro.bull?'bull':'bear');
+  // summary cards
+  document.getElementById('strip').innerHTML=
+    card('Profit Factor',m.pf,'acc')+card('Win Rate',m.wr+'%')+card('Sharpe',m.sharpe,'acc')+
+    card('Max DD',m.dd+'%','neg')+card('CAGR',m.cagr+'%','pos')+
+    card('BTC vs 200d',(d.macro.btc?('$'+d.macro.btc.toLocaleString()):'—'),d.macro.bull?'pos':'neg')+
+    card('Universe',d.universe)+card('Mode','SHADOW','acc');
+  // equity
+  new Chart(eq,{type:'line',data:{labels:d.equity.dates,datasets:[
+    {label:'Combined',data:d.equity.COMBINED,borderColor:C('--accent'),borderWidth:2,pointRadius:0,tension:.1},
+    {label:'Momentum',data:d.equity.MOMENTUM,borderColor:C('--blue'),borderWidth:1,pointRadius:0,tension:.1},
+    {label:'Breakout',data:d.equity.BREAKOUT,borderColor:C('--purple'),borderWidth:1,pointRadius:0,tension:.1}]},
+    options:{plugins:{legend:{labels:{color:C('--dim'),font:{size:10}}}},
+      scales:{y:{type:'logarithmic',ticks:{color:C('--dim'),font:{size:9}},grid:{color:C('--line')}},
+        x:{ticks:{color:C('--dim'),maxTicksLimit:8,font:{size:9}},grid:{display:false}}}}});
+  // cycles
+  new Chart(cyc,{type:'bar',data:{labels:d.cycles.map(c=>c.name),datasets:[
+    {data:d.cycles.map(c=>c.ret),backgroundColor:d.cycles.map(c=>c.ret>0?C('--green'):C('--red'))}]},
+    options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw}% · Sharpe ${d.cycles[c.dataIndex].sharpe??'-'}`}}},
+      scales:{y:{ticks:{color:C('--dim'),callback:v=>v+'%',font:{size:9}},grid:{color:C('--line')}},
+        x:{ticks:{color:C('--dim'),font:{size:10}},grid:{display:false}}}}});
+  // monthly
+  new Chart(mon,{type:'bar',data:{labels:d.monthly.map(x=>x.m),datasets:[
+    {data:d.monthly.map(x=>x.ret),backgroundColor:d.monthly.map(x=>x.ret>0?C('--green'):C('--red'))}]},
+    options:{plugins:{legend:{display:false}},scales:{y:{ticks:{color:C('--dim'),font:{size:9}},grid:{color:C('--line')}},
+      x:{ticks:{color:C('--dim'),maxTicksLimit:12,font:{size:8}},grid:{display:false}}}}});
+  // allocation
+  let a='';
+  for(const[name,picks]of Object.entries(d.target)){
+    a+=`<div style="margin-bottom:10px"><div class="l" style="font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">${name}</div>`;
+    if(picks==='CASH'){a+=`<span class="cash">⏸ CASH (macro gate / no signal)</span>`;}
+    else{a+='<div class="alloc">'+picks.map(p=>`<span class="chip"><b>${p.sym}</b> ${(p.weight*100).toFixed(0)}%</span>`).join('')+'</div>';}
+    a+='</div>';
+  }
+  document.getElementById('alloc').innerHTML=a;
+  // metrics table
+  let t='<tr><th>Sleeve</th><th>PF</th><th>Win%</th><th>Sharpe</th><th>MaxDD</th><th>CAGR</th></tr>';
+  for(const[n,x]of Object.entries(d.metrics))
+    t+=`<tr><td>${n}</td><td>${x.pf}</td><td>${x.wr}%</td><td>${x.sharpe}</td><td class="neg">${x.dd}%</td><td class="pos">${x.cagr}%</td></tr>`;
+  document.getElementById('mtable').innerHTML=t;
+}
+load(); setInterval(load,300000);
+</script>
+</body>
+</html>

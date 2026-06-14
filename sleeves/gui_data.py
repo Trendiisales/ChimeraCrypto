@@ -90,6 +90,32 @@ def main():
         ledger=load_ledger(),
     )
     with open(OUT,"w") as f: json.dump(data,f)
-    print(f"wrote {OUT} ({len(data['equity']['dates'])} equity points, gate={'BULL' if bull else 'BEAR'})")
+
+    # ── api_state.json: feeds the old GUI's /api/state2 (engines + signals) ──
+    from breakout_portfolio import momentum_score
+    opos={p["engine"]:p for p in load_ledger()["positions"]}
+    engines=[]
+    SLEEVE_OF={"MOM":"MOMENTUM","BRK":"BREAKOUT"}
+    # open positions (in_position=true)
+    for tag,p in opos.items():
+        engines.append(dict(tag=tag, symbol=p["sym"], in_position=True,
+            entry_px=p["entry_px"], sl_px=0, mfe_bp=p.get("mfe_bp",0),
+            strategy=SLEEVE_OF.get(tag.split("-")[0],"SLEEVE"), tf_secs=14*86400,
+            oos_pf=data["metrics"]["COMBINED"]["pf"], last_close=p.get("spot",0),
+            bars_held=None, trail_armed=False, signal_ready=False, momentum_pct=0))
+    # per-symbol momentum signals (ready-to-enter candidates)
+    for sym in syms:
+        mp=momentum_score(close[sym],i,30)
+        if mp is None: continue
+        engines.append(dict(tag=sym, symbol=sym, in_position=False,
+            strategy="MOMENTUM", tf_secs=14*86400, momentum_pct=round(mp*100,1),
+            signal_ready=bool(bull and mp>0), halted=not bull,
+            next_bar_close_ms=0, entry_px=0, sl_px=0, mfe_bp=0,
+            last_close=round(close[sym][i],8) if close[sym][i]==close[sym][i] else 0))
+    apist=dict(build=f"sleeves · MACRO {'BULL' if bull else 'BEAR (cash)'}",
+        startup_ts=days[i]*86400000, engines=engines,
+        spot_local={s.lower():round(close[s][i],8) for s in syms if close[s][i]==close[s][i]})
+    with open(os.path.join(os.path.dirname(__file__),"api_state.json"),"w") as f: json.dump(apist,f)
+    print(f"wrote {OUT} + api_state.json ({len(engines)} engines, {len(opos)} open, gate={'BULL' if bull else 'BEAR'})")
 
 if __name__=="__main__": main()

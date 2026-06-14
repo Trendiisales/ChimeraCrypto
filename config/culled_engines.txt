@@ -271,3 +271,18 @@ XRP-TSMOM-H6
 ZRO-ICHI-H8
 ZRO-TSMOM-D1
 ZRO-TSMOM-H6
+
+# S-2026-06-14 live-ledger cull (bull-only book): 72-trade shadow window was -646bp;
+# these 10 caused it all (killing them flips the SAME window to +117bp). XLM = toxic
+# (both cells took -196.5bp single-trade gap-throughs vs SL -- illiquid, loss-cap cannot
+# stop a single gap, only symbol-kill does). Rest = alt-TSMOM big single/0%-WR bleeders.
+XLM-TSMOM-H4
+XLM-ICHI-H4
+DOT-TSMOM-H3
+JTO-TSMOM-H3
+ENA-TSMOM-H3
+ETHFI-TSMOM-H4
+INJ-TSMOM-H3
+PYTH-TSMOM-H2
+WIF-BOLL20k20-H1
+COMP-TSMOM-H3

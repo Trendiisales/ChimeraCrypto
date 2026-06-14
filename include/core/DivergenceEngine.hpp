@@ -13,8 +13,8 @@
 //   Track a 30-second rolling price change for each of BTC(0), ETH(1), SOL(2).
 //   When symbol X moves > DIVERGE_THRESH_BP while the MEDIAN of the other two
 //   moves < ANCHOR_FLAT_BP, the mover is diverging from the group.
-//   On spot we only fade UPWARD divergences (the mover is too high vs peers).
-//   Entry: maker bid on the diverging symbol — we buy the pullback.
+//   On spot (long-only) we fade DOWNWARD divergences — the laggard dropped vs
+//   peers and should snap back up. Entry: maker bid on the diverging symbol.
 //
 //   Wait — if the mover ran UP and we buy, we're chasing not fading.
 //   Actually: if ETH ran up 8bp but BTC/SOL are flat → ETH will pull back.
@@ -47,6 +47,7 @@
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <limits>   // std::numeric_limits — quiet_NaN() used below (was only transitively included)
 #include "core/SymbolIndex.hpp"
 #include "config/TradingConfig.hpp"
 
@@ -97,8 +98,9 @@ public:
     // Only checks BTC(0), ETH(1), SOL(2) — the correlated trio.
     bool check_signal(int symbol_id, double book_imbalance, double spread_bps,
                       int64_t now_ms, double& diverge_bp_out) {
-        // Only trade the correlated trio
-        if (symbol_id > 2) return false;
+        // Only trade the correlated trio (guard both bounds — negative id would
+        // index states_[] out of bounds; update() guards <0 but this did not).
+        if (symbol_id < 0 || symbol_id > 2) return false;
 
         SymState& st = states_[symbol_id];
 
@@ -116,12 +118,12 @@ public:
         // Only fire on DOWN divergers (spot long only)
         if (move_bp > -DIVERGE_THRESH_BP) return false;
 
-        // Compute average move of the OTHER two symbols (the anchors)
-        double anchor_move = compute_anchor_move(symbol_id);
-        if (std::isnan(anchor_move)) return false;
-
-        // Anchors must be flat (not also falling — that's a trend, not divergence)
-        if (std::fabs(anchor_move) > ANCHOR_FLAT_BP) return false;
+        // Anchors must be flat — and EACH one individually, not their average.
+        // Averaging hid split anchors: BTC +6bp & SOL -6bp average to ~0 and
+        // falsely passed as "flat", firing on incoherent rotation/trend (exactly
+        // what this gate exists to reject). anchor_move (mean) is for logging only.
+        double anchor_move = 0.0;
+        if (!anchors_flat(symbol_id, anchor_move)) return false;
 
         // Book must show buyers stepping in (bid pressure on the laggard)
         if (book_imbalance < MIN_IMBALANCE) return false;
@@ -152,10 +154,14 @@ private:
         return (end - start) / start * 10000.0;
     }
 
-    // Average 30s move of the two symbols that are NOT symbol_id
-    double compute_anchor_move(int symbol_id) const {
+    // Anchor-flatness gate over the symbols that are NOT symbol_id.
+    // Returns true only if EVERY valid anchor moved within +/-ANCHOR_FLAT_BP
+    // (each individually flat — so a split like BTC +6 / SOL -6 is rejected).
+    // avg_out receives the mean anchor move for logging. False if no valid anchor.
+    bool anchors_flat(int symbol_id, double& avg_out) const {
         double sum = 0.0;
-        int count  = 0;
+        int    count = 0;
+        bool   all_flat = true;
         for (int i = 0; i <= 2; ++i) {
             if (i == symbol_id) continue;
             const SymState& st = states_[i];
@@ -163,11 +169,14 @@ private:
             double start = st.price_buf.front().price;
             double end   = st.price_buf.back().price;
             if (start <= 0.0) continue;
-            sum += (end - start) / start * 10000.0;
+            double mv = (end - start) / start * 10000.0;
+            if (std::fabs(mv) > ANCHOR_FLAT_BP) all_flat = false;
+            sum += mv;
             count++;
         }
-        if (count == 0) return std::numeric_limits<double>::quiet_NaN();
-        return sum / count;
+        if (count == 0) { avg_out = std::numeric_limits<double>::quiet_NaN(); return false; }
+        avg_out = sum / count;
+        return all_flat;
     }
 };
 

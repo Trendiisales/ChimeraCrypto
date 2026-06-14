@@ -3595,8 +3595,8 @@ private:
     // DIVERGENCE  BTC/ETH/SOL laggard snaps back to correlated peers
     // =========================================================================
     bool check_divergence(int id, double price, int64_t ts, SymbolState& s, double latency_ms) {
-        // Only BTC(0), ETH(1), SOL(2) — the correlated trio
-        if (id > 2) return false;
+        // Only BTC(0), ETH(1), SOL(2) — the correlated trio (guard both bounds)
+        if (id < 0 || id > 2) return false;
         if (s.pos.state == POS_OPEN || s.pos.state == POS_PENDING) return false;
 
         // Only GRIND and BUILDUP — divergences in BREAKOUT are trend-driven

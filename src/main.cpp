@@ -157,6 +157,7 @@
 #include "core/SymbolIndex.hpp"
 #include "core/PortfolioOverlay.hpp"  // AUDIT-2026: cross-sec mom + vol-scale overlay
 #include "core/CrossSectionalMomentumEngine.hpp"  // S-2026-06-18: validated standalone XSec allocator
+#include "core/RipRiderEngine.hpp"                 // S-2026-06-18: sleeve 3 — per-symbol regime-gated rip-rider
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
 #include "core/LiquidationCascadeDetector.hpp"
 #include "live/LiquidationWSFeed.hpp"
@@ -2146,6 +2147,52 @@ int main() {
             static std::map<std::string,double> hold; fire("XSEC-BTC", nav_btc, hold, d, tw, b); });
         xsec_br.set_rebalance_callback([fire, nav_br](int64_t d, const std::map<std::string,double>& tw, bool b){
             static std::map<std::string,double> hold; fire("XSEC-BR", nav_br, hold, d, tw, b); });
+    }
+
+    // ── Sleeve 3: RipRiderEngine — per-symbol regime-gated rip-rider ──────────
+    // Catches individual coin RIPS, rides them (no tight trail — that amputates the
+    // tail), exits on regime-flip (BTC<200d). Validated FAITHFUL (C++ BT == python
+    // crypto_momo_rider.py): 2021 +18701 / 2023 +2038 / 2024 +214 / 2025 +1747 /
+    // 2022+2026 flat. Per-symbol momentum-continuation, complements the XSec
+    // portfolio sleeves. SHADOW. This is "trade the rips" done so it keeps the tail.
+    chimera::RipRiderEngine riprider;  // defaults = validated (ig20%/5d/gate+regime-exit/maxhold60/pure-ride)
+    {
+        std::vector<std::string> ru = {
+            "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
+            "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
+            "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"};
+        riprider.set_universe(ru);
+        int rseeded = 0;
+        for (const auto& s : ru) {
+            std::ifstream rf("data/xsec_seed/" + s + "USDT_1d.csv");
+            if (!rf) continue;
+            std::string rl; std::getline(rf, rl);  // header
+            int rr = 0;
+            while (std::getline(rf, rl)) {
+                char* p = rl.data(); char* e; long long ts = strtoll(p, &e, 10); if (*e != ',') continue;
+                double op = strtod(e+1, nullptr);                                  // col1 = open
+                const char* q = e + 1; for (int k = 0; k < 3 && q; ++k) { q = std::strchr(q, ','); if (q) ++q; }
+                if (!q) continue; double c = strtod(q, nullptr);                    // col4 = close
+                if (c > 0 && op > 0) { riprider.seed_daily_bar(s, ts / 86400000LL, op, c); ++rr; }
+            }
+            if (rr > 0) ++rseeded;
+        }
+        double rip_nav = (runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0);
+        std::printf("[RIP] rip-rider installed: warm-seeded %d/%zu symbols, %zu days; "
+                    "ig20%%/5d BTC>200d-gate + regime-exit, pure-ride maxhold60 SHADOW\n",
+                    rseeded, ru.size(), riprider.num_days());
+        std::fflush(stdout);
+        riprider.set_entry_callback([&executor, &exec_ok, rip_nav](const std::string& sym, double px, int64_t ts){
+            (void)ts;
+            std::printf("[RIP] ENTRY %s @ %.6f\n", sym.c_str(), px); std::fflush(stdout);
+            if (exec_ok && executor.is_ready() && px > 0) executor.execute(sym + "USDT", true, (rip_nav/8.0)/px, px);
+        });
+        riprider.set_close_callback([&executor, &exec_ok, rip_nav](const chimera::RipClose& t){
+            double ret = t.entryPrice>0 ? (t.exitPrice/t.entryPrice-1)*100.0 : 0.0;
+            std::printf("[RIP] EXIT %s entry=%.6f exit=%.6f ret=%+.1f%% %s\n",
+                        t.symbol.c_str(), t.entryPrice, t.exitPrice, ret, t.exitReason.c_str()); std::fflush(stdout);
+            if (exec_ok && executor.is_ready() && t.exitPrice > 0) executor.execute(t.symbol + "USDT", false, (rip_nav/8.0)/t.exitPrice, t.exitPrice);
+        });
     }
 
     // wire_engine — single helper applied to every engine. Sets shadow_mode
@@ -7077,7 +7124,8 @@ int main() {
                 std::chrono::system_clock::now().time_since_epoch()).count();
           const char* xss = chimera::sym_short(id);
           xsec_btc.on_tick(xss, mid, xnow);
-          xsec_br.on_tick(xss, mid, xnow); }
+          xsec_br.on_tick(xss, mid, xnow);
+          riprider.on_tick(xss, mid, xnow); }
 
         // S34: log BTC ticks into rolling chart buffer (~last 1000 ticks)
         if (id == chimera::SYM_BTC) {

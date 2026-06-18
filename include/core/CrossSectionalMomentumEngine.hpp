@@ -43,9 +43,13 @@ struct XSecConfig {
     bool   inverse_vol    = true;   // inverse-vol weight (else equal)
     int    vol_window     = 30;     // realized-vol window for weighting
     int    btc_sma_days   = 200;    // macro regime gate
-    bool   macro_gate     = true;   // BTC>SMA -> deploy, else CASH
+    bool   macro_gate     = true;   // gate on -> deploy in bull, else CASH
     double cost_bps       = 15.0;   // per-side turnover cost (SIM only; live uses real fills)
     std::string gate_symbol = "BTC";
+    // regime gate mode: 0=BTC>200d (BTC-led), 1=BREADTH (alts' own health — captures
+    // alt-decoupled bulls), 2=BTC_OR_BREADTH. Validated cross-regime per gate.
+    int    gate_mode      = 0;
+    double breadth_thresh = 0.40;   // BREADTH: deploy when this share of universe has positive lb-return
 };
 
 class CrossSectionalMomentumEngine {
@@ -78,10 +82,24 @@ public:
         for (auto& kv : close_) w[kv.first] = 0.0;
         bull_out = true;
         if (cfg_.macro_gate) {
+            // BTC>200d regime
             auto it = close_.find(cfg_.gate_symbol);
             double m = (it != close_.end()) ? sma(it->second, i, cfg_.btc_sma_days) : NAN;
             double bc = (it != close_.end() && i < it->second.size()) ? it->second[i] : NAN;
-            bull_out = (!std::isnan(m) && !std::isnan(bc) && bc > m);
+            bool btc_bull = (!std::isnan(m) && !std::isnan(bc) && bc > m);
+            // breadth regime: share of universe with positive trailing-lb return
+            int npos = 0, ntot = 0;
+            for (auto& kv : close_) {
+                double tr = trailing_ret(kv.second, i, cfg_.lookback_days);
+                if (std::isnan(tr)) continue;
+                ++ntot; if (tr > 0) ++npos;
+            }
+            bool breadth_bull = (ntot > 0 && (double)npos/ntot >= cfg_.breadth_thresh);
+            switch (cfg_.gate_mode) {
+                case 1:  bull_out = breadth_bull; break;            // BREADTH
+                case 2:  bull_out = (btc_bull || breadth_bull); break; // BTC_OR_BREADTH
+                default: bull_out = btc_bull; break;                // BTC
+            }
         }
         if (!bull_out) return w;  // CASH
         std::vector<std::pair<double,std::string>> scores;

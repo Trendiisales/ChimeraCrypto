@@ -2080,14 +2080,19 @@ int main() {
     // -> cash. Faithful BT reproduces backtest/cross_sectional.py EXACTLY
     // (2021 +1596% / 2023 +324% / 2024 +159% / 2025-holdout +39%). SHADOW.
     // ════════════════════════════════════════════════════════════════════
-    chimera::XSecConfig xsec_cfg;  // defaults = validated flagship
-    chimera::CrossSectionalMomentumEngine xsec(xsec_cfg);
+    // DUAL-SLEEVE: BTC-gated (BTC-led regimes) + breadth-gated (alt-decoupled
+    // bulls). Validated cross-regime (C++ faithful BT == Python). Broad 32-quality
+    // universe (no overfit cull — culling drags BROKE the 2025 holdout). 60/40 split.
+    chimera::XSecConfig xsec_btc_cfg; xsec_btc_cfg.gate_mode = 0;                                  // BTC>200d
+    chimera::XSecConfig xsec_br_cfg;  xsec_br_cfg.gate_mode = 1; xsec_br_cfg.breadth_thresh = 0.65; // alts' own health
+    chimera::CrossSectionalMomentumEngine xsec_btc(xsec_btc_cfg);
+    chimera::CrossSectionalMomentumEngine xsec_br(xsec_br_cfg);
     {
         std::vector<std::string> xu = {
             "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
             "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
             "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"};
-        xsec.set_universe(xu);
+        xsec_btc.set_universe(xu); xsec_br.set_universe(xu);
         int xseeded = 0;
         for (const auto& s : xu) {
             std::ifstream xf("data/xsec_seed/" + s + "USDT_1d.csv");
@@ -2101,46 +2106,46 @@ int main() {
                 for (int k = 0; k < 3 && q; ++k) { q = std::strchr(q, ','); if (q) ++q; }
                 if (!q) continue;
                 double c = strtod(q, nullptr);
-                if (c > 0) { xsec.seed_daily_close(s, ts / 86400000LL, c); ++xr; }
+                if (c > 0) { long long d = ts / 86400000LL;
+                    xsec_btc.seed_daily_close(s, d, c); xsec_br.seed_daily_close(s, d, c); ++xr; }
             }
             if (xr > 0) ++xseeded;
         }
-        double xsec_nav = runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0;
-        std::printf("[XSEC] installed: warm-seeded %d/%zu symbols, %zu days; "
-                    "lb%d top%d rebal%dd inverse-vol gate-BTC>200d nav=$%.0f SHADOW\n",
-                    xseeded, xu.size(), xsec.num_days(),
-                    xsec_cfg.lookback_days, xsec_cfg.top_k, xsec_cfg.rebalance_days, xsec_nav);
-        { bool b0; auto w0 = xsec.compute_target_weights(xsec.num_days() > 0 ? xsec.num_days()-1 : 0, b0);
-          std::string p0; for (const auto& kv : w0) if (kv.second > 0.0) { char bb[48];
-              std::snprintf(bb, sizeof bb, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); p0 += bb; }
-          std::printf("[XSEC] startup signal: bull=%d picks=%s\n", b0 ? 1 : 0,
-                      b0 ? (p0.empty() ? "(no positive-momentum picks)" : p0.c_str()) : "CASH (bear gate)"); }
+        double nav = runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0;
+        double nav_btc = nav * 0.6, nav_br = nav * 0.4;
+        std::printf("[XSEC] dual-sleeve installed: warm-seeded %d/%zu symbols, %zu days; lb30/top3/rebal14d/inv-vol | "
+                    "BTC-sleeve nav=$%.0f + BREADTH(>=0.65)-sleeve nav=$%.0f SHADOW\n",
+                    xseeded, xu.size(), xsec_btc.num_days(), nav_btc, nav_br);
+        auto fmt = [](const std::map<std::string,double>& w){ std::string p;
+            for (const auto& kv : w) if (kv.second > 0.0) { char z[48];
+                std::snprintf(z, sizeof z, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); p += z; }
+            return p.empty() ? std::string("(none)") : p; };
+        { size_t i_btc = xsec_btc.num_days()?xsec_btc.num_days()-1:0, i_br = xsec_br.num_days()?xsec_br.num_days()-1:0;
+          bool bb, br; auto wb = xsec_btc.compute_target_weights(i_btc, bb); auto wr = xsec_br.compute_target_weights(i_br, br);
+          std::printf("[XSEC] startup: BTC-sleeve bull=%d %s | BREADTH-sleeve bull=%d %s\n",
+                      bb?1:0, bb?fmt(wb).c_str():"CASH", br?1:0, br?fmt(wr).c_str():"CASH"); }
         std::fflush(stdout);
-        xsec.set_rebalance_callback(
-            [&executor, &exec_ok, xsec_nav](int64_t day,
+        auto fire = [&executor, &exec_ok](const char* tag, double sleeve_nav,
+                    std::map<std::string,double>& hold, int64_t day,
                     const std::map<std::string,double>& tw, bool bull) {
-                static std::map<std::string,double> hold;  // sym -> held $ notional (shadow)
-                std::string picks;
-                for (const auto& kv : tw) if (kv.second > 0.0) { char b[48];
-                    std::snprintf(b, sizeof b, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); picks += b; }
-                std::printf("[XSEC] REBALANCE day=%lld bull=%d -> %s\n", (long long)day, bull ? 1 : 0,
-                            bull ? (picks.empty() ? "(no positive-momentum picks)" : picks.c_str())
-                                 : "CASH (bear gate)");
-                std::fflush(stdout);
-                if (!exec_ok || !executor.is_ready()) return;
-                for (const auto& kv : tw) {
-                    std::string lc = kv.first; for (auto& ch : lc) if (ch >= 'A' && ch <= 'Z') ch += 32;
-                    int sid = chimera::sym_id(lc + "usdt");
-                    if (sid < 0) continue;
-                    double px = load_dbl_atomic(g_last_spot_px_bits[sid]);
-                    if (px <= 0.0) continue;
-                    double tgt = kv.second * xsec_nav;
-                    double dusd = tgt - hold[kv.first];
-                    if (std::fabs(dusd) < 25.0) continue;  // dust threshold
-                    executor.execute(kv.first + "USDT", dusd > 0.0, std::fabs(dusd) / px, px);
-                    hold[kv.first] = tgt;
-                }
-            });
+            std::string picks; for (const auto& kv : tw) if (kv.second > 0.0) { char b[48];
+                std::snprintf(b, sizeof b, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); picks += b; }
+            std::printf("[%s] REBALANCE day=%lld bull=%d -> %s\n", tag, (long long)day, bull?1:0,
+                        bull ? (picks.empty()?"(none)":picks.c_str()) : "CASH (gate)"); std::fflush(stdout);
+            if (!exec_ok || !executor.is_ready()) return;
+            for (const auto& kv : tw) {
+                std::string lc = kv.first; for (auto& ch : lc) if (ch >= 'A' && ch <= 'Z') ch += 32;
+                int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
+                double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
+                double tgt = kv.second * sleeve_nav, dusd = tgt - hold[kv.first];
+                if (std::fabs(dusd) < 25.0) continue;
+                executor.execute(kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px); hold[kv.first] = tgt;
+            }
+        };
+        xsec_btc.set_rebalance_callback([fire, nav_btc](int64_t d, const std::map<std::string,double>& tw, bool b){
+            static std::map<std::string,double> hold; fire("XSEC-BTC", nav_btc, hold, d, tw, b); });
+        xsec_br.set_rebalance_callback([fire, nav_br](int64_t d, const std::map<std::string,double>& tw, bool b){
+            static std::map<std::string,double> hold; fire("XSEC-BR", nav_br, hold, d, tw, b); });
     }
 
     // wire_engine — single helper applied to every engine. Sets shadow_mode
@@ -7066,11 +7071,13 @@ int main() {
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
-        // S-2026-06-18: feed the validated XSec allocator (rolls daily close,
-        // rebalances on the 14d clock -> [XSEC] log + shadow executor mirror).
-        xsec.on_tick(chimera::sym_short(id), mid,
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count());
+        // S-2026-06-18: feed BOTH validated XSec sleeves (roll daily close,
+        // rebalance on the 14d clock -> [XSEC-BTC]/[XSEC-BR] log + shadow mirror).
+        { auto xnow = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+          const char* xss = chimera::sym_short(id);
+          xsec_btc.on_tick(xss, mid, xnow);
+          xsec_br.on_tick(xss, mid, xnow); }
 
         // S34: log BTC ticks into rolling chart buffer (~last 1000 ticks)
         if (id == chimera::SYM_BTC) {

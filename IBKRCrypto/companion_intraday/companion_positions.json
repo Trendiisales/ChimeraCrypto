@@ -1,0 +1,72 @@
+{
+ "CRYPTO|Trend Kelt 4h|ETH MET micro (ladder ~8bps)|1626.48": {
+  "book": "CRYPTO",
+  "eng": "Trend Kelt 4h",
+  "sym": "ETH MET micro (ladder ~8bps)",
+  "side": "LONG",
+  "entry": 1626.48,
+  "open_ts": 1782767220,
+  "open_bar": 123803,
+  "mfe_pct": 0.0,
+  "ext_bar": 123803,
+  "last_upnl": -1.24,
+  "stall": 0,
+  "fav": -0.3805764595937272
+ },
+ "CRYPTO|Trend Ichi 4h|ETH MET micro (ladder ~8bps)|1626.48": {
+  "book": "CRYPTO",
+  "eng": "Trend Ichi 4h",
+  "sym": "ETH MET micro (ladder ~8bps)",
+  "side": "LONG",
+  "entry": 1626.48,
+  "open_ts": 1782769140,
+  "open_bar": 123803,
+  "mfe_pct": 0.0,
+  "ext_bar": 123803,
+  "last_upnl": -1.24,
+  "stall": 0,
+  "fav": -0.3805764595937272
+ },
+ "CRYPTO|Trend Ichi 4h|SOL fut (ladder ~2bps; QSOL pending)|75.91": {
+  "book": "CRYPTO",
+  "eng": "Trend Ichi 4h",
+  "sym": "SOL fut (ladder ~2bps; QSOL pending)",
+  "side": "LONG",
+  "entry": 75.91,
+  "open_ts": 1782769140,
+  "open_bar": 123803,
+  "mfe_pct": 0.0,
+  "ext_bar": 123803,
+  "last_upnl": -1.35,
+  "stall": 0,
+  "fav": -0.355684363061515
+ },
+ "CRYPTO|Trend Macd 4h|SOL fut (ladder ~2bps; QSOL pending)|75.91": {
+  "book": "CRYPTO",
+  "eng": "Trend Macd 4h",
+  "sym": "SOL fut (ladder ~2bps; QSOL pending)",
+  "side": "LONG",
+  "entry": 75.91,
+  "open_ts": 1782769140,
+  "open_bar": 123803,
+  "mfe_pct": 0.0,
+  "ext_bar": 123803,
+  "last_upnl": -1.4,
+  "stall": 0,
+  "fav": -0.3688578579897262
+ },
+ "CRYPTO|Breakout Donch40 1h|SOL fut 1h (ladder ~2bps; QSOL pending)|75.42": {
+  "book": "CRYPTO",
+  "eng": "Breakout Donch40 1h",
+  "sym": "SOL fut 1h (ladder ~2bps; QSOL pending)",
+  "side": "LONG",
+  "entry": 75.42,
+  "open_ts": 1782769140,
+  "open_bar": 123803,
+  "mfe_pct": 0.4375497215592658,
+  "ext_bar": 123803,
+  "last_upnl": 2.0,
+  "stall": 0,
+  "fav": 0.2651816494298632
+ }
+}

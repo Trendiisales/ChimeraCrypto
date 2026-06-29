@@ -1,0 +1,121 @@
+{
+ "updated": "2026-06-29 22:13 UTC",
+ "stall_bars": 2,
+ "gate_pct": 1.0,
+ "reversal_giveback": 0.05,
+ "open_companions": 5,
+ "realized_total": 104.82,
+ "realized_today": 104.82,
+ "realized_7d": 104.82,
+ "realized_30d": 104.82,
+ "by_reason": {
+  "REVERSAL_CLIP": 108.04,
+  "ENGINE_EXIT": -3.22
+ },
+ "by_book": {
+  "CRYPTO": {
+   "realized": 104.82,
+   "realized_today": 104.82,
+   "realized_7d": 104.82,
+   "realized_30d": 104.82,
+   "by_reason": {
+    "REVERSAL_CLIP": 108.04,
+    "ENGINE_EXIT": -3.22
+   }
+  }
+ },
+ "per_engine": {
+  "Trend TSMom50 4h": {
+   "open": 0,
+   "closed": 5,
+   "realized": 33.15
+  },
+  "Trend EMAx 4h": {
+   "open": 0,
+   "closed": 9,
+   "realized": 54.7
+  },
+  "Trend EMAx 1h": {
+   "open": 0,
+   "closed": 5,
+   "realized": 16.97
+  },
+  "Trend Kelt 4h": {
+   "open": 1,
+   "closed": 0,
+   "realized": 0.0
+  },
+  "Trend Ichi 4h": {
+   "open": 2,
+   "closed": 0,
+   "realized": 0.0
+  },
+  "Trend Macd 4h": {
+   "open": 1,
+   "closed": 0,
+   "realized": 0.0
+  },
+  "Breakout Donch40 1h": {
+   "open": 1,
+   "closed": 0,
+   "realized": 0.0
+  }
+ },
+ "open_detail": [
+  {
+   "book": "CRYPTO",
+   "eng": "Trend Kelt 4h",
+   "sym": "ETH MET micro (ladder ~8bps)",
+   "side": "LONG",
+   "entry": 1626.48,
+   "mfe_pct": 0.0,
+   "stall": 0,
+   "upnl": -1.24,
+   "eligible": false
+  },
+  {
+   "book": "CRYPTO",
+   "eng": "Trend Ichi 4h",
+   "sym": "ETH MET micro (ladder ~8bps)",
+   "side": "LONG",
+   "entry": 1626.48,
+   "mfe_pct": 0.0,
+   "stall": 0,
+   "upnl": -1.24,
+   "eligible": false
+  },
+  {
+   "book": "CRYPTO",
+   "eng": "Trend Ichi 4h",
+   "sym": "SOL fut (ladder ~2bps; QSOL pending)",
+   "side": "LONG",
+   "entry": 75.91,
+   "mfe_pct": 0.0,
+   "stall": 0,
+   "upnl": -1.35,
+   "eligible": false
+  },
+  {
+   "book": "CRYPTO",
+   "eng": "Trend Macd 4h",
+   "sym": "SOL fut (ladder ~2bps; QSOL pending)",
+   "side": "LONG",
+   "entry": 75.91,
+   "mfe_pct": 0.0,
+   "stall": 0,
+   "upnl": -1.4,
+   "eligible": false
+  },
+  {
+   "book": "CRYPTO",
+   "eng": "Breakout Donch40 1h",
+   "sym": "SOL fut 1h (ladder ~2bps; QSOL pending)",
+   "side": "LONG",
+   "entry": 75.42,
+   "mfe_pct": 0.44,
+   "stall": 0,
+   "upnl": 2.0,
+   "eligible": false
+  }
+ ]
+}

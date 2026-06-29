@@ -1,0 +1,11 @@
+{
+ "CRYPTO|Trend EMAx 4h|ETH MET micro (ladder ~8bps)|1578.34": 1.1537438067843309,
+ "CRYPTO|Trend TSMom50 4h|ETH MET micro (ladder ~8bps)|1578.34": 1.131568610058663,
+ "CRYPTO|Trend EMAx 4h|ETH QEF SQF perp (~28bps)|1578.34": 1.131568610058663,
+ "CRYPTO|Trend TSMom50 4h|ETH QEF SQF perp (~28bps)|1578.34": 1.1271335707135324,
+ "CRYPTO|Trend EMAx 4h|BTC MBT micro (ladder ~6bps)|60082.4": 1.664314341637483,
+ "CRYPTO|Trend EMAx 4h|BTC QTF SQF perp (~22bps)|60082.4": 1.6643309854466553,
+ "CRYPTO|Trend EMAx 4h|SOL fut (ladder ~2bps; QSOL pending)|73.24": 3.7138175860185676,
+ "CRYPTO|Trend EMAx 1h|SOL fut 1h (ladder ~2bps)|73.25": 3.6860068259385703,
+ "CRYPTO|Trend TSMom50 4h|SOL fut (ladder ~2bps; QSOL pending)|73.87": 2.951130364153232
+}

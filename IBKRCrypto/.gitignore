@@ -1,0 +1,13 @@
+# high-churn runtime outputs (rewritten every few min by cron) — not source
+backtest/data/**/state.json
+backtest/data/**/state.json.tmp
+backtest/data/**/ALARM_STALE.txt
+backtest/data/**/stale_data.flag
+backtest/data/**/companion_state.json
+companion_intraday/companion_state.json
+gui/state.json
+# python/byte + os cruft
+__pycache__/
+*.pyc
+.DS_Store
+*.log

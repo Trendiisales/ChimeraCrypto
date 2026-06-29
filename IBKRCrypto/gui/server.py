@@ -27,6 +27,12 @@ STATE_INTRA=os.environ.get("IBKRCRYPTO_STATE_INTRADAY",
     os.path.join(HERE,"..","backtest","data","ibkrcrypto_intraday","state.json"))
 COMP_INTRA=os.environ.get("COMPANION_STATE_INTRADAY",
     os.path.expanduser("~/IBKRCrypto/companion_intraday/companion_state.json"))
+# LUKE (daily multi-name momentum) book — separate producer (refresh_luke_shadow.py), own state.
+# VPS: cron scps it beside this server; Mac dev: backtest output. First existing wins.
+STATE_LUKE=os.environ.get("IBKRCRYPTO_STATE_LUKE",
+    next((p for p in (os.path.join(HERE,"state_luke.json"),
+        os.path.join(HERE,"..","backtest","data","ibkrcrypto_luke","state.json"))
+        if os.path.exists(p)), os.path.join(HERE,"state_luke.json")))
 
 # S-2026-06-26 REAL-TIME NDX from OUR IBKR feed -- the crypto legs tick live via a client-side Coinbase WS;
 # NDX must match. The Omega gateway (4001) streams every NQ TRADE into C:\Omega\logs\ibkr_l2\ibkr_trades_NQ_*.csv
@@ -132,6 +138,9 @@ class H(http.server.SimpleHTTPRequestHandler):
             try: body=_inject_fresh(open(STATE_INTRA,"rb").read(),STATE_INTRA,"intraday")
             except Exception: body=b'{"engine":"IBKRCrypto-Intraday","mode":"SHADOW","slots":[],"closed":[],"_fresh":{"stale":true,"reasons":["state unreachable"]}}'
             return self._json(body)
+        if self.path.startswith("/api/state_luke"):
+            try: return self._json(open(STATE_LUKE,"rb").read())
+            except Exception: return self._json({"book":"LukeCrypto","mode":"SHADOW","equity":0,"n_open":0,"positions":[],"closed_today":0,"last":"unreachable"})
         if self.path.startswith("/api/companion_intraday"):   # MUST precede /api/companion
             try: return self._json(open(COMP_INTRA,"rb").read())
             except Exception: return self._json({"open_companions":0,"open_detail":[],"realized_total":0})

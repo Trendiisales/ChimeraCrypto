@@ -81,6 +81,18 @@
     <table><thead><tr><th>symbol / venue</th><th>strat</th><th>dir</th><th>opened</th><th>closed</th><th>entry→exit</th><th>realized P&L</th></tr></thead>
      <tbody id="closed_i"></tbody></table>
   </div>
+
+  <!-- ===================== LUKE BOOK ===================== -->
+  <div class="book-sec">
+    <h2 class="book-title">Luke Book · daily momentum (multi-name) <span id="mode_l" class="mode SHADOW">SHADOW</span> <span class="sub">updated <span id="ts_l">—</span></span><span id="stale_l" class="stale-badge">⚠ STALE</span></h2>
+    <div id="regime_l" class="stale-why"></div>
+    <div class="tot" id="tot_l"></div>
+    <div class="prot" style="border-left-color:#7fb37f">Luke tight-stop momentum (entry C inside-day/VCP + B AVWAP, <b>ride-wide exit</b> first close &lt;9EMA, no trimming).
+      <b>BTC&gt;200MA gate MANDATORY</b> — ungated CY2022 bear −$112k; gated sidesteps it. <b>Flat when BTC&lt;200MA = the gate working, not a fault.</b></div>
+    <h2>Open positions <span id="nopen_l" class="sub"></span></h2>
+    <table><thead><tr><th>ticker</th><th>setup</th><th>entry</th><th>stop</th><th>live px</th><th>unreal ($)</th></tr></thead>
+     <tbody id="book_l"></tbody></table>
+  </div>
   </div><!-- /.books -->
 
 <script>
@@ -208,11 +220,32 @@ async function pullComp(){ try{ const c=await (await fetch('/api/companion',{cac
 async function pullCompIntra(){ try{ const c=await (await fetch('/api/companion_intraday',{cache:'no-store'})).json();
   compI={}; (c.open_detail||c.positions||[]).forEach(p=>{ if((p.book||'')==='CRYPTO') compI[p.eng+'|'+p.sym]=p; });
   compBank(c,'compbank_i'); renderAll(); }catch(e){} }
-pullState(); pullStateIntra(); connectWS(); pullNdx(); pullComp(); pullCompIntra();
+async function pullLuke(){
+  try{ const d=await (await fetch('/api/state_luke',{cache:'no-store'})).json(); renderLuke(d); }
+  catch(e){ const t=document.getElementById('ts_l'); if(t) t.innerHTML='<span class=neg>state unreachable</span>'; }
+}
+function renderLuke(d){
+  const last=d.last||'—', eq=+(d.equity||0), n=+(d.n_open||0), pos=d.positions||[];
+  const ts=document.getElementById('ts_l'); if(ts) ts.textContent=last;
+  const tot=document.getElementById('tot_l');
+  if(tot) tot.innerHTML='book equity: <b>'+usd(eq)+'</b> · open <b>'+n+'</b> · closed today '+(d.closed_today||0);
+  const rg=document.getElementById('regime_l');
+  if(rg){ if(n===0){ rg.style.display='block'; rg.innerHTML='FLAT — BTC&lt;200MA bear gate: book standing down (this is the −$112k-bleed protection working)'; }
+          else { rg.style.display='none'; } }
+  const nop=document.getElementById('nopen_l'); if(nop) nop.textContent=n?('('+n+' open)'):'';
+  const tb=document.getElementById('book_l'); if(!tb) return;
+  if(!pos.length){ tb.innerHTML='<tr><td colspan=6 class=sub>no open positions — gate down / no breakout</td></tr>'; return; }
+  tb.innerHTML=pos.map(p=>{ const u=+(p.unreal||0);
+    return '<tr><td><b>'+(p.ticker||'')+'</b></td><td>'+(p.setup||'')+'</td><td>'+(+p.entry).toFixed(4)+'</td>'
+      +'<td>'+(+p.stop).toFixed(4)+'</td><td>'+(+p.close).toFixed(4)+'</td>'
+      +'<td class='+(u>0?'pos':(u<0?'neg':'sub'))+'>'+usd(u)+'</td></tr>'; }).join('');
+}
+pullState(); pullStateIntra(); connectWS(); pullNdx(); pullComp(); pullCompIntra(); pullLuke();
 setInterval(pullState,3000);
 setInterval(pullStateIntra,3000);
 setInterval(pullNdx,2000);
 setInterval(pullComp,5000);
 setInterval(pullCompIntra,5000);
+setInterval(pullLuke,5000);
 </script>
 </body></html>

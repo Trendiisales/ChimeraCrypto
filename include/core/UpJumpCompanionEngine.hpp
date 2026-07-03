@@ -63,6 +63,10 @@ public:
     const Config& config() const { return cfg_; }
     bool  is_open() const { return open_; }
     int   clips()   const { return clip_num_; }
+    // Restore cumulative counters from the durable clip log on boot so the desk
+    // panel clips/bank_bp survive a process restart (otherwise in-RAM -> 0 each boot).
+    // Per-trade session state (mfe/open/stall) intentionally stays ephemeral.
+    void rehydrate(int clips_total, double bank_bp_total) { clip_num_ = clips_total; banked_bp_ = bank_bp_total; }
     bool  shadow_mode = true;
 
     // Live per-leg snapshot for the Omega desk CRYPTO COMPANIONS panel. Read-only
@@ -72,7 +76,7 @@ public:
         bool   armed           = false;   // profit-gate cleared (mfe >= arm_pct)
         double peak_mfe_pct    = 0.0;     // peak favourable % since (re)open
         int    bars_since_high = 0;       // stall = bars since last new fav high
-        int    clips           = 0;       // clips banked this process lifetime
+        int    clips           = 0;       // clips banked (durable: rehydrated from clip log on boot)
         double bank_bp         = 0.0;     // cumulative net_bp banked (after cost)
     };
     LiveSnap snapshot() const {

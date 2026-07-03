@@ -1095,6 +1095,31 @@ static void persist_companion_clip(const chimera::UpJumpCompanionEngine::ClipRec
     fclose(f);
 }
 
+// Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from
+// the append-only durable clip log, so the desk panel clips/bank_bp survive a restart.
+// Crude line-scan parse (the file is our own one-object-per-line ndjson) -> no JSON dep.
+static std::map<std::string, std::pair<int,double>> load_companion_clip_totals() {
+    std::map<std::string, std::pair<int,double>> totals;  // tag -> (clip_count, sum net_bp)
+    std::ifstream f(COMPANION_TRADES_FILE);
+    if (!f) return totals;
+    std::string line;
+    while (std::getline(f, line)) {
+        auto tp = line.find("\"tag\":\"");
+        if (tp == std::string::npos) continue;
+        tp += 7;
+        auto te = line.find("\"", tp);
+        if (te == std::string::npos) continue;
+        std::string tag = line.substr(tp, te - tp);
+        double net = 0.0;
+        auto np = line.find("\"net_bp\":");
+        if (np != std::string::npos) { try { net = std::stod(line.substr(np + 9)); } catch (...) {} }
+        auto& agg = totals[tag];
+        agg.first  += 1;
+        agg.second += net;
+    }
+    return totals;
+}
+
 // Live per-leg companion snapshot for the Omega desk CRYPTO COMPANIONS panel.
 // Schema: {"ts":<unix>,"legs":[{sym,armed,peak_mfe_pct,bars_since_high,clips,bank_bp}]}.
 // Cross-box pushed to C:\Omega\crypto_companion_state.json (Mac launchd scp) where
@@ -2634,8 +2659,13 @@ int main() {
         &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1,&aave_upjump_h1 };
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
+        auto _clip_totals = load_companion_clip_totals();
         for (int i = 0; i < 9; ++i) {
             _all_clips[i]->shadow_mode = true;
+            {   // durable-counter rehydrate: panel clips/bank_bp survive restarts
+                auto _ct = _clip_totals.find(_all_clips[i]->config().tag);
+                if (_ct != _clip_totals.end()) _all_clips[i]->rehydrate(_ct->second.first, _ct->second.second);
+            }
             _all_clips[i]->set_on_clip(persist_companion_clip);
             g_companion_by_parent[_all_clips[i]->config().parent_tag] =
                 std::make_pair(_all_clip_parents[i], _all_clips[i]);

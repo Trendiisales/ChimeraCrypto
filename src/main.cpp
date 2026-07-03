@@ -2511,6 +2511,23 @@ int main() {
     wire_engine(sol_upjump_h1);
     wire_engine(doge_upjump_h1);
     wire_engine(bnb_upjump_h1);
+    // UPJUMP-H1 remaining 5 legs — S-2026-07-03b: feeds already subscribed (all 62
+    // SYM_FULL). Per-coin thr from Crypto 437337c. OP = parent-only (no companion).
+    chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  0.08);
+    chimera::EdgeEngine::Config trx_upjump_cfg  = make_upjump("trxusdt",  "TRX-UPJUMP-H1",  0.08);
+    chimera::EdgeEngine::Config aave_upjump_cfg = make_upjump("aaveusdt", "AAVE-UPJUMP-H1", 0.05);
+    chimera::EdgeEngine::Config near_upjump_cfg = make_upjump("nearusdt", "NEAR-UPJUMP-H1", 0.12);
+    chimera::EdgeEngine::Config op_upjump_cfg   = make_upjump("opusdt",   "OP-UPJUMP-H1",   0.12);
+    chimera::EdgeEngine ada_upjump_h1(ada_upjump_cfg);
+    chimera::EdgeEngine trx_upjump_h1(trx_upjump_cfg);
+    chimera::EdgeEngine aave_upjump_h1(aave_upjump_cfg);
+    chimera::EdgeEngine near_upjump_h1(near_upjump_cfg);
+    chimera::EdgeEngine op_upjump_h1(op_upjump_cfg);
+    wire_engine(ada_upjump_h1);
+    wire_engine(trx_upjump_h1);
+    wire_engine(aave_upjump_h1);
+    wire_engine(near_upjump_h1);
+    wire_engine(op_upjump_h1);
 
     // ENGINE A2: ETH-TSMOM-D1 — PF=3.15, Sharpe=3.17, Nbr=91%
     chimera::EdgeEngine::Config eth_d1_cfg{
@@ -6167,6 +6184,12 @@ int main() {
     g_slots.push_back({chimera::SYM_SOL,  &sol_upjump_h1,  "solusdt",  3600, "SOL-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
     g_slots.push_back({chimera::SYM_DOGE, &doge_upjump_h1, "dogeusdt", 3600, "DOGE-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
     g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump_h1,  "bnbusdt",  3600, "BNB-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    // UPJUMP-H1 remaining 5 (S-2026-07-03b) — ADA/TRX/AAVE/NEAR/OP (OP parent-only)
+    g_slots.push_back({chimera::SYM_ADA,  &ada_upjump_h1,  "adausdt",  3600, "ADA-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_TRX,  &trx_upjump_h1,  "trxusdt",  3600, "TRX-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_AAVE, &aave_upjump_h1, "aaveusdt", 3600, "AAVE-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_NEAR, &near_upjump_h1, "nearusdt", 3600, "NEAR-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_OP,   &op_upjump_h1,   "opusdt",   3600, "OP-UPJUMP-H1",   0.0, 0.0, 0, 0, 57});
 
     // H12 engines (3)
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12,  "btcusdt",  43200, "BTC-TSMOM-H12",  3.63, 3.40,  96,  31, 14});

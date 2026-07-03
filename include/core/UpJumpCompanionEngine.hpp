@@ -65,6 +65,27 @@ public:
     int   clips()   const { return clip_num_; }
     bool  shadow_mode = true;
 
+    // Live per-leg snapshot for the Omega desk CRYPTO COMPANIONS panel. Read-only
+    // view of settled state (no side effects). sym is derived in main.cpp from tag.
+    struct LiveSnap {
+        bool   open            = false;   // companion session currently open
+        bool   armed           = false;   // profit-gate cleared (mfe >= arm_pct)
+        double peak_mfe_pct    = 0.0;     // peak favourable % since (re)open
+        int    bars_since_high = 0;       // stall = bars since last new fav high
+        int    clips           = 0;       // clips banked this process lifetime
+        double bank_bp         = 0.0;     // cumulative net_bp banked (after cost)
+    };
+    LiveSnap snapshot() const {
+        LiveSnap s;
+        s.open            = open_;
+        s.armed           = open_ && (mfe_pct_ >= cfg_.arm_pct);
+        s.peak_mfe_pct    = mfe_pct_;
+        s.bars_since_high = stall_now_;
+        s.clips           = clip_num_;
+        s.bank_bp         = banked_bp_;
+        return s;
+    }
+
     // Drive ONCE per completed parent H1 bar. Reads the parent's settled position
     // state only (never writes to it). long-only: UPJUMP is always a long.
     //   parent_in_pos   — engine.in_position() after the bar settled
@@ -105,6 +126,7 @@ public:
         if (fav > mfe_pct_ + 1e-9) { mfe_pct_ = fav; ext_bar_ = bar; }   // new fav extreme
 
         const int  stall = static_cast<int>(bar - ext_bar_);
+        stall_now_ = stall;                                              // live snapshot view
         const bool armed = mfe_pct_ >= cfg_.arm_pct;                     // profit-gate cleared
 
         if (armed && cfg_.stall_bars > 0 && stall >= cfg_.stall_bars) {  // stagnation
@@ -132,6 +154,7 @@ private:
         r.bars_held = static_cast<int>(bar - open_bar_);
         r.clip_num  = ++clip_num_;
         r.shadow    = shadow_mode;
+        banked_bp_ += r.net_bp;                   // cumulative banked (after cost) for live snapshot
         if (on_clip_) on_clip_(r);
         std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d\n",
             cfg_.tag.c_str(), reason, r.net_bp, r.gross_bp, r.mfe_pct, r.bars_held,
@@ -151,6 +174,8 @@ private:
     int64_t open_bar_   = 0;
     int64_t open_ts_    = 0;
     int     clip_num_   = 0;
+    int     stall_now_  = 0;     // live stall (bars since last new fav high) for snapshot
+    double  banked_bp_  = 0.0;   // cumulative net_bp banked across clips (live snapshot)
 };
 
 } // namespace chimera

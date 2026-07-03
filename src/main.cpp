@@ -1095,6 +1095,37 @@ static void persist_companion_clip(const chimera::UpJumpCompanionEngine::ClipRec
     fclose(f);
 }
 
+// Live per-leg companion snapshot for the Omega desk CRYPTO COMPANIONS panel.
+// Schema: {"ts":<unix>,"legs":[{sym,armed,peak_mfe_pct,bars_since_high,clips,bank_bp}]}.
+// Cross-box pushed to C:\Omega\crypto_companion_state.json (Mac launchd scp) where
+// /api/crypto_companion serves it. Caller MUST hold g_companion_mtx. Atomic write
+// (tmp+rename). Read-only view of settled companion state — never touches a parent.
+static constexpr const char* COMPANION_STATE_FILE = "data/crypto_companion_state.json";
+static void emit_companion_state() {
+    std::ostringstream js; js << std::fixed;
+    js << "{\"ts\":" << (long long)std::time(nullptr) << ",\"legs\":[";
+    bool first = true;
+    for (const auto& kv : g_companion_by_parent) {
+        const auto snap = kv.second.second->snapshot();
+        std::string sym = kv.first.substr(0, kv.first.find('-'));  // "BTC-UPJUMP-H1" -> "BTC"
+        if (!first) js << ",";
+        first = false;
+        js << "{\"sym\":\"" << sym << "\",\"armed\":" << (snap.armed ? "true" : "false")
+           << std::setprecision(4) << ",\"peak_mfe_pct\":" << snap.peak_mfe_pct
+           << ",\"bars_since_high\":" << snap.bars_since_high
+           << ",\"clips\":" << snap.clips
+           << std::setprecision(2) << ",\"bank_bp\":" << snap.bank_bp << "}";
+    }
+    js << "]}";
+    const std::string tmp = std::string(COMPANION_STATE_FILE) + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "w");
+    if (!f) { std::fprintf(stderr, "[CC_STATE] failed to open %s\n", tmp.c_str()); return; }
+    const std::string s = js.str();
+    fwrite(s.c_str(), 1, s.size(), f);
+    fclose(f);
+    std::rename(tmp.c_str(), COMPANION_STATE_FILE);
+}
+
 // Bar callback — called by EdgeEngine on every bar close
 static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
     persist_bar(rec);
@@ -1112,6 +1143,9 @@ static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
             chimera::EdgeEngine* par = it->second.first;
             it->second.second->observe(par->in_position(), par->entry_px(), rec.c, rec.open_ts_ms);
         }
+        // Re-emit the full live roster snapshot for the Omega desk panel (every
+        // bar close, any leg). Lock already held — iterates all registered legs.
+        if (!g_companion_by_parent.empty()) emit_companion_state();
     }
 }
 
@@ -2606,6 +2640,7 @@ int main() {
                 _all_clips[i]->config().arm_pct, _all_clips[i]->config().stall_bars,
                 _all_clips[i]->config().rev_gb, _all_clips[i]->config().reclip_pct);
         }
+        emit_companion_state();   // one-shot startup emit so the Omega desk panel lights up immediately (not after 1st H1 close)
     }
     std::fflush(stdout);
 

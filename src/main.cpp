@@ -152,6 +152,7 @@
 #include "live/BinanceREST.hpp"
 #include "live/SpotExecutor.hpp"
 #include "core/EdgeEngine.hpp"
+#include "core/UpJumpCompanionEngine.hpp" // S-2026-07-03: standalone additive clip book for UPJUMP legs (shadow)
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
@@ -1069,6 +1070,31 @@ static void persist_bar(const chimera::EdgeEngine::BarRecord& b) {
     fclose(f);
 }
 
+// ── UPJUMP companion clip book (S-2026-07-03, Slice 4b) ─────────────────────
+// STANDALONE ADDITIVE paper book: each UPJUMP leg gets an independent clip
+// companion that OBSERVES (never touches / closes / moves) the parent. Registered
+// by parent tag; driven from on_bar_callback on every completed bar. Judged
+// STANDALONE, never vs-WIDE (feedback-companion-independent-engine). Emits its
+// own ledger only — no order, no callback into the parent.
+static constexpr const char* COMPANION_TRADES_FILE = "data/companion_trades.json";
+static std::map<std::string, std::pair<chimera::EdgeEngine*, chimera::UpJumpCompanionEngine*>> g_companion_by_parent;
+static std::mutex g_companion_mtx;
+
+static void persist_companion_clip(const chimera::UpJumpCompanionEngine::ClipRecord& r) {
+    FILE* f = fopen(COMPANION_TRADES_FILE, "a");
+    if (!f) { std::fprintf(stderr, "[CLIP_LOG] failed to open %s for append\n", COMPANION_TRADES_FILE); return; }
+    std::ostringstream js; js << std::fixed;
+    js << "{\"tag\":\"" << r.tag << "\",\"symbol\":\"" << r.symbol << "\",\"reason\":\"" << r.reason << "\","
+       << "\"entry_ts\":" << r.entry_ts_ms << ",\"exit_ts\":" << r.exit_ts_ms << std::setprecision(6)
+       << ",\"entry_px\":" << r.entry_px << ",\"exit_px\":" << r.exit_px << std::setprecision(2)
+       << ",\"gross_bp\":" << r.gross_bp << ",\"net_bp\":" << r.net_bp << ",\"mfe_pct\":" << r.mfe_pct
+       << ",\"bars_held\":" << r.bars_held << ",\"clip_num\":" << r.clip_num
+       << ",\"shadow\":" << (r.shadow ? "true" : "false") << "}\n";
+    std::string line = js.str();
+    fwrite(line.c_str(), 1, line.size(), f);
+    fclose(f);
+}
+
 // Bar callback — called by EdgeEngine on every bar close
 static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
     persist_bar(rec);
@@ -1076,6 +1102,16 @@ static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
     {
         std::lock_guard<std::mutex> lk(g_momentum_mtx);
         g_last_momentum_pct[rec.tag] = rec.momentum_pct;
+    }
+    // Drive the UPJUMP clip companion for this leg (if registered). Reads the
+    // parent's settled position only — never modifies it. Additive standalone book.
+    {
+        std::lock_guard<std::mutex> lk(g_companion_mtx);
+        auto it = g_companion_by_parent.find(rec.tag);
+        if (it != g_companion_by_parent.end()) {
+            chimera::EdgeEngine* par = it->second.first;
+            it->second.second->observe(par->in_position(), par->entry_px(), rec.c, rec.open_ts_ms);
+        }
     }
 }
 
@@ -2528,6 +2564,50 @@ int main() {
     wire_engine(aave_upjump_h1);
     wire_engine(near_upjump_h1);
     wire_engine(op_upjump_h1);
+
+    // ── UPJUMP clip companions (S-2026-07-03, Slice 4b) ─────────────────────
+    // STANDALONE ADDITIVE paper clip book per leg. Per-coin knobs = the vault
+    // CryptoUpJumpCompanion FINAL SOLVED ROSTER (arm / stall_bars / rev_gb / reclip;
+    // 0 = that lever OFF). OP = parent-only (companion not viable any lever).
+    // Judged STANDALONE, never vs-WIDE. Shadow: each emits its OWN ledger, never
+    // touches the parent (observe-only). Cost 20bp RT (0.20% Binance spot taker).
+    auto make_companion = [](const char* ptag, const char* ctag, const char* sym,
+                             double arm, int stall, double rev_gb, double reclip) {
+        chimera::UpJumpCompanionEngine::Config c;
+        c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
+        c.arm_pct = arm; c.stall_bars = stall; c.rev_gb = rev_gb; c.reclip_pct = reclip;
+        c.tf_secs = 3600; c.round_trip_bp = 20.0;
+        return c;
+    };
+    //                                                                    arm  stall rev_gb reclip
+    chimera::UpJumpCompanionEngine btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  8.0, 6, 0.30, 0.05));
+    chimera::UpJumpCompanionEngine eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  5.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  5.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine doge_clip(make_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 5.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  8.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  5.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8.0, 6, 0.0,  0.05));  // stall-only
+    chimera::UpJumpCompanionEngine near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 8.0, 8, 0.0,  0.05));  // stall-only (stall8)
+    chimera::UpJumpCompanionEngine aave_clip(make_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 3.0, 6, 0.0,  0.0));   // INVERSE: single-clip, reclip OFF
+    chimera::UpJumpCompanionEngine* _all_clips[] = {
+        &btc_clip,&eth_clip,&sol_clip,&doge_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip,&aave_clip };
+    chimera::EdgeEngine* _all_clip_parents[] = {
+        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&doge_upjump_h1,&bnb_upjump_h1,
+        &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1,&aave_upjump_h1 };
+    {
+        std::lock_guard<std::mutex> lk(g_companion_mtx);
+        for (int i = 0; i < 9; ++i) {
+            _all_clips[i]->shadow_mode = true;
+            _all_clips[i]->set_on_clip(persist_companion_clip);
+            g_companion_by_parent[_all_clips[i]->config().parent_tag] =
+                std::make_pair(_all_clip_parents[i], _all_clips[i]);
+            std::printf("[CLIP-INIT] %s -> observes %s (arm=%.0f stall=%d rev_gb=%.2f reclip=%.2f) shadow=1\n",
+                _all_clips[i]->config().tag.c_str(), _all_clips[i]->config().parent_tag.c_str(),
+                _all_clips[i]->config().arm_pct, _all_clips[i]->config().stall_bars,
+                _all_clips[i]->config().rev_gb, _all_clips[i]->config().reclip_pct);
+        }
+    }
+    std::fflush(stdout);
 
     // ENGINE A2: ETH-TSMOM-D1 — PF=3.15, Sharpe=3.17, Nbr=91%
     chimera::EdgeEngine::Config eth_d1_cfg{

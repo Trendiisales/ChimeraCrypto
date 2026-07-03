@@ -1,0 +1,156 @@
+#pragma once
+// ─────────────────────────────────────────────────────────────────────────────
+// UpJumpCompanionEngine — STANDALONE ADDITIVE clip book (S-2026-07-03, Slice 4b).
+//
+// Observes ONE UPJUMP parent leg (EdgeEngine, StrategyKind::UPJUMP, ride-to-flip)
+// per completed H1 bar and runs its OWN independent clip contract alongside it.
+//
+// HARD OPERATOR RULE — the companion is a SEPARATE, INDEPENDENT engine. It does
+// NOT modify / close / move / shrink the parent UpJump position. The parent rides
+// to symmetric down-jump flip (WIDE) regardless; the companion runs its own book.
+// Judge STANDALONE (net-positive after cost, WF both halves, both regimes),
+// NEVER vs-WIDE (Memory-Omega/wiki/entities/CompanionDominanceError.md,
+// auto-memory feedback-companion-independent-engine).
+//
+// Faithful native port of stall_accountant.py clip decisions (the %-gauge path):
+//   arm at peak  -> clip on STALL (N bars no new fav high) OR REVERSAL (giveback
+//   fraction of peak) -> RECLIP (re-arm after each clip on a new fav high past the
+//   prior peak). Long-only (UPJUMP is always long). No cold-loss cut — the clip
+//   itself (arm/stall/reversal/reclip) IS the protection (COLD_LOSS OFF in cron).
+//
+// Cost 0.20% RT = 20bp (Binance spot taker 0.10%/side, no BNB discount), deducted
+// as net_bp = gross_bp - round_trip_bp, same convention as EdgeEngine exits.
+//
+// PAPER / SHADOW: emits its own ClipRecord ledger only. Never places an order,
+// never calls back into the parent. Additive.
+// ─────────────────────────────────────────────────────────────────────────────
+#include <string>
+#include <cstdint>
+#include <functional>
+#include <cstdio>
+#include <utility>
+
+namespace chimera {
+
+class UpJumpCompanionEngine {
+public:
+    struct Config {
+        std::string parent_tag;        // e.g. "BTC-UPJUMP-H1" (the leg we observe)
+        std::string tag;               // e.g. "BTC-UPJUMP-CLIP" (our own ledger tag)
+        std::string symbol;            // e.g. "btcusdt"
+        double  arm_pct       = 5.0;   // profit-gate: arm triggers once mfe% >= this
+        int     stall_bars    = 6;     // clip after N bars with no new fav high (0 = stall OFF)
+        double  rev_gb        = 0.0;   // clip when fav <= mfe*(1-rev_gb)      (0 = reversal OFF)
+        double  reclip_pct    = 0.0;   // re-arm when fav > prior_peak*(1+reclip_pct) (0 = single-clip)
+        int64_t tf_secs       = 3600;  // H1
+        double  round_trip_bp = 20.0;  // 0.20% RT Binance spot taker
+    };
+
+    // Emitted on every clip / engine-exit. main.cpp persists to the companion ledger.
+    struct ClipRecord {
+        std::string tag, symbol, reason;   // STALL_CLIP / REVERSAL_CLIP / ENGINE_EXIT
+        int64_t entry_ts_ms = 0, exit_ts_ms = 0;
+        double  entry_px = 0.0, exit_px = 0.0;
+        double  gross_bp = 0.0, net_bp = 0.0, mfe_pct = 0.0;
+        int     bars_held = 0, clip_num = 0;
+        bool    shadow = true;
+    };
+    using ClipCallback = std::function<void(const ClipRecord&)>;
+
+    explicit UpJumpCompanionEngine(Config c) : cfg_(std::move(c)) {}
+
+    void set_on_clip(ClipCallback cb) { on_clip_ = std::move(cb); }
+    const Config& config() const { return cfg_; }
+    bool  is_open() const { return open_; }
+    int   clips()   const { return clip_num_; }
+    bool  shadow_mode = true;
+
+    // Drive ONCE per completed parent H1 bar. Reads the parent's settled position
+    // state only (never writes to it). long-only: UPJUMP is always a long.
+    //   parent_in_pos   — engine.in_position() after the bar settled
+    //   parent_entry_px — engine.entry_px()   (the parent's entry for THIS trade)
+    //   cur_px          — the completed bar close
+    //   ts_ms           — bar open ts (ms)
+    void observe(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms) {
+        const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
+
+        // Parent flat (or no valid mark) -> bank any open companion as ENGINE_EXIT,
+        // then reset the session so a future NEW parent trade tracks cleanly.
+        if (!parent_in_pos || parent_entry_px <= 0.0 || cur_px <= 0.0) {
+            if (open_) close_(cur_px > 0.0 ? cur_px : entry_ref_, ts_ms, bar, "ENGINE_EXIT");
+            reset_session_();
+            return;
+        }
+
+        // A NEW parent trade (entry price changed) -> reset companion session.
+        if (entry_ref_ != parent_entry_px) { reset_session_(); entry_ref_ = parent_entry_px; }
+
+        const double fav = (cur_px - parent_entry_px) / parent_entry_px * 100.0;
+
+        if (clipped_) {
+            // RECLIP: re-open only when the parent (still live) makes a NEW favourable
+            // high past the prior clip peak by reclip_pct. Else stay clipped (dark).
+            if (cfg_.reclip_pct > 0.0 && prior_peak_ > 0.0 &&
+                fav > prior_peak_ * (1.0 + cfg_.reclip_pct)) {
+                clipped_ = false;                 // fall through -> re-arm a fresh companion
+            } else {
+                return;
+            }
+        }
+
+        if (!open_) {                             // open on first observation of this leg
+            open_ = true; open_ts_ = ts_ms; open_bar_ = bar;
+            mfe_pct_ = fav; ext_bar_ = bar;
+        }
+        if (fav > mfe_pct_ + 1e-9) { mfe_pct_ = fav; ext_bar_ = bar; }   // new fav extreme
+
+        const int  stall = static_cast<int>(bar - ext_bar_);
+        const bool armed = mfe_pct_ >= cfg_.arm_pct;                     // profit-gate cleared
+
+        if (armed && cfg_.stall_bars > 0 && stall >= cfg_.stall_bars) {  // stagnation
+            prior_peak_ = mfe_pct_; close_(cur_px, ts_ms, bar, "STALL_CLIP"); clipped_ = true; return;
+        }
+        if (armed && cfg_.rev_gb > 0.0 && fav <= mfe_pct_ * (1.0 - cfg_.rev_gb)) {  // reversal
+            prior_peak_ = mfe_pct_; close_(cur_px, ts_ms, bar, "REVERSAL_CLIP"); clipped_ = true; return;
+        }
+    }
+
+private:
+    void reset_session_() {
+        open_ = false; clipped_ = false; prior_peak_ = 0.0;
+        mfe_pct_ = 0.0; ext_bar_ = 0; open_bar_ = 0; open_ts_ = 0; entry_ref_ = 0.0;
+    }
+
+    void close_(double exit_px, int64_t ts_ms, int64_t bar, const char* reason) {
+        ClipRecord r;
+        r.tag = cfg_.tag; r.symbol = cfg_.symbol; r.reason = reason;
+        r.entry_ts_ms = open_ts_; r.exit_ts_ms = ts_ms;
+        r.entry_px = entry_ref_;  r.exit_px = exit_px;
+        r.gross_bp = (entry_ref_ > 0.0) ? (exit_px / entry_ref_ - 1.0) * 1e4 : 0.0;
+        r.net_bp   = r.gross_bp - cfg_.round_trip_bp;
+        r.mfe_pct  = mfe_pct_;
+        r.bars_held = static_cast<int>(bar - open_bar_);
+        r.clip_num  = ++clip_num_;
+        r.shadow    = shadow_mode;
+        if (on_clip_) on_clip_(r);
+        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d\n",
+            cfg_.tag.c_str(), reason, r.net_bp, r.gross_bp, r.mfe_pct, r.bars_held,
+            r.entry_px, r.exit_px, shadow_mode ? 1 : 0);
+        std::fflush(stdout);
+        open_ = false;                            // closed; reclip may re-open next bar
+    }
+
+    Config       cfg_;
+    ClipCallback on_clip_;
+    bool    open_       = false;
+    bool    clipped_    = false;
+    double  entry_ref_  = 0.0;   // the parent entry this companion session tracks
+    double  mfe_pct_    = 0.0;   // peak favourable % since (re)open
+    double  prior_peak_ = 0.0;   // peak at last clip (for reclip gate)
+    int64_t ext_bar_    = 0;     // bar of last new fav extreme
+    int64_t open_bar_   = 0;
+    int64_t open_ts_    = 0;
+    int     clip_num_   = 0;
+};
+
+} // namespace chimera

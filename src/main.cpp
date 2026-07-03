@@ -2602,7 +2602,11 @@ int main() {
     // ── UPJUMP clip companions (S-2026-07-03, Slice 4b) ─────────────────────
     // STANDALONE ADDITIVE paper clip book per leg. Per-coin knobs = the vault
     // CryptoUpJumpCompanion FINAL SOLVED ROSTER (arm / stall_bars / rev_gb / reclip;
-    // 0 = that lever OFF). OP = parent-only (companion not viable any lever).
+    // 0 = that lever OFF).
+    // ARM RETUNE 04-07-2026 (operator): arms lowered to the threshold-tier ladder
+    // (5%-thr->1, 8%-thr->2, 12%-thr->3) to arm EARLY -- was best-net (5-8), too high.
+    // Synced from the Omega-Mac paper cron. rev_gb/stall/reclip UNCHANGED. See vault
+    // [[CryptoUpJumpCompanion]] Operator ARM RETUNE section. OP = parent-only (companion not viable any lever).
     // Judged STANDALONE, never vs-WIDE. Shadow: each emits its OWN ledger, never
     // touches the parent (observe-only). Cost 20bp RT (0.20% Binance spot taker).
     auto make_companion = [](const char* ptag, const char* ctag, const char* sym,
@@ -2614,15 +2618,15 @@ int main() {
         return c;
     };
     //                                                                    arm  stall rev_gb reclip
-    chimera::UpJumpCompanionEngine btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  8.0, 6, 0.30, 0.05));
-    chimera::UpJumpCompanionEngine eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  5.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  5.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine doge_clip(make_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 5.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  8.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  5.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8.0, 6, 0.0,  0.05));  // stall-only
-    chimera::UpJumpCompanionEngine near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 8.0, 8, 0.0,  0.05));  // stall-only (stall8)
-    chimera::UpJumpCompanionEngine aave_clip(make_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 3.0, 6, 0.0,  0.0));   // INVERSE: single-clip, reclip OFF
+    chimera::UpJumpCompanionEngine btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  1.0, 6, 0.30, 0.05));
+    chimera::UpJumpCompanionEngine eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  2.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  3.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine doge_clip(make_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 3.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  3.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  2.0, 6, 0.50, 0.05));
+    chimera::UpJumpCompanionEngine trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  2.0, 6, 0.0,  0.05));  // stall-only
+    chimera::UpJumpCompanionEngine near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 3.0, 8, 0.0,  0.05));  // stall-only (stall8)
+    chimera::UpJumpCompanionEngine aave_clip(make_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 1.0, 6, 0.0,  0.0));   // INVERSE: single-clip, reclip OFF
     chimera::UpJumpCompanionEngine* _all_clips[] = {
         &btc_clip,&eth_clip,&sol_clip,&doge_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip,&aave_clip };
     chimera::EdgeEngine* _all_clip_parents[] = {

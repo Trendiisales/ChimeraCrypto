@@ -2475,6 +2475,43 @@ int main() {
     chimera::EdgeEngine btc_tsmom_d1(btc_d1_cfg);
     wire_engine(btc_tsmom_d1);
 
+    // ── UPJUMP-H1 (S-2026-07-03): faithful CryptoUpJump port ────────────────
+    // Wide W=24 (24×1h) symmetric up-jump, long-only, ride-to-flip: NO
+    // trade-level price stops (vault UpMoveTrailLossMitigation — stops destroy
+    // the up-move edge; protection = the separate companion clip only). Exit
+    // only on symmetric down-jump flip. Per-coin thr from Crypto 437337c
+    // refresh_shadow_intraday.py L60-75. RT cost 20bp (18+2). 5 legs with live
+    // Binance feeds (BTC/ETH/SOL/DOGE/BNB); 6 no-feed legs deferred.
+    auto make_upjump = [](const char* sym, const char* tag, double thr) {
+        return chimera::EdgeEngine::Config{
+            .symbol         = sym,
+            .tag            = tag,
+            .kind           = chimera::StrategyKind::UPJUMP,
+            .tf_secs        = 3600,
+            .atr_period     = 14,
+            .upjump_w       = 24,
+            .upjump_thr     = thr,
+            .ride_to_flip   = true,
+            .round_trip_bp  = 20.0,
+            .max_history    = 720,   // ~30d of 1h klines so the up-jump event is visible on restart
+        };
+    };
+    chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  0.05);
+    chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  0.08);
+    chimera::EdgeEngine::Config sol_upjump_cfg  = make_upjump("solusdt",  "SOL-UPJUMP-H1",  0.12);
+    chimera::EdgeEngine::Config doge_upjump_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP-H1", 0.12);
+    chimera::EdgeEngine::Config bnb_upjump_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP-H1",  0.12);
+    chimera::EdgeEngine btc_upjump_h1(btc_upjump_cfg);
+    chimera::EdgeEngine eth_upjump_h1(eth_upjump_cfg);
+    chimera::EdgeEngine sol_upjump_h1(sol_upjump_cfg);
+    chimera::EdgeEngine doge_upjump_h1(doge_upjump_cfg);
+    chimera::EdgeEngine bnb_upjump_h1(bnb_upjump_cfg);
+    wire_engine(btc_upjump_h1);
+    wire_engine(eth_upjump_h1);
+    wire_engine(sol_upjump_h1);
+    wire_engine(doge_upjump_h1);
+    wire_engine(bnb_upjump_h1);
+
     // ENGINE A2: ETH-TSMOM-D1 — PF=3.15, Sharpe=3.17, Nbr=91%
     chimera::EdgeEngine::Config eth_d1_cfg{
         .symbol         = "ethusdt",
@@ -6123,6 +6160,13 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_d1,   "solusdt",  86400, "SOL-TSMOM-D1",   2.25, 2.41,  89,  15, 13});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d1,  "linkusdt", 86400, "LINK-TSMOM-D1",  2.18, 1.92, 100,  23, 13});
     g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1,   "bnbusdt",  86400, "BNB-TSMOM-D1",   3.16, 2.91,  90,  32, 14});
+
+    // UPJUMP-H1 (5) — S-2026-07-03 faithful CryptoUpJump port, ride-to-flip, no stops
+    g_slots.push_back({chimera::SYM_BTC,  &btc_upjump_h1,  "btcusdt",  3600, "BTC-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_ETH,  &eth_upjump_h1,  "ethusdt",  3600, "ETH-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_upjump_h1,  "solusdt",  3600, "SOL-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_upjump_h1, "dogeusdt", 3600, "DOGE-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump_h1,  "bnbusdt",  3600, "BNB-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
 
     // H12 engines (3)
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12,  "btcusdt",  43200, "BTC-TSMOM-H12",  3.63, 3.40,  96,  31, 14});

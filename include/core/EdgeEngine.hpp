@@ -89,7 +89,8 @@ enum class StrategyKind {
     SUPERTREND,     // ATR-based trailing trend flip (Session 29)
     WILLIAMS_R,     // Williams %R cross up from oversold (Session 29b)
     STOCH_RSI,      // Stochastic RSI cross up from oversold (Session 29b)
-    BREAKOUT_PULLBACK // S38: N-bar high breakout, enter on pullback that holds the breakout level
+    BREAKOUT_PULLBACK, // S38: N-bar high breakout, enter on pullback that holds the breakout level
+    UPJUMP          // S-2026-07-03: wide W-bar up-jump, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -107,6 +108,7 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::WILLIAMS_R:     return "WILLIAMS_R";
         case StrategyKind::STOCH_RSI:      return "STOCH_RSI";
         case StrategyKind::BREAKOUT_PULLBACK: return "BREAKOUT_PULLBACK";
+        case StrategyKind::UPJUMP:         return "UPJUMP";
     }
     return "UNK";
 }
@@ -123,6 +125,7 @@ inline bool is_trend_kind(StrategyKind k) {
         case StrategyKind::ICHIMOKU:
         case StrategyKind::SUPERTREND:
         case StrategyKind::BREAKOUT_PULLBACK:
+        case StrategyKind::UPJUMP:
             return true;
         default:               // BOLLINGER/RSI_REVERT/KELTNER_REVERT/WILLIAMS_R/
             return false;      // STOCH_RSI/OVERNIGHT/WEEKDAY — ok in chop
@@ -140,6 +143,13 @@ public:
         int          hold_bars  = 12;
         double       sl_atr_mult = 2.5;
         int          atr_period  = 14;
+        // UPJUMP (S-2026-07-03): wide W-bar up-jump, ride to symmetric down-jump
+        // flip. ride_to_flip => NO trade-level price stops (vault
+        // UpMoveTrailLossMitigation: stops destroy the up-move edge; protection =
+        // the separate companion clip only).
+        int          upjump_w    = 24;
+        double       upjump_thr  = 0.08;
+        bool         ride_to_flip = false;
         // BOLLINGER:
         double       bb_k        = 2.0;
         // RSI_REVERT:
@@ -1449,9 +1459,16 @@ private:
         }
 
         // First, check if a time-based exit just landed on this bar boundary.
-        if (in_position_ && cur_open_ts_ms_ + cfg_.tf_secs * 1000 > time_exit_ts_ms_) {
+        // UPJUMP (ride_to_flip): skip TIME; exit only on symmetric down-jump flip.
+        if (!cfg_.ride_to_flip && in_position_ &&
+            cur_open_ts_ms_ + cfg_.tf_secs * 1000 > time_exit_ts_ms_) {
             // exit at this bar's close
             exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "TIME");
+        }
+        if (cfg_.ride_to_flip && in_position_ && cfg_.kind == StrategyKind::UPJUMP) {
+            if (upjump_state_() == 0) {
+                exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
+            }
         }
 
         // Then, evaluate a new signal (only if flat and not halted).
@@ -1794,6 +1811,20 @@ private:
         return true;
     }
 
+    // UPJUMP (S-2026-07-03): scan back for the most-recent W-bar symmetric jump
+    // event. +thr => up-jump (long), -thr => down-jump (flat). Returns 1=long, 0=flat.
+    int upjump_state_() const {
+        const int W  = cfg_.upjump_w > 0 ? cfg_.upjump_w : 24;
+        const int sz = (int)closes_.size();
+        if (sz < W + 1) return 0;
+        for (int k = sz - 1; k >= W; --k) {
+            double j = closes_[k] / closes_[k - W] - 1.0;
+            if (j >=  cfg_.upjump_thr) return 1;   // most recent event = up-jump -> long
+            if (j <= -cfg_.upjump_thr) return 0;   // most recent event = down-jump -> flat
+        }
+        return 0;
+    }
+
     void evaluate_signal_(bool st_flip = false) {
         bool fire = false;
         switch (cfg_.kind) {
@@ -1810,6 +1841,7 @@ private:
             case StrategyKind::WILLIAMS_R:     fire = signal_williams_r_();        break;
             case StrategyKind::STOCH_RSI:      fire = signal_stoch_rsi_();         break;
             case StrategyKind::BREAKOUT_PULLBACK: fire = signal_breakout_pullback_(); break;
+            case StrategyKind::UPJUMP:         fire = (upjump_state_() == 1);    break;
         }
         if (!fire) return;
 
@@ -2103,6 +2135,7 @@ private:
 
     void check_exits_(double price, int64_t ts_ms) {
         if (!in_position_) return;
+        if (cfg_.ride_to_flip) return;   // UPJUMP: NO trade-level price stops; exit only on flip (close_bar_)
 
         // Update MFE tracking
         if (price > mfe_px_) {

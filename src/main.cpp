@@ -7508,6 +7508,43 @@ int main() {
             }
         }
 
+        // ── UPJUMP companion: drive on EVERY tick (S-2026-07-05) ─────────────
+        // Was H1-bar-close ONLY (on_bar_callback) -> blind to any mover that
+        // spiked+reversed WITHIN the hour: peak-MFE was sampled at the close and
+        // the reversal-giveback clip could only fire on the hour boundary. Now
+        // observe() runs per tick for this symbol's companions, so peak-MFE
+        // tracks the true intra-hour high and the REVERSAL/RECLIP price gates
+        // fire the instant they trip. The stall counter is unaffected: bar index
+        // = ts/H1 still only advances on the hour, so STALL stays in H1 units
+        // (backtested roster semantics preserved). This RESTORES the intra-bar
+        // cadence the validated stall_accountant.py had — the native H1-only path
+        // was a fidelity regression, not the design. on_bar_callback still drives
+        // the canonical bar-close observe + emit; double-drive is safe (post-clip
+        // re-arm gate blocks a double clip, peak only ratchets up).
+        {
+            std::lock_guard<std::mutex> lk(g_companion_mtx);
+            if (!g_companion_by_parent.empty()) {
+                int clips_before = 0, clips_after = 0;
+                for (auto& kv : g_companion_by_parent) {
+                    chimera::EdgeEngine* par            = kv.second.first;
+                    chimera::UpJumpCompanionEngine* comp = kv.second.second;
+                    if (!par || !comp) continue;
+                    if (chimera::symbol_to_id(par->cfg().symbol) != id) continue;
+                    clips_before += comp->clips();
+                    comp->observe(par->in_position(), par->entry_px(), mid, now_ms);
+                    clips_after  += comp->clips();
+                }
+                // Refresh the desk snapshot when a clip fired this tick, or on a
+                // light 5s time-throttle so armed/peak/bank track intra-bar (the
+                // desk panel polls ~15s). Avoids per-tick file I/O.
+                static int64_t last_cc_emit_ms = 0;
+                if (clips_after != clips_before || now_ms - last_cc_emit_ms >= 5000) {
+                    last_cc_emit_ms = now_ms;
+                    emit_companion_state();
+                }
+            }
+        }
+
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n % 10000 == 0) {

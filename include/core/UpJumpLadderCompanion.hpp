@@ -57,6 +57,9 @@ public:
         double  reclip_pct    = 0.05;  // re-enter when fav > prior_peak*(1+reclip_pct)
         int     cap           = 5;     // max concurrent legs (2 base + up to cap-2 ladder)
         double  cost_gate_bp  = 0.0;   // >0 = hard cost-cover clip gate (suppress sub-cost clips)
+        double  confirm_bp    = 25.0;  // OPTION-B confirmed-entry: a leg stays FLAT (books nothing,
+                                       // pays no cost) until fav>=confirm_bp; a never-confirmed leg
+                                       // never opens (fixes the BTC -141.39bp never-positive flush).
         int64_t tf_secs       = 3600;  // H1
         double  round_trip_bp = 20.0;  // 0.20% RT Binance spot taker
     };
@@ -86,7 +89,7 @@ public:
         std::string label;      // "T1" / "T2" / "L1".. (tier / ladder id for the GUI)
         double  epx = 0.0;      // FIXED entry — fav/mfe/arm/reclip gauge
         double  le  = 0.0;      // MOVING leg entry — clip gross gauge (resets on reclip)
-        double  arm = 5.0; int stall = 0; double gb = 0.0; double rc = 0.05; double cg = 0.0;
+        double  arm = 5.0; int stall = 0; double gb = 0.0; double rc = 0.05; double cg = 0.0; double confirm = 0.0;
         bool    open = false, clipped = false;
         double  pk = 0.0, mfe = 0.0;
         int64_t ext_bar = 0, open_bar = 0, open_ts = 0;
@@ -188,7 +191,7 @@ private:
     Leg make_leg_(std::string label, double epx, const Tier& t, int64_t /*ts*/, int64_t /*bar*/, bool /*seed*/) {
         Leg l; l.label = std::move(label);
         l.epx = epx; l.le = epx; l.arm = t.arm; l.stall = t.stall; l.gb = t.gb;
-        l.rc = cfg_.reclip_pct; l.cg = cfg_.cost_gate_bp;
+        l.rc = cfg_.reclip_pct; l.cg = cfg_.cost_gate_bp; l.confirm = cfg_.confirm_bp;
         return l;   // open=false until first step (matches python: open set on first observation)
     }
 
@@ -214,7 +217,12 @@ private:
                 lg.clipped = false; lg.le = cur;      // RECLIP = re-enter at current price
             } else return false;
         }
-        if (!lg.open) { lg.open = true; lg.open_ts = bar * cfg_.tf_secs * 1000; lg.open_bar = bar; lg.mfe = fav; lg.ext_bar = bar; }
+        if (!lg.open) {
+            if (lg.confirm > 0.0 && fav * 100.0 < lg.confirm) return false;   // OPTION-B: not yet confirmed -> stay flat, book nothing
+            lg.open = true; lg.open_ts = bar * cfg_.tf_secs * 1000; lg.open_bar = bar;
+            if (lg.confirm > 0.0) lg.le = cur;                                 // le set to the confirm price (matches python)
+            lg.mfe = fav; lg.ext_bar = bar;
+        }
         if (fav > lg.mfe + 1e-9) { lg.mfe = fav; lg.ext_bar = bar; }
         const bool armed = lg.mfe >= lg.arm;
         const int  stall = (int)(bar - lg.ext_bar);

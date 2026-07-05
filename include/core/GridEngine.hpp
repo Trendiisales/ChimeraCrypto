@@ -2,9 +2,15 @@
 // Multi-lot ladder: buy a lot on each g% drop (post-only/maker), sell each lot on
 // a g% rise. Earns the spacing per oscillation; long-only -> accumulates dips,
 // distributes rips. Validated (sim): ~+10%/yr on BTC/SOL, uncorrelated to trend.
-// Crash guard: stop buying + flatten if drawdown from equity-peak exceeds a cap
-// (the inventory-bleed-in-a-crash risk). Separate from EdgeEngine (which is
-// single-position); GridEngine tracks total_bp() the same way for the dashboard.
+// ADVERSE-PROTECTION (verdict, S-2026-07-05): PRIMARY = macro gate (no new lots while
+//   BTC<200d-MA) + max_lots cap. SECONDARY = crash_dd_stop circuit-breaker: a >cap
+//   equity-peak drawdown latches halted_ -> STOPS opening new lots (caps a fast flash-DD
+//   the slow 200d-MA gate misses). Existing inventory is deliberately NOT force-flattened:
+//   validated finding (dip-flatten sold the bottom, hurt SOL/ETH) -> holding + macro gate
+//   is net-better. Backtested: engine REJECTED for allocation (100% bull-beta, SOL -100%
+//   wipe, fails WF) -> ships SHADOW only; this guard closes the "crash_dd_stop was a DEAD
+//   field / on_tick never enforced it" bug (S-2026-07-05f handoff B2).
+// Separate from EdgeEngine (single-position); GridEngine tracks total_bp() for the dashboard.
 #pragma once
 #include <vector>
 #include <algorithm>
@@ -47,6 +53,13 @@ public:
         if (eq > peak_eq_) peak_eq_ = eq;
         if (ref_px_ <= 0) ref_px_ = px;
 
+        // S-2026-07-05 crash circuit-breaker (was a DEAD field: on_tick tracked eq/peak_eq_
+        // but NEVER enforced crash_dd_stop). A >cap equity-peak drawdown LATCHES halted_,
+        // which gates the BUY block below -> no new lots into a crash. Existing inventory is
+        // NOT force-flattened (validated: dip-flatten sells the bottom, hurt SOL/ETH); it
+        // exits on bounces via the normal sell/runner path. See ADVERSE-PROTECTION header.
+        if (peak_eq_ > 0.0 && (peak_eq_ - eq) / peak_eq_ > cfg_.crash_dd_stop) halted_ = true;
+
         // S55 RUNNER: trail the runner lot (rides the sustained move), exit on pullback.
         if (has_runner_) {
             if (px > run_peak_) run_peak_ = px;
@@ -63,7 +76,7 @@ public:
         // inventory recovers on the bounce; max_lots caps exposure. The bear is sat
         // out at the macro level, not by panic-selling intra-trend.
         // BUY on g-drop (maker), if slot free (incl runner) + macro_ok
-        if (macro_ok && (int)(lots_.size() + (has_runner_ ? 1 : 0)) < cfg_.max_lots
+        if (!halted_ && macro_ok && (int)(lots_.size() + (has_runner_ ? 1 : 0)) < cfg_.max_lots
                      && px <= ref_px_ * (1.0 - cfg_.grid_pct)) {
             lots_.push_back(px); ref_px_ = px; fills_++;
             if (on_order) on_order(cfg_.tag, cfg_.symbol, true, px, ts_ms);

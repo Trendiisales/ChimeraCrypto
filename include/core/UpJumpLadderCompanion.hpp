@@ -41,12 +41,13 @@
 #include <cstdio>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 namespace chimera {
 
 class UpJumpLadderCompanion {
 public:
-    struct Tier { double arm = 5.0; int stall = 0; double gb = 0.0; };  // 0 = that lever OFF
+    struct Tier { double arm = 5.0; int stall = 0; double gb = 0.0; double trail_bp = 0.0; };  // 0 = that lever OFF; trail_bp used only in be_floor mode
 
     struct Config {
         std::string parent_tag;        // e.g. "BTC-UPJUMP-H1" (the leg we observe)
@@ -62,6 +63,20 @@ public:
                                        // never opens (fixes the BTC -141.39bp never-positive flush).
         int64_t tf_secs       = 3600;  // H1
         double  round_trip_bp = 20.0;  // 0.20% RT Binance spot taker
+        // ── BE-FLOOR mode (S-2026-07-05 resume, operator restated spec) ──────────
+        // When true the leg exits are governed by a HARD BREAK-EVEN FLOOR instead of
+        // giveback/stall + MTM flush. Faithful port of be_bptrail.py leg_book:
+        //   • a leg stays FLAT until price clears +be_bp from its ref (== RT cost);
+        //     it OPENS at that price (le), so net starts at 0 (the move paid the cost).
+        //   • stop = max(le, hwm*(1 - trail_bp/1e4)); exit the instant cur<=stop.
+        //     exit_px = stop >= le ALWAYS -> gross>=0 -> net = gross (NO 2nd RT charge,
+        //     the +be_bp open move already paid it). NO underwater flush, EVER.
+        //   • reclip: after an exit the ref becomes the exit price; the leg re-opens on
+        //     the next +be_bp continuation. NO self-funding ladder (operator dropped it).
+        // Result: net_bp >= 0 on EVERY clip BY CONSTRUCTION. Trigger (W/thr) lives in
+        // the dedicated shadow detector engine the companion observes — parent untouched.
+        bool    be_floor      = false;
+        double  be_bp         = 20.0;  // gross bp move from ref required to open a leg (== cost)
     };
 
     // Emitted on every clip / engine-exit. main.cpp persists to the companion ledger.
@@ -93,6 +108,10 @@ public:
         bool    open = false, clipped = false;
         double  pk = 0.0, mfe = 0.0;
         int64_t ext_bar = 0, open_bar = 0, open_ts = 0;
+        // BE-floor mode state
+        double  trail_bp = 0.0;   // bp giveback-from-hwm (0 = ride to parent exit)
+        double  hwm = 0.0;        // high-water price since open
+        double  ref_px = 0.0;     // reference the +be_bp open gate is measured from (resets to exit px on reclip)
     };
 
     // Drive ONCE per completed parent bar (byte-exact vs python) OR per tick
@@ -101,6 +120,7 @@ public:
     // settled position only, never writes to it. Long-only (UPJUMP is always long).
     void observe(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms) {
         const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
+        if (cfg_.be_floor) { observe_be_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar); return; }
 
         // Parent flat / no valid mark -> flush every open leg MTM, then reset.
         if (!parent_in_pos || parent_entry_px <= 0.0 || cur_px <= 0.0) {
@@ -181,6 +201,83 @@ public:
     }
 
 private:
+    // ── BE-FLOOR mode (faithful port of be_bptrail.py leg_book) ──────────────
+    // net_bp >= 0 on EVERY clip by construction; no ladder; reclip from exit px.
+    void observe_be_(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms, int64_t bar) {
+        cur_bar_ = bar;
+        // Parent flat / bad mark -> flush every open leg (floored >=0), reset.
+        if (!parent_in_pos || parent_entry_px <= 0.0 || cur_px <= 0.0) {
+            const double px = (cur_px > 0.0) ? cur_px : last_be_px_;
+            for (auto& lg : legs_) flush_be_(lg, px, ts_ms, bar);
+            reset_session_();
+            return;
+        }
+        // New parent trade -> flush stragglers, reset, seed 2 base legs (ref = parent entry).
+        if (entry_ref_ != parent_entry_px) {
+            for (auto& lg : legs_) flush_be_(lg, cur_px, ts_ms, bar);
+            reset_session_();
+            entry_ref_ = parent_entry_px;
+            legs_.push_back(make_be_leg_("T1", parent_entry_px, cfg_.tight));
+            legs_.push_back(make_be_leg_("T2", parent_entry_px, cfg_.wide));
+        }
+        last_be_px_ = cur_px;
+        for (auto& lg : legs_) step_be_(lg, cur_px, ts_ms, bar);   // NO ladder spawn in be_floor
+    }
+
+    Leg make_be_leg_(std::string label, double ref_px, const Tier& t) {
+        Leg l; l.label = std::move(label);
+        l.ref_px = ref_px; l.trail_bp = t.trail_bp; l.arm = t.arm;
+        l.open = false; l.clipped = false; l.le = 0.0; l.hwm = 0.0;
+        return l;
+    }
+
+    // one H1-close step of a BE-floor leg. Books a clip (net>=0) when the trailing
+    // stop (floored at entry) is hit; reclips from the exit price.
+    void step_be_(Leg& lg, double cur, int64_t ts, int64_t bar) {
+        if (!lg.open) {                                     // FLAT: wait for +be_bp from ref -> open here
+            if ((cur / lg.ref_px - 1.0) * 1e4 < cfg_.be_bp) return;
+            lg.open = true; lg.le = cur; lg.hwm = cur;
+            lg.open_ts = ts; lg.open_bar = bar; lg.ext_bar = bar; lg.mfe = 0.0;
+            return;                                         // opened this bar; stop==le, cur==le -> no exit yet
+        }
+        if (cur > lg.hwm) { lg.hwm = cur; lg.ext_bar = bar; }
+        lg.mfe = (lg.hwm / lg.le - 1.0) * 100.0;            // peak % from entry (for the GUI snapshot)
+        const double stop = (lg.trail_bp > 0.0)
+            ? std::max(lg.le, lg.hwm * (1.0 - lg.trail_bp / 1e4))
+            : lg.le;                                        // trail_bp==0 -> pure BE floor (ride to parent exit)
+        if (cur <= stop) {
+            const double gross = std::max(0.0, (stop / lg.le - 1.0) * 1e4);   // >=0 ALWAYS
+            emit_be_clip_(lg, stop, ts, bar, gross, "BE_TRAIL_CLIP");
+            lg.ref_px = stop; lg.open = false; lg.clipped = false;            // reclip from exit px
+            lg.le = 0.0; lg.hwm = 0.0;
+        }
+    }
+
+    void flush_be_(Leg& lg, double px, int64_t ts, int64_t bar) {            // parent exit: floored, never underwater
+        if (!lg.open || lg.le <= 0.0 || px <= 0.0) return;
+        const double gross = std::max(0.0, (px / lg.le - 1.0) * 1e4);
+        emit_be_clip_(lg, px, ts, bar, gross, "ENGINE_EXIT");
+        lg.open = false;
+    }
+
+    void emit_be_clip_(Leg& lg, double exit_px, int64_t ts, int64_t bar,
+                       double gross, const char* reason) {
+        const double net = gross;   // BE-floor: cost already paid by the +be_bp open move; no 2nd RT charge
+        ClipRecord r;
+        r.tag = cfg_.tag + "-" + lg.label; r.symbol = cfg_.symbol; r.reason = reason;
+        r.entry_ts_ms = lg.open_ts; r.exit_ts_ms = ts;
+        r.entry_px = lg.le; r.exit_px = exit_px;
+        r.gross_bp = gross; r.net_bp = net; r.mfe_pct = lg.mfe;
+        r.bars_held = (int)(bar - lg.open_bar);
+        r.clip_num = ++clip_num_;
+        r.shadow = shadow_mode;
+        banked_bp_ += net;
+        if (on_clip_) on_clip_(r);
+        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d BEFLOOR\n",
+            r.tag.c_str(), reason, net, gross, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
+        std::fflush(stdout);
+    }
+
     void reset_session_() { legs_.clear(); entry_ref_ = 0.0; }
 
     void init_base_legs_(double epx, int64_t ts, int64_t bar) {
@@ -271,6 +368,7 @@ private:
     int     clip_num_  = 0;
     double  banked_bp_ = 0.0;
     int64_t cur_bar_   = 0;   // last bar seen (for snapshot bars_since_high)
+    double  last_be_px_ = 0.0; // last mark seen in be_floor mode (flush fallback)
 };
 
 } // namespace chimera

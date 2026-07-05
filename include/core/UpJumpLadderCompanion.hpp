@@ -77,6 +77,15 @@ public:
         // the dedicated shadow detector engine the companion observes — parent untouched.
         bool    be_floor      = false;
         double  be_bp         = 20.0;  // gross bp move from ref required to open a leg (== cost)
+        // Internal up-jump detector (be_floor only). >0 = the companion self-detects its
+        // OWN long-event window from the price stream it already receives — it does NOT
+        // read the live parent's position (independence: the parent is never retuned for
+        // the companion's sake). Faithful to sw.parent(W,thr) on H1 closes; enter when
+        // close/close[-W]-1 >= det_thr, exit when <= -det_thr. det_w=2/det_thr=0.01 =
+        // the swept "2h/+1%" trigger. W=2 -> ~2h cold-start on restart (no warm-seed
+        // needed; the companion's per-trade legs are ephemeral anyway).
+        int     det_w         = 0;
+        double  det_thr       = 0.0;
     };
 
     // Emitted on every clip / engine-exit. main.cpp persists to the companion ledger.
@@ -120,7 +129,11 @@ public:
     // settled position only, never writes to it. Long-only (UPJUMP is always long).
     void observe(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms) {
         const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
-        if (cfg_.be_floor) { observe_be_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar); return; }
+        if (cfg_.be_floor) {
+            if (cfg_.det_w > 0) { feed_selfdetect_(cur_px, ts_ms); return; }        // internal detector (live)
+            observe_be_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (validation harness)
+            return;
+        }
 
         // Parent flat / no valid mark -> flush every open leg MTM, then reset.
         if (!parent_in_pos || parent_entry_px <= 0.0 || cur_px <= 0.0) {
@@ -201,6 +214,32 @@ public:
     }
 
 private:
+    // ── internal up-jump detector (be_floor self-detect; parent never read) ──
+    // Aggregates H1 closes from the mark stream; a bar "closes" when the next bar's
+    // first mark arrives. On each completed close: run sw.parent(det_w,det_thr) and
+    // drive the leg book with the detector's own (in_event, entry_px) window.
+    void feed_selfdetect_(double cur_px, int64_t ts_ms) {
+        if (cur_px <= 0.0) return;
+        const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
+        if (det_bar_ < 0) { det_bar_ = bar; det_close_ = cur_px; return; }
+        if (bar < det_bar_) return;                             // ignore stale/backward feeds (2nd driver, rehydrate replay)
+        if (bar == det_bar_) { det_close_ = cur_px; return; }   // same bar -> update running close
+        process_close_(det_close_, det_bar_);                   // prior bar finalized
+        det_bar_ = bar; det_close_ = cur_px;
+    }
+    void process_close_(double close, int64_t closed_bar) {
+        h1c_.push_back(close);
+        if ((int)h1c_.size() > cfg_.det_w + 1) h1c_.erase(h1c_.begin());
+        if ((int)h1c_.size() >= cfg_.det_w + 1) {               // have close[i] and close[i-W]
+            const double past = h1c_.front();
+            const double j = close / past - 1.0;
+            if (!det_in_ && j >=  cfg_.det_thr) { det_in_ = true; det_entry_ = close; }  // enter (entry ~ next open)
+            else if (det_in_ && j <= -cfg_.det_thr) { det_in_ = false; }                 // exit -> book flushes
+        }
+        const int64_t ts = closed_bar * cfg_.tf_secs * 1000;
+        observe_be_(det_in_, det_entry_, close, ts, closed_bar);   // drive the BE-floor book
+    }
+
     // ── BE-FLOOR mode (faithful port of be_bptrail.py leg_book) ──────────────
     // net_bp >= 0 on EVERY clip by construction; no ladder; reclip from exit px.
     void observe_be_(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms, int64_t bar) {
@@ -369,6 +408,12 @@ private:
     double  banked_bp_ = 0.0;
     int64_t cur_bar_   = 0;   // last bar seen (for snapshot bars_since_high)
     double  last_be_px_ = 0.0; // last mark seen in be_floor mode (flush fallback)
+    // internal detector state (be_floor self-detect)
+    std::vector<double> h1c_;      // ring of last det_w+1 H1 closes
+    int64_t det_bar_   = -1;       // current H1 bar being aggregated
+    double  det_close_ = 0.0;      // running close of det_bar_
+    bool    det_in_    = false;    // in a detected long event
+    double  det_entry_ = 0.0;      // event entry ref (~ next open)
 };
 
 } // namespace chimera

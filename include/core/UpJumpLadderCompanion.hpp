@@ -178,6 +178,9 @@ public:
         const int64_t nbar = now_ms      / (cfg_.tf_secs * 1000);
         const double  peak_mfe = (peak_px > entry_px) ? (peak_px / entry_px - 1.0) * 100.0 : 0.0;
         entry_ref_ = entry_px;
+        cur_bar_   = nbar;   // anchor "now" so the first post-rehydrate snapshot() before any
+                             // observe_be_/step reports bars_since_high = nbar - ext_bar(=nbar) = 0
+                             // (was 0 - nbar = -495347: the desk CRYPTO COMPANIONS -495347 render bug)
         legs_.push_back(seed_leg_("T1", entry_px, cfg_.tight, entry_ts_ms, ebar, nbar, peak_mfe));
         legs_.push_back(seed_leg_("T2", entry_px, cfg_.wide,  entry_ts_ms, ebar, nbar, peak_mfe));
     }
@@ -197,7 +200,7 @@ public:
             if (!lg.open) continue;
             s.open = true;
             if (lg.mfe >= lg.arm) s.armed = true;
-            if (lg.mfe > s.peak_mfe_pct) { s.peak_mfe_pct = lg.mfe; s.bars_since_high = (int)(cur_bar_ - lg.ext_bar); }
+            if (lg.mfe > s.peak_mfe_pct) { s.peak_mfe_pct = lg.mfe; s.bars_since_high = (int)std::max<int64_t>(0, cur_bar_ - lg.ext_bar); }
         }
         return s;
     }
@@ -207,7 +210,7 @@ public:
             if (!lg.open) continue;
             LiveSnap s; s.label = lg.label; s.open = true;
             s.armed = (lg.mfe >= lg.arm); s.peak_mfe_pct = lg.mfe;
-            s.bars_since_high = (int)(cur_bar_ - lg.ext_bar);
+            s.bars_since_high = (int)std::max<int64_t>(0, cur_bar_ - lg.ext_bar);
             v.push_back(s);
         }
         return v;

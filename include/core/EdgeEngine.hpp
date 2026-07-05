@@ -623,6 +623,21 @@ public:
         if (in_position_) {
             check_exits_(price, ts_ms);
         }
+
+        // ── UPJUMP intra-bar ENTRY (S-2026-07-05, operator: no boundary wait) ──
+        // The up-jump is a PRICE event, not a bar-close event. Fire the instant
+        // the live price crosses the jump threshold vs the close W bars back —
+        // do NOT wait for the H1 boundary. Full gate chain still applies inside
+        // evaluate_signal_ (cluster/regime already cut for UPJUMP; funding/vol/
+        // confirmation still run). Guarded to at most one attempt per forming
+        // bar so a persistent jump doesn't spam entry-eval every tick; the H1
+        // close path (close_bar_) remains as the backstop.
+        if (!in_position_ && !halted_ && cfg_.kind == StrategyKind::UPJUMP
+            && intrabar_fired_bar_ != cur_bar_id_
+            && intrabar_upjump_fires_(cur_close_)) {
+            intrabar_fired_bar_ = cur_bar_id_;
+            evaluate_signal_intrabar_(cur_close_, ts_ms);
+        }
     }
 
     // Force-flatten any open paper position at the given price.
@@ -1140,6 +1155,12 @@ private:
     // Position state
     bool    in_position_ = false;
     double  entry_px_    = 0.0;
+    // Intra-bar UPJUMP entry (S-2026-07-05): when >0, evaluate_signal_ opens at
+    // this live price/ts instead of the just-closed bar. intrabar_fired_bar_
+    // caps entry attempts to one per forming bar (avoids per-tick eval spam).
+    double  intrabar_entry_px_ = 0.0;
+    int64_t intrabar_entry_ts_ = 0;
+    int64_t intrabar_fired_bar_ = -1;
     double  sl_px_       = 0.0;     // hard stop-loss (never moves)
     int64_t entry_ts_ms_ = 0;
     int64_t time_exit_ts_ms_ = 0;
@@ -1825,6 +1846,29 @@ private:
         return 0;
     }
 
+    // Intra-bar UPJUMP test (S-2026-07-05, operator: no boundary wait). The
+    // up-jump is a PRICE event — a jump of live_px vs the close W bars back —
+    // not a bar-close event. Returns true the instant the live (forming-bar)
+    // price crosses +thr, so entry fires mid-hour instead of at the H1 close.
+    bool intrabar_upjump_fires_(double live_px) const {
+        const int W  = cfg_.upjump_w > 0 ? cfg_.upjump_w : 24;
+        const int sz = (int)closes_.size();
+        if (sz < W || live_px <= 0.0) return false;
+        const double j = live_px / closes_[sz - W] - 1.0;   // vs price W bars ago
+        return j >= cfg_.upjump_thr;                        // up-jump NOW = most-recent event = long
+    }
+
+    // Drive an entry evaluation intra-bar at the live price/ts (UPJUMP only).
+    // Reuses the full evaluate_signal_ gate chain (cluster/funding/vol/etc);
+    // the override members make it open at the live price NOW, not next-bar-open.
+    void evaluate_signal_intrabar_(double live_px, int64_t ts_ms) {
+        intrabar_entry_px_ = live_px;
+        intrabar_entry_ts_ = ts_ms;
+        evaluate_signal_(false);
+        intrabar_entry_px_ = 0.0;
+        intrabar_entry_ts_ = 0;
+    }
+
     void evaluate_signal_(bool st_flip = false) {
         bool fire = false;
         switch (cfg_.kind) {
@@ -1841,7 +1885,8 @@ private:
             case StrategyKind::WILLIAMS_R:     fire = signal_williams_r_();        break;
             case StrategyKind::STOCH_RSI:      fire = signal_stoch_rsi_();         break;
             case StrategyKind::BREAKOUT_PULLBACK: fire = signal_breakout_pullback_(); break;
-            case StrategyKind::UPJUMP:         fire = (upjump_state_() == 1);    break;
+            case StrategyKind::UPJUMP:         fire = (upjump_state_() == 1) ||
+                                                      (intrabar_entry_px_ > 0.0);  break;  // intra-bar: caller pre-verified the live jump
         }
         if (!fire) return;
 
@@ -2071,7 +2116,9 @@ private:
         // approximation: enter at last_close_ which is the price at this
         // moment of bar close. The error vs theoretical next-bar-open is
         // <1 tick on liquid pairs.
-        entry_px_     = last_close_;
+        // Intra-bar UPJUMP entry opens at the LIVE price NOW; the normal path
+        // opens at the just-closed bar's close (≈ next-bar-open on a live feed).
+        entry_px_     = (intrabar_entry_px_ > 0.0) ? intrabar_entry_px_ : last_close_;
         atr_at_entry_ = a;
         sl_px_        = entry_px_ - cfg_.sl_atr_mult * a;
         // S44L H: swing-low SL — find min(low) over last N bars, use as
@@ -2093,7 +2140,8 @@ private:
                 sl_px_ = floor_px;
             }
         }
-        entry_ts_ms_  = cur_open_ts_ms_ + cfg_.tf_secs * 1000;
+        entry_ts_ms_  = (intrabar_entry_ts_ > 0) ? intrabar_entry_ts_
+                                                 : (cur_open_ts_ms_ + cfg_.tf_secs * 1000);
         time_exit_ts_ms_ = entry_ts_ms_ + (int64_t)cfg_.hold_bars * cfg_.tf_secs * 1000;
         in_position_  = true;
         bars_held_    = 0;

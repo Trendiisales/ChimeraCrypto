@@ -7442,8 +7442,21 @@ int main() {
                     // S54 MACRO GATE: no long entries while BTC < 200d-MA (no
                     // long edge below it — validated). Applies to ALL kinds.
                     bool macro_ok        = g_macro_bull.load(std::memory_order_relaxed);
-                    bool regime_ok       = btc_regime_ok && sym_regime_ok && macro_ok;
-                    e->set_cluster_gate(concurrency_ok && cluster_loss_ok && regime_ok);
+                    // S-2026-07-05 OPERATOR RULE: UPJUMP is a spike/uptrend catch —
+                    // the W-bar up-jump trigger IS the signal (the coin's OWN uptrend).
+                    // Spot-long-only book: when a coin runs up we ride it as hard as
+                    // we can. The broad market-direction vetoes (200d-MA macro +
+                    // BULL_TREND regime) are IRRELEVANT to a per-coin up-jump and were
+                    // silently suppressing EVERY up-jump in a BTC-below-200DMA bear
+                    // (only ETH — opened before the halt — rode, so only 1 companion
+                    // ever armed). Operator directive, repeated + explicit: cut the
+                    // 200DMA/regime direction gate for these trades. Genuine RISK caps
+                    // stay in force: per-symbol + per-cluster concurrency + cluster
+                    // 24h loss circuit-breaker (see set above).
+                    bool direction_ok    = (e->cfg().kind == chimera::StrategyKind::UPJUMP)
+                                               ? true
+                                               : (btc_regime_ok && sym_regime_ok && macro_ok);
+                    e->set_cluster_gate(concurrency_ok && cluster_loss_ok && direction_ok);
                 } else {
                     e->set_cluster_gate(true);
                 }

@@ -152,7 +152,7 @@
 #include "live/BinanceREST.hpp"
 #include "live/SpotExecutor.hpp"
 #include "core/EdgeEngine.hpp"
-#include "core/UpJumpCompanionEngine.hpp" // S-2026-07-03: standalone additive clip book for UPJUMP legs (shadow)
+#include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
@@ -1077,10 +1077,10 @@ static void persist_bar(const chimera::EdgeEngine::BarRecord& b) {
 // STANDALONE, never vs-WIDE (feedback-companion-independent-engine). Emits its
 // own ledger only — no order, no callback into the parent.
 static constexpr const char* COMPANION_TRADES_FILE = "data/companion_trades.json";
-static std::map<std::string, std::pair<chimera::EdgeEngine*, chimera::UpJumpCompanionEngine*>> g_companion_by_parent;
+static std::map<std::string, std::pair<chimera::EdgeEngine*, chimera::UpJumpLadderCompanion*>> g_companion_by_parent;
 static std::mutex g_companion_mtx;
 
-static void persist_companion_clip(const chimera::UpJumpCompanionEngine::ClipRecord& r) {
+static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRecord& r) {
     FILE* f = fopen(COMPANION_TRADES_FILE, "a");
     if (!f) { std::fprintf(stderr, "[CLIP_LOG] failed to open %s for append\n", COMPANION_TRADES_FILE); return; }
     std::ostringstream js; js << std::fixed;
@@ -1110,6 +1110,11 @@ static std::map<std::string, std::pair<int,double>> load_companion_clip_totals()
         auto te = line.find("\"", tp);
         if (te == std::string::npos) continue;
         std::string tag = line.substr(tp, te - tp);
+        // Multi-leg ladder tags are "<COIN>-UPJUMP-CLIP-T1/-T2/-L1..". Collapse to the
+        // book base tag ("<COIN>-UPJUMP-CLIP") so rehydrate (keyed on config().tag)
+        // sums clips/bank across every sub-leg of the book.
+        auto cp = tag.find("-CLIP");
+        if (cp != std::string::npos) tag = tag.substr(0, cp + 5);
         double net = 0.0;
         auto np = line.find("\"net_bp\":");
         if (np != std::string::npos) { try { net = std::stod(line.substr(np + 9)); } catch (...) {} }
@@ -1139,7 +1144,21 @@ static void emit_companion_state() {
            << std::setprecision(4) << ",\"peak_mfe_pct\":" << snap.peak_mfe_pct
            << ",\"bars_since_high\":" << snap.bars_since_high
            << ",\"clips\":" << snap.clips
-           << std::setprecision(2) << ",\"bank_bp\":" << snap.bank_bp << "}";
+           << std::setprecision(2) << ",\"bank_bp\":" << snap.bank_bp;
+        // Per-leg breakdown (S-2026-07-05b tiered ladder): T1/T2 base + L1..Ln ladder
+        // legs currently OPEN, each with its own armed/peak/stall for the Omega desk
+        // CRYPTO COMPANIONS multi-leg render. sym-level fields above remain the book
+        // aggregate (back-compat with the pre-ladder single-leg panel).
+        js << ",\"sublegs\":[";
+        bool sfirst = true;
+        for (const auto& ls : kv.second.second->leg_snapshots()) {
+            if (!sfirst) js << ",";
+            sfirst = false;
+            js << "{\"id\":\"" << ls.label << "\",\"armed\":" << (ls.armed ? "true" : "false")
+               << std::setprecision(4) << ",\"peak_mfe_pct\":" << ls.peak_mfe_pct
+               << ",\"bars_since_high\":" << ls.bars_since_high << "}";
+        }
+        js << "]}";
     }
     js << "]}";
     const std::string tmp = std::string(COMPANION_STATE_FILE) + ".tmp";
@@ -2570,32 +2589,33 @@ int main() {
     chimera::EdgeEngine btc_tsmom_d1(btc_d1_cfg);
     wire_engine(btc_tsmom_d1);
 
-    // ── UPJUMP-H1 (S-2026-07-03): faithful CryptoUpJump port ────────────────
-    // Wide W=24 (24×1h) symmetric up-jump, long-only, ride-to-flip: NO
-    // trade-level price stops (vault UpMoveTrailLossMitigation — stops destroy
-    // the up-move edge; protection = the separate companion clip only). Exit
-    // only on symmetric down-jump flip. Per-coin thr from Crypto 437337c
-    // refresh_shadow_intraday.py L60-75. RT cost 20bp (18+2). 5 legs with live
-    // Binance feeds (BTC/ETH/SOL/DOGE/BNB); 6 no-feed legs deferred.
-    auto make_upjump = [](const char* sym, const char* tag, double thr) {
+    // ── UPJUMP-H1 (S-2026-07-05b): INTRADAY per-coin window + tiered ladder ──
+    // PER-COIN INTRADAY WINDOW W (4-8h), symmetric up-jump, long-only, ride-to-flip:
+    // NO trade-level price stops (vault UpMoveTrailLossMitigation — stops destroy the
+    // up-move edge; protection = the separate companion ladder book only). Exit only
+    // on symmetric down-jump flip. The 24h wide window was too slow to catch the
+    // intraday movers; per-coin W/thr from crypto_upjump_tiered_ladder_sweep.py (best
+    // net W<=8 passing standalone all-6). RT cost 20bp. make_upjump now takes W.
+    auto make_upjump = [](const char* sym, const char* tag, int w, double thr) {
         return chimera::EdgeEngine::Config{
             .symbol         = sym,
             .tag            = tag,
             .kind           = chimera::StrategyKind::UPJUMP,
             .tf_secs        = 3600,
             .atr_period     = 14,
-            .upjump_w       = 24,
+            .upjump_w       = w,
             .upjump_thr     = thr,
             .ride_to_flip   = true,
             .round_trip_bp  = 20.0,
             .max_history    = 720,   // ~30d of 1h klines so the up-jump event is visible on restart
         };
     };
-    chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  0.05);
-    chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  0.08);
-    chimera::EdgeEngine::Config sol_upjump_cfg  = make_upjump("solusdt",  "SOL-UPJUMP-H1",  0.12);
-    chimera::EdgeEngine::Config doge_upjump_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP-H1", 0.12);
-    chimera::EdgeEngine::Config bnb_upjump_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP-H1",  0.12);
+    // per-coin intraday W(h)/thr — crypto_upjump_tiered_ladder_sweep.py roster (05-07b)
+    chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  4, 0.08);
+    chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  4, 0.05);
+    chimera::EdgeEngine::Config sol_upjump_cfg  = make_upjump("solusdt",  "SOL-UPJUMP-H1",  4, 0.12);
+    chimera::EdgeEngine::Config doge_upjump_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP-H1", 8, 0.05);
+    chimera::EdgeEngine::Config bnb_upjump_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP-H1",  4, 0.05);
     chimera::EdgeEngine btc_upjump_h1(btc_upjump_cfg);
     chimera::EdgeEngine eth_upjump_h1(eth_upjump_cfg);
     chimera::EdgeEngine sol_upjump_h1(sol_upjump_cfg);
@@ -2608,11 +2628,11 @@ int main() {
     wire_engine(bnb_upjump_h1);
     // UPJUMP-H1 remaining 5 legs — S-2026-07-03b: feeds already subscribed (all 62
     // SYM_FULL). Per-coin thr from Crypto 437337c. OP = parent-only (no companion).
-    chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  0.08);
-    chimera::EdgeEngine::Config trx_upjump_cfg  = make_upjump("trxusdt",  "TRX-UPJUMP-H1",  0.08);
-    chimera::EdgeEngine::Config aave_upjump_cfg = make_upjump("aaveusdt", "AAVE-UPJUMP-H1", 0.05);
-    chimera::EdgeEngine::Config near_upjump_cfg = make_upjump("nearusdt", "NEAR-UPJUMP-H1", 0.12);
-    chimera::EdgeEngine::Config op_upjump_cfg   = make_upjump("opusdt",   "OP-UPJUMP-H1",   0.12);
+    chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  6, 0.05);
+    chimera::EdgeEngine::Config trx_upjump_cfg  = make_upjump("trxusdt",  "TRX-UPJUMP-H1",  8, 0.08);
+    chimera::EdgeEngine::Config aave_upjump_cfg = make_upjump("aaveusdt", "AAVE-UPJUMP-H1", 4, 0.05);  // parent-only (companion DROPPED task1: PF1.04/H1~0)
+    chimera::EdgeEngine::Config near_upjump_cfg = make_upjump("nearusdt", "NEAR-UPJUMP-H1", 6, 0.05);
+    chimera::EdgeEngine::Config op_upjump_cfg   = make_upjump("opusdt",   "OP-UPJUMP-H1",   24, 0.12); // parent-only (fails all-6 any W)
     chimera::EdgeEngine ada_upjump_h1(ada_upjump_cfg);
     chimera::EdgeEngine trx_upjump_h1(trx_upjump_cfg);
     chimera::EdgeEngine aave_upjump_h1(aave_upjump_cfg);
@@ -2624,46 +2644,41 @@ int main() {
     wire_engine(near_upjump_h1);
     wire_engine(op_upjump_h1);
 
-    // ── UPJUMP clip companions (S-2026-07-03, Slice 4b) ─────────────────────
-    // STANDALONE ADDITIVE paper clip book per leg. Per-coin knobs = the vault
-    // CryptoUpJumpCompanion FINAL SOLVED ROSTER (arm / stall_bars / rev_gb / reclip;
-    // 0 = that lever OFF).
-    // ARM RETUNE 04-07-2026 (operator): arms lowered to the threshold-tier ladder
-    // (5%-thr->1, 8%-thr->2, 12%-thr->3) to arm EARLY -- was best-net (5-8), too high.
-    // Synced from the Omega-Mac paper cron. rev_gb/stall/reclip UNCHANGED. See vault
-    // [[CryptoUpJumpCompanion]] Operator ARM RETUNE section. OP = parent-only (companion not viable any lever).
-    // Judged STANDALONE, never vs-WIDE. Shadow: each emits its OWN ledger, never
-    // touches the parent (observe-only). Cost 20bp RT (0.20% Binance spot taker).
+    // ── UPJUMP clip companions — TIERED-2 + SELF-FUNDING LADDER (S-2026-07-05b) ──
+    // STANDALONE ADDITIVE paper ladder book per leg. Each trade runs >=2 base tiers
+    // (TIGHT banks cost fast, WIDE rides far) + a self-funding ladder (each cost-
+    // covered clip opens ONE more WIDE leg, cap 5). Per-tier FREE exit lever (stall
+    // and/or reversal-giveback; 0 = OFF). Reclip = re-ENTER on trend resume.
+    // Roster = crypto_upjump_tiered_ladder_sweep.py (STANDALONE all-6 gate: net>0,
+    // PF>1, WF both halves>0, bear>=0; NEVER vs-WIDE). Native VALIDATED byte-exact vs
+    // that python (5477 clips, 8 coins — validate_ladder.cpp). DOGE now HAS a companion
+    // (intraday W=8h). AAVE DROPPED (task1 cost-cover gate re-sweep: PF1.04, H1~0 noise).
+    // OP parent-only (fails all-6 any window). Shadow: own ledger, observe-only, never
+    // touches the parent. Cost 20bp RT (0.20% Binance spot taker).
     auto make_companion = [](const char* ptag, const char* ctag, const char* sym,
-                             double arm, int stall, double rev_gb, double reclip) {
-        chimera::UpJumpCompanionEngine::Config c;
+                             double ta, int ts, double tg, double wa, int ws, double wg,
+                             double reclip, int cap, double cost_gate_bp) {
+        chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
-        c.arm_pct = arm; c.stall_bars = stall; c.rev_gb = rev_gb; c.reclip_pct = reclip;
+        c.tight = {ta, ts, tg}; c.wide = {wa, ws, wg};
+        c.reclip_pct = reclip; c.cap = cap; c.cost_gate_bp = cost_gate_bp;
         c.tf_secs = 3600; c.round_trip_bp = 20.0;
         return c;
     };
-    // BEST-PROFIT RETUNE 05-07-2026 (operator, from crypto_upjump_roster_sweep.py —
-    // faithful UpJump8 parent + observe() overlay, STANDALONE all-6 gate: net/PF/WF-both/
-    // regime-both, never vs-WIDE). REVERSES the 04-07 arm-early ladder, which FAILED the
-    // gate on 6/9 legs (BTC -70%, NEAR -3%). Robust pattern = HIGH arm (5-8) + stall off/
-    // long + reclip-on: arm only real winners, don't clip stagnation early. Grid-selected
-    // cells (mild overfit; plateau-robust). DOGE -> PARENT-ONLY (no config passes all-6;
-    // book profits only bear+H1) -> dropped from companion roster like OP. See vault
-    // [[CryptoUpJumpCompanion]] BEST-PROFIT RETUNE section + upjump_roster_sweep_2026-07-05.txt.
-    //                                                                    arm  stall rev_gb reclip   sweep net (standalone)
-    chimera::UpJumpCompanionEngine btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  5.0, 0, 0.30, 0.0));   // +104.5%
-    chimera::UpJumpCompanionEngine eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  2.0, 0, 0.50, 0.05));  // +192.0%
-    chimera::UpJumpCompanionEngine sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  8.0, 0, 0.50, 0.0));   // +305.7%
-    chimera::UpJumpCompanionEngine bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  8.0, 8, 0.0,  0.05));  // +327.1% stall-only
-    chimera::UpJumpCompanionEngine ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  8.0, 8, 0.0,  0.05));  // +317.5% stall-only
-    chimera::UpJumpCompanionEngine trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8.0, 6, 0.50, 0.05));  // +169.8%
-    chimera::UpJumpCompanionEngine near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 5.0, 8, 0.40, 0.0));   // +185.5%
-    chimera::UpJumpCompanionEngine aave_clip(make_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 8.0, 8, 0.0,  0.05));  // +189.5% stall-only
-    chimera::UpJumpCompanionEngine* _all_clips[] = {
-        &btc_clip,&eth_clip,&sol_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip,&aave_clip };  // DOGE dropped -> parent-only
+    //                                                                       TIGHT(arm/stall/gb)  WIDE(arm/stall/gb)  reclip cap cg   standalone net / PF
+    chimera::UpJumpLadderCompanion btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  3.0,0,0.50, 5.0,0,0.50, 0.05,5,0.0));  // +452% PF2.32
+    chimera::UpJumpLadderCompanion eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  3.0,0,0.50, 8.0,0,0.50, 0.05,5,0.0));  // +494% PF1.38
+    chimera::UpJumpLadderCompanion sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  2.0,0,0.50, 8.0,0,0.50, 0.05,5,0.0));  // +3459% PF5.15
+    chimera::UpJumpLadderCompanion doge_clip(make_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 3.0,3,0.0,  8.0,8,0.40, 0.05,5,0.0));  // +2203% PF1.60
+    chimera::UpJumpLadderCompanion bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  3.0,3,0.30, 8.0,0,0.50, 0.05,5,0.0));  // +1052% PF1.85
+    chimera::UpJumpLadderCompanion ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  3.0,4,0.50, 5.0,6,0.0,  0.05,5,0.0));  // +930% PF1.33
+    chimera::UpJumpLadderCompanion trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  3.0,0,0.30, 8.0,6,0.0,  0.05,5,0.0));  // +803% PF1.86
+    chimera::UpJumpLadderCompanion near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 3.0,0,0.50, 8.0,0,0.50, 0.05,5,0.0));  // +898% PF1.25
+    chimera::UpJumpLadderCompanion* _all_clips[] = {
+        &btc_clip,&eth_clip,&sol_clip,&doge_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip };  // AAVE dropped, OP parent-only
     chimera::EdgeEngine* _all_clip_parents[] = {
-        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&bnb_upjump_h1,
-        &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1,&aave_upjump_h1 };  // DOGE parent still trades, no companion
+        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&doge_upjump_h1,&bnb_upjump_h1,
+        &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1 };  // 1:1 with _all_clips
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
@@ -2677,10 +2692,14 @@ int main() {
             _all_clips[i]->set_on_clip(persist_companion_clip);
             g_companion_by_parent[_all_clips[i]->config().parent_tag] =
                 std::make_pair(_all_clip_parents[i], _all_clips[i]);
-            std::printf("[CLIP-INIT] %s -> observes %s (arm=%.0f stall=%d rev_gb=%.2f reclip=%.2f) shadow=1\n",
-                _all_clips[i]->config().tag.c_str(), _all_clips[i]->config().parent_tag.c_str(),
-                _all_clips[i]->config().arm_pct, _all_clips[i]->config().stall_bars,
-                _all_clips[i]->config().rev_gb, _all_clips[i]->config().reclip_pct);
+            {
+                const auto& cc = _all_clips[i]->config();
+                std::printf("[CLIP-INIT] %s -> observes %s  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) reclip=%.2f cap=%d cg=%.0f shadow=1\n",
+                    cc.tag.c_str(), cc.parent_tag.c_str(),
+                    cc.tight.arm, cc.tight.stall, cc.tight.gb,
+                    cc.wide.arm, cc.wide.stall, cc.wide.gb,
+                    cc.reclip_pct, cc.cap, cc.cost_gate_bp);
+            }
         }
         emit_companion_state();   // one-shot startup emit so the Omega desk panel lights up immediately (not after 1st H1 close)
     }
@@ -7268,7 +7287,7 @@ int main() {
         int seeded = 0;
         for (auto& kv : g_companion_by_parent) {
             chimera::EdgeEngine*             par  = kv.second.first;
-            chimera::UpJumpCompanionEngine*  comp = kv.second.second;
+            chimera::UpJumpLadderCompanion*  comp = kv.second.second;
             if (!par || !comp || !par->in_position()) continue;
             comp->seed_open(par->entry_px(), par->entry_ts_ms(), par->mfe_px(), now_ms);
             auto s = comp->snapshot();
@@ -7577,7 +7596,7 @@ int main() {
                 int clips_before = 0, clips_after = 0;
                 for (auto& kv : g_companion_by_parent) {
                     chimera::EdgeEngine* par            = kv.second.first;
-                    chimera::UpJumpCompanionEngine* comp = kv.second.second;
+                    chimera::UpJumpLadderCompanion* comp = kv.second.second;
                     if (!par || !comp) continue;
                     if (chimera::symbol_to_id(par->cfg().symbol) != id) continue;
                     clips_before += comp->clips();

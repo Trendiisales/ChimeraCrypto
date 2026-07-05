@@ -2611,11 +2611,11 @@ int main() {
         };
     };
     // per-coin intraday W(h)/thr — crypto_upjump_tiered_ladder_sweep.py roster (05-07b)
-    chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  4, 0.08);
-    chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  4, 0.05);
-    chimera::EdgeEngine::Config sol_upjump_cfg  = make_upjump("solusdt",  "SOL-UPJUMP-H1",  4, 0.12);
-    chimera::EdgeEngine::Config doge_upjump_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP-H1", 8, 0.05);
-    chimera::EdgeEngine::Config bnb_upjump_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP-H1",  4, 0.05);
+    chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  4, 0.02);
+    chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  4, 0.02);
+    chimera::EdgeEngine::Config sol_upjump_cfg  = make_upjump("solusdt",  "SOL-UPJUMP-H1",  4, 0.02);
+    chimera::EdgeEngine::Config doge_upjump_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP-H1", 4, 0.02);
+    chimera::EdgeEngine::Config bnb_upjump_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP-H1",  4, 0.02);
     chimera::EdgeEngine btc_upjump_h1(btc_upjump_cfg);
     chimera::EdgeEngine eth_upjump_h1(eth_upjump_cfg);
     chimera::EdgeEngine sol_upjump_h1(sol_upjump_cfg);
@@ -2628,11 +2628,11 @@ int main() {
     wire_engine(bnb_upjump_h1);
     // UPJUMP-H1 remaining 5 legs — S-2026-07-03b: feeds already subscribed (all 62
     // SYM_FULL). Per-coin thr from Crypto 437337c. OP = parent-only (no companion).
-    chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  6, 0.05);
-    chimera::EdgeEngine::Config trx_upjump_cfg  = make_upjump("trxusdt",  "TRX-UPJUMP-H1",  8, 0.08);
-    chimera::EdgeEngine::Config aave_upjump_cfg = make_upjump("aaveusdt", "AAVE-UPJUMP-H1", 4, 0.05);  // parent-only (companion DROPPED task1: PF1.04/H1~0)
-    chimera::EdgeEngine::Config near_upjump_cfg = make_upjump("nearusdt", "NEAR-UPJUMP-H1", 6, 0.05);
-    chimera::EdgeEngine::Config op_upjump_cfg   = make_upjump("opusdt",   "OP-UPJUMP-H1",   24, 0.12); // parent-only (fails all-6 any W)
+    chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  4, 0.02);
+    chimera::EdgeEngine::Config trx_upjump_cfg  = make_upjump("trxusdt",  "TRX-UPJUMP-H1",  4, 0.02);
+    chimera::EdgeEngine::Config aave_upjump_cfg = make_upjump("aaveusdt", "AAVE-UPJUMP-H1", 4, 0.02);  // parent-only (companion DROPPED task1: PF1.04/H1~0)
+    chimera::EdgeEngine::Config near_upjump_cfg = make_upjump("nearusdt", "NEAR-UPJUMP-H1", 4, 0.02);
+    chimera::EdgeEngine::Config op_upjump_cfg   = make_upjump("opusdt",   "OP-UPJUMP-H1",   4, 0.02); // parent-only (fails all-6 any W)
     chimera::EdgeEngine ada_upjump_h1(ada_upjump_cfg);
     chimera::EdgeEngine trx_upjump_h1(trx_upjump_cfg);
     chimera::EdgeEngine aave_upjump_h1(aave_upjump_cfg);

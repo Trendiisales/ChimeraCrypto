@@ -2642,25 +2642,33 @@ int main() {
         c.tf_secs = 3600; c.round_trip_bp = 20.0;
         return c;
     };
-    //                                                                    arm  stall rev_gb reclip
-    chimera::UpJumpCompanionEngine btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  1.0, 6, 0.30, 0.05));
-    chimera::UpJumpCompanionEngine eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  2.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  3.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine doge_clip(make_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 3.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  3.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  2.0, 6, 0.50, 0.05));
-    chimera::UpJumpCompanionEngine trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  2.0, 6, 0.0,  0.05));  // stall-only
-    chimera::UpJumpCompanionEngine near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 3.0, 8, 0.0,  0.05));  // stall-only (stall8)
-    chimera::UpJumpCompanionEngine aave_clip(make_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 1.0, 6, 0.0,  0.0));   // INVERSE: single-clip, reclip OFF
+    // BEST-PROFIT RETUNE 05-07-2026 (operator, from crypto_upjump_roster_sweep.py —
+    // faithful UpJump8 parent + observe() overlay, STANDALONE all-6 gate: net/PF/WF-both/
+    // regime-both, never vs-WIDE). REVERSES the 04-07 arm-early ladder, which FAILED the
+    // gate on 6/9 legs (BTC -70%, NEAR -3%). Robust pattern = HIGH arm (5-8) + stall off/
+    // long + reclip-on: arm only real winners, don't clip stagnation early. Grid-selected
+    // cells (mild overfit; plateau-robust). DOGE -> PARENT-ONLY (no config passes all-6;
+    // book profits only bear+H1) -> dropped from companion roster like OP. See vault
+    // [[CryptoUpJumpCompanion]] BEST-PROFIT RETUNE section + upjump_roster_sweep_2026-07-05.txt.
+    //                                                                    arm  stall rev_gb reclip   sweep net (standalone)
+    chimera::UpJumpCompanionEngine btc_clip (make_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  5.0, 0, 0.30, 0.0));   // +104.5%
+    chimera::UpJumpCompanionEngine eth_clip (make_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  2.0, 0, 0.50, 0.05));  // +192.0%
+    chimera::UpJumpCompanionEngine sol_clip (make_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  8.0, 0, 0.50, 0.0));   // +305.7%
+    chimera::UpJumpCompanionEngine bnb_clip (make_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  8.0, 8, 0.0,  0.05));  // +327.1% stall-only
+    chimera::UpJumpCompanionEngine ada_clip (make_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  8.0, 8, 0.0,  0.05));  // +317.5% stall-only
+    chimera::UpJumpCompanionEngine trx_clip (make_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8.0, 6, 0.50, 0.05));  // +169.8%
+    chimera::UpJumpCompanionEngine near_clip(make_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 5.0, 8, 0.40, 0.0));   // +185.5%
+    chimera::UpJumpCompanionEngine aave_clip(make_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 8.0, 8, 0.0,  0.05));  // +189.5% stall-only
     chimera::UpJumpCompanionEngine* _all_clips[] = {
-        &btc_clip,&eth_clip,&sol_clip,&doge_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip,&aave_clip };
+        &btc_clip,&eth_clip,&sol_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip,&aave_clip };  // DOGE dropped -> parent-only
     chimera::EdgeEngine* _all_clip_parents[] = {
-        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&doge_upjump_h1,&bnb_upjump_h1,
-        &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1,&aave_upjump_h1 };
+        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&bnb_upjump_h1,
+        &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1,&aave_upjump_h1 };  // DOGE parent still trades, no companion
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
-        for (int i = 0; i < 9; ++i) {
+        const int _NCLIP = (int)(sizeof(_all_clips)/sizeof(_all_clips[0]));  // was hard-coded 9; now size-derived (DOGE dropped)
+        for (int i = 0; i < _NCLIP; ++i) {
             _all_clips[i]->shadow_mode = true;
             {   // durable-counter rehydrate: panel clips/bank_bp survive restarts
                 auto _ct = _clip_totals.find(_all_clips[i]->config().tag);

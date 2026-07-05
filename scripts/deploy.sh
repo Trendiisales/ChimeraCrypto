@@ -11,9 +11,24 @@ echo "[DEPLOY] Chimera root: $CHIMERA_DIR"
 echo "[DEPLOY] User home:    $HOME"
 
 # ── 1. Pull latest code ──────────────────────────────────────────────────────
-echo "[DEPLOY] Pulling latest code..."
+# HYGIENE (2026-07-05): NEVER --rebase here. Rebase re-applies any box-local commits
+# as NEW SHAs on top of origin -> exactly the mac/box divergence that broke github.
+# The box must be a pure CONSUMER of origin: fast-forward only, no local commits.
+echo "[DEPLOY] Pulling latest code (ff-only)..."
 cd "$CHIMERA_DIR"
-git pull --rebase
+LOCAL_AHEAD=$(git rev-list --count origin/xsec-deploy..HEAD 2>/dev/null || echo 0)
+if [[ "$LOCAL_AHEAD" != "0" ]]; then
+    echo "[DEPLOY] ABORT: box has $LOCAL_AHEAD local commit(s) ahead of origin/xsec-deploy."
+    echo "[DEPLOY] Do NOT commit on the box. Commit on mac -> push -> here pulls ff-only."
+    echo "[DEPLOY] Reconcile: push these to origin, or 'git reset --soft origin/xsec-deploy'."
+    exit 1
+fi
+git fetch origin xsec-deploy
+if ! git merge --ff-only origin/xsec-deploy; then
+    echo "[DEPLOY] ABORT: fast-forward failed (working tree diverged or dirty tracked source)."
+    echo "[DEPLOY] Resolve manually; do NOT force. See DEPLOY_HYGIENE.md."
+    exit 1
+fi
 
 # ── 2. Build ─────────────────────────────────────────────────────────────────
 echo "[DEPLOY] Building..."

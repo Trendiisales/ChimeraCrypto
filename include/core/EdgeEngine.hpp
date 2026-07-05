@@ -632,9 +632,13 @@ public:
         // confirmation still run). Guarded to at most one attempt per forming
         // bar so a persistent jump doesn't spam entry-eval every tick; the H1
         // close path (close_bar_) remains as the backstop.
+        // Fire on EITHER a fresh live jump (intrabar_upjump_fires_, cheap O(1))
+        // OR an already-standing up-jump regime (upjump_state_()==1) — a coin
+        // that entered up-jump regime on a prior bar and is flat only because
+        // entry hadn't re-evaluated must open NOW, not wait for the H1 close.
         if (!in_position_ && !halted_ && cfg_.kind == StrategyKind::UPJUMP
             && intrabar_fired_bar_ != cur_bar_id_
-            && intrabar_upjump_fires_(cur_close_)) {
+            && (intrabar_upjump_fires_(cur_close_) || upjump_state_() == 1)) {
             intrabar_fired_bar_ = cur_bar_id_;
             evaluate_signal_intrabar_(cur_close_, ts_ms);
         }
@@ -859,6 +863,10 @@ public:
         return (spot_px / entry_px_ - 1.0) * 1e4;
     }
     double entry_px() const { return entry_px_; }
+    // Live-trade peak favourable price + entry ts — used by UpJumpCompanionEngine::seed_open()
+    // to rehydrate the companion's peak-to-date on restart (S-2026-07-05).
+    double  mfe_px()      const { return mfe_px_; }
+    int64_t entry_ts_ms() const { return entry_ts_ms_; }
     double last_close() const { return last_close_; }
     int max_history_needed() const { return cfg_.max_history; }
 

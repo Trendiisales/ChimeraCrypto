@@ -7254,6 +7254,35 @@ int main() {
         }
     }
 
+    // ── Companion peak rehydrate (S-2026-07-05) ──────────────────────────
+    // Seed each UpJump companion OPEN + armed from its parent's just-restored live
+    // position, so it reflects the parent's true peak-to-date immediately instead of
+    // sitting dark until the next H1 close (companion peak/mfe is per-session ephemeral
+    // and otherwise re-anchors to the current bar's fav). Runs AFTER resume_position()
+    // so parents carry entry_px/mfe_px/entry_ts. Observe-only, shadow — never touches
+    // the parent. entry_ref_ aligns with the parent entry so the next observe() no-ops.
+    {
+        std::lock_guard<std::mutex> lk(g_companion_mtx);
+        int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        int seeded = 0;
+        for (auto& kv : g_companion_by_parent) {
+            chimera::EdgeEngine*             par  = kv.second.first;
+            chimera::UpJumpCompanionEngine*  comp = kv.second.second;
+            if (!par || !comp || !par->in_position()) continue;
+            comp->seed_open(par->entry_px(), par->entry_ts_ms(), par->mfe_px(), now_ms);
+            auto s = comp->snapshot();
+            std::printf("[CLIP-SEED] %s open from live parent: entry=%.6f peak_mfe=%.2f%% armed=%d\n",
+                comp->config().tag.c_str(), par->entry_px(), s.peak_mfe_pct, s.armed ? 1 : 0);
+            seeded++;
+        }
+        if (seeded > 0) {
+            emit_companion_state();   // refresh the desk panel immediately with the seeded peaks
+            std::printf("[CLIP-SEED] %d companion(s) rehydrated from live parents\n", seeded);
+        }
+        std::fflush(stdout);
+    }
+
     // ── Trade journal: load history ──────────────────────────────────────
     load_trade_history();
 

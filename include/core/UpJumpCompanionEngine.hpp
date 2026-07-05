@@ -67,6 +67,33 @@ public:
     // panel clips/bank_bp survive a process restart (otherwise in-RAM -> 0 each boot).
     // Per-trade session state (mfe/open/stall) intentionally stays ephemeral.
     void rehydrate(int clips_total, double bank_bp_total) { clip_num_ = clips_total; banked_bp_ = bank_bp_total; }
+
+    // Rehydrate an OPEN companion session from a live parent position on process
+    // restart (S-2026-07-05). Without this, observe() only runs on completed H1
+    // bars, so after a restart the companion is dark until the next H1 close and
+    // then re-anchors its peak to the CURRENT bar's fav — losing the parent's true
+    // peak-to-date (a deep-in-profit leg wrongly shows armed=false meanwhile).
+    // seed_open() sets the session open immediately and restores the peak from the
+    // parent's mfe_px. Called from main.cpp AFTER resume_position() (so entry_px /
+    // mfe_px / entry_ts are populated). It fully aligns entry_ref_ with the parent
+    // entry, so the very next observe() does NOT reset the session.
+    //   entry_px    — parent entry for the live trade
+    //   entry_ts_ms — parent entry ts (open_bar_ -> correct bars_held on later clips)
+    //   peak_px     — parent mfe_px (highest fav price seen); <=entry => peak 0%
+    //   now_ms      — current time; the STALL counter re-anchors here (the peak's ts
+    //                 is not persisted, so we start stall fresh from the restart to
+    //                 avoid a spurious instant stall-clip on boot). Documented reset.
+    void seed_open(double entry_px, int64_t entry_ts_ms, double peak_px, int64_t now_ms) {
+        if (open_ || clipped_ || entry_px <= 0.0) return;
+        entry_ref_  = entry_px;
+        open_       = true;
+        open_ts_    = entry_ts_ms;
+        open_bar_   = entry_ts_ms / (cfg_.tf_secs * 1000);
+        mfe_pct_    = (peak_px > entry_px) ? (peak_px / entry_px - 1.0) * 100.0 : 0.0;
+        ext_bar_    = now_ms / (cfg_.tf_secs * 1000);   // stall fresh from restart (peak ts not persisted)
+        stall_now_  = 0;
+        prior_peak_ = 0.0;
+    }
     bool  shadow_mode = true;
 
     // Live per-leg snapshot for the Omega desk CRYPTO COMPANIONS panel. Read-only

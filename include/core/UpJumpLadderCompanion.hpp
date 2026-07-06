@@ -94,6 +94,12 @@ public:
         int64_t entry_ts_ms = 0, exit_ts_ms = 0;
         double  entry_px = 0.0, exit_px = 0.0;
         double  gross_bp = 0.0, net_bp = 0.0, mfe_pct = 0.0;
+        // S-2026-07-07f HONEST REAL COLUMN (Omega befloor-family real-fill audit): the be_floor
+        // model column books fill-at-floor + max(0,.) + net=gross (no cost) — an accounting
+        // tautology (neg=0 by construction), proven -1.13M bp real vs +3.6M bp model on 2021-26
+        // Binance H1 across the 10-coin roster. These fields carry the worse-of fill (the H1
+        // close that tripped the stop) minus the 20bp RT cost. Judge the book on THESE.
+        double  gross_bp_real = 0.0, net_bp_real = 0.0;
         int     bars_held = 0, clip_num = 0;
         bool    shadow = true;
     };
@@ -105,7 +111,8 @@ public:
     const Config& config() const { return cfg_; }
     bool  is_open() const { for (auto& l : legs_) if (l.open) return true; return false; }
     int   clips()   const { return clip_num_; }
-    void  rehydrate(int clips_total, double bank_bp_total) { clip_num_ = clips_total; banked_bp_ = bank_bp_total; }
+    void  rehydrate(int clips_total, double bank_bp_total, double bank_bp_real_total = 0.0) {
+        clip_num_ = clips_total; banked_bp_ = bank_bp_total; banked_bp_real_ = bank_bp_real_total; }
     bool  shadow_mode = true;
 
     // ── one independent clip leg (faithful python Leg) ─────────────────────
@@ -192,10 +199,11 @@ public:
         double peak_mfe_pct = 0.0;
         int    bars_since_high = 0;
         int    clips = 0;                 // book-level (durable)
-        double bank_bp = 0.0;             // book-level (durable)
+        double bank_bp = 0.0;             // book-level (durable) — MODEL column (reference only)
+        double bank_bp_real = 0.0;        // book-level (durable) — HONEST real-fill column (fold THIS)
     };
     LiveSnap snapshot() const {           // book aggregate (back-compat)
-        LiveSnap s; s.clips = clip_num_; s.bank_bp = banked_bp_;
+        LiveSnap s; s.clips = clip_num_; s.bank_bp = banked_bp_; s.bank_bp_real = banked_bp_real_;
         for (const auto& lg : legs_) {
             if (!lg.open) continue;
             s.open = true;
@@ -288,8 +296,9 @@ private:
             ? std::max(lg.le, lg.hwm * (1.0 - lg.trail_bp / 1e4))
             : lg.le;                                        // trail_bp==0 -> pure BE floor (ride to parent exit)
         if (cur <= stop) {
-            const double gross = std::max(0.0, (stop / lg.le - 1.0) * 1e4);   // >=0 ALWAYS
-            emit_be_clip_(lg, stop, ts, bar, gross, "BE_TRAIL_CLIP");
+            const double gross = std::max(0.0, (stop / lg.le - 1.0) * 1e4);   // >=0 ALWAYS (MODEL column, reference only)
+            const double gross_real = (cur / lg.le - 1.0) * 1e4;              // REAL: mechanism is H1-close-driven -> honest fill = the close that tripped it (worse-of)
+            emit_be_clip_(lg, stop, ts, bar, gross, gross_real, "BE_TRAIL_CLIP");
             lg.ref_px = stop; lg.open = false; lg.clipped = false;            // reclip from exit px
             lg.le = 0.0; lg.hwm = 0.0;
         }
@@ -297,26 +306,30 @@ private:
 
     void flush_be_(Leg& lg, double px, int64_t ts, int64_t bar) {            // parent exit: floored, never underwater
         if (!lg.open || lg.le <= 0.0 || px <= 0.0) return;
-        const double gross = std::max(0.0, (px / lg.le - 1.0) * 1e4);
-        emit_be_clip_(lg, px, ts, bar, gross, "ENGINE_EXIT");
+        const double gross = std::max(0.0, (px / lg.le - 1.0) * 1e4);        // MODEL (clamped, reference only)
+        const double gross_real = (px / lg.le - 1.0) * 1e4;                  // REAL: unclamped MTM at the flush px
+        emit_be_clip_(lg, px, ts, bar, gross, gross_real, "ENGINE_EXIT");
         lg.open = false;
     }
 
     void emit_be_clip_(Leg& lg, double exit_px, int64_t ts, int64_t bar,
-                       double gross, const char* reason) {
-        const double net = gross;   // BE-floor: cost already paid by the +be_bp open move; no 2nd RT charge
+                       double gross, double gross_real, const char* reason) {
+        const double net = gross;   // MODEL column: "cost already paid by +be_bp" fallacy — kept as reference, NEVER fold
+        const double net_real = gross_real - cfg_.round_trip_bp;   // REAL: worse-of fill − RT cost (the honest book)
         ClipRecord r;
         r.tag = cfg_.tag + "-" + lg.label; r.symbol = cfg_.symbol; r.reason = reason;
         r.entry_ts_ms = lg.open_ts; r.exit_ts_ms = ts;
         r.entry_px = lg.le; r.exit_px = exit_px;
         r.gross_bp = gross; r.net_bp = net; r.mfe_pct = lg.mfe;
+        r.gross_bp_real = gross_real; r.net_bp_real = net_real;
         r.bars_held = (int)(bar - lg.open_bar);
         r.clip_num = ++clip_num_;
         r.shadow = shadow_mode;
         banked_bp_ += net;
+        banked_bp_real_ += net_real;
         if (on_clip_) on_clip_(r);
-        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d BEFLOOR\n",
-            r.tag.c_str(), reason, net, gross, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
+        std::printf("[CLIP][%s] %s real=%+.1fbp (model=%+.1fbp) gross_real=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d BEFLOOR\n",
+            r.tag.c_str(), reason, net_real, net, gross_real, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
         std::fflush(stdout);
     }
 
@@ -393,10 +406,12 @@ private:
         r.entry_ts_ms = lg.open_ts; r.exit_ts_ms = ts;
         r.entry_px = lg.le; r.exit_px = exit_px;
         r.gross_bp = gross; r.net_bp = net; r.mfe_pct = lg.mfe;
+        r.gross_bp_real = gross; r.net_bp_real = net;   // ladder mode fills MTM at cur with cost debited -> model == real
         r.bars_held = (int)(bar - lg.open_bar);
         r.clip_num = ++clip_num_;
         r.shadow = shadow_mode;
         banked_bp_ += net;
+        banked_bp_real_ += net;
         if (on_clip_) on_clip_(r);
         std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d\n",
             r.tag.c_str(), reason, net, gross, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
@@ -408,7 +423,8 @@ private:
     std::vector<Leg> legs_;
     double  entry_ref_ = 0.0;
     int     clip_num_  = 0;
-    double  banked_bp_ = 0.0;
+    double  banked_bp_ = 0.0;        // MODEL column (reference only — see gross_bp_real note)
+    double  banked_bp_real_ = 0.0;   // HONEST real-fill column — the number that may fold into PnL
     int64_t cur_bar_   = 0;   // last bar seen (for snapshot bars_since_high)
     double  last_be_px_ = 0.0; // last mark seen in be_floor mode (flush fallback)
     // internal detector state (be_floor self-detect)

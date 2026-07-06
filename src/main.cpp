@@ -1087,7 +1087,8 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
     js << "{\"tag\":\"" << r.tag << "\",\"symbol\":\"" << r.symbol << "\",\"reason\":\"" << r.reason << "\","
        << "\"entry_ts\":" << r.entry_ts_ms << ",\"exit_ts\":" << r.exit_ts_ms << std::setprecision(6)
        << ",\"entry_px\":" << r.entry_px << ",\"exit_px\":" << r.exit_px << std::setprecision(2)
-       << ",\"gross_bp\":" << r.gross_bp << ",\"net_bp\":" << r.net_bp << ",\"mfe_pct\":" << r.mfe_pct
+       << ",\"gross_bp\":" << r.gross_bp << ",\"net_bp\":" << r.net_bp
+       << ",\"gross_bp_real\":" << r.gross_bp_real << ",\"net_bp_real\":" << r.net_bp_real << ",\"mfe_pct\":" << r.mfe_pct
        << ",\"bars_held\":" << r.bars_held << ",\"clip_num\":" << r.clip_num
        << ",\"shadow\":" << (r.shadow ? "true" : "false") << "}\n";
     std::string line = js.str();
@@ -1098,8 +1099,9 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
 // Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from
 // the append-only durable clip log, so the desk panel clips/bank_bp survive a restart.
 // Crude line-scan parse (the file is our own one-object-per-line ndjson) -> no JSON dep.
-static std::map<std::string, std::pair<int,double>> load_companion_clip_totals() {
-    std::map<std::string, std::pair<int,double>> totals;  // tag -> (clip_count, sum net_bp)
+struct ClipTotals { int n = 0; double net = 0.0; double net_real = 0.0; };
+static std::map<std::string, ClipTotals> load_companion_clip_totals() {
+    std::map<std::string, ClipTotals> totals;  // tag -> (clip_count, sum net_bp, sum net_bp_real)
     std::ifstream f(COMPANION_TRADES_FILE);
     if (!f) return totals;
     std::string line;
@@ -1115,12 +1117,16 @@ static std::map<std::string, std::pair<int,double>> load_companion_clip_totals()
         // sums clips/bank across every sub-leg of the book.
         auto cp = tag.find("-CLIP");
         if (cp != std::string::npos) tag = tag.substr(0, cp + 5);
-        double net = 0.0;
+        double net = 0.0, net_real = 0.0;
         auto np = line.find("\"net_bp\":");
         if (np != std::string::npos) { try { net = std::stod(line.substr(np + 9)); } catch (...) {} }
+        auto nrp = line.find("\"net_bp_real\":");
+        if (nrp != std::string::npos) { try { net_real = std::stod(line.substr(nrp + 14)); } catch (...) {} }
+        // pre-real-column history lines lack net_bp_real -> counted as 0 (unknown real value)
         auto& agg = totals[tag];
-        agg.first  += 1;
-        agg.second += net;
+        agg.n        += 1;
+        agg.net      += net;
+        agg.net_real += net_real;
     }
     return totals;
 }
@@ -1144,7 +1150,8 @@ static void emit_companion_state() {
            << std::setprecision(4) << ",\"peak_mfe_pct\":" << snap.peak_mfe_pct
            << ",\"bars_since_high\":" << snap.bars_since_high
            << ",\"clips\":" << snap.clips
-           << std::setprecision(2) << ",\"bank_bp\":" << snap.bank_bp;
+           << std::setprecision(2) << ",\"bank_bp\":" << snap.bank_bp
+           << ",\"bank_bp_real\":" << snap.bank_bp_real;
         // Per-leg breakdown (S-2026-07-05b tiered ladder): T1/T2 base + L1..Ln ladder
         // legs currently OPEN, each with its own armed/peak/stall for the Omega desk
         // CRYPTO COMPANIONS multi-leg render. sym-level fields above remain the book
@@ -2704,7 +2711,7 @@ int main() {
             _all_clips[i]->shadow_mode = true;
             {   // durable-counter rehydrate: panel clips/bank_bp survive restarts
                 auto _ct = _clip_totals.find(_all_clips[i]->config().tag);
-                if (_ct != _clip_totals.end()) _all_clips[i]->rehydrate(_ct->second.first, _ct->second.second);
+                if (_ct != _clip_totals.end()) _all_clips[i]->rehydrate(_ct->second.n, _ct->second.net, _ct->second.net_real);
             }
             _all_clips[i]->set_on_clip(persist_companion_clip);
             g_companion_by_parent[_all_clips[i]->config().parent_tag] =

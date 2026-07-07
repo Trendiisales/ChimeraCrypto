@@ -55,6 +55,11 @@ public:
         std::string symbol;            // e.g. "btcusdt"
         Tier    tight;                 // base tier 1 (tight)
         Tier    wide;                  // base tier 2 (wide) — ALSO the ladder-leg params
+        // STACKED BASE ARMS (S-2026-07-07 item 5, backtest/upjump_concurrent_arms_2026-07-07.txt):
+        // each extra tier opens ONE MORE base leg at window entry ("S1".."Sn"). Winner =
+        // roster tight+wide + {arm 2/4/6%, g50 rev-only} stacked arms + cap 8: +18,360% vs
+        // +10,283% roster cap5, 8/8 coins all-6, 2x-cost robust. Ladder spawns still use `wide`.
+        std::vector<Tier> extra_base;
         double  reclip_pct    = 0.05;  // re-enter when fav > prior_peak*(1+reclip_pct)
         int     cap           = 5;     // max concurrent legs (2 base + up to cap-2 ladder)
         double  cost_gate_bp  = 0.0;   // >0 = hard cost-cover clip gate (suppress sub-cost clips)
@@ -77,13 +82,15 @@ public:
         // the dedicated shadow detector engine the companion observes — parent untouched.
         bool    be_floor      = false;
         double  be_bp         = 20.0;  // gross bp move from ref required to open a leg (== cost)
-        // Internal up-jump detector (be_floor only). >0 = the companion self-detects its
-        // OWN long-event window from the price stream it already receives — it does NOT
-        // read the live parent's position (independence: the parent is never retuned for
-        // the companion's sake). Faithful to sw.parent(W,thr) on H1 closes; enter when
-        // close/close[-W]-1 >= det_thr, exit when <= -det_thr. det_w=2/det_thr=0.01 =
-        // the swept "2h/+1%" trigger. W=2 -> ~2h cold-start on restart (no warm-seed
-        // needed; the companion's per-trade legs are ephemeral anyway).
+        // Internal up-jump detector (BOTH modes since S-2026-07-07w; was be_floor-only).
+        // >0 = the companion self-detects its OWN long-event window from the price stream
+        // it already receives — it does NOT read the live parent's position (independence:
+        // the parent is never retuned for the companion's sake). Faithful to sw.parent(W,thr)
+        // on H1 closes; enter when close/close[-W]-1 >= det_thr, exit when <= -det_thr.
+        // LADDER mode uses the roster per-coin W/thr (the +18,360% winner was swept on those
+        // windows — the live parents are UNIFORM 4h/+2% since 52c0d31 and must NOT be the
+        // companion's trigger: different window family than the backtest). W-hour cold-start
+        // on restart (no warm-seed; per-trade legs are ephemeral).
         int     det_w         = 0;
         double  det_thr       = 0.0;
     };
@@ -122,6 +129,7 @@ public:
         double  le  = 0.0;      // MOVING leg entry — clip gross gauge (resets on reclip)
         double  arm = 5.0; int stall = 0; double gb = 0.0; double rc = 0.05; double cg = 0.0; double confirm = 0.0;
         bool    open = false, clipped = false;
+        bool    seeded_flat = false;   // restart-rehydrated leg: le anchors at first live mark on open
         double  pk = 0.0, mfe = 0.0;
         int64_t ext_bar = 0, open_bar = 0, open_ts = 0;
         // BE-floor mode state
@@ -136,13 +144,18 @@ public:
     // settled position only, never writes to it. Long-only (UPJUMP is always long).
     void observe(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms) {
         const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
+        if (cfg_.det_w > 0) { feed_selfdetect_(cur_px, ts_ms); return; }             // internal detector (live, both modes)
         if (cfg_.be_floor) {
-            if (cfg_.det_w > 0) { feed_selfdetect_(cur_px, ts_ms); return; }        // internal detector (live)
             observe_be_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (validation harness)
             return;
         }
+        observe_ladder_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (parent-driven)
+    }
 
-        // Parent flat / no valid mark -> flush every open leg MTM, then reset.
+    // ── LADDER mode window driver (the faithful python run_trade walk). in_pos/entry_px
+    //   come from EITHER the live parent (det_w==0 back-compat) or the internal detector. ──
+    void observe_ladder_(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms, int64_t bar) {
+        // Window over / no valid mark -> flush every open leg MTM, then reset.
         if (!parent_in_pos || parent_entry_px <= 0.0 || cur_px <= 0.0) {
             const double px = (cur_px > 0.0) ? cur_px : entry_ref_;
             for (auto& lg : legs_) flush_leg_(lg, px, ts_ms, bar);
@@ -174,22 +187,30 @@ public:
         for (auto& l : spawn) legs_.push_back(std::move(l));
     }
 
-    // Rehydrate an OPEN book from a live parent on restart (S-2026-07-05). Per-session
-    // leg state is ephemeral, so we re-seed the 2 BASE legs open+armed from the parent
-    // peak (any pre-restart ladder legs are lost — their banked clips already persisted
-    // to the durable log; open ladder legs would have been flushed anyway). Documented
-    // reset, same philosophy as the single-leg engine's seed_open.
+    // Rehydrate a book from a live parent on restart — REHYDRATE-FLAT (S-2026-07-07w).
+    // The old version re-seeded legs OPEN at the parent entry with le/floor BACKDATED —
+    // through a mid-event move that books fake fills on the next flush (the ADA -244bp
+    // seed_open artifact: legs re-opened OPEN at 0.186050 mid-event bypassing the +be_bp
+    // gate; item-3 audit Crypto/backtest/latearm/LATEARM_VERDICT.md). Now: restore the
+    // WINDOW ONLY (entry_ref_ + detector event); every leg re-opens FLAT through its
+    // normal gated step path, and its le anchors at the first live mark it actually
+    // opens on (seeded_flat) — no backdated floor, no phantom PnL.
     void seed_open(double entry_px, int64_t entry_ts_ms, double peak_px, int64_t now_ms) {
         if (!legs_.empty() || entry_px <= 0.0) return;
+        (void)peak_px;
         const int64_t ebar = entry_ts_ms / (cfg_.tf_secs * 1000);
         const int64_t nbar = now_ms      / (cfg_.tf_secs * 1000);
-        const double  peak_mfe = (peak_px > entry_px) ? (peak_px / entry_px - 1.0) * 100.0 : 0.0;
         entry_ref_ = entry_px;
         cur_bar_   = nbar;   // anchor "now" so the first post-rehydrate snapshot() before any
-                             // observe_be_/step reports bars_since_high = nbar - ext_bar(=nbar) = 0
-                             // (was 0 - nbar = -495347: the desk CRYPTO COMPANIONS -495347 render bug)
-        legs_.push_back(seed_leg_("T1", entry_px, cfg_.tight, entry_ts_ms, ebar, nbar, peak_mfe));
-        legs_.push_back(seed_leg_("T2", entry_px, cfg_.wide,  entry_ts_ms, ebar, nbar, peak_mfe));
+                             // step reports bars_since_high >= 0 (the -495347 render bug)
+        if (cfg_.det_w > 0) { det_in_ = true; det_entry_ = entry_px; }   // window continues; exit via detector
+        if (cfg_.be_floor) {
+            legs_.push_back(make_be_leg_("T1", entry_px, cfg_.tight));   // FLAT: opens on +be_bp from ref
+            legs_.push_back(make_be_leg_("T2", entry_px, cfg_.wide));
+        } else {
+            init_base_legs_(entry_px, entry_ts_ms, ebar);                // FLAT: open on first step
+            for (auto& lg : legs_) lg.seeded_flat = true;                // le anchors at first live mark
+        }
     }
 
     // ── live snapshots for the Omega desk CRYPTO COMPANIONS panel ──────────
@@ -248,7 +269,8 @@ private:
             else if (det_in_ && j <= -cfg_.det_thr) { det_in_ = false; }                 // exit -> book flushes
         }
         const int64_t ts = closed_bar * cfg_.tf_secs * 1000;
-        observe_be_(det_in_, det_entry_, close, ts, closed_bar);   // drive the BE-floor book
+        if (cfg_.be_floor) observe_be_(det_in_, det_entry_, close, ts, closed_bar);      // BE-floor book
+        else               observe_ladder_(det_in_, det_entry_, close, ts, closed_bar);  // LADDER book (S-2026-07-07w)
     }
 
     // ── BE-FLOOR mode (faithful port of be_bptrail.py leg_book) ──────────────
@@ -338,6 +360,9 @@ private:
     void init_base_legs_(double epx, int64_t ts, int64_t bar) {
         legs_.push_back(make_leg_("T1", epx, cfg_.tight, ts, bar, false));
         legs_.push_back(make_leg_("T2", epx, cfg_.wide,  ts, bar, false));
+        int i = 0;   // stacked base arms (item 5): one more base leg per extra tier
+        for (const auto& t : cfg_.extra_base)
+            legs_.push_back(make_leg_("S" + std::to_string(++i), epx, t, ts, bar, false));
     }
 
     Leg make_leg_(std::string label, double epx, const Tier& t, int64_t /*ts*/, int64_t /*bar*/, bool /*seed*/) {
@@ -372,7 +397,7 @@ private:
         if (!lg.open) {
             if (lg.confirm > 0.0 && fav * 100.0 < lg.confirm) return false;   // OPTION-B: not yet confirmed -> stay flat, book nothing
             lg.open = true; lg.open_ts = bar * cfg_.tf_secs * 1000; lg.open_bar = bar;
-            if (lg.confirm > 0.0) lg.le = cur;                                 // le set to the confirm price (matches python)
+            if (lg.confirm > 0.0 || lg.seeded_flat) lg.le = cur;               // le = confirm price / first live mark (rehydrate-FLAT: never backdated)
             lg.mfe = fav; lg.ext_bar = bar;
         }
         if (fav > lg.mfe + 1e-9) { lg.mfe = fav; lg.ext_bar = bar; }

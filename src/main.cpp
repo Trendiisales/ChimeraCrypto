@@ -2651,58 +2651,56 @@ int main() {
     wire_engine(near_upjump_h1);
     wire_engine(op_upjump_h1);
 
-    // ── UPJUMP clip companions — TIERED-2 + SELF-FUNDING LADDER (S-2026-07-05b) ──
-    // STANDALONE ADDITIVE paper ladder book per leg. Each trade runs >=2 base tiers
-    // (TIGHT banks cost fast, WIDE rides far) + a self-funding ladder (each cost-
-    // covered clip opens ONE more WIDE leg, cap 5). Per-tier FREE exit lever (stall
-    // and/or reversal-giveback; 0 = OFF). Reclip = re-ENTER on trend resume.
-    // Roster = crypto_upjump_tiered_ladder_sweep.py (STANDALONE all-6 gate: net>0,
-    // PF>1, WF both halves>0, bear>=0; NEVER vs-WIDE). Native VALIDATED byte-exact vs
-    // that python. 6 companions {BTC,ETH,SOL,BNB,ADA,TRX} with OPTION-B confirm=25.
-    // DROPPED: DOGE/NEAR (confirm taxes ~-46%, operator dropped 05-07d), AAVE
-    // (prior cost-cover re-sweep PF1.04/H1~0 noise), OP (fails all-6 any window) —
-    // all parent-only. Shadow: own ledger, observe-only, never touches the parent.
-    // Cost 20bp RT (0.20% Binance spot taker).
-    auto make_be_companion = [](const char* ptag, const char* ctag, const char* sym,
-                                double tight_bp, double wide_bp, int det_w, double det_thr) {
+    // ── UPJUMP clip companions — NO-FLOOR TIERED LADDER + STACKED ARMS + cap8 ──
+    // (S-2026-07-07w, operator item 5 — REVERT from BE-floor mode.) The BE-floor book
+    // is real-fill DEAD both ways: close-eval = slip bleed (-1.13Mbp real, 07-07f audit),
+    // per-tick stops = churn bleed (-2.57M, PF 0.04) — Crypto/backtest/latearm/. The only
+    // trail family surviving real fills is this NO-FLOOR giveback ladder. WINNER
+    // (backtest/upjump_concurrent_arms_2026-07-07.txt): roster_cfg.csv per-coin tiers
+    // + STACKED BASE ARMS +2/+4/+6% (g50 rev-only) + self-funding ladder cap 8 =
+    // +18,360% vs +10,283% roster cap5, 8/8 coins all-6, 2x-cost robust (BTC bear -12
+    // marginal). Pure cap raises on 2 tiers BREAK ADA H1 — stacked arms scale better
+    // than deeper ladders. NO confirm gate (winner swept with cg=0/confirm=0).
+    // Trigger = INTERNAL per-coin roster W/thr detector (the windows the winner was
+    // swept on) — NOT the live parents (uniform 4h/+2% since 52c0d31: different window
+    // family; feedback-test-operator-spec: never conflate). parent_tag = price feed +
+    // panel key only. Dual-column stays (ladder books model==real, cost debited).
+    // Shadow: own ledger, observe-only, never touches the parent
+    // (feedback-companion-independent-engine). Cost 20bp RT (0.20% Binance spot taker).
+    auto make_lad_companion = [](const char* ptag, const char* ctag, const char* sym,
+                                 int det_w, double det_thr,
+                                 chimera::UpJumpLadderCompanion::Tier tight,
+                                 chimera::UpJumpLadderCompanion::Tier wide) {
         chimera::UpJumpLadderCompanion::Config c;
-        c.parent_tag = ptag;  // observed ONLY for the symbol's price feed; parent position never read
+        c.parent_tag = ptag;  // price feed + desk panel key only; parent position never read
         c.tag = ctag; c.symbol = sym;
-        c.tight = {0, 0, 0, tight_bp};   // Tier{arm,stall,gb,trail_bp} — be_floor uses trail_bp only
-        c.wide  = {0, 0, 0, wide_bp};
-        c.reclip_pct = 0.0; c.cap = 2;   // x2 (tight banker + wide runner); NO self-funding ladder
-        c.be_floor = true; c.be_bp = 20.0;                 // open at +20bp (cost covered) -> net starts 0
-        c.det_w = det_w; c.det_thr = det_thr;              // internal 2h/+1% up-jump detector (self-detect)
+        c.tight = tight; c.wide = wide;   // Tier{arm%, stall_bars, gb_frac, trail_bp(unused)}
+        c.extra_base = { {2.0, 0, 0.50, 0}, {4.0, 0, 0.50, 0}, {6.0, 0, 0.50, 0} };  // stacked arms S1/S2/S3
+        c.reclip_pct = 0.05; c.cap = 8;                    // 5 base + up to 3 self-funded ladder legs
+        c.cost_gate_bp = 0.0; c.confirm_bp = 0.0;          // faithful to the winner sweep
+        c.be_floor = false;                                // NO FLOOR anywhere
+        c.det_w = det_w; c.det_thr = det_thr;              // roster per-coin W(h1 bars)/thr window
         c.tf_secs = 3600; c.round_trip_bp = 20.0;
         return c;
     };
-    // OPTION-B confirmed-entry (last arg = confirm_bp=25): a base/ladder leg stays FLAT
-    // (books nothing, pays no cost) until fav>=25bp; a never-positive leg never opens.
-    // Fixes the BTC -141.39bp never-positive flush. All 6 PASS all-6 standalone at
-    // confirm=25 (faithful full-tick sweep 05-07d). DOGE/NEAR DROPPED (confirm taxes
-    // both ~-46%; operator dropped). AAVE parent-only (prior drop, not resurrected).
-    //                                                                       TIGHT(arm/stall/gb)  WIDE(arm/stall/gb)  reclip cap cg  confirm  standalone net / PF (confirm=25)
-    // BE-FLOOR roster — all 10 coins (S-2026-07-05 resume). Trigger = internal 2h/+1%
-    // self-detector; exit = BE floor (net>=0 EVERY clip). trail 20bp banker / 150bp runner
-    // (near-universal best-2026 in be_bptrail.py). Byte-exact book vs python; live self-
-    // detect ~7-9% under the ideal (open-vs-close entry realism — conservative). neg=0 all.
-    //                                                                                    tight/wide bp  W  thr
-    chimera::UpJumpLadderCompanion btc_clip (make_be_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion eth_clip (make_be_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion sol_clip (make_be_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion bnb_clip (make_be_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion ada_clip (make_be_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion trx_clip (make_be_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion doge_clip(make_be_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion near_clip(make_be_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion aave_clip(make_be_companion("AAVE-UPJUMP-H1", "AAVE-UPJUMP-CLIP", "aaveusdt", 20,150, 2,0.01));
-    chimera::UpJumpLadderCompanion op_clip  (make_be_companion("OP-UPJUMP-H1",   "OP-UPJUMP-CLIP",   "opusdt",   20,150, 2,0.01));
+    using LTier = chimera::UpJumpLadderCompanion::Tier;
+    // roster_cfg.csv rows (S-2026-07-05 all-6 roster; W/thr = detector window):
+    //                                                                                        W  thr    TIGHT{arm,stall,gb}   WIDE{arm,stall,gb}
+    chimera::UpJumpLadderCompanion btc_clip (make_lad_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  4, 0.08, LTier{3,0,0.5,0},  LTier{5,0,0.5,0}));
+    chimera::UpJumpLadderCompanion eth_clip (make_lad_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  4, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0}));
+    chimera::UpJumpLadderCompanion sol_clip (make_lad_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  4, 0.12, LTier{2,0,0.5,0},  LTier{8,0,0.5,0}));
+    chimera::UpJumpLadderCompanion doge_clip(make_lad_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 8, 0.05, LTier{3,3,0,0},    LTier{8,8,0.4,0}));
+    chimera::UpJumpLadderCompanion bnb_clip (make_lad_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  4, 0.05, LTier{3,3,0.3,0},  LTier{8,0,0.5,0}));
+    chimera::UpJumpLadderCompanion ada_clip (make_lad_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  6, 0.05, LTier{3,4,0.5,0},  LTier{5,6,0,0}));
+    chimera::UpJumpLadderCompanion trx_clip (make_lad_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8, 0.08, LTier{3,0,0.3,0},  LTier{8,6,0,0}));
+    chimera::UpJumpLadderCompanion near_clip(make_lad_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 6, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0}));
+    // AAVE/OP: parent-only (not in the winner roster — AAVE PF1.04 noise, OP fails all-6).
+    // DOGE/NEAR re-added: the 05-07d drop was the confirm-25 tax; winner runs confirm=0.
     chimera::UpJumpLadderCompanion* _all_clips[] = {
-        &btc_clip,&eth_clip,&sol_clip,&bnb_clip,&ada_clip,
-        &trx_clip,&doge_clip,&near_clip,&aave_clip,&op_clip };  // all 10 (BE-floor is loss-proof; breadth = the scaler)
+        &btc_clip,&eth_clip,&sol_clip,&doge_clip,&bnb_clip,&ada_clip,&trx_clip,&near_clip };  // the 8/8 winner roster
     chimera::EdgeEngine* _all_clip_parents[] = {
-        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&bnb_upjump_h1,&ada_upjump_h1,
-        &trx_upjump_h1,&doge_upjump_h1,&near_upjump_h1,&aave_upjump_h1,&op_upjump_h1 };  // 1:1 with _all_clips (price feed only)
+        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&doge_upjump_h1,&bnb_upjump_h1,
+        &ada_upjump_h1,&trx_upjump_h1,&near_upjump_h1 };  // 1:1 with _all_clips (price feed only)
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
@@ -2723,10 +2721,11 @@ int main() {
                         cc.tag.c_str(), cc.parent_tag.c_str(), cc.be_bp,
                         cc.tight.trail_bp, cc.wide.trail_bp, cc.det_w, cc.det_thr * 100, cc.cap);
                 else
-                    std::printf("[CLIP-INIT] %s -> observes %s  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp shadow=1\n",
-                        cc.tag.c_str(), cc.parent_tag.c_str(),
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.0f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp NO-FLOOR shadow=1\n",
+                        cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
                         cc.tight.arm, cc.tight.stall, cc.tight.gb,
                         cc.wide.arm, cc.wide.stall, cc.wide.gb,
+                        (int)cc.extra_base.size(),
                         cc.reclip_pct, cc.cap, cc.cost_gate_bp, cc.confirm_bp);
             }
         }

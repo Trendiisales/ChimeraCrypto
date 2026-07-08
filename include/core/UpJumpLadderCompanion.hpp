@@ -42,6 +42,8 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
+#include <sstream>
+#include <iomanip>
 
 namespace chimera {
 
@@ -93,6 +95,27 @@ public:
         // on restart (no warm-seed; per-trade legs are ephemeral).
         int     det_w         = 0;
         double  det_thr       = 0.0;
+        // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/upjump_weighting_bt.cpp) ──
+        // size_mult: per-coin notional weight (x2 robust top performer / x1 baseline).
+        //   Stamped on every ClipRecord; weighted bank = Σ net_bp_real * size_mult
+        //   (bank_bp_real_w). The RAW real column is untouched — retirement + parity
+        //   stay in unweighted per-leg bp.
+        double  size_mult     = 1.0;
+        // rank_out: book takes NO NEW windows (detector enter + base-leg init suppressed);
+        //   open legs manage + flush normally; durable state preserved. For per-coin
+        //   BT-net-negative books (none as of 2026-07-08 — machinery wired for the
+        //   monthly re-test to use).
+        bool    rank_out      = false;
+        // retire_bp: AUTO-RETIREMENT threshold on the book's banked REAL net (raw bp,
+        //   restored at boot from its own clip ledger). <0 enables: when
+        //   banked_bp_real <= retire_bp the book RETIRES — stops arming new windows,
+        //   open legs manage normally, loud one-shot [CLIP-RETIRE] log. Default per
+        //   coin = -2x the worst validated per-book BT drawdown episode (a level
+        //   beyond anything the validated backtest ever produced). 0 = off.
+        double  retire_bp     = 0.0;
+        // retire_override: operator un-retire (deliberate act): tag listed in
+        //   data/companion_unretire.flags -> retirement latch disabled this run.
+        bool    retire_override = false;
     };
 
     // Emitted on every clip / engine-exit. main.cpp persists to the companion ledger.
@@ -107,6 +130,7 @@ public:
         // Binance H1 across the 10-coin roster. These fields carry the worse-of fill (the H1
         // close that tripped the stop) minus the 20bp RT cost. Judge the book on THESE.
         double  gross_bp_real = 0.0, net_bp_real = 0.0;
+        double  size_mult = 1.0;           // per-coin weight this clip was booked under (S-2026-07-08)
         int     bars_held = 0, clip_num = 0;
         bool    shadow = true;
     };
@@ -118,9 +142,50 @@ public:
     const Config& config() const { return cfg_; }
     bool  is_open() const { for (auto& l : legs_) if (l.open) return true; return false; }
     int   clips()   const { return clip_num_; }
-    void  rehydrate(int clips_total, double bank_bp_total, double bank_bp_real_total = 0.0) {
-        clip_num_ = clips_total; banked_bp_ = bank_bp_total; banked_bp_real_ = bank_bp_real_total; }
+    void  rehydrate(int clips_total, double bank_bp_total, double bank_bp_real_total = 0.0,
+                    double bank_bp_real_w_total = 0.0) {
+        clip_num_ = clips_total; banked_bp_ = bank_bp_total; banked_bp_real_ = bank_bp_real_total;
+        banked_bp_real_w_ = bank_bp_real_w_total;
+        check_retire_();   // restore-at-boot: forward bank already through threshold -> retire now
+    }
+    bool  is_retired() const { return retired_; }
     bool  shadow_mode = true;
+
+    // ── S-2026-07-08 detector-state persistence (restart-path fix) ──────────
+    // The old restart path seeded the roster-W/thr detector book from the LIVE
+    // PARENT's position — but the parents run the UNIFORM 4h/+2% window (52c0d31),
+    // a DIFFERENT window family (never conflate, feedback-test-operator-spec).
+    // A restart therefore either injected a window the roster detector never
+    // opened (phantom arms) or ate a genuine in-flight detector window (lost
+    // arms). Fix: persist the detector's own state each H1 close and restore it
+    // verbatim at boot; legs re-open FLAT through the gated step path
+    // (rehydrate-FLAT, no backdated le).
+    std::string det_state_json() const {
+        std::ostringstream js; js << std::fixed << std::setprecision(8);
+        js << "{\"tag\":\"" << cfg_.tag << "\",\"det_in\":" << (det_in_ ? 1 : 0)
+           << ",\"det_entry\":" << det_entry_ << ",\"det_bar\":" << det_bar_
+           << ",\"det_close\":" << det_close_ << ",\"h1c\":[";
+        for (size_t i = 0; i < h1c_.size(); ++i) { if (i) js << ","; js << h1c_[i]; }
+        js << "]}";
+        return js.str();
+    }
+    void restore_det_state(bool in, double entry, int64_t bar, double close,
+                           const std::vector<double>& h1c, int64_t now_ms) {
+        if (cfg_.det_w <= 0) return;
+        h1c_ = h1c;
+        if ((int)h1c_.size() > cfg_.det_w + 1)
+            h1c_.erase(h1c_.begin(), h1c_.end() - (cfg_.det_w + 1));
+        det_bar_ = bar; det_close_ = close;
+        det_in_ = in; det_entry_ = entry;
+        if (det_in_ && det_entry_ > 0.0 && legs_.empty() && !cfg_.be_floor && arming_allowed_()) {
+            entry_ref_ = det_entry_;
+            cur_bar_   = now_ms / (cfg_.tf_secs * 1000);
+            init_base_legs_(det_entry_, now_ms, cur_bar_);
+            for (auto& lg : legs_) lg.seeded_flat = true;   // le anchors at first live mark
+        }
+        std::printf("[CLIP-DETSEED] %s det_in=%d entry=%.6f ring=%zu (own-window restore, parent NOT used)\n",
+            cfg_.tag.c_str(), det_in_ ? 1 : 0, det_entry_, h1c_.size());
+    }
 
     // ── one independent clip leg (faithful python Leg) ─────────────────────
     struct Leg {
@@ -164,11 +229,14 @@ public:
         }
 
         // New parent trade -> flush any stragglers, reset, seed the 2 base legs.
+        // RANK-OUT / RETIRED: the window is tracked (entry_ref_) but NO legs are
+        // opened — "no new windows, state preserved"; open legs from before the
+        // latch keep managing via the loop below.
         if (entry_ref_ != parent_entry_px) {
             for (auto& lg : legs_) flush_leg_(lg, cur_px, ts_ms, bar);
             reset_session_();
             entry_ref_ = parent_entry_px;
-            init_base_legs_(parent_entry_px, ts_ms, bar);
+            if (arming_allowed_()) init_base_legs_(parent_entry_px, ts_ms, bar);
         }
 
         // Step every leg; ladder-spawn on cost-covered clips (newborns added AFTER
@@ -179,7 +247,7 @@ public:
             if (step_leg_(lg, bar, cur_px, gross, reason)) {
                 const double net = gross - cfg_.round_trip_bp;
                 emit_clip_(lg, cur_px, ts_ms, bar, gross, net, reason);
-                if (net > 0.0 && (int)(legs_.size() + spawn.size()) < cfg_.cap)
+                if (net > 0.0 && arming_allowed_() && (int)(legs_.size() + spawn.size()) < cfg_.cap)
                     spawn.push_back(make_leg_(next_ladder_label_(legs_.size() + spawn.size()),
                                               cur_px, cfg_.wide, ts_ms, bar, /*seed_open=*/false));
             }
@@ -197,13 +265,27 @@ public:
     // opens on (seeded_flat) — no backdated floor, no phantom PnL.
     void seed_open(double entry_px, int64_t entry_ts_ms, double peak_px, int64_t now_ms) {
         if (!legs_.empty() || entry_px <= 0.0) return;
+        if (!arming_allowed_()) return;   // ranked-out / retired: no new legs at rehydrate either
         (void)peak_px;
+        // S-2026-07-08 RESTART-PATH FIX: a det_w book must NEVER be seeded from the
+        // live PARENT — the parents run the UNIFORM 4h/+2% window (52c0d31) while this
+        // book's trigger is the roster per-coin W/thr detector: a DIFFERENT window
+        // family (never conflate). The old behaviour injected phantom windows on every
+        // restart while a parent happened to be in-pos (and its exit then hung on a
+        // cold detector ring). Rehydrate for det_w books = restore_det_state() from
+        // data/companion_det_state.json; if that file is absent the book cold-starts
+        // its W-hour window honestly.
+        if (cfg_.det_w > 0) {
+            std::printf("[CLIP-SEED-SKIP] %s det_w=%d: parent-window seed refused (wrong window "
+                        "family); use restore_det_state()\n", cfg_.tag.c_str(), cfg_.det_w);
+            std::fflush(stdout);
+            return;
+        }
         const int64_t ebar = entry_ts_ms / (cfg_.tf_secs * 1000);
         const int64_t nbar = now_ms      / (cfg_.tf_secs * 1000);
         entry_ref_ = entry_px;
         cur_bar_   = nbar;   // anchor "now" so the first post-rehydrate snapshot() before any
                              // step reports bars_since_high >= 0 (the -495347 render bug)
-        if (cfg_.det_w > 0) { det_in_ = true; det_entry_ = entry_px; }   // window continues; exit via detector
         if (cfg_.be_floor) {
             legs_.push_back(make_be_leg_("T1", entry_px, cfg_.tight));   // FLAT: opens on +be_bp from ref
             legs_.push_back(make_be_leg_("T2", entry_px, cfg_.wide));
@@ -222,9 +304,14 @@ public:
         int    clips = 0;                 // book-level (durable)
         double bank_bp = 0.0;             // book-level (durable) — MODEL column (reference only)
         double bank_bp_real = 0.0;        // book-level (durable) — HONEST real-fill column (fold THIS)
+        double bank_bp_real_w = 0.0;      // weighted real bank (Σ net_bp_real * size_mult) — S-2026-07-08
+        double size_mult = 1.0;           // per-coin weight (S-2026-07-08)
+        bool   retired = false;           // auto-retirement latch (S-2026-07-08)
     };
     LiveSnap snapshot() const {           // book aggregate (back-compat)
         LiveSnap s; s.clips = clip_num_; s.bank_bp = banked_bp_; s.bank_bp_real = banked_bp_real_;
+        s.bank_bp_real_w = banked_bp_real_w_; s.size_mult = cfg_.size_mult;
+        s.retired = retired_ || cfg_.rank_out;
         for (const auto& lg : legs_) {
             if (!lg.open) continue;
             s.open = true;
@@ -265,7 +352,11 @@ private:
         if ((int)h1c_.size() >= cfg_.det_w + 1) {               // have close[i] and close[i-W]
             const double past = h1c_.front();
             const double j = close / past - 1.0;
-            if (!det_in_ && j >=  cfg_.det_thr) { det_in_ = true; det_entry_ = close; }  // enter (entry ~ next open)
+            // RANK-OUT / RETIRED books take NO NEW windows (enter suppressed);
+            // an in-flight window still exits normally so open legs flush.
+            if (!det_in_ && j >=  cfg_.det_thr) {
+                if (arming_allowed_()) { det_in_ = true; det_entry_ = close; }           // enter (entry ~ next open)
+            }
             else if (det_in_ && j <= -cfg_.det_thr) { det_in_ = false; }                 // exit -> book flushes
         }
         const int64_t ts = closed_bar * cfg_.tf_secs * 1000;
@@ -344,14 +435,38 @@ private:
         r.entry_px = lg.le; r.exit_px = exit_px;
         r.gross_bp = gross; r.net_bp = net; r.mfe_pct = lg.mfe;
         r.gross_bp_real = gross_real; r.net_bp_real = net_real;
+        r.size_mult = cfg_.size_mult;
         r.bars_held = (int)(bar - lg.open_bar);
         r.clip_num = ++clip_num_;
         r.shadow = shadow_mode;
         banked_bp_ += net;
         banked_bp_real_ += net_real;
+        banked_bp_real_w_ += net_real * cfg_.size_mult;
         if (on_clip_) on_clip_(r);
+        check_retire_();
         std::printf("[CLIP][%s] %s real=%+.1fbp (model=%+.1fbp) gross_real=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d BEFLOOR\n",
             r.tag.c_str(), reason, net_real, net, gross_real, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
+        std::fflush(stdout);
+    }
+
+    // ── S-2026-07-08 weighting / auto-retirement helpers ─────────────────────
+    bool arming_allowed_() const { return !cfg_.rank_out && !retired_; }
+    void check_retire_() {
+        if (retired_ || cfg_.retire_bp >= 0.0) return;               // off / already latched
+        if (banked_bp_real_ > cfg_.retire_bp) return;                // raw REAL bank above threshold
+        if (cfg_.retire_override) {
+            std::printf("[CLIP-RETIRE-OVERRIDE] %s bank_real=%.1fbp <= retire_bp=%.1fbp but tag is in "
+                        "companion_unretire.flags — retirement DISABLED this run (operator act)\n",
+                        cfg_.tag.c_str(), banked_bp_real_, cfg_.retire_bp);
+            std::fflush(stdout);
+            return;
+        }
+        retired_ = true;                                             // one-shot latch
+        std::printf("[CLIP-RETIRE] *** %s AUTO-RETIRED: banked REAL net %.1fbp <= threshold %.1fbp "
+                    "(-2x worst validated BT drawdown). NO NEW windows will arm; open legs manage "
+                    "normally. Un-retire = operator act: add tag to data/companion_unretire.flags "
+                    "(or archive the clip ledger) and restart. ***\n",
+                    cfg_.tag.c_str(), banked_bp_real_, cfg_.retire_bp);
         std::fflush(stdout);
     }
 
@@ -432,12 +547,15 @@ private:
         r.entry_px = lg.le; r.exit_px = exit_px;
         r.gross_bp = gross; r.net_bp = net; r.mfe_pct = lg.mfe;
         r.gross_bp_real = gross; r.net_bp_real = net;   // ladder mode fills MTM at cur with cost debited -> model == real
+        r.size_mult = cfg_.size_mult;
         r.bars_held = (int)(bar - lg.open_bar);
         r.clip_num = ++clip_num_;
         r.shadow = shadow_mode;
         banked_bp_ += net;
         banked_bp_real_ += net;
+        banked_bp_real_w_ += net * cfg_.size_mult;
         if (on_clip_) on_clip_(r);
+        check_retire_();
         std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d\n",
             r.tag.c_str(), reason, net, gross, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
         std::fflush(stdout);
@@ -450,6 +568,8 @@ private:
     int     clip_num_  = 0;
     double  banked_bp_ = 0.0;        // MODEL column (reference only — see gross_bp_real note)
     double  banked_bp_real_ = 0.0;   // HONEST real-fill column — the number that may fold into PnL
+    double  banked_bp_real_w_ = 0.0; // weighted real bank (Σ net_bp_real * size_mult) — S-2026-07-08
+    bool    retired_ = false;        // auto-retirement latch (S-2026-07-08); un-retire = operator act
     int64_t cur_bar_   = 0;   // last bar seen (for snapshot bars_since_high)
     double  last_be_px_ = 0.0; // last mark seen in be_floor mode (flush fallback)
     // internal detector state (be_floor self-detect)

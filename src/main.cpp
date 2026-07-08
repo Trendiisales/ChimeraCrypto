@@ -1088,7 +1088,8 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
        << "\"entry_ts\":" << r.entry_ts_ms << ",\"exit_ts\":" << r.exit_ts_ms << std::setprecision(6)
        << ",\"entry_px\":" << r.entry_px << ",\"exit_px\":" << r.exit_px << std::setprecision(2)
        << ",\"gross_bp\":" << r.gross_bp << ",\"net_bp\":" << r.net_bp
-       << ",\"gross_bp_real\":" << r.gross_bp_real << ",\"net_bp_real\":" << r.net_bp_real << ",\"mfe_pct\":" << r.mfe_pct
+       << ",\"gross_bp_real\":" << r.gross_bp_real << ",\"net_bp_real\":" << r.net_bp_real
+       << ",\"mult\":" << r.size_mult << ",\"mfe_pct\":" << r.mfe_pct
        << ",\"bars_held\":" << r.bars_held << ",\"clip_num\":" << r.clip_num
        << ",\"shadow\":" << (r.shadow ? "true" : "false") << "}\n";
     std::string line = js.str();
@@ -1099,7 +1100,7 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
 // Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from
 // the append-only durable clip log, so the desk panel clips/bank_bp survive a restart.
 // Crude line-scan parse (the file is our own one-object-per-line ndjson) -> no JSON dep.
-struct ClipTotals { int n = 0; double net = 0.0; double net_real = 0.0; };
+struct ClipTotals { int n = 0; double net = 0.0; double net_real = 0.0; double net_real_w = 0.0; };
 static std::map<std::string, ClipTotals> load_companion_clip_totals() {
     std::map<std::string, ClipTotals> totals;  // tag -> (clip_count, sum net_bp, sum net_bp_real)
     std::ifstream f(COMPANION_TRADES_FILE);
@@ -1117,18 +1118,82 @@ static std::map<std::string, ClipTotals> load_companion_clip_totals() {
         // sums clips/bank across every sub-leg of the book.
         auto cp = tag.find("-CLIP");
         if (cp != std::string::npos) tag = tag.substr(0, cp + 5);
-        double net = 0.0, net_real = 0.0;
+        double net = 0.0, net_real = 0.0, mult = 1.0;
         auto np = line.find("\"net_bp\":");
         if (np != std::string::npos) { try { net = std::stod(line.substr(np + 9)); } catch (...) {} }
         auto nrp = line.find("\"net_bp_real\":");
         if (nrp != std::string::npos) { try { net_real = std::stod(line.substr(nrp + 14)); } catch (...) {} }
-        // pre-real-column history lines lack net_bp_real -> counted as 0 (unknown real value)
+        auto mp = line.find("\"mult\":");
+        if (mp != std::string::npos) { try { mult = std::stod(line.substr(mp + 7)); } catch (...) {} }
+        // pre-real-column history lines lack net_bp_real -> counted as 0 (unknown real value);
+        // pre-weighting lines lack mult -> weighted at 1.0 (they were booked at x1).
         auto& agg = totals[tag];
-        agg.n        += 1;
-        agg.net      += net;
-        agg.net_real += net_real;
+        agg.n          += 1;
+        agg.net        += net;
+        agg.net_real   += net_real;
+        agg.net_real_w += net_real * mult;
     }
     return totals;
+}
+
+// ── S-2026-07-08 companion detector-state persistence (restart-path fix) ────
+// The det_w books self-detect their windows on the roster per-coin W/thr — a
+// DIFFERENT window family than the live parents (uniform 4h/+2%). The old boot
+// path seeded them from the parent's position: phantom windows in, genuine
+// in-flight windows eaten. Now the detector state itself is persisted each H1
+// close and restored verbatim at boot. Caller MUST hold g_companion_mtx.
+static constexpr const char* COMPANION_DET_STATE_FILE = "data/companion_det_state.json";
+static void save_companion_det_state() {
+    std::ostringstream js;
+    for (const auto& kv : g_companion_by_parent) {
+        const auto& cfg = kv.second.second->config();
+        if (cfg.det_w <= 0) continue;
+        js << kv.second.second->det_state_json() << "\n";
+    }
+    const std::string tmp = std::string(COMPANION_DET_STATE_FILE) + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "w");
+    if (!f) return;
+    const std::string s = js.str();
+    fwrite(s.c_str(), 1, s.size(), f);
+    fclose(f);
+    std::rename(tmp.c_str(), COMPANION_DET_STATE_FILE);
+}
+// crude ndjson line-scan restore (same style as load_companion_clip_totals).
+static void restore_companion_det_state() {
+    std::ifstream f(COMPANION_DET_STATE_FILE);
+    if (!f) { std::printf("[CLIP-DETSEED] no %s — det_w books cold-start their windows honestly\n",
+                          COMPANION_DET_STATE_FILE); return; }
+    int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::string line;
+    while (std::getline(f, line)) {
+        auto tp = line.find("\"tag\":\"");
+        if (tp == std::string::npos) continue;
+        tp += 7; auto te = line.find("\"", tp);
+        if (te == std::string::npos) continue;
+        std::string tag = line.substr(tp, te - tp);
+        chimera::UpJumpLadderCompanion* comp = nullptr;
+        for (auto& kv : g_companion_by_parent)
+            if (kv.second.second->config().tag == tag) { comp = kv.second.second; break; }
+        if (!comp) continue;
+        auto num = [&](const char* key, double dflt) -> double {
+            auto p = line.find(key); if (p == std::string::npos) return dflt;
+            try { return std::stod(line.substr(p + std::strlen(key))); } catch (...) { return dflt; }
+        };
+        bool   det_in    = num("\"det_in\":", 0) > 0.5;
+        double det_entry = num("\"det_entry\":", 0.0);
+        int64_t det_bar  = (int64_t)num("\"det_bar\":", -1);
+        double det_close = num("\"det_close\":", 0.0);
+        std::vector<double> ring;
+        auto hp = line.find("\"h1c\":[");
+        if (hp != std::string::npos) {
+            auto he = line.find("]", hp);
+            std::string arr = line.substr(hp + 7, he - hp - 7);
+            std::stringstream ss(arr); std::string tok;
+            while (std::getline(ss, tok, ',')) { if (!tok.empty()) { try { ring.push_back(std::stod(tok)); } catch (...) {} } }
+        }
+        comp->restore_det_state(det_in, det_entry, det_bar, det_close, ring, now_ms);
+    }
 }
 
 // Live per-leg companion snapshot for the Omega desk CRYPTO COMPANIONS panel.
@@ -1151,7 +1216,10 @@ static void emit_companion_state() {
            << ",\"bars_since_high\":" << snap.bars_since_high
            << ",\"clips\":" << snap.clips
            << std::setprecision(2) << ",\"bank_bp\":" << snap.bank_bp
-           << ",\"bank_bp_real\":" << snap.bank_bp_real;
+           << ",\"bank_bp_real\":" << snap.bank_bp_real
+           << ",\"bank_bp_real_w\":" << snap.bank_bp_real_w
+           << ",\"mult\":" << snap.size_mult
+           << ",\"retired\":" << (snap.retired ? "true" : "false");
         // Per-leg breakdown (S-2026-07-05b tiered ladder): T1/T2 base + L1..Ln ladder
         // legs currently OPEN, each with its own armed/peak/stall for the Omega desk
         // CRYPTO COMPANIONS multi-leg render. sym-level fields above remain the book
@@ -1196,7 +1264,10 @@ static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
         }
         // Re-emit the full live roster snapshot for the Omega desk panel (every
         // bar close, any leg). Lock already held — iterates all registered legs.
-        if (!g_companion_by_parent.empty()) emit_companion_state();
+        if (!g_companion_by_parent.empty()) {
+            emit_companion_state();
+            save_companion_det_state();   // S-2026-07-08: det window survives restarts
+        }
     }
 }
 
@@ -2667,10 +2738,30 @@ int main() {
     // panel key only. Dual-column stays (ladder books model==real, cost debited).
     // Shadow: own ledger, observe-only, never touches the parent
     // (feedback-companion-independent-engine). Cost 20bp RT (0.20% Binance spot taker).
-    auto make_lad_companion = [](const char* ptag, const char* ctag, const char* sym,
+    // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/upjump_weighting_bt.cpp,
+    // outputs/CRYPTO_WEIGHTING_RETIREMENT_2026-07-08.md) ─────────────────────────
+    // size mult: x2 = robust top performer (honest all-6 PASS + >=2σ over the 20-seed
+    // random-entry control). Only SOL clears both bars (net +5980% PF 5.78, z=2.3).
+    // DOGE passes all-6 but is only 1.1σ over random (bull-beta risk) -> x1.
+    // rank-out: reserved for BT-net-negative books — NONE (ADA's forward -244bp was
+    // the seed_open rehydrate artifact, already fixed; ADA BT = +1594% PF 1.31).
+    // retire_bp: -2x the worst per-book drawdown episode in the validated 2021-2026
+    // BT of the exact live config (cumulative real-net curve, raw per-leg bp) —
+    // a level beyond anything the validated backtest ever produced.
+    // Un-retire = operator act: list the tag in data/companion_unretire.flags, restart.
+    auto unretired = [](const char* ctag) {
+        std::ifstream f("data/companion_unretire.flags"); std::string ln;
+        while (f && std::getline(f, ln)) {
+            while (!ln.empty() && (ln.back() == '\r' || ln.back() == ' ')) ln.pop_back();
+            if (ln == ctag) return true;
+        }
+        return false;
+    };
+    auto make_lad_companion = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                  int det_w, double det_thr,
                                  chimera::UpJumpLadderCompanion::Tier tight,
-                                 chimera::UpJumpLadderCompanion::Tier wide) {
+                                 chimera::UpJumpLadderCompanion::Tier wide,
+                                 double size_mult, double retire_bp) {
         chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag;  // price feed + desk panel key only; parent position never read
         c.tag = ctag; c.symbol = sym;
@@ -2681,19 +2772,22 @@ int main() {
         c.be_floor = false;                                // NO FLOOR anywhere
         c.det_w = det_w; c.det_thr = det_thr;              // roster per-coin W(h1 bars)/thr window
         c.tf_secs = 3600; c.round_trip_bp = 20.0;
+        c.size_mult = size_mult; c.rank_out = false;       // no BT-net-negative book 2026-07-08
+        c.retire_bp = retire_bp;
+        c.retire_override = unretired(ctag);
         return c;
     };
     using LTier = chimera::UpJumpLadderCompanion::Tier;
     // roster_cfg.csv rows (S-2026-07-05 all-6 roster; W/thr = detector window):
-    //                                                                                        W  thr    TIGHT{arm,stall,gb}   WIDE{arm,stall,gb}
-    chimera::UpJumpLadderCompanion btc_clip (make_lad_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  4, 0.08, LTier{3,0,0.5,0},  LTier{5,0,0.5,0}));
-    chimera::UpJumpLadderCompanion eth_clip (make_lad_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  4, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0}));
-    chimera::UpJumpLadderCompanion sol_clip (make_lad_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  4, 0.12, LTier{2,0,0.5,0},  LTier{8,0,0.5,0}));
-    chimera::UpJumpLadderCompanion doge_clip(make_lad_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 8, 0.05, LTier{3,3,0,0},    LTier{8,8,0.4,0}));
-    chimera::UpJumpLadderCompanion bnb_clip (make_lad_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  4, 0.05, LTier{3,3,0.3,0},  LTier{8,0,0.5,0}));
-    chimera::UpJumpLadderCompanion ada_clip (make_lad_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  6, 0.05, LTier{3,4,0.5,0},  LTier{5,6,0,0}));
-    chimera::UpJumpLadderCompanion trx_clip (make_lad_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8, 0.08, LTier{3,0,0.3,0},  LTier{8,6,0,0}));
-    chimera::UpJumpLadderCompanion near_clip(make_lad_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 6, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0}));
+    //                                                                                        W  thr    TIGHT{arm,stall,gb}   WIDE{arm,stall,gb}   mult  retire_bp(-2xBTmaxDD)
+    chimera::UpJumpLadderCompanion btc_clip (make_lad_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  4, 0.08, LTier{3,0,0.5,0},  LTier{5,0,0.5,0},  1.0,  -32000.0));
+    chimera::UpJumpLadderCompanion eth_clip (make_lad_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  4, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -101000.0));
+    chimera::UpJumpLadderCompanion sol_clip (make_lad_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  4, 0.12, LTier{2,0,0.5,0},  LTier{8,0,0.5,0},  2.0,  -78500.0));
+    chimera::UpJumpLadderCompanion doge_clip(make_lad_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 8, 0.05, LTier{3,3,0,0},    LTier{8,8,0.4,0},  1.0, -141000.0));
+    chimera::UpJumpLadderCompanion bnb_clip (make_lad_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  4, 0.05, LTier{3,3,0.3,0},  LTier{8,0,0.5,0},  1.0,  -52000.0));
+    chimera::UpJumpLadderCompanion ada_clip (make_lad_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  6, 0.05, LTier{3,4,0.5,0},  LTier{5,6,0,0},    1.0, -102500.0));
+    chimera::UpJumpLadderCompanion trx_clip (make_lad_companion("TRX-UPJUMP-H1",  "TRX-UPJUMP-CLIP",  "trxusdt",  8, 0.08, LTier{3,0,0.3,0},  LTier{8,6,0,0},    1.0,  -85000.0));
+    chimera::UpJumpLadderCompanion near_clip(make_lad_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 6, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -136000.0));
     // AAVE/OP: parent-only (not in the winner roster — AAVE PF1.04 noise, OP fails all-6).
     // DOGE/NEAR re-added: the 05-07d drop was the confirm-25 tax; winner runs confirm=0.
     chimera::UpJumpLadderCompanion* _all_clips[] = {
@@ -2707,9 +2801,12 @@ int main() {
         const int _NCLIP = (int)(sizeof(_all_clips)/sizeof(_all_clips[0]));  // was hard-coded 9; now size-derived (DOGE dropped)
         for (int i = 0; i < _NCLIP; ++i) {
             _all_clips[i]->shadow_mode = true;
-            {   // durable-counter rehydrate: panel clips/bank_bp survive restarts
+            {   // durable-counter rehydrate: panel clips/bank_bp survive restarts.
+                // 4th arg = weighted real bank; rehydrate() also runs the auto-retire
+                // check against the restored RAW real bank (one-shot [CLIP-RETIRE]).
                 auto _ct = _clip_totals.find(_all_clips[i]->config().tag);
-                if (_ct != _clip_totals.end()) _all_clips[i]->rehydrate(_ct->second.n, _ct->second.net, _ct->second.net_real);
+                if (_ct != _clip_totals.end())
+                    _all_clips[i]->rehydrate(_ct->second.n, _ct->second.net, _ct->second.net_real, _ct->second.net_real_w);
             }
             _all_clips[i]->set_on_clip(persist_companion_clip);
             g_companion_by_parent[_all_clips[i]->config().parent_tag] =
@@ -2721,13 +2818,31 @@ int main() {
                         cc.tag.c_str(), cc.parent_tag.c_str(), cc.be_bp,
                         cc.tight.trail_bp, cc.wide.trail_bp, cc.det_w, cc.det_thr * 100, cc.cap);
                 else
-                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.0f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp NO-FLOOR shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.0f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp mult=x%.1f retire@%.0fbp%s NO-FLOOR shadow=1\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
                         cc.tight.arm, cc.tight.stall, cc.tight.gb,
                         cc.wide.arm, cc.wide.stall, cc.wide.gb,
                         (int)cc.extra_base.size(),
-                        cc.reclip_pct, cc.cap, cc.cost_gate_bp, cc.confirm_bp);
+                        cc.reclip_pct, cc.cap, cc.cost_gate_bp, cc.confirm_bp,
+                        cc.size_mult, cc.retire_bp,
+                        _all_clips[i]->is_retired() ? " [RETIRED]" : (cc.rank_out ? " [RANK-OUT]" : ""));
             }
+        }
+        // S-2026-07-08 weighting split (one loud boot line, operator-auditable):
+        {
+            std::string x2, x1, ro, rt;
+            for (int i = 0; i < _NCLIP; ++i) {
+                const auto& cc = _all_clips[i]->config();
+                std::string sym = cc.tag.substr(0, cc.tag.find('-'));
+                if      (_all_clips[i]->is_retired()) rt += (rt.empty() ? "" : ",") + sym;
+                else if (cc.rank_out)                 ro += (ro.empty() ? "" : ",") + sym;
+                else if (cc.size_mult >= 2.0)         x2 += (x2.empty() ? "" : ",") + sym;
+                else                                  x1 += (x1.empty() ? "" : ",") + sym;
+            }
+            std::printf("[CLIP-WEIGHTS] x2={%s} x1={%s} rank-out={%s} retired={%s} "
+                        "(basis: BT 2021-2026 honest all-6 + random-entry control, "
+                        "outputs/CRYPTO_WEIGHTING_RETIREMENT_2026-07-08.md)\n",
+                        x2.c_str(), x1.c_str(), ro.c_str(), rt.c_str());
         }
         emit_companion_state();   // one-shot startup emit so the Omega desk panel lights up immediately (not after 1st H1 close)
     }
@@ -7310,23 +7425,29 @@ int main() {
     // the parent. entry_ref_ aligns with the parent entry so the next observe() no-ops.
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
+        // S-2026-07-08 RESTART-PATH FIX: det_w books restore their OWN detector window
+        // (data/companion_det_state.json) — never the parent's (uniform 4h/+2% = a
+        // different window family; the old parent-seed injected phantom windows on
+        // every restart and ate genuine in-flight detector windows). Parent-seed is
+        // kept ONLY for det_w==0 books (none live) and seed_open() itself refuses
+        // det_w books as defense-in-depth.
+        restore_companion_det_state();
         int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         int seeded = 0;
         for (auto& kv : g_companion_by_parent) {
             chimera::EdgeEngine*             par  = kv.second.first;
             chimera::UpJumpLadderCompanion*  comp = kv.second.second;
-            if (!par || !comp || !par->in_position()) continue;
+            if (!par || !comp || comp->config().det_w > 0 || !par->in_position()) continue;
             comp->seed_open(par->entry_px(), par->entry_ts_ms(), par->mfe_px(), now_ms);
             auto s = comp->snapshot();
             std::printf("[CLIP-SEED] %s open from live parent: entry=%.6f peak_mfe=%.2f%% armed=%d\n",
                 comp->config().tag.c_str(), par->entry_px(), s.peak_mfe_pct, s.armed ? 1 : 0);
             seeded++;
         }
-        if (seeded > 0) {
-            emit_companion_state();   // refresh the desk panel immediately with the seeded peaks
+        emit_companion_state();   // refresh the desk panel immediately with the restored state
+        if (seeded > 0)
             std::printf("[CLIP-SEED] %d companion(s) rehydrated from live parents\n", seeded);
-        }
         std::fflush(stdout);
     }
 

@@ -2781,7 +2781,7 @@ int main() {
     // roster_cfg.csv rows (S-2026-07-05 all-6 roster; W/thr = detector window):
     //                                                                                        W  thr    TIGHT{arm,stall,gb}   WIDE{arm,stall,gb}   mult  retire_bp(-2xBTmaxDD)
     chimera::UpJumpLadderCompanion btc_clip (make_lad_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  4, 0.08, LTier{3,0,0.5,0},  LTier{5,0,0.5,0},  1.0,  -32000.0));
-    chimera::UpJumpLadderCompanion eth_clip (make_lad_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  4, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -101000.0));
+    chimera::UpJumpLadderCompanion eth_clip (make_lad_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  6, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -101000.0));
     chimera::UpJumpLadderCompanion sol_clip (make_lad_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  4, 0.12, LTier{2,0,0.5,0},  LTier{8,0,0.5,0},  2.0,  -78500.0));
     chimera::UpJumpLadderCompanion doge_clip(make_lad_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 8, 0.05, LTier{3,3,0,0},    LTier{8,8,0.4,0},  1.0, -141000.0));
     chimera::UpJumpLadderCompanion bnb_clip (make_lad_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  4, 0.05, LTier{3,3,0.3,0},  LTier{8,0,0.5,0},  1.0,  -52000.0));

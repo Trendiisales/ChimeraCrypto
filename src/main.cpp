@@ -173,6 +173,7 @@
 #include "core/TrendPullbackReclaimEngine.hpp"     // S-2026-07-11: Phase-6 family 1 — SHADOW OBSERVATION-ONLY
 #include "core/CompressionBreakoutDailyEngine.hpp" // S-2026-07-11: Phase-6 family 2 — SHADOW OBSERVATION-ONLY
 #include "core/BullRegimeMeanReversionEngine.hpp"  // S-2026-07-11: Phase-6 family 3 — SHADOW OBSERVATION-ONLY
+#include "core/DerivativesSignals.hpp"             // S-2026-07-11: Phase-7 derivatives-data-as-signal — OBSERVATION-ONLY recorder
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
 #include "core/LiquidationCascadeDetector.hpp"
 #include "live/LiquidationWSFeed.hpp"
@@ -2873,6 +2874,80 @@ int main() {
         install6(p6_tpr, "P6-TPR");   // trend-pullback / reclaim
         install6(p6_cbd, "P6-CBD");   // compression breakout
         install6(p6_bmr, "P6-BMR");   // bull-regime mean-reversion
+    }
+
+    // ── Phase-7 (S-2026-07-11): DERIVATIVES-DATA-AS-SIGNAL — OBSERVATION-ONLY recorder
+    // Derivatives + microstructure data as a QUALITY FILTER / SIZE modifier on the
+    // EXISTING spot-long entries — the data is NEVER traded; every executed trade
+    // stays SPOT-LONG. Long-only, NO shorts, NO 200DMA.
+    // BACKTEST VERDICT (backtest/phase7_derivsignals_bt.cpp; faithful live UpJump
+    // per-coin H1 W/thr, ride-to-flip, 20bp RT; 8 sym × 2025-05..2026-05 = the ENTIRE
+    // derivatives history available; gate-attribution + quartile monotonicity;
+    // cost-invariant to 2×): ALL THREE data-supported filters REJECTED —
+    //   A funding-extreme  : NEUTRAL   (no separation; funding-pct quartiles non-monotonic).
+    //   B spot-vs-perp CVD : WEAK/NON-MONOTONIC (perp-led Q1 worst but spot-led Q4 also
+    //                        worst; the veto 'help' is the Q1 tail only, does not rank
+    //                        quality → not a robust filter). Strongest of the three.
+    //   C basis-extreme    : SUSPECT   (high-basis entries were WINNERS → veto suppresses winners).
+    // DEFERRED — NO HISTORICAL DATA (won't fabricate): OI change (no OI file; Binance
+    // REST OI hist ~30d only), real order-book liquidity cost / expected impact
+    // (DepthManager live-only, no historical depth), liquidation clusters
+    // (LiquidationWSFeed live-only), stablecoin/exchange flows, event risk (unlocks).
+    // Because NO filter earned wiring — and the ONLY real blocker is the 1-year data
+    // window — Phase 7 ships as a pure OBSERVATION-ONLY RECORDER: it computes the real
+    // funding-pct / spot-vs-perp CVD / basis context at boot and stamps it, so a
+    // forward derivative dataset accrues to RE-JUDGE Phase 7 with more history. It
+    // changes NOTHING — no order, no size, no veto, no allocator, no feed plumbing.
+    // The 32-cell UpJump grid + every shadow book are untouched. See [[ChimeraReviewPhase7]].
+    static chimera::DerivativesSignalBook g_deriv_book;
+    {
+        const std::vector<std::string> dsyms = {
+            "BTCUSDT","ETHUSDT","SOLUSDT","DOGEUSDT","BNBUSDT","LINKUSDT","XRPUSDT","AVAXUSDT"};
+        // bounded-tail H1 CVD seed (last ~33h) so boot stays light (no full-year 1m parse)
+        auto seed_cvd_tail = [&](const std::string& path, bool perp, const std::string& sym){
+            FILE* f = std::fopen(path.c_str(), "r"); if (!f) return;
+            std::fseek(f, 0, SEEK_END); long sz = std::ftell(f);
+            long back = sz > 220000 ? 220000 : sz; std::fseek(f, sz - back, SEEK_SET);
+            char line[1024]; if (back < sz) std::fgets(line, sizeof line, f); // drop partial first line
+            struct Bar { double c=0, v=0, tbb=0; };
+            std::map<int64_t, Bar> agg; // hour -> {close,vol,tbb}
+            while (std::fgets(line, sizeof line, f)) {
+                char* p = line; char* e; int64_t t = strtoll(p, &e, 10); if (e == p || *e != ',') continue;
+                strtod(e+1,&e); strtod(e+1,&e); strtod(e+1,&e); double c = strtod(e+1,&e);
+                double v = strtod(e+1,&e); strtoll(e+1,&e,10); strtod(e+1,&e); strtoll(e+1,&e,10);
+                double tbb = strtod(e+1,&e); if (c <= 0) continue;
+                int64_t hh = (t/3600000LL)*3600000LL; auto& a = agg[hh]; a.c=c; a.v+=v; a.tbb+=tbb;
+            }
+            std::fclose(f);
+            for (auto& kv : agg) { if (perp) g_deriv_book.on_perp_h1(sym, kv.first, kv.second.c, kv.second.v, kv.second.tbb);
+                                   else       g_deriv_book.on_spot_h1(sym, kv.first, kv.second.c, kv.second.v, kv.second.tbb); }
+        };
+        int seeded = 0;
+        for (const auto& s : dsyms) {
+            // funding (full, tiny)
+            std::ifstream ff("data/funding/" + s + ".csv");
+            if (ff) { std::string l; std::getline(ff, l); int fr = 0;
+                while (std::getline(ff, l)) { auto c1 = l.find(','); if (c1 == std::string::npos) continue;
+                    char* e; int64_t t = strtoll(l.c_str()+c1+1, &e, 10); double r = strtod(e+1, &e);
+                    g_deriv_book.on_funding(s, t, r); ++fr; }
+                if (fr > 0) ++seeded; }
+            seed_cvd_tail("data/klines_spot/" + s + "_1m.csv", false, s);
+            seed_cvd_tail("data/klines_perp/" + s + "_1m.csv", true,  s);
+        }
+        std::printf("[P7-DERIV] Phase-7 DERIVATIVES-DATA-AS-SIGNAL — OBSERVATION-ONLY recorder installed: "
+                    "seeded %d/%zu symbols (funding + spot/perp CVD + basis); ALL 3 filters REJECTED by BT "
+                    "(funding NEUTRAL / CVD non-monotonic / basis SUSPECT); OI+depth+liq+flows DEFERRED (no history); "
+                    "changes NOTHING (no order/size/veto). SHADOW.\n", seeded, dsyms.size());
+        for (const auto& s : dsyms) {
+            auto d = g_deriv_book.eval(s);
+            if (!d.ready) { std::printf("[P7-DERIV] %-8s context: (not ready)\n", s.c_str()); continue; }
+            std::printf("[P7-DERIV] %-8s context: funding=%.4f%% pct=%.2f | CVD_div=%+.3f (%s) | basis=%+.3f%% "
+                        "| would-be size_mult=%.2f (INERT — recorder)\n",
+                        s.c_str(), d.funding_rate*100.0, d.funding_pct, d.cvd_div,
+                        d.spot_led ? "spot-led" : "perp-led", d.basis_pct*100.0,
+                        d.size_mult(g_deriv_book.params()));
+        }
+        std::fflush(stdout);
     }
 
     // ── Sleeve 3: RipRiderEngine — per-symbol regime-gated rip-rider ──────────

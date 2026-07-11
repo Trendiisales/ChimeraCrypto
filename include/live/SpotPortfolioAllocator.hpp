@@ -31,12 +31,29 @@
 // It NEVER edits a validated sleeve's signal/exit logic — only the target->order
 // step between them. Header-only; the emit sink is a std::function so it is unit-
 // testable with no gateway.
+//
+// Phase-8A Stage-2 (2026-07-11) — HARD-CAP ENFORCEMENT (staged progression, NOT
+// full sizing authority). A THIRD mode sits between TRACK-ONLY (off) and the
+// full plan()-emit path (full): HARDCAP. In hardcap the engines still PROPOSE
+// their own quantity; the allocator does NOT set the final size (that stays
+// Stage-3). It only acts as a SAFETY BACKSTOP — govern_entry() can REDUCE (to the
+// remaining headroom) or REJECT (no headroom) a proposed BUY that would breach a
+// hard cap: the per-symbol cap, the aggregate momentum-factor cap, and drawdown
+// scaling (the DD governor's exposure_scale multiplies both caps, so entries
+// shrink in a drawdown and are rejected on HALT). Cash is deliberately NOT
+// enforced here in shadow — it is gated on portfolio_cash_usd>0 at the caller
+// (go-live only). CRITICAL invariant for promotion (no erroneous rejections): an
+// IN-LIMIT order returns byte-identical to what the sleeve proposed, so hardcap
+// is indistinguishable from track-only for every order that does not genuinely
+// breach a cap; only a true breach reduces/rejects. Exits are never governed.
 // ============================================================================
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <functional>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <algorithm>
 #include "live/RegimeExposure.hpp"
@@ -52,6 +69,30 @@ inline const char* factor_str(Factor f) {
                  case Factor::MEANREV:  return "MEANREV";
                  default:               return "OTHER"; }
 }
+
+// Enforcement stage (Phase-8A). OFF = TRACK-ONLY (compute+log, never touch an
+// order). HARDCAP = Stage-2 safety backstop (govern_entry reduces/rejects only a
+// genuine cap breach; in-limit orders pass unchanged). FULL = Stage-3+ plan()
+// emits the netted deltas and the raw per-sleeve orders defer to it.
+enum class EnforceMode { OFF, HARDCAP, FULL };
+inline const char* enforce_mode_str(EnforceMode m) {
+    switch (m) { case EnforceMode::HARDCAP: return "HARDCAP";
+                 case EnforceMode::FULL:    return "FULL";
+                 default:                   return "OFF"; }
+}
+
+// The verdict govern_entry() returns for a proposed BUY entry (Phase-8A Stage-2).
+// approved=false => REJECT (submit nothing). reduced=true => qty/usd were cut to
+// the cap headroom. Neither set => PASS unchanged (byte-identical to track-only).
+struct CapDecision {
+    bool        approved     = true;
+    bool        reduced      = false;
+    double      approved_usd = 0.0;   // notional the allocator permits
+    double      approved_qty = 0.0;   // base qty at ref_px
+    double      proposed_usd = 0.0;
+    double      proposed_qty = 0.0;
+    const char* reason       = "pass";
+};
 
 // A strategy's DESIRED exposure to a symbol (a target, not an order).
 struct StrategyTarget {
@@ -77,17 +118,24 @@ struct AllocDelta {
 class SpotPortfolioAllocator {
 public:
     // enforce=false => TRACK-ONLY (compute + log, never emit). SHADOW default.
+    // (Back-compat: bool maps OFF/FULL. Phase-8A adds set_enforce_mode() for the
+    //  three-way OFF | HARDCAP | FULL.)
     void configure(bool enforce, double symbol_cap_usd,
                    double momentum_cap_usd, double target_portfolio_vol,
                    double max_cluster_frac, double max_crypto_beta) {
-        enforce_ = enforce;
+        emode_ = enforce ? EnforceMode::FULL : EnforceMode::OFF;
         symbol_cap_usd_ = symbol_cap_usd;
         momentum_cap_usd_ = momentum_cap_usd;
         target_vol_ = target_portfolio_vol;
         max_cluster_frac_ = max_cluster_frac;
         max_crypto_beta_ = max_crypto_beta;
     }
-    bool enforce() const { return enforce_; }
+    // Phase-8A: set the exact enforcement stage. FULL routes plan()'s emit path;
+    // HARDCAP arms govern_entry() (Stage-2 safety caps); OFF = track-only.
+    void set_enforce_mode(EnforceMode m) { emode_ = m; }
+    EnforceMode enforce_mode() const { return emode_; }
+    // FULL-emit path (plan()) keys on this; HARDCAP does NOT emit from plan().
+    bool enforce() const { return emode_ == EnforceMode::FULL; }
 
     // Overlay toggles — the base MERGE/CAP/NET (item 15) always runs; the exposure
     // overlays can be enabled independently. Default: all overlays ON. Turning them
@@ -189,13 +237,14 @@ public:
             std::fprintf(stderr,
                 "[ALLOC%s] %s merged=$%.2f cap=$%.2f held=$%.2f -> %s $%.2f (qty=%.8f) "
                 "[mom_scale=%.3f dd=%.2f regime=%s]\n",
-                enforce_ ? "" : "-TRACK", sym.c_str(), d.merged_usd, d.capped_usd,
+                enforce() ? "" : "-TRACK", sym.c_str(), d.merged_usd, d.capped_usd,
                 d.held_usd, d.is_buy ? "BUY" : "SELL", d.usd, d.qty,
                 mom_scale, dd_scale, family_str(sym_family[sym]));
 
-            // 5. emit ONLY in ENFORCE; TRACK-ONLY leaves the shadow books + grid
-            //    experiment completely undisturbed.
-            if (enforce_ && emit && d.usd > 0.0 && px > 0.0)
+            // 5. emit ONLY in FULL; TRACK-ONLY / HARDCAP leave the shadow books +
+            //    grid experiment completely undisturbed (HARDCAP acts at the
+            //    sleeve's own submit via govern_entry, not from plan()).
+            if (enforce() && emit && d.usd > 0.0 && px > 0.0)
                 emit(d, sym_factor[sym], sym_family[sym]);
         }
         return out;
@@ -217,12 +266,84 @@ public:
         return w;
     }
 
+    // ── Phase-8A Stage-2 HARD-CAP governor ────────────────────────────────────
+    // Evaluate a PROPOSED buy entry (a sleeve's own quantity) against the hard
+    // SAFETY caps. Returns a CapDecision: PASS (unchanged), REDUCE (to the exact
+    // remaining headroom), or REJECT (no headroom). NEVER sets final sizing — an
+    // in-limit order is returned byte-identical (approved, not reduced), which is
+    // the no-erroneous-rejection invariant. Only bites in HARDCAP mode; in OFF /
+    // FULL it is an immediate passthrough. Exits must NOT be passed here.
+    //
+    //   * symbol cap   — (held+pending for this symbol) + order <= symbol_cap * dd
+    //   * momentum cap — (held+pending across all momentum symbols) + order
+    //                    <= momentum_cap * dd   (momentum entries only)
+    //   * drawdown     — dd = DrawdownGovernor::exposure_scale() (1.0 normal,
+    //                    <1 in drawdown => caps tighten, 0 on HALT => reject)
+    // Cash is intentionally omitted (go-live only; gated on portfolio_cash_usd>0
+    // at the caller) so shadow never enforces cash.
+    CapDecision govern_entry(const std::string& symbol, double qty, double ref_px,
+                             Factor factor, const ExchangeLedger* ledger) const {
+        CapDecision d;
+        d.proposed_qty = qty; d.proposed_usd = qty * ref_px;
+        d.approved_qty = qty; d.approved_usd = d.proposed_usd;
+        if (emode_ != EnforceMode::HARDCAP)   return d;   // OFF / FULL: inert
+        if (qty <= 0.0 || ref_px <= 0.0)      return d;   // invalids: let the gateway reject
+
+        const double dd = dd_overlay_ ? dd_.exposure_scale() : 1.0;
+        const double proposed = d.proposed_usd;
+        double allowed = proposed;                        // running headroom allowance
+
+        // symbol hard cap (× dd)
+        if (symbol_cap_usd_ > 0.0) {
+            double held = 0.0;
+            if (ledger)
+                held = ledger->position_value(symbol, ref_px) + ledger->pending_buy_value(symbol);
+            double headroom = symbol_cap_usd_ * dd - held;
+            if (headroom < allowed) { allowed = headroom; d.reason = "symbol-cap"; }
+        }
+        // aggregate momentum-factor hard cap (× dd) — momentum entries only
+        if (factor == Factor::MOMENTUM && momentum_cap_usd_ > 0.0) {
+            double mom_held = momentum_exposure_held(ledger);
+            double headroom = momentum_cap_usd_ * dd - mom_held;
+            if (headroom < allowed) { allowed = headroom; d.reason = "momentum-cap"; }
+        }
+        // drawdown HALT forces reject even if both caps are disabled (0.0).
+        if (dd <= 0.0) { allowed = 0.0; d.reason = "drawdown-halt"; }
+
+        if (allowed >= proposed - 1e-9) return d;          // IN-LIMIT: unchanged (pass)
+        if (allowed <= 1e-9) {                             // no headroom: REJECT
+            d.approved = false; d.approved_usd = 0.0; d.approved_qty = 0.0;
+            if (std::strcmp(d.reason, "pass") == 0) d.reason = "cap-reject";
+            return d;
+        }
+        d.reduced = true;                                  // partial headroom: REDUCE
+        d.approved_usd = allowed;
+        d.approved_qty = allowed / ref_px;
+        return d;
+    }
+
+    // Held+pending exposure (exchange-truth) summed over every symbol a MOMENTUM
+    // sleeve currently targets — the base the aggregate momentum cap measures the
+    // incremental order against. Uses ref_px to value the other symbols.
+    double momentum_exposure_held(const ExchangeLedger* ledger) const {
+        if (!ledger) return 0.0;
+        std::set<std::string> mom;
+        for (auto& kv : targets_)
+            if (kv.second.factor == Factor::MOMENTUM) mom.insert(kv.second.symbol);
+        double tot = 0.0;
+        for (auto& s : mom) {
+            double px = ref_px ? ref_px(s) : 0.0;
+            if (px > 0.0) tot += ledger->position_value(s, px) + ledger->pending_buy_value(s);
+        }
+        return tot;
+    }
+
 private:
     struct Key { std::string sid, sym;
         bool operator<(const Key& o) const {
             return sid != o.sid ? sid < o.sid : sym < o.sym; } };
 
-    bool   enforce_ = false;
+    EnforceMode emode_ = EnforceMode::OFF;   // Phase-8A: OFF | HARDCAP | FULL
     double symbol_cap_usd_   = 0.0;
     double momentum_cap_usd_ = 0.0;
     double target_vol_       = 0.0;

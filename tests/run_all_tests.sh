@@ -26,6 +26,7 @@
 #   drawdown-ladder ............ P3 drawdown_governor
 #   allocator-vs-legacy ........ MATRIX allocator_vs_legacy          [added]
 #   counterfactual-realism ..... P4 realistic_fill (+ P4 gate_attribution)
+#   allocator-hardcap-enforce .. P8A hardcap_enforce (Stage-2 caps + no-erroneous-rejection)
 # ============================================================================
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -39,6 +40,7 @@ SUITES=(
   "Phase 6  (long-only families)  :run_phase6_tests.sh"
   "Phase 6b (remaining families)  :run_phase6b_tests.sh"
   "Phase 7  (derivatives signals) :run_phase7_tests.sh"
+  "Phase 8A (allocator hard-cap)  :run_phase8a_tests.sh"
   "CI-matrix supplemental         :run_matrix_tests.sh"
 )
 

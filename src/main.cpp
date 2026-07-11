@@ -1842,6 +1842,9 @@ void signal_handler(int) { g_running = false; }
 // ── LiveRuntimeConfig — reads config/live_config.json so the runtime is
 // actually driven by that file instead of the hard-coded credentials path.
 // ───────────────────────────────────────────────────────────────────────
+// Phase-8A Stage-2: allocator enforcement stage (config "portfolio_alloc_mode").
+enum class AllocMode { OFF, HARDCAP, FULL };
+
 struct LiveRuntimeConfig {
     std::string credentials_file = "config/binance_credentials.json";
     bool        shadow_mode      = true;
@@ -1859,7 +1862,17 @@ struct LiveRuntimeConfig {
     // exercised, but does NOT emit — the per-sleeve shadow books + the 32-cell
     // UpJump threshold GRID keep their own records. true => ENFORCE: the allocator
     // emits the netted deltas and the raw per-sleeve orders defer to it.
+    // (Back-compat only — superseded by portfolio_alloc_mode below.)
     bool        portfolio_alloc_enforce = false;
+    // Phase-8A Stage-2 (2026-07-11): three-way allocator enforcement stage.
+    //   off     (default) => TRACK-ONLY, identical to portfolio_alloc_enforce=false
+    //   hardcap           => Stage-2 SAFETY CAPS: engines still propose qty, but the
+    //                        allocator can REDUCE/REJECT a BUY that breaches the
+    //                        symbol / momentum-factor / drawdown caps. In-limit
+    //                        orders pass byte-identical to track-only.
+    //   full              => Stage-3+ plan()-emit (== portfolio_alloc_enforce=true)
+    // If the string key is absent, falls back to the bool above.
+    AllocMode   portfolio_alloc_mode = AllocMode::OFF;
     // S44d: testing-mode protection bypass. When TRUE + shadow_mode=true,
     // the portfolio ratchet does NOT halt entries (lets testing flow
     // through). Going live (shadow_mode=false) with this set = FATAL abort.
@@ -1932,6 +1945,15 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     cfg.min_edge_bps     = lrc_extract_double(content, "min_edge_bps", 10.0);
     cfg.portfolio_cash_usd = lrc_extract_double(content, "portfolio_cash_usd", 0.0);
     cfg.portfolio_alloc_enforce = lrc_extract_bool(content, "portfolio_alloc_enforce", false);
+    // Phase-8A: three-way mode string wins if present; else fall back to the bool.
+    {
+        std::string m = lrc_extract_string(content, "portfolio_alloc_mode");
+        for (auto& ch : m) if (ch >= 'A' && ch <= 'Z') ch += 32;
+        if      (m == "hardcap")               cfg.portfolio_alloc_mode = AllocMode::HARDCAP;
+        else if (m == "full" || m == "enforce") cfg.portfolio_alloc_mode = AllocMode::FULL;
+        else if (m == "off" || m == "track")   cfg.portfolio_alloc_mode = AllocMode::OFF;
+        else cfg.portfolio_alloc_mode = cfg.portfolio_alloc_enforce ? AllocMode::FULL : AllocMode::OFF;
+    }
     cfg.protection_disabled_for_testing =
         lrc_extract_bool(content, "protection_disabled_for_testing", false);
     // Phase-1: optional explicit runtime mode + control-API bind/token.
@@ -2545,9 +2567,14 @@ int main() {
         // symbol cap = 1 NAV unit; aggregate momentum cap = 4 NAV units (XSec +
         // UpJump + RipRider are ONE factor); vol/beta OFF until the rolling
         // covariance warms (apply_risk returns 1.0 cold); cluster cap 50%.
-        g_allocator.configure(/*enforce*/runtime_cfg.portfolio_alloc_enforce,
+        chimera::EnforceMode emode =
+            runtime_cfg.portfolio_alloc_mode == AllocMode::FULL    ? chimera::EnforceMode::FULL :
+            runtime_cfg.portfolio_alloc_mode == AllocMode::HARDCAP ? chimera::EnforceMode::HARDCAP :
+                                                                     chimera::EnforceMode::OFF;
+        g_allocator.configure(/*enforce(FULL)*/emode == chimera::EnforceMode::FULL,
                               /*symbol_cap*/nav, /*momentum_cap*/4.0*nav,
                               /*target_vol*/0.0, /*cluster_frac*/0.50, /*beta*/0.0);
+        g_allocator.set_enforce_mode(emode);   // Phase-8A: OFF | HARDCAP | FULL
         g_allocator.regime().configure(/*hysteresis*/0.05);
         g_allocator.drawdown().configure();
         g_allocator.risk().configure(/*window*/30, /*shrink*/0.30);
@@ -2566,12 +2593,50 @@ int main() {
             gateway.submit({ d.symbol, d.is_buy, d.qty, d.usd>0.0 ? d.usd/d.qty : 0.0,
                              /*is_exit*/ !d.is_buy, "ALLOC" });
         };
-        std::printf("[ALLOC] Phase-3 portfolio allocator wired: %s | symbol_cap=$%.0f "
-                    "momentum_cap=$%.0f cluster<=50%% (regime+DD+factor overlays ON)\n",
-                    runtime_cfg.portfolio_alloc_enforce ? "ENFORCE" : "TRACK-ONLY (shadow record + grid preserved)",
-                    nav, 4.0*nav);
+        std::printf("[ALLOC] Phase-3/8A portfolio allocator wired: mode=%s | symbol_cap=$%.0f "
+                    "momentum_cap=$%.0f cluster<=50%% (regime+DD+factor overlays ON)%s\n",
+                    chimera::enforce_mode_str(emode), nav, 4.0*nav,
+                    emode == chimera::EnforceMode::HARDCAP
+                        ? " [Stage-2: reduce/reject over-cap BUYs; in-limit unchanged; grid+shadow preserved]"
+                        : emode == chimera::EnforceMode::FULL ? " [Stage-3+: plan() emits]"
+                        : " (TRACK-ONLY: shadow record + grid preserved)");
         std::fflush(stdout);
     }
+
+    // ── Phase-8A Stage-2: governed submit for the PROMOTED sleeves only ──────────
+    // The books that feed the allocator (XSec v1 BTC/BR, XSec2, RipRider, the
+    // EdgeEngine/UpJump intent path) route their BUY entries through here. In
+    // OFF/FULL mode, or for any exit/sell, this is a straight passthrough —
+    // byte-identical to the pre-8A gateway.submit — so track-only behaviour is
+    // preserved. In HARDCAP it asks the allocator whether the proposed BUY breaches
+    // a hard cap: an in-limit order passes unchanged; a genuine breach is REDUCED to
+    // the headroom or REJECTED. Observation books (P6/P7) and the 32-cell grid do
+    // NOT call this and are wholly unaffected. Cash is not enforced here (shadow).
+    auto governed_submit = [&](const chimera::OrderIntent& in, chimera::Factor factor)
+            -> chimera::OrderResult {
+        if (runtime_cfg.portfolio_alloc_mode != AllocMode::HARDCAP || !in.is_buy || in.is_exit)
+            return gateway.submit(in);
+        chimera::CapDecision cd;
+        {
+            std::lock_guard<std::mutex> lk(g_alloc_mtx);
+            cd = g_allocator.govern_entry(in.symbol, in.qty, in.ref_px, factor, &g_ledger);
+        }
+        if (!cd.approved) {
+            std::fprintf(stderr, "[ALLOC-HARDCAP] REJECT src=%s %s proposed=$%.2f — %s\n",
+                         in.source ? in.source : "?", in.symbol.c_str(), cd.proposed_usd, cd.reason);
+            chimera::OrderResult r; r.error = std::string("hardcap:") + cd.reason; return r;
+        }
+        if (cd.reduced) {
+            std::fprintf(stderr,
+                "[ALLOC-HARDCAP] REDUCE src=%s %s proposed=$%.2f -> $%.2f (qty %.8f -> %.8f) — %s\n",
+                in.source ? in.source : "?", in.symbol.c_str(), cd.proposed_usd,
+                cd.approved_usd, in.qty, cd.approved_qty, cd.reason);
+            chimera::OrderIntent adj = in; adj.qty = cd.approved_qty;
+            return gateway.submit(adj);
+        }
+        return gateway.submit(in);   // in-limit: byte-identical to track-only
+    };
+    (void)governed_submit;   // referenced by the promoted-sleeve callbacks below
 
     // ════════════════════════════════════════════════════════════════════
     // S-2026-06-18: CrossSectionalMomentumEngine — FIRST OOS-validated Chimera
@@ -2659,7 +2724,7 @@ int main() {
           std::printf("[XSEC] startup: BTC-sleeve bull=%d %s | BREADTH-sleeve bull=%d %s\n",
                       bb?1:0, bb?fmt(wb).c_str():"CASH", br?1:0, br?fmt(wr).c_str():"CASH"); }
         std::fflush(stdout);
-        auto fire = [&gateway, &exec_ok](const char* tag, double sleeve_nav,
+        auto fire = [&exec_ok, &governed_submit](const char* tag, double sleeve_nav,
                     std::map<std::string,double>& hold, int64_t day,
                     const std::map<std::string,double>& tw, bool bull,
                     double breadth, double dispersion) {
@@ -2676,8 +2741,10 @@ int main() {
                 if (std::fabs(dusd) < 25.0) continue;
                 // Phase-1: route through the gateway. A rebalance SELL (dusd<0) is a
                 // risk-reducing exit -> never blocked by halts.
-                gateway.submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px,
-                                 /*is_exit*/ dusd < 0.0, tag });
+                // Phase-8A: BUYs pass through the hard-cap governor (MOMENTUM/XSEC);
+                // in-limit unchanged, over-cap reduced/rejected. SELLs pass through.
+                governed_submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px,
+                                 /*is_exit*/ dusd < 0.0, tag }, chimera::Factor::MOMENTUM);
                 hold[kv.first] = tgt;
             }
             // Phase-3 TRACK-ONLY: declare this sleeve's DESIRED per-symbol targets to
@@ -2752,7 +2819,7 @@ int main() {
           std::printf("[XSEC2] startup: bull=%d breadth=%.2f -> %s\n",
                       b2?1:0, xsec2.breadth_latest(), b2 ? (p.empty()?"(none)":p.c_str()) : "CASH (breadth gate)"); }
         std::fflush(stdout);
-        xsec2.set_rebalance_callback([&gateway, &exec_ok, nav2, &xsec2](int64_t day,
+        xsec2.set_rebalance_callback([&gateway, &exec_ok, nav2, &xsec2, &governed_submit](int64_t day,
                                      const std::map<std::string,double>& tw, bool bull){
             static std::map<std::string,double> hold;
             std::string picks; for (auto& kv : tw) if (kv.second > 0) { char b[48];
@@ -2765,7 +2832,8 @@ int main() {
                 double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
                 double tgt = kv.second * nav2, dusd = tgt - hold[kv.first];
                 if (std::fabs(dusd) < 25.0) continue;
-                gateway.submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px, /*is_exit*/ dusd < 0.0, "XSEC2" });
+                // Phase-8A: governed BUY (MOMENTUM/XSEC); SELL passes through.
+                governed_submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px, /*is_exit*/ dusd < 0.0, "XSEC2" }, chimera::Factor::MOMENTUM);
                 hold[kv.first] = tgt;
             }
             // also zero-out held names no longer targeted (rebalance to CASH/out)
@@ -3023,11 +3091,12 @@ int main() {
         if (rrejected > 0)
             std::printf("[DATA-QUALITY] RIP seed: %d symbol(s) REFUSED for corrupt history\n", rrejected);
         std::fflush(stdout);
-        riprider.set_entry_callback([&gateway, &exec_ok, rip_nav](const std::string& sym, double px, int64_t ts){
+        riprider.set_entry_callback([&exec_ok, rip_nav, &governed_submit](const std::string& sym, double px, int64_t ts){
             (void)ts;
             std::printf("[RIP] ENTRY %s @ %.6f\n", sym.c_str(), px); std::fflush(stdout);
+            // Phase-8A: governed BUY (MOMENTUM/RIPRIDER); over aggregate momentum cap -> reduce/reject.
             if (exec_ok && px > 0)
-                gateway.submit({ sym + "USDT", true, (rip_nav/8.0)/px, px, /*is_exit*/false, "RIP" });
+                governed_submit({ sym + "USDT", true, (rip_nav/8.0)/px, px, /*is_exit*/false, "RIP" }, chimera::Factor::MOMENTUM);
             // Phase-3 TRACK-ONLY: declare the RipRider target (one factor with XSec/
             // UpJump); the allocator caps aggregate momentum. Shadow book unchanged.
             if (px > 0) {
@@ -3240,8 +3309,14 @@ int main() {
                     qty * intent.ref_px);
                 std::fflush(stdout);
                 // Phase-1: route through the single gateway (EdgeEngine SELLs are exits).
-                auto result = gateway.submit({ intent.symbol, intent.is_buy, qty, intent.ref_px,
-                                               /*is_exit*/ !intent.is_buy, intent.tag.c_str() });
+                // Phase-8A: UPJUMP/TSMOM tags are the MOMENTUM factor -> governed by the
+                // aggregate momentum cap; other EdgeEngines are per-symbol EDGE (OTHER,
+                // symbol-cap only). SELLs pass through. (This intent path is legacy-gated.)
+                bool _im = intent.tag.find("UPJUMP") != std::string::npos
+                        || intent.tag.find("TSMOM")  != std::string::npos;
+                auto result = governed_submit({ intent.symbol, intent.is_buy, qty, intent.ref_px,
+                                               /*is_exit*/ !intent.is_buy, intent.tag.c_str() },
+                                               _im ? chimera::Factor::MOMENTUM : chimera::Factor::OTHER);
                 if (!result.ok) {
                     std::fprintf(stderr,
                         "[ORDER-INTENT] execute failed tag=%s symbol=%s err=%s\n",

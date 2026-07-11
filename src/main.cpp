@@ -150,7 +150,11 @@
 
 #include "live/BinanceWSFeed.hpp"
 #include "live/BinanceREST.hpp"
+#include <random>                      // Phase-1: control-token generation
 #include "live/SpotExecutor.hpp"
+#include "live/RuntimeMode.hpp"        // Phase-1: ONE immutable process mode
+#include "live/ExecutionGateway.hpp"   // Phase-1: single order chokepoint
+#include "live/HttpControlAuth.hpp"    // Phase-1: control-API auth/method helpers
 #include "core/EdgeEngine.hpp"
 #include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
@@ -256,6 +260,13 @@ static std::string read_file(const std::string& path) {
 }
 
 static std::string gui_root;
+
+// Phase-1 review (2026-07-11): control-API hardening. The HTTP server previously
+// bound to INADDR_ANY (public IP) with no auth on kill/reset. Bind address now
+// defaults to localhost; mutating endpoints require this token. Both set in
+// main() from live_config.json / env before the server thread launches.
+static std::string g_http_bind_addr = "127.0.0.1";
+static std::string g_ctrl_token;
 
 // ── Session 30: Multi-symbol funding filter ─────────────────────────────────
 static chimera::MultiSymbolFundingFilter g_funding_filter;
@@ -1499,11 +1510,20 @@ static void http_server_thread(int port) {
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    // Phase-1 review: bind to localhost by default (was INADDR_ANY = public IP).
+    // Set CHIMERA_HTTP_BIND=0.0.0.0 (or a specific IP) to override; the mutating
+    // endpoints remain token-guarded regardless. nginx proxies to 127.0.0.1:8080.
+    if (g_http_bind_addr == "0.0.0.0") {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    } else if (inet_pton(AF_INET, g_http_bind_addr.c_str(), &addr.sin_addr) != 1) {
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   // safe fallback
+    }
     addr.sin_port        = htons(port);
     if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return; }
     listen(server_fd, 16);
-    std::printf("[HTTP] GUI on port %d | root: %s\n", port, gui_root.c_str());
+    std::printf("[HTTP] GUI on %s:%d | root: %s | control-auth=%s\n",
+                g_http_bind_addr.c_str(), port, gui_root.c_str(),
+                g_ctrl_token.empty() ? "DENY-ALL(no token)" : "token");
     std::fflush(stdout);
 
     while (true) {
@@ -1518,7 +1538,24 @@ static void http_server_thread(int port) {
         const char* ct = "application/json";
         int status = 200;
 
-        if (strstr(req, "GET /api/bars/")) {
+        // Phase-1 review: guard the state-mutating control endpoints
+        // (kill / ratchet_reset / daily_kill_clear / session_reset). They must
+        // be POST and carry the control token (X-Auth-Token header or ?token=).
+        bool req_handled = false;
+        if (chimera::http_is_mutating_control(req)) {
+            if (!chimera::http_request_is_post(req)) {
+                status = 405; body = "{\"error\":\"method not allowed — use POST\"}";
+                req_handled = true;
+            } else if (!chimera::http_control_authorized(req, g_ctrl_token)) {
+                status = 401; body = "{\"error\":\"unauthorized — missing/invalid control token\"}";
+                std::fprintf(stderr, "[HTTP] REJECTED unauthenticated control request\n");
+                req_handled = true;
+            }
+        }
+
+        if (req_handled) {
+            /* security pre-check already set status + body */
+        } else if (strstr(req, "GET /api/bars/")) {
             // /api/bars/{TAG} — return last 100 saved bars for an engine
             const char* tag_start = strstr(req, "/api/bars/") + 10;
             char tag_buf[128] = {};
@@ -1776,6 +1813,15 @@ struct LiveRuntimeConfig {
     // the portfolio ratchet does NOT halt entries (lets testing flow
     // through). Going live (shadow_mode=false) with this set = FATAL abort.
     bool        protection_disabled_for_testing = false;
+    // Phase-1 review (2026-07-11): optional explicit "mode" string
+    // (disabled|shadow|paper|live). Cross-checked against shadow_mode + the
+    // credentials file at startup; a disagreement is a HARD abort.
+    bool               mode_key_present = false;
+    chimera::RuntimeMode mode_key       = chimera::RuntimeMode::SHADOW;
+    // Phase-1 review: control-API hardening. bind defaults to localhost; a
+    // token (env CHIMERA_CTRL_TOKEN overrides) guards the mutating endpoints.
+    std::string http_bind     = "127.0.0.1";
+    std::string control_token = "";
 };
 
 static std::string lrc_extract_string(const std::string& s, const char* key) {
@@ -1835,6 +1881,25 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     cfg.min_edge_bps     = lrc_extract_double(content, "min_edge_bps", 10.0);
     cfg.protection_disabled_for_testing =
         lrc_extract_bool(content, "protection_disabled_for_testing", false);
+    // Phase-1: optional explicit runtime mode + control-API bind/token.
+    {
+        std::string mkey = lrc_extract_string(content, "mode");
+        if (!mkey.empty()) {
+            chimera::RuntimeMode mk;
+            if (!chimera::parse_runtime_mode(mkey, mk)) {
+                std::fprintf(stderr,
+                    "[STARTUP] FATAL: live_config.json mode=\"%s\" is not one of "
+                    "disabled|shadow|paper|live\n", mkey.c_str());
+                std::exit(1);
+            }
+            cfg.mode_key_present = true;
+            cfg.mode_key = mk;
+        }
+        std::string hb = lrc_extract_string(content, "http_bind");
+        if (!hb.empty()) cfg.http_bind = hb;
+        std::string ct = lrc_extract_string(content, "control_token");
+        if (!ct.empty()) cfg.control_token = ct;
+    }
     std::printf("[STARTUP] live_config loaded from %s: creds=%s shadow=%d max_pos=%.2f min_edge=%.2fbp protection_disabled=%d\n",
                 opened.c_str(), cfg.credentials_file.c_str(),
                 cfg.shadow_mode ? 1 : 0, cfg.max_position_usd, cfg.min_edge_bps,
@@ -2266,6 +2331,52 @@ int main() {
         std::fprintf(stderr, "[STARTUP] WARNING: executor init failed — order intents will drop\n");
     }
 
+    // ── Phase-1 review (2026-07-11): resolve ONE immutable runtime mode and
+    // cross-check every mode-bearing config file. A disagreement is a HARD abort
+    // (previously the mode was spread across live_config.json + the credentials
+    // file with no consistency check — a mismatch could route real orders while
+    // the system believed it was in shadow).
+    auto _mode_res = chimera::resolve_runtime_mode(runtime_cfg.shadow_mode,
+                                                   runtime_cfg.mode_key_present,
+                                                   runtime_cfg.mode_key);
+    if (!_mode_res.ok) {
+        std::fprintf(stderr,
+            "\n[STARTUP] FATAL mode conflict (live_config.json): %s\n"
+            "Refusing to start.\n\n", _mode_res.error.c_str());
+        std::exit(1);
+    }
+    if (exec_ok) {
+        auto _xchk = chimera::cross_check_credentials_shadow(_mode_res.mode,
+                                                             executor.is_shadow());
+        if (!_xchk.ok) {
+            std::fprintf(stderr,
+                "\n[STARTUP] FATAL mode conflict (config files disagree): %s\n"
+                "Refusing to start.\n\n", _xchk.error.c_str());
+            std::exit(1);
+        }
+    }
+    const chimera::RuntimeMode g_runtime_mode = _mode_res.mode;
+    std::printf("[STARTUP] RUNTIME MODE = %s (live_config.shadow_mode=%d creds_shadow=%d)\n",
+                chimera::runtime_mode_str(g_runtime_mode),
+                runtime_cfg.shadow_mode ? 1 : 0,
+                exec_ok ? (executor.is_shadow() ? 1 : 0) : -1);
+    std::fflush(stdout);
+
+    // ── Phase-1 review: THE single order chokepoint. Every strategy order goes
+    // through gateway.submit(); SpotExecutor::execute() is private + befriends the
+    // gateway, so a direct executor.execute() from strategy code will not compile.
+    // The gateway applies mode + kill-switch (daily-loss / emergency halt) +
+    // exchange filters; risk-reducing EXITS are never blocked.
+    chimera::ExecutionGatewayT<chimera::SpotExecutor> gateway(executor, g_runtime_mode);
+    gateway.kill_switch_active = []() -> bool {
+        int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        // Do NOT honour the testing bypass here: the gateway is the last line of
+        // defence for the XSec/RipRider sleeves that bypassed ALL risk before.
+        return now < g_daily_kill_until_ms.load(std::memory_order_relaxed)
+            || now < g_emergency_halt_until_ms.load(std::memory_order_relaxed);
+    };
+
     // ════════════════════════════════════════════════════════════════════
     // S-2026-06-18: CrossSectionalMomentumEngine — FIRST OOS-validated Chimera
     // edge, installed as a STANDALONE allocator (not a sizing tilt). Curated
@@ -2318,21 +2429,25 @@ int main() {
           std::printf("[XSEC] startup: BTC-sleeve bull=%d %s | BREADTH-sleeve bull=%d %s\n",
                       bb?1:0, bb?fmt(wb).c_str():"CASH", br?1:0, br?fmt(wr).c_str():"CASH"); }
         std::fflush(stdout);
-        auto fire = [&executor, &exec_ok](const char* tag, double sleeve_nav,
+        auto fire = [&gateway, &exec_ok](const char* tag, double sleeve_nav,
                     std::map<std::string,double>& hold, int64_t day,
                     const std::map<std::string,double>& tw, bool bull) {
             std::string picks; for (const auto& kv : tw) if (kv.second > 0.0) { char b[48];
                 std::snprintf(b, sizeof b, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); picks += b; }
             std::printf("[%s] REBALANCE day=%lld bull=%d -> %s\n", tag, (long long)day, bull?1:0,
                         bull ? (picks.empty()?"(none)":picks.c_str()) : "CASH (gate)"); std::fflush(stdout);
-            if (!exec_ok || !executor.is_ready()) return;
+            if (!exec_ok) return;
             for (const auto& kv : tw) {
                 std::string lc = kv.first; for (auto& ch : lc) if (ch >= 'A' && ch <= 'Z') ch += 32;
                 int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
                 double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
                 double tgt = kv.second * sleeve_nav, dusd = tgt - hold[kv.first];
                 if (std::fabs(dusd) < 25.0) continue;
-                executor.execute(kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px); hold[kv.first] = tgt;
+                // Phase-1: route through the gateway. A rebalance SELL (dusd<0) is a
+                // risk-reducing exit -> never blocked by halts.
+                gateway.submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px,
+                                 /*is_exit*/ dusd < 0.0, tag });
+                hold[kv.first] = tgt;
             }
         };
         xsec_btc.set_rebalance_callback([fire, nav_btc](int64_t d, const std::map<std::string,double>& tw, bool b){
@@ -2374,16 +2489,20 @@ int main() {
                     "ig20%%/5d BTC>200d-gate + regime-exit, pure-ride maxhold60 SHADOW\n",
                     rseeded, ru.size(), riprider.num_days());
         std::fflush(stdout);
-        riprider.set_entry_callback([&executor, &exec_ok, rip_nav](const std::string& sym, double px, int64_t ts){
+        riprider.set_entry_callback([&gateway, &exec_ok, rip_nav](const std::string& sym, double px, int64_t ts){
             (void)ts;
             std::printf("[RIP] ENTRY %s @ %.6f\n", sym.c_str(), px); std::fflush(stdout);
-            if (exec_ok && executor.is_ready() && px > 0) executor.execute(sym + "USDT", true, (rip_nav/8.0)/px, px);
+            if (exec_ok && px > 0)
+                gateway.submit({ sym + "USDT", true, (rip_nav/8.0)/px, px, /*is_exit*/false, "RIP" });
         });
-        riprider.set_close_callback([&executor, &exec_ok, rip_nav](const chimera::RipClose& t){
+        riprider.set_close_callback([&gateway, &exec_ok, rip_nav](const chimera::RipClose& t){
             double ret = t.entryPrice>0 ? (t.exitPrice/t.entryPrice-1)*100.0 : 0.0;
             std::printf("[RIP] EXIT %s entry=%.6f exit=%.6f ret=%+.1f%% %s\n",
                         t.symbol.c_str(), t.entryPrice, t.exitPrice, ret, t.exitReason.c_str()); std::fflush(stdout);
-            if (exec_ok && executor.is_ready() && t.exitPrice > 0) executor.execute(t.symbol + "USDT", false, (rip_nav/8.0)/t.exitPrice, t.exitPrice);
+            // Phase-1: risk-reducing EXIT -> is_exit=true (never blocked by halts).
+            if (exec_ok && t.exitPrice > 0)
+                gateway.submit({ t.symbol + "USDT", false, (rip_nav/8.0)/t.exitPrice, t.exitPrice,
+                                 /*is_exit*/true, "RIP" });
         });
     }
 
@@ -2568,7 +2687,9 @@ int main() {
                     tier_mult, liq_mult, funding_mult, confluence_mult, crash_mult, total_mult,
                     qty * intent.ref_px);
                 std::fflush(stdout);
-                auto result = executor.execute(intent.symbol, intent.is_buy, qty, intent.ref_px);
+                // Phase-1: route through the single gateway (EdgeEngine SELLs are exits).
+                auto result = gateway.submit({ intent.symbol, intent.is_buy, qty, intent.ref_px,
+                                               /*is_exit*/ !intent.is_buy, intent.tag.c_str() });
                 if (!result.ok) {
                     std::fprintf(stderr,
                         "[ORDER-INTENT] execute failed tag=%s symbol=%s err=%s\n",
@@ -2632,7 +2753,9 @@ int main() {
                 std::fflush(stdout);
                 // Pyramid uses engine's symbol context; resolve via tag prefix is non-trivial,
                 // so use engine.symbol field captured at config time.
-                auto result = executor.execute(engine.cfg().symbol, true, qty, price);
+                // Phase-1: route the pyramid ADD (a buy/entry) through the gateway.
+                auto result = gateway.submit({ engine.cfg().symbol, true, qty, price,
+                                               /*is_exit*/false, tag.c_str() });
                 if (!result.ok) {
                     std::fprintf(stderr,
                         "[PYRAMID] execute failed tag=%s err=%s\n",
@@ -7585,7 +7708,25 @@ int main() {
         } else { gui_root = "../gui"; }
     }
 
-    std::printf("[STARTUP] HTTP server starting on port 8080...\n");
+    // ── Phase-1 review: control-API hardening. Bind localhost by default; require
+    // a token on the mutating endpoints. Precedence: env > live_config.json.
+    // If no token is configured a random one is generated + printed (so the
+    // mutating endpoints fail closed to anyone without it).
+    if (const char* b = std::getenv("CHIMERA_HTTP_BIND")) g_http_bind_addr = b;
+    else                                                  g_http_bind_addr = runtime_cfg.http_bind;
+    if (g_http_bind_addr.empty()) g_http_bind_addr = "127.0.0.1";
+    if (const char* t = std::getenv("CHIMERA_CTRL_TOKEN")) g_ctrl_token = t;
+    else                                                   g_ctrl_token = runtime_cfg.control_token;
+    if (g_ctrl_token.empty()) {
+        std::random_device rd;
+        static const char* hex = "0123456789abcdef";
+        std::string tok; for (int i = 0; i < 24; ++i) tok += hex[rd() & 0xF];
+        g_ctrl_token = tok;
+        std::printf("[STARTUP] no control_token configured — generated one for this run: %s\n"
+                    "          (set CHIMERA_CTRL_TOKEN or control_token in live_config.json to fix it)\n",
+                    g_ctrl_token.c_str());
+    }
+    std::printf("[STARTUP] HTTP server starting on %s:8080...\n", g_http_bind_addr.c_str());
     std::fflush(stdout);
     std::thread http_thread(http_server_thread, 8080);
     http_thread.detach();

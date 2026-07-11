@@ -24,7 +24,14 @@
 
 namespace chimera {
 
+// Phase-1 review fix (2026-07-11): the ExecutionGateway is the ONLY caller
+// permitted to reach execute(). Forward-declared here so it can be befriended;
+// strategy code must route orders through ExecutionGatewayT::submit().
+template <class E> class ExecutionGatewayT;
+
 class SpotExecutor {
+    // Only the execution gateway may call the raw execute() path.
+    template <class E> friend class ExecutionGatewayT;
 public:
     // -----------------------------------------------------------------------
     // init — must be called before execute().
@@ -82,8 +89,13 @@ public:
         return true;
     }
 
+private:
     // -----------------------------------------------------------------------
-    // execute — called by BalancedEngine on every entry/exit
+    // execute — PRIVATE. Reachable ONLY via ExecutionGatewayT::submit(), which
+    // applies the mode gate + kill-switch + exchange/exposure filters first.
+    // A direct strategy call (executor.execute(...)) will NOT compile.
+    // -----------------------------------------------------------------------
+    // execute — called by the ExecutionGateway on every entry/exit
     //
     // symbol:   lowercase e.g. "btcusdt" — converted to uppercase internally
     // is_buy:   true=BUY, false=SELL
@@ -143,6 +155,7 @@ public:
         return r;
     }
 
+public:
     // -----------------------------------------------------------------------
     // submit_limit_maker — post a maker limit order, returns client_id
     // -----------------------------------------------------------------------

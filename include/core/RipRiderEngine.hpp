@@ -62,7 +62,17 @@ public:
     void seed_daily_close(const std::string& sym, int64_t day, double close){ ingest(sym, day, close, close); }
     size_t num_days() const { return days_.size(); }
 
-    // live tick path: aggregate to daily close; on UTC day rollover, run per-symbol logic
+    // live tick path: aggregate to daily close; on UTC day rollover, run per-symbol logic.
+    //
+    // Phase-1 review fix (2026-07-11): the entry is faithful to the backtest
+    // (crypto_momo_rider.py: ignition on day i's close -> ENTER at day i+1's OPEN).
+    // The OLD live path called evaluate_day(size-1) on the JUST-CLOSED day, whose
+    // i+1 bar does not exist yet, so the entry branch (i+1 < days_.size()) could
+    // NEVER fire in live -> the sleeve took zero entries forward while the batch
+    // BT happily entered. Closed via a PendingEntry queue: ignition on the close
+    // day queues an entry; it is executed on the FIRST TICK of the following UTC
+    // day (the open), re-validating the BTC regime at entry. Batch simulate() and
+    // this streaming path drive the SAME queue, so they produce identical entries.
     void on_tick(const std::string& sym, double price, int64_t now_ms){
         if(price<=0 || !sd_.count(sym)) return;
         int64_t day = now_ms/86400000LL;
@@ -70,10 +80,28 @@ public:
         if(day>cur_day_){
             for(auto&kv:last_px_) ingest(kv.first, cur_day_, day_open_.count(kv.first)?day_open_[kv.first]:kv.second, kv.second);
             cur_day_=day; day_open_.clear();
-            evaluate_day(days_.size()? days_.size()-1 : 0, now_ms);  // run ignition/manage on the just-closed day
+            evaluate_day(days_.size()? days_.size()-1 : 0, now_ms);  // manage + queue ignition on the just-closed day
         }
-        if(!day_open_.count(sym)) day_open_[sym]=price;  // first tick of the day = open
+        if(!day_open_.count(sym)){          // FIRST tick of the new UTC day == the open
+            day_open_[sym]=price;
+            try_pending_entry(sym, price, now_ms);  // execute a queued entry at the open
+        }
         last_px_[sym]=price;
+    }
+
+    // Execute a queued entry at the first tick (open) of the following day.
+    // Re-validates the regime gate at entry using the last completed close
+    // (the signal day) — causal, and identical to what evaluate_day() applies.
+    void try_pending_entry(const std::string& s, double open_px, int64_t now_ms){
+        if(s==cfg_.gate_symbol || open_px<=0) return;
+        auto pit=pending_.find(s); if(pit==pending_.end()) return;
+        size_t sig_idx = pit->second;
+        pending_.erase(pit);                          // one-shot
+        Pos& p = pos_[s]; if(p.active) return;
+        bool gate_ok = !cfg_.regime_gate || btc_bull(sig_idx);
+        if(!gate_ok) return;
+        p.active=true; p.entry=open_px; p.peak=open_px; p.entry_day=cur_day_; ++trade_id_;
+        if(on_entry_) on_entry_(s, open_px, now_ms);
     }
 
     // ===== PURE LOGIC (faithful to crypto_momo_rider.py gated ride+regime-exit) =====
@@ -85,7 +113,14 @@ public:
         return c>m;
     }
 
-    // evaluate ignition + position management at dense-axis index i; emit closes via cb
+    // evaluate ignition + position management at dense-axis index i; emit closes via cb.
+    //
+    // Entry model (pending queue, Phase-1 review fix): ignition on day i's close
+    // QUEUES an entry; it is executed at day i+1's OPEN (faithful to
+    // crypto_momo_rider.py entry=bars[i+1].open). Step A executes a queue item
+    // whose signal was day i-1. Both simulate() (batch) and the live streaming
+    // path (on_tick -> try_pending_entry) drive this SAME queue with the SAME
+    // gate/open, so they produce identical entries (the review's parity check).
     void evaluate_day(size_t i, int64_t now_ms){
         if(i==0) return;
         for(auto& kv : sd_){
@@ -95,6 +130,25 @@ public:
             if(i>=px.size()) continue;
             Pos& p = pos_[s];
             double c = px[i];
+            // STEP A: execute a pending entry queued on the previous bar -> enter at THIS
+            // day's open. (In live this is normally already consumed intraday by
+            // try_pending_entry(); this is the batch / no-tick replay path.)
+            if(!p.active){
+                auto pit = pending_.find(s);
+                if(pit != pending_.end()){
+                    size_t sig_idx = pit->second;
+                    bool   fresh   = (i == sig_idx + 1);                 // only the immediately-following bar
+                    bool   gate_ok = !cfg_.regime_gate || btc_bull(sig_idx);
+                    auto   oit     = so_.find(s);
+                    double e       = (oit!=so_.end() && i < oit->second.size()) ? oit->second[i] : NAN;
+                    pending_.erase(pit);                                  // one-shot regardless of outcome
+                    if(fresh && gate_ok && !std::isnan(e) && e>0){
+                        p.active=true; p.entry=e; p.peak=e; p.entry_day=days_[i]; ++trade_id_;
+                        if(on_entry_) on_entry_(s, e, now_ms);
+                    }
+                }
+            }
+            // STEP B: manage an open position on THIS day's close.
             if(p.active){
                 if(!std::isnan(c) && c>p.peak) p.peak=c;
                 bool exit=false; const char* why="";
@@ -102,18 +156,12 @@ public:
                 else if(cfg_.wide_trail>0 && !std::isnan(c) && c <= p.peak*(1-cfg_.wide_trail)){ exit=true; why="WIDE_TRAIL"; }
                 else if((int)(days_[i]-p.entry_day) >= cfg_.maxhold_days){ exit=true; why="MAXHOLD"; }
                 if(exit && !std::isnan(c)) close_pos(s, c, why, now_ms);
-            } else {
-                // ignition on day i's close -> ENTER at NEXT day's OPEN (faithful to
-                // crypto_momo_rider.py: entry=bars[i+1].open), gate checked at entry day.
+            }
+            // STEP C: ignition on THIS day's close -> queue an entry for the following bar's open.
+            else {
                 double tr = trailing_ret(px, i, cfg_.lb_days);
-                if(!std::isnan(tr) && tr >= cfg_.ig_pct && i+1 < days_.size()){
-                    bool gate_ok = !cfg_.regime_gate || btc_bull(i+1);
-                    auto oit = so_.find(s);
-                    double e = (oit!=so_.end() && i+1 < oit->second.size()) ? oit->second[i+1] : NAN;
-                    if(gate_ok && !std::isnan(e) && e>0){
-                        p.active=true; p.entry=e; p.peak=e; p.entry_day=days_[i+1]; ++trade_id_;
-                        if(on_entry_) on_entry_(s, e, now_ms);
-                    }
+                if(!std::isnan(tr) && tr >= cfg_.ig_pct){
+                    pending_[s] = i;   // signal index; executed at open of i+1
                 }
             }
         }
@@ -133,6 +181,7 @@ private:
     std::map<std::string,double> last_px_, day_open_;
     struct Pos{ bool active=false; double entry=0,peak=0; int64_t entry_day=0; };
     std::map<std::string,Pos> pos_;
+    std::map<std::string,size_t> pending_;   // sym -> signal dense-index; entry executes at open of signal+1
     int64_t cur_day_=-1; int trade_id_=0;
     CloseCallback on_close_;
     EntryCallback on_entry_;

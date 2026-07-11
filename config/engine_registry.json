@@ -1,0 +1,37 @@
+[
+  {
+    "name": "EDGE-SLOTS",
+    "state": "SHADOW",
+    "note": "validated TSMOM/UPJUMP/ICHI EdgeEngines driven via g_slots tick loop"
+  },
+  {
+    "name": "LEGACY-EDGE",
+    "state": "DISABLED",
+    "note": "285 per-symbol EdgeEngines — CULLED (no validated cross-cycle edge). Env CHIMERA_WIRE_LEGACY flips this to SHADOW at runtime; the registry reconciles the env truth."
+  },
+  {
+    "name": "XSEC-BTC",
+    "state": "SHADOW",
+    "note": "cross-sectional momentum, BTC-regime-gated sleeve"
+  },
+  {
+    "name": "XSEC-BR",
+    "state": "SHADOW",
+    "note": "cross-sectional momentum, breadth-gated sleeve"
+  },
+  {
+    "name": "RIPRIDER",
+    "state": "SHADOW",
+    "note": "RipRider next-open sleeve (Phase-1 PendingEntry)"
+  },
+  {
+    "name": "UPJUMP-GRID",
+    "state": "SHADOW",
+    "note": "32-cell UpJump threshold-comparison grid (clip companions) — live shadow experiment; do NOT net or disturb"
+  },
+  {
+    "name": "EXECUTOR",
+    "state": "SHADOW",
+    "note": "SpotExecutor order-routing readiness — runtime reflects HALTED when credentials fail (sleeves still shadow-compute)"
+  }
+]

@@ -156,6 +156,10 @@
 #include "live/ExecutionGateway.hpp"   // Phase-1: single order chokepoint
 #include "live/StartupReconciler.hpp"  // Phase-2: boot reconcile gate (ledger/filters/clock via gateway)
 #include "live/SpotPortfolioAllocator.hpp" // Phase-3: portfolio unification (merge/cap/net + regime/DD/factor overlays)
+#include "live/EngineRegistry.hpp"     // Phase-4 item 20: honest lifecycle registry (reconcile declared vs actual)
+#include "live/GateAttribution.hpp"    // Phase-4 item 21: gate-attribution + counterfactual + correlation-ID
+#include "live/RealisticFill.hpp"      // Phase-4 item 22: additive realistic-fill shadow metric (parallel book)
+#include "live/DataQuality.hpp"        // Phase-4 item 23: seed/feed schema+checksum+gap+stale validation
 #include "live/HttpControlAuth.hpp"    // Phase-1: control-API auth/method helpers
 #include "core/EdgeEngine.hpp"
 #include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
@@ -234,6 +238,28 @@ static std::vector<EngineSlot>  g_slots;
 static std::vector<chimera::EdgeEngine*> g_all_wired;
 static std::mutex               g_engine_mtx;
 static int64_t                  g_startup_ts_ms = 0;   // epoch ms at startup
+
+// ── Phase-4 (2026-07-11) observability globals ──────────────────────────────
+// item 20: HONEST engine registry — reconciles each declared engine lifecycle
+//   (DISABLED/SHADOW/PAPER/LIVE/HALTED/STALE) against the ACTUAL wired+connected
+//   graph; startup aborts on a mismatch and the status count is generated from
+//   connected_count() (not a hardcoded banner). Populated just before the READY
+//   banner; /api/state2 reads its state_json.
+static chimera::EngineRegistry   g_registry;
+static int                       g_grid_clip_count = 0;   // real UpJump grid-cell count (set at grid init)
+// item 21: gate-attribution sink (per-gate suppression reason + counterfactual,
+//   correlation-ID threaded). Observational only — never alters signal/exit logic.
+static chimera::GateAttribution  g_gate_attr;
+// item 22: ADDITIVE realistic-fill shadow metric — a PARALLEL book (spread+
+//   slippage+fee+queue) beside the signal-price book. Never touches the running
+//   shadow ledger or the 32-cell grid; the operator compares the two books.
+static chimera::ShadowFillComparator g_fill_realism;
+// item 23: data-quality gate for seed/warm-start files. Structural checks
+//   (schema/checksum/dup/out-of-order/invalid-price) REFUSE a malformed seed;
+//   for the STATIC committed warm-seed CSVs staleness + gap rejection are OFF
+//   (those files are inherently historical and may span exchange downtime), so
+//   a good-but-old seed still loads while a CORRUPTED one is refused.
+static chimera::DataQualityGate g_dq_gate;
 
 // Last-seen mid per symbol — used by /api/kill flatten paths and the
 // /api/state2 "spot_prices" field that the GUI renders as a live price strip.
@@ -1340,6 +1366,11 @@ static std::string build_state_json() {
     js << "\"startup_ts\":" << g_startup_ts_ms << ",";
     js << "\"engine_count\":" << g_all_wired.size() << ",";
     js << "\"slot_count\":" << g_slots.size() << ",";
+    // Phase-4 item 20: honest connected-engine count + registry from the REAL
+    // reconciled graph (not a hardcoded banner). connected_engines supersedes the
+    // legacy engine_count (which is g_all_wired and reads 0 with the legacy layer culled).
+    js << "\"connected_engines\":" << g_registry.connected_count() << ",";
+    js << "\"engine_registry\":" << g_registry.state_json() << ",";
     js << "\"protection_disabled_for_testing\":"
        << (g_protection_disabled_for_testing.load() ? "true" : "false") << ",";
     // S44d alerts queue
@@ -2457,6 +2488,19 @@ int main() {
         gateway.set_id_registry(&g_idreg);
         gateway.set_stream(&g_userstream);
 
+        // Phase-4 item 22: attach the ADDITIVE realistic-fill observer. Every
+        // gateway-routed fill (XSec / RipRider / UpJump-parent — NOT the grid
+        // companions, which never route here) is mirrored into a PARALLEL book:
+        // one leg at signal price (= current record), one leg at a realistic
+        // price (spread+slippage+fee+queue). The signal-price shadow ledger and
+        // the 32-cell grid are untouched — this is a side metric the operator
+        // compares. realistic_pnl <= signal_pnl by construction.
+        gateway.on_fill_observer = [](const chimera::OrderIntent& in, double filled_qty, double ref_px){
+            if (filled_qty <= 0.0 || ref_px <= 0.0) return;
+            g_fill_realism.on_fill(in.source ? in.source : "?", in.symbol,
+                                   in.is_buy, ref_px, filled_qty);
+        };
+
         // Startup reconciliation (item 9): the ledger must agree with the exchange
         // before trading. SHADOW clean-boot => empty snapshot reconciles trivially;
         // the hard-block on mismatch/fetch-failure is proven by the regression test
@@ -2544,9 +2588,26 @@ int main() {
             "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
             "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"};
         xsec_btc.set_universe(xu); xsec_br.set_universe(xu);
-        int xseeded = 0;
+        // Phase-4 item 23: structural data-quality gate for the committed daily
+        // warm-seed CSVs. Refuse a CORRUPTED seed (invalid price / duplicate /
+        // out-of-order timestamp / bad schema) — do NOT seed the engines on it.
+        // Staleness + gap rejection are OFF: these files are static history that
+        // may legitimately be old and span exchange-downtime gaps.
+        g_dq_gate.configure(/*step*/ 86400000LL, /*max_stale*/ 0, /*schema*/ 1);
+        g_dq_gate.set_reject_on_gap(false);
+        int xseeded = 0, xrejected = 0;
         for (const auto& s : xu) {
-            std::ifstream xf("data/xsec_seed/" + s + "USDT_1d.csv");
+            std::string xpath = "data/xsec_seed/" + s + "USDT_1d.csv";
+            {
+                auto dq = g_dq_gate.validate_csv(xpath, /*now*/ 0);
+                if (dq.rows > 0 && !dq.ok) {
+                    std::printf("[DATA-QUALITY] REFUSE seed %s — %s (rows=%d dup=%d ooo=%d invalid=%d)\n",
+                                xpath.c_str(), dq.reason.c_str(), dq.rows,
+                                dq.duplicates, dq.out_of_order, dq.invalid);
+                    ++xrejected; continue;   // refuse to seed on malformed history
+                }
+            }
+            std::ifstream xf(xpath);
             if (!xf) continue;
             std::string xl; std::getline(xf, xl);  // header
             int xr = 0;
@@ -2562,6 +2623,8 @@ int main() {
             }
             if (xr > 0) ++xseeded;
         }
+        if (xrejected > 0)
+            std::printf("[DATA-QUALITY] XSEC seed: %d symbol(s) REFUSED for corrupt history\n", xrejected);
         double nav = runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0;
         double nav_btc = nav * 0.6, nav_br = nav * 0.4;
         std::printf("[XSEC] dual-sleeve installed: warm-seeded %d/%zu symbols, %zu days; lb30/top3/rebal14d/inv-vol | "
@@ -2633,9 +2696,17 @@ int main() {
             "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
             "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"};
         riprider.set_universe(ru);
-        int rseeded = 0;
+        int rseeded = 0, rrejected = 0;
         for (const auto& s : ru) {
-            std::ifstream rf("data/xsec_seed/" + s + "USDT_1d.csv");
+            std::string rpath = "data/xsec_seed/" + s + "USDT_1d.csv";
+            {   // Phase-4 item 23: refuse a corrupted seed (same gate as XSEC).
+                auto dq = g_dq_gate.validate_csv(rpath, /*now*/ 0);
+                if (dq.rows > 0 && !dq.ok) {
+                    std::printf("[DATA-QUALITY] REFUSE RIP seed %s — %s\n", rpath.c_str(), dq.reason.c_str());
+                    ++rrejected; continue;
+                }
+            }
+            std::ifstream rf(rpath);
             if (!rf) continue;
             std::string rl; std::getline(rf, rl);  // header
             int rr = 0;
@@ -2652,6 +2723,8 @@ int main() {
         std::printf("[RIP] rip-rider installed: warm-seeded %d/%zu symbols, %zu days; "
                     "ig20%%/5d BTC>200d-gate + regime-exit, pure-ride maxhold60 SHADOW\n",
                     rseeded, ru.size(), riprider.num_days());
+        if (rrejected > 0)
+            std::printf("[DATA-QUALITY] RIP seed: %d symbol(s) REFUSED for corrupt history\n", rrejected);
         std::fflush(stdout);
         riprider.set_entry_callback([&gateway, &exec_ok, rip_nav](const std::string& sym, double px, int64_t ts){
             (void)ts;
@@ -3204,6 +3277,7 @@ int main() {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
         const int _NCLIP = (int)_all_clips.size();   // 32 grid cells
+        g_grid_clip_count = _NCLIP;   // Phase-4 item 20: real grid-cell count for the honest registry
         for (int i = 0; i < _NCLIP; ++i) {
             _all_clips[i]->shadow_mode = true;
             {   // durable-counter rehydrate: panel clips/bank_bp survive restarts.
@@ -8255,14 +8329,74 @@ int main() {
     std::fflush(stdout);
     // g_liq_feed.start();  // disabled — see comment above
 
+    // ── Phase-4 item 20: HONEST engine registry — reconcile declared lifecycle
+    // vs the ACTUAL wired+connected graph, then generate the status count from
+    // connected_count() (NOT the old hardcoded/aspirational "94 TSMOM …" banner
+    // that overstated a graph of ~30 slots). Startup ABORTS on any mismatch
+    // (e.g. a "LIVE" engine whose callback is disconnected). ── begin
+    {
+        bool wire_legacy = std::getenv("CHIMERA_WIRE_LEGACY") != nullptr;
+        // Programmatic defaults (authoritative fallback) …
+        g_registry.declare("EDGE-SLOTS", chimera::Lifecycle::SHADOW,
+                           "validated TSMOM/UPJUMP/ICHI EdgeEngines (g_slots)");
+        g_registry.declare("LEGACY-EDGE", chimera::Lifecycle::DISABLED,
+                           "285 per-symbol EdgeEngines — CULLED unless CHIMERA_WIRE_LEGACY");
+        g_registry.declare("XSEC-BTC",   chimera::Lifecycle::SHADOW, "cross-sectional momentum, BTC-gated sleeve");
+        g_registry.declare("XSEC-BR",    chimera::Lifecycle::SHADOW, "cross-sectional momentum, breadth-gated sleeve");
+        g_registry.declare("RIPRIDER",   chimera::Lifecycle::SHADOW, "RipRider next-open sleeve");
+        g_registry.declare("UPJUMP-GRID",chimera::Lifecycle::SHADOW, "32-cell UpJump threshold grid (clip companions)");
+        // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
+        // the shadow desk: SHADOW when the executor is ready, HALTED when creds
+        // failed (sleeves still compute signals+books; only routing is a no-op).
+        g_registry.declare("EXECUTOR", chimera::Lifecycle::SHADOW, "SpotExecutor order-routing readiness");
+        // … operator override (config/engine_registry.json, if present) …
+        int loaded = g_registry.load_from_json("config/engine_registry.json");
+        // … then the env truth for the legacy layer wins regardless of the json.
+        g_registry.set_state("LEGACY-EDGE",
+                             wire_legacy ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
+        // Executor-readiness reflected as a non-aborting HALTED when not ready.
+        g_registry.set_state("EXECUTOR", exec_ok ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::HALTED);
+        // Runtime wiring truth. The XSec/RipRider/grid sleeves are installed +
+        // seeded UNCONDITIONALLY (their blocks run regardless of exec_ok — only
+        // order routing checks exec_ok), so they are wired+connected in shadow
+        // independent of executor readiness. EDGE-SLOTS/UPJUMP-GRID reflect the
+        // real container sizes.
+        g_registry.mark_wired("EDGE-SLOTS",  !g_slots.empty(),                    (int)g_slots.size());
+        g_registry.mark_wired("LEGACY-EDGE", wire_legacy && !g_all_wired.empty(), (int)g_all_wired.size());
+        g_registry.mark_wired("XSEC-BTC",    true, 1);
+        g_registry.mark_wired("XSEC-BR",     true, 1);
+        g_registry.mark_wired("RIPRIDER",    true, 1);
+        g_registry.mark_wired("UPJUMP-GRID", g_grid_clip_count > 0, g_grid_clip_count);
+        g_registry.mark_wired("EXECUTOR",    exec_ok, 1);
+        std::string reg_err;
+        if (!g_registry.validate(reg_err)) {
+            std::fprintf(stderr, "[REGISTRY] STARTUP ABORT — declared vs actual mismatch: %s\n",
+                         reg_err.c_str());
+            return 1;
+        }
+        std::printf("[REGISTRY] loaded %d override(s) from config/engine_registry.json; reconcile PASS\n", loaded);
+        g_registry.print_summary("[REGISTRY]");
+        // Phase-4 item 21/22: configure the observability sinks (SHADOW, additive).
+        g_gate_attr.configure(/*horizon*/ (int64_t)6 * 3600 * 1000, /*tp_bp*/ 0.0, /*sl_bp*/ 0.0);
+        g_fill_realism.configure(chimera::FillModelParams{});   // Binance-spot-like defaults
+        // Attach the gate-attribution sink to every CONNECTED EdgeEngine (g_slots
+        // + any legacy-wired). Observational only — records each raw signal's
+        // per-gate suppression reason + counterfactual + correlation-ID.
+        {
+            std::lock_guard<std::mutex> lk(g_engine_mtx);
+            int attached = 0;
+            for (auto& s : g_slots) if (s.engine) { s.engine->set_gate_sink(&g_gate_attr); ++attached; }
+            for (auto* e : g_all_wired) if (e) { e->set_gate_sink(&g_gate_attr); ++attached; }
+            std::printf("[GATE-ATTR] attached to %d connected engines (counterfactual horizon=6h, SHADOW)\n", attached);
+        }
+    }
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
-    std::printf("[STARTUP] ✓ CHIMERA READY — %d engines running (shadow_mode=true)\n", (int)g_slots.size());
-    std::printf("[STARTUP]   TSMOM=94+4W1 | RSI_REVERT=49+2W1 | BOLLINGER=44+2W1 | DONCHIAN=28 | ICHIMOKU=6 | SUPERTREND=6\n");
-    std::printf("[STARTUP]   KELTNER=6 | DUAL_THRUST=2 | WILLIAMS_R=4 | STOCH_RSI=4\n");
-    std::printf("[STARTUP]   Filters: vol+mtf+adx+vol_gate+corr+session+portfolio+funding+vol_regime+cross_tf+liq_cascade\n");
-    std::printf("[STARTUP]   4 engines DISABLED (failed re-validation S29c)\n");
-    std::printf("[STARTUP]   17 symbols | spot-long-only | all edges validated\n");
-    std::printf("[STARTUP]   NEW S30: funding filter, vol regime, position sizing, cross-TF, W1 MR, liq cascade\n");
+    std::printf("[STARTUP] ✓ CHIMERA READY — %d engines connected (from the real graph; shadow_mode=true)\n",
+                g_registry.connected_count());
+    std::printf("[STARTUP]   EDGE-SLOTS=%d  LEGACY-EDGE=%d(wired)  XSEC=2  RIPRIDER=1  UPJUMP-GRID=%d\n",
+                (int)g_slots.size(), (int)g_all_wired.size(), g_grid_clip_count);
+    std::printf("[STARTUP]   Gates observed (item 21): portfolio+cluster+confirm+funding+vol_regime+corr+session+volume+vol_filter+mtf+adx\n");
+    std::printf("[STARTUP]   spot-long-only | NO 200DMA | SHADOW | counts are RECONCILED (not aspirational)\n");
     std::printf("[STARTUP]   GUI: http://localhost:8080\n");
     std::printf("[STARTUP]   API: /api/state2  /api/positions  /api/trades\n");
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
@@ -8282,6 +8416,23 @@ int main() {
             std::chrono::system_clock::now().time_since_epoch()).count();
         if (now_ms - last_snapshot_ms >= SNAPSHOT_INTERVAL_MS) {
             last_snapshot_ms = now_ms;
+            // ── Phase-4 item 21: feed forward prices to resolve gate-attribution
+            // counterfactuals (6h horizon; 60s cadence is ample), and print a
+            // per-gate helpfulness summary every 10 min. Observational only.
+            {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
+                    if (spot > 0.0) g_gate_attr.on_price(s.symbol_str, spot, now_ms);
+                }
+            }
+            static int64_t last_obs_summary_ms = 0;
+            if (now_ms - last_obs_summary_ms >= 600000) {   // 10 min
+                last_obs_summary_ms = now_ms;
+                g_gate_attr.print_summary("[GATE-ATTR]");
+                g_fill_realism.print_summary("[FILL-REALISM]");
+            }
             // Build snapshot of all open positions
             std::ostringstream snap;
             snap << "{\"snapshot_ts\":" << now_ms << ",\"positions\":[";

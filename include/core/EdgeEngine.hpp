@@ -73,6 +73,7 @@
 #include <iomanip>
 #include <ctime>
 #include <functional>
+#include "live/GateAttribution.hpp"   // Phase-4 item 21: observability sink (dep-free, header-only)
 
 namespace chimera {
 
@@ -471,11 +472,20 @@ public:
         // main.cpp so the live qty calc finally applies them. Was previously
         // computed into sizing_mult_ and discarded (never reached order qty).
         double      risk_mult = 1.0;
+        // Phase-4 item 21: correlation-ID threaded from the raw signal so the
+        // whole chain (signal -> gate -> target -> order -> fill -> pnl) is
+        // resolvable in the GateAttribution store. 0 => no sink attached.
+        uint64_t    corr_id = 0;
     };
 
     using OrderIntentCallback = std::function<void(const OrderIntentRecord&)>;
 
     bool shadow_mode = true;  // public for main.cpp init parity with old engines
+
+    // Phase-4 item 21: attach a gate-attribution sink (observational only —
+    // records each raw signal's per-gate suppression reason + counterfactual +
+    // correlation-ID). Never alters signal/exit logic. null => no-op.
+    void set_gate_sink(GateAttribution* s) { gate_sink_ = s; }
 
     // Set a callback to receive trade records on each exit.
     void set_on_trade(TradeCallback cb) { on_trade_ = std::move(cb); }
@@ -1139,6 +1149,10 @@ private:
     // Portfolio gate state (fed by main.cpp)
     bool    portfolio_entry_allowed_ = true;  // false = max positions or drawdown breaker active
     bool    cluster_gate_            = true;   // false = correlated-cluster exposure cap hit
+
+    // Phase-4 item 21: gate-attribution sink (observational; null => no-op).
+    GateAttribution* gate_sink_  = nullptr;
+    uint64_t         cur_corr_id_ = 0;   // corr-id of the signal under evaluation
 
     // Session 30: Funding filter state
     bool    funding_tailwind_ = false;  // negative funding = carry edge for longs
@@ -1898,6 +1912,19 @@ private:
         }
         if (!fire) return;
 
+        // ── Phase-4 item 21: open a gate-attribution record for this RAW signal.
+        // corr-id threads the whole chain; each gate below records its reason;
+        // the counterfactual resolves forward from prices. Observational only.
+        uint64_t corr = 0;
+        cur_corr_id_ = 0;
+        if (gate_sink_) {
+            double sig_px = (intrabar_entry_px_ > 0.0) ? intrabar_entry_px_ : last_close_;
+            int64_t sig_ts = bar_ts_ms_.empty() ? 0 : bar_ts_ms_.back();
+            corr = gate_sink_->begin_signal(cfg_.tag, cfg_.symbol,
+                                            strategy_name(cfg_.kind), sig_px, sig_ts);
+            cur_corr_id_ = corr;
+        }
+
         // ── Portfolio gate (Session 29b) ────────────────────────────────────
         // If main.cpp has disabled entries (max positions or drawdown breaker),
         // suppress immediately. Cheapest check — do first.
@@ -1905,6 +1932,7 @@ private:
             std::printf("[%s] PORTFOLIO_GATE: entries disabled — signal SUPPRESSED\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
+            if (gate_sink_) gate_sink_->suppressed(corr, "PORTFOLIO_GATE", "entries disabled (max-pos/DD breaker)");
             return;
         }
 
@@ -1917,6 +1945,7 @@ private:
             std::printf("[%s] CLUSTER_GATE: correlated exposure cap hit — signal SUPPRESSED\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
+            if (gate_sink_) gate_sink_->suppressed(corr, "CLUSTER_GATE", "correlated exposure cap hit");
             return;
         }
 
@@ -1942,6 +1971,8 @@ private:
                 std::printf("[%s] CONFIRMATION_BAR: prior_ok=%d/%d — wait\n",
                     cfg_.tag.c_str(), prior_ok, needed);
                 std::fflush(stdout);
+                if (gate_sink_) gate_sink_->suppressed(corr, "CONFIRMATION_BAR",
+                    "prior_ok=" + std::to_string(prior_ok) + "/" + std::to_string(needed));
                 return;
             }
         }
@@ -1953,6 +1984,7 @@ private:
             std::printf("[%s] FUNDING_HEADWIND: extreme positive funding — signal SUPPRESSED\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
+            if (gate_sink_) gate_sink_->suppressed(corr, "FUNDING_HEADWIND", "extreme positive funding");
             return;
         }
 
@@ -1964,12 +1996,14 @@ private:
             std::printf("[%s] VOL_REGIME: LOW vol — counter-trend SUPPRESSED (need vol for reversals)\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
+            if (gate_sink_) gate_sink_->suppressed(corr, "VOL_REGIME", "LOW vol — counter-trend");
             return;
         }
         if (vol_regime_ == VolRegime::HIGH && is_trend_following()) {
             std::printf("[%s] VOL_REGIME: HIGH vol — trend-following SUPPRESSED (whipsaw risk)\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
+            if (gate_sink_) gate_sink_->suppressed(corr, "VOL_REGIME", "HIGH vol — trend-following");
             return;
         }
 
@@ -1980,6 +2014,7 @@ private:
             std::printf("[%s] CORR_FILTER: BTC correlation extreme — signal SUPPRESSED\n",
                 cfg_.tag.c_str());
             std::fflush(stdout);
+            if (gate_sink_) gate_sink_->suppressed(corr, "CORR_FILTER", "BTC correlation extreme");
             return;
         }
 
@@ -2003,6 +2038,8 @@ private:
                     cfg_.tag.c_str(), bar_hour,
                     cfg_.session_suppress_start, cfg_.session_suppress_end);
                 std::fflush(stdout);
+                if (gate_sink_) gate_sink_->suppressed(corr, "SESSION_FILTER",
+                    "bar_hour=" + std::to_string(bar_hour) + " in suppressed session");
                 return;
             }
         }
@@ -2031,6 +2068,8 @@ private:
                             cfg_.tag.c_str(), last_tick_count, threshold,
                             cfg_.vol_tick_ratio * 100.0, avg);
                         std::fflush(stdout);
+                        if (gate_sink_) gate_sink_->suppressed(corr, "VOLUME_GATE",
+                            "low activity ticks=" + std::to_string(last_tick_count));
                         return;
                     }
                 }
@@ -2050,6 +2089,7 @@ private:
                 std::printf("[%s] VOL_FILTER: CHAOS regime (ratio=%.2f > %.2f) — signal SUPPRESSED\n",
                     cfg_.tag.c_str(), vr, cfg_.vol_chaos_threshold);
                 std::fflush(stdout);
+                if (gate_sink_) gate_sink_->suppressed(corr, "VOL_FILTER", "CHAOS regime");
                 return;
             }
             if (vr > cfg_.vol_elevated_threshold && is_counter_trend) {
@@ -2057,6 +2097,7 @@ private:
                 std::printf("[%s] VOL_FILTER: ELEVATED vol (ratio=%.2f > %.2f) — counter-trend SUPPRESSED\n",
                     cfg_.tag.c_str(), vr, cfg_.vol_elevated_threshold);
                 std::fflush(stdout);
+                if (gate_sink_) gate_sink_->suppressed(corr, "VOL_FILTER", "ELEVATED vol — counter-trend");
                 return;
             }
         }
@@ -2073,6 +2114,8 @@ private:
                 std::printf("[%s] MTF_GATE: D1 bearish (streak=%d) — counter-trend signal SUPPRESSED\n",
                     cfg_.tag.c_str(), d1_bearish_streak_);
                 std::fflush(stdout);
+                if (gate_sink_) gate_sink_->suppressed(corr, "MTF_GATE",
+                    "D1 bearish streak=" + std::to_string(d1_bearish_streak_));
                 return;
             }
         }
@@ -2093,6 +2136,7 @@ private:
                     cfg_.tag.c_str(), adx_val, effective_threshold,
                     funding_tailwind_ ? " (tailwind-adjusted)" : "");
                 std::fflush(stdout);
+                if (gate_sink_) gate_sink_->suppressed(corr, "ADX_FILTER", "ADX below threshold");
                 return;
             }
         }
@@ -2113,6 +2157,7 @@ private:
             }
             double avg_atr = (n_atr > 0) ? sum_atr / n_atr : a;
             if (avg_atr > 0.0 && a < cfg_.low_vol_skip_ratio * avg_atr) {
+                if (gate_sink_) gate_sink_->suppressed(corr, "LOW_VOL_SKIP", "ATR below chop ratio");
                 return;  // chop suppression
             }
         }
@@ -2154,6 +2199,10 @@ private:
         in_position_  = true;
         bars_held_    = 0;
 
+        // Phase-4 item 21: the signal passed every gate and a real entry was
+        // taken — record it (no counterfactual; this trade actually happens).
+        if (gate_sink_) gate_sink_->passed(corr);
+
         // Initialise trailing stop state
         trail_armed_   = false;
         trail_stop_px_ = 0.0;
@@ -2185,6 +2234,7 @@ private:
             intent.ref_px = entry_px_;
             intent.ts_ms  = entry_ts_ms_;
             intent.risk_mult = risk_mult_;   // P1: carry DD-throttle x vol-overlay to qty calc
+            intent.corr_id = cur_corr_id_;   // Phase-4 item 21: thread corr-id signal->order
             on_order_intent_(intent);
         }
     }

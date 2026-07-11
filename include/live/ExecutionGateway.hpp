@@ -58,6 +58,11 @@ public:
     std::function<bool()> kill_switch_active;
     // Optional: return false to reject an ENTRY that would breach exposure caps.
     std::function<bool(const OrderIntent&)> exposure_ok;
+    // Phase-4 item 22: OPTIONAL observer fired after a successful fill (never
+    // affects routing). Feeds the additive realistic-fill parallel book. Args:
+    // (intent, filled_qty, signal/ref px). null => no-op. Grid companions never
+    // route through the gateway, so this can NOT touch the grid's own book.
+    std::function<void(const OrderIntent&, double, double)> on_fill_observer;
 
     // Phase-2 optional attachments (null => skipped).
     void set_ledger(ExchangeLedger* l)     { ledger_ = l; }
@@ -153,6 +158,11 @@ public:
             ExecReport rep = build_report(r, in, qty, cid);
             if (stream_) stream_->feed_report(rep);      // stream drives the ledger (item 8 path)
             else         ledger_->apply_report(rep);
+        }
+        // Phase-4 item 22: additive parallel realistic-fill metric (observational).
+        if (on_fill_observer) {
+            double fq = r.executed_qty > 0.0 ? r.executed_qty : qty;
+            on_fill_observer(in, fq, in.ref_px);
         }
         return r;
     }

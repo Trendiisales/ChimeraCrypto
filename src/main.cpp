@@ -2091,8 +2091,9 @@ static void init_macro_ma(chimera::BinanceREST& rest) {
     g_macro_last_day.store(kl.back().open_ts_ms / 86400000LL, std::memory_order_relaxed);
     double last_close = kl.back().c;
     g_macro_bull.store(last_close > ma, std::memory_order_relaxed);
-    std::printf("[MACRO] init: BTC 200d-MA=%.0f last_close=%.0f -> %s\n",
-                ma, last_close, last_close > ma ? "BULL (longs ON)" : "BEAR (longs HALTED)");
+    std::printf("[MACRO] init: BTC 200d-MA=%.0f last_close=%.0f -> %s "
+                "(TELEMETRY ONLY — gates no slot entry; NO-200DMA rule, S-2026-07-11)\n",
+                ma, last_close, last_close > ma ? "BULL" : "BEAR");
     std::fflush(stdout);
 }
 
@@ -8556,24 +8557,34 @@ int main() {
                     bool btc_regime_ok = (g_regime.load(std::memory_order_relaxed) >= min_reg);
                     bool sym_regime_ok = (sid < 0) ||
                                          (g_sym_regime[sid].load(std::memory_order_relaxed) >= min_reg);
-                    // S54 MACRO GATE: no long entries while BTC < 200d-MA (no
-                    // long edge below it — validated). Applies to ALL kinds.
-                    bool macro_ok        = g_macro_bull.load(std::memory_order_relaxed);
-                    // S-2026-07-05 OPERATOR RULE: UPJUMP is a spike/uptrend catch —
-                    // the W-bar up-jump trigger IS the signal (the coin's OWN uptrend).
-                    // Spot-long-only book: when a coin runs up we ride it as hard as
-                    // we can. The broad market-direction vetoes (200d-MA macro +
-                    // BULL_TREND regime) are IRRELEVANT to a per-coin up-jump and were
-                    // silently suppressing EVERY up-jump in a BTC-below-200DMA bear
-                    // (only ETH — opened before the halt — rode, so only 1 companion
-                    // ever armed). Operator directive, repeated + explicit: cut the
-                    // 200DMA/regime direction gate for these trades. Genuine RISK caps
-                    // stay in force: per-symbol + per-cluster concurrency + cluster
-                    // 24h loss circuit-breaker (see set above).
+                    // S-2026-07-11 NO-200DMA (bounce RCA): the S54 "BTC<200d-MA halts
+                    // longs" macro veto is REMOVED from ALL slot entry gating. It was
+                    // already cut for UPJUMP on 2026-07-05 by explicit, repeated operator
+                    // directive; the standing rule (feedback-no-200dma-crypto) bans a
+                    // 200DMA bull-gate ANYWHERE in crypto. During the Jul-8..10 bounce
+                    // (all 8 majors +1.7..4.7% off the low) EVERY TSMOM/ICHI/BOLL signal
+                    // was suppressed by this veto while the log mislabelled the block as
+                    // "CLUSTER_GATE" (GateAttribution scored it SUSPECT — killed winners).
+                    // g_macro_bull is still COMPUTED for telemetry (/status JSON,
+                    // macro-base NAV, S55 grid sleeve) but gates NO slot entry.
+                    // S-2026-07-05 UPJUMP rationale retained: the W-bar up-jump trigger
+                    // IS the signal — broad market-direction vetoes are irrelevant to it.
+                    // Genuine RISK caps stay in force: per-symbol + per-cluster
+                    // concurrency, cluster 24h loss circuit-breaker, and the (non-200DMA)
+                    // BTC/symbol regime chop-halt for non-UPJUMP kinds.
                     bool direction_ok    = (e->cfg().kind == chimera::StrategyKind::UPJUMP)
                                                ? true
-                                               : (btc_regime_ok && sym_regime_ok && macro_ok);
-                    e->set_cluster_gate(concurrency_ok && cluster_loss_ok && direction_ok);
+                                               : (btc_regime_ok && sym_regime_ok);
+                    // Honest gate attribution — pre-fix every suppression printed
+                    // "CLUSTER_GATE: correlated exposure cap hit" regardless of cause.
+                    const char* gate_name = nullptr; const char* gate_why = nullptr;
+                    if      (!concurrency_ok)  { gate_name = "CLUSTER_GATE"; gate_why = "correlated exposure cap hit"; }
+                    else if (!cluster_loss_ok) { gate_name = "CLUSTER_GATE"; gate_why = "cluster 24h loss circuit-breaker"; }
+                    else if (!direction_ok)    { gate_name = "REGIME_GATE";
+                                                 gate_why  = !btc_regime_ok ? "BTC regime below entry floor (chop-halt)"
+                                                                            : "symbol regime below entry floor (chop-halt)"; }
+                    e->set_cluster_gate(concurrency_ok && cluster_loss_ok && direction_ok,
+                                        gate_name, gate_why);
                 } else {
                     e->set_cluster_gate(true);
                 }

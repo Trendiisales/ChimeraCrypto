@@ -1040,7 +1040,15 @@ public:
     // main.cpp recomputes this every tick from live per-symbol / per-cluster
     // open-position counts. Self-resetting: re-opens automatically when a
     // correlated position exits. ANDed with portfolio_entry_allowed_ at entry.
-    void set_cluster_gate(bool allowed) { cluster_gate_ = allowed; }
+    // gate_name/reason: optional honest attribution of WHY the gate is closed
+    // (S-2026-07-11). Must be string literals / static storage. Defaults keep
+    // legacy call sites source-compatible.
+    void set_cluster_gate(bool allowed, const char* gate_name = nullptr,
+                          const char* reason = nullptr) {
+        cluster_gate_        = allowed;
+        cluster_gate_name_   = (!allowed) ? gate_name : nullptr;
+        cluster_gate_reason_ = (!allowed) ? reason    : nullptr;
+    }
     bool cluster_gate() const { return cluster_gate_; }
 
     // MTF gate: called externally when D1 TSMOM trend state changes.
@@ -1148,7 +1156,14 @@ private:
 
     // Portfolio gate state (fed by main.cpp)
     bool    portfolio_entry_allowed_ = true;  // false = max positions or drawdown breaker active
-    bool    cluster_gate_            = true;   // false = correlated-cluster exposure cap hit
+    bool    cluster_gate_            = true;   // false = entry vetoed by main.cpp combined gate
+    // S-2026-07-11 honest gate attribution: main.cpp says WHICH term of the
+    // combined gate blocked (cluster cap vs loss breaker vs regime chop-halt).
+    // Pre-fix every suppression was mislabelled "CLUSTER_GATE" — this masked
+    // the S54 200DMA macro veto through the Jul-8..10 bounce. String literals
+    // / static storage only (pointers are stored, not copied).
+    const char* cluster_gate_name_   = nullptr;
+    const char* cluster_gate_reason_ = nullptr;
 
     // Phase-4 item 21: gate-attribution sink (observational; null => no-op).
     GateAttribution* gate_sink_  = nullptr;
@@ -1942,10 +1957,11 @@ private:
         // the May-30 failure: 6 same-symbol engines firing together, all
         // stopped out on one adverse beta move for an amplified loss.
         if (!cluster_gate_) {
-            std::printf("[%s] CLUSTER_GATE: correlated exposure cap hit — signal SUPPRESSED\n",
-                cfg_.tag.c_str());
+            const char* gname = cluster_gate_name_   ? cluster_gate_name_   : "CLUSTER_GATE";
+            const char* gwhy  = cluster_gate_reason_ ? cluster_gate_reason_ : "correlated exposure cap hit";
+            std::printf("[%s] %s: %s — signal SUPPRESSED\n", cfg_.tag.c_str(), gname, gwhy);
             std::fflush(stdout);
-            if (gate_sink_) gate_sink_->suppressed(corr, "CLUSTER_GATE", "correlated exposure cap hit");
+            if (gate_sink_) gate_sink_->suppressed(corr, gname, gwhy);
             return;
         }
 

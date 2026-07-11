@@ -116,6 +116,20 @@ public:
         // retire_override: operator un-retire (deliberate act): tag listed in
         //   data/companion_unretire.flags -> retirement latch disabled this run.
         bool    retire_override = false;
+        // ── STAGGERED-OPEN (S-2026-07-11, operator full-roster) ──────────────────
+        // Controls WHEN each base tier leg is allowed to OPEN, to cut the worst-case
+        // simultaneous drawdown (all legs opening at the window-entry top and dropping
+        // together). Independent of arm/gb/stall (those still govern each leg once open).
+        // Base legs open in tier order (T1,T2,S1,S2,...); a leg with eligible=false is
+        // held FLAT (does not open) until advance_stagger_ releases it. Long-only, shadow,
+        // parent untouched. 0 = OFF (every existing cell unchanged — legs all eligible).
+        //   1 = BE_CASCADE: release the next leg only once EVERY already-released leg is
+        //       open AND break-even (mfe >= stagger_be_bp). => at most ONE un-BE'd leg at
+        //       a time. Requires reclip OFF + cap==#base (no ladder) to hold the guarantee.
+        //   2 = TIME: release the next leg every stagger_k bars after the previous release.
+        int     stagger_mode  = 0;
+        int     stagger_k     = 0;      // TIME: bars between successive leg releases
+        double  stagger_be_bp = 20.0;   // BE_CASCADE: mfe(bp) for a released leg to count "BE'd"
     };
 
     // Emitted on every clip / engine-exit. main.cpp persists to the companion ledger.
@@ -195,6 +209,8 @@ public:
         double  arm = 5.0; int stall = 0; double gb = 0.0; double rc = 0.05; double cg = 0.0; double confirm = 0.0;
         bool    open = false, clipped = false;
         bool    seeded_flat = false;   // restart-rehydrated leg: le anchors at first live mark on open
+        bool    eligible = true;       // STAGGER gate: false = held FLAT until advance_stagger_ releases it
+        int     tier_idx = 0;          // base-tier open order (T1=0,T2=1,S1=2,...) for staggered release
         double  pk = 0.0, mfe = 0.0;
         int64_t ext_bar = 0, open_bar = 0, open_ts = 0;
         // BE-floor mode state
@@ -238,6 +254,9 @@ public:
             entry_ref_ = parent_entry_px;
             if (arming_allowed_()) init_base_legs_(parent_entry_px, ts_ms, bar);
         }
+
+        // STAGGER: release the next base leg if its gate (BE-cascade / time) is met.
+        advance_stagger_(bar);
 
         // Step every leg; ladder-spawn on cost-covered clips (newborns added AFTER
         // the loop so they do not step the bar they are born — matches python).
@@ -470,7 +489,28 @@ private:
         std::fflush(stdout);
     }
 
-    void reset_session_() { legs_.clear(); entry_ref_ = 0.0; }
+    void reset_session_() { legs_.clear(); entry_ref_ = 0.0; last_stagger_bar_ = 0; }
+
+    // STAGGER: release (make eligible) the next base tier leg when its gate is met.
+    // BE_CASCADE (mode 1): hold until every already-released leg is OPEN and BE'd
+    //   (mfe >= stagger_be_bp) -> release exactly ONE more (=> at most 1 un-BE'd leg).
+    // TIME (mode 2): release one leg every stagger_k bars since the last release.
+    // Ineligible (not-yet-released) legs never open (step_leg_ early-returns on them).
+    void advance_stagger_(int64_t bar) {
+        if (cfg_.stagger_mode == 0) return;
+        Leg* next = nullptr;                                   // lowest-tier_idx not-yet-eligible leg
+        for (auto& lg : legs_) if (!lg.eligible && (!next || lg.tier_idx < next->tier_idx)) next = &lg;
+        if (!next) return;
+        if (cfg_.stagger_mode == 1) {                          // BE_CASCADE
+            for (auto& lg : legs_) {
+                if (!lg.eligible) continue;
+                if (!(lg.open && lg.mfe >= cfg_.stagger_be_bp / 100.0)) return;  // an eligible leg not yet BE'd -> hold
+            }
+            next->eligible = true;                             // all eligible legs open+BE'd -> release exactly one
+        } else if (cfg_.stagger_mode == 2) {                   // TIME
+            if (bar - last_stagger_bar_ >= cfg_.stagger_k) { next->eligible = true; last_stagger_bar_ = bar; }
+        }
+    }
 
     void init_base_legs_(double epx, int64_t ts, int64_t bar) {
         legs_.push_back(make_leg_("T1", epx, cfg_.tight, ts, bar, false));
@@ -478,6 +518,16 @@ private:
         int i = 0;   // stacked base arms (item 5): one more base leg per extra tier
         for (const auto& t : cfg_.extra_base)
             legs_.push_back(make_leg_("S" + std::to_string(++i), epx, t, ts, bar, false));
+        // STAGGER: number the base tiers in open order; hold all but the first FLAT
+        // (advance_stagger_ releases them per BE-cascade / time rule). mode 0 = every
+        // leg stays eligible (unchanged for all non-staggered cells).
+        if (cfg_.stagger_mode != 0) {
+            for (size_t k = 0; k < legs_.size(); ++k) {
+                legs_[k].tier_idx = (int)k;
+                legs_[k].eligible = (k == 0);
+            }
+            last_stagger_bar_ = bar;   // TIME: releases measured from the window-entry bar
+        }
     }
 
     Leg make_leg_(std::string label, double epx, const Tier& t, int64_t /*ts*/, int64_t /*bar*/, bool /*seed*/) {
@@ -504,6 +554,7 @@ private:
     bool step_leg_(Leg& lg, int64_t bar, double cur, double& gross_out, const char*& reason_out) {
         const double fav = (cur - lg.epx) / lg.epx * 100.0;
         cur_bar_ = bar;
+        if (!lg.eligible) return false;                 // STAGGER: leg not yet released -> stays FLAT
         if (lg.clipped) {
             if (lg.rc > 0.0 && lg.pk > 0.0 && fav > lg.pk * (1.0 + lg.rc)) {
                 lg.clipped = false; lg.le = cur;      // RECLIP = re-enter at current price
@@ -571,6 +622,7 @@ private:
     double  banked_bp_real_w_ = 0.0; // weighted real bank (Σ net_bp_real * size_mult) — S-2026-07-08
     bool    retired_ = false;        // auto-retirement latch (S-2026-07-08); un-retire = operator act
     int64_t cur_bar_   = 0;   // last bar seen (for snapshot bars_since_high)
+    int64_t last_stagger_bar_ = 0; // TIME-stagger: bar of the last leg release
     double  last_be_px_ = 0.0; // last mark seen in be_floor mode (flush fallback)
     // internal detector state (be_floor self-detect)
     std::vector<double> h1c_;      // ring of last det_w+1 H1 closes

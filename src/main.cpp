@@ -168,6 +168,7 @@
 #include "core/SymbolIndex.hpp"
 #include "core/PortfolioOverlay.hpp"  // AUDIT-2026: cross-sec mom + vol-scale overlay
 #include "core/CrossSectionalMomentumEngine.hpp"  // S-2026-06-18: validated standalone XSec allocator
+#include "core/CrossSectionalMomentum2Engine.hpp" // S-2026-07-11: Phase-5 XSec 2.0 SHADOW comparison book
 #include "core/RipRiderEngine.hpp"                 // S-2026-06-18: sleeve 3 — per-symbol regime-gated rip-rider
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
 #include "core/LiquidationCascadeDetector.hpp"
@@ -2582,6 +2583,18 @@ int main() {
     chimera::XSecConfig xsec_br_cfg;  xsec_br_cfg.gate_mode = 1; xsec_br_cfg.breadth_thresh = 0.65; // alts' own health
     chimera::CrossSectionalMomentumEngine xsec_btc(xsec_btc_cfg);
     chimera::CrossSectionalMomentumEngine xsec_br(xsec_br_cfg);
+    // ── Phase-5 (S-2026-07-11): XSec 2.0 — a SEPARATE SHADOW comparison book ──
+    // Runs ALONGSIDE v1 (does NOT replace it) so the operator sees v1 vs v2.0
+    // forward. Composite score (vol-adj 7/30/90d + accel − liq/corr penalty),
+    // adaptive rebalance + hysteresis, core+challenger sizing, POINT-IN-TIME
+    // dynamic universe. Regime gate = BREADTH (participation ratio), NO 200DMA.
+    // BACKTEST verdict (backtest/xsec2_bt.cpp): does NOT beat v1 standalone
+    // (+1330% Sh0.94 vs v1 +3052% Sh1.11) but IMPROVES the combined book
+    // (50/50 v1+v2 Sh1.21 vs 1.11, corr 0.44); WF both halves +, 2×-cost +,
+    // broad param plateau, beats 95% of random draws. NOT promotion-ready —
+    // SHADOW-for-observation, allocator TRACK-ONLY. See [[ChimeraReviewPhase5]].
+    chimera::XSec2Config xsec2_cfg;
+    chimera::CrossSectionalMomentum2Engine xsec2(xsec2_cfg);
     {
         std::vector<std::string> xu = {
             "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
@@ -2681,6 +2694,91 @@ int main() {
         xsec_br.set_rebalance_callback([fire, nav_br, &xsec_br](int64_t d, const std::map<std::string,double>& tw, bool b){
             static std::map<std::string,double> hold;
             fire("XSEC-BR", nav_br, hold, d, tw, b, xsec_br.breadth_latest(), xsec_br.dispersion_latest()); });
+    }
+
+    // ── Phase-5: XSec 2.0 SHADOW comparison book (own tag XSEC2, own NAV) ─────
+    // Seeds close + DOLLAR-VOLUME (close*base_vol) from the SAME daily CSVs (its
+    // point-in-time universe eligibility needs the volume). Its callback logs
+    // [XSEC2] REBALANCE, mirrors a SHADOW order per target (tag XSEC2 -> its own
+    // shadow ledger, for the v1-vs-v2 forward comparison) AND declares targets to
+    // the portfolio allocator TRACK-ONLY (one MOMENTUM/XSEC factor with v1). The
+    // 32-cell UpJump grid + the existing shadow record are untouched (new tag).
+    xsec2.set_universe({
+        "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
+        "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
+        "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"});
+    {
+        std::vector<std::string> xu = {
+            "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
+            "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
+            "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"};
+        int x2seeded = 0, x2rejected = 0;
+        for (const auto& s : xu) {
+            std::string xpath = "data/xsec_seed/" + s + "USDT_1d.csv";
+            {   // same Phase-4 data-quality gate as v1
+                auto dq = g_dq_gate.validate_csv(xpath, /*now*/ 0);
+                if (dq.rows > 0 && !dq.ok) { std::printf("[DATA-QUALITY] REFUSE XSEC2 seed %s — %s\n",
+                        xpath.c_str(), dq.reason.c_str()); ++x2rejected; continue; }
+            }
+            std::ifstream xf(xpath); if (!xf) continue;
+            std::string xl; std::getline(xf, xl); int xr = 0;
+            while (std::getline(xf, xl)) {
+                char* p = xl.data(); char* e; long long ts = strtoll(p, &e, 10); if (*e != ',') continue;
+                const char* q = e + 1;
+                for (int k = 0; k < 3 && q; ++k) { q = std::strchr(q, ','); if (q) ++q; }
+                if (!q) continue; char* e2; double c = strtod(q, &e2);        // col4 = close
+                double vol = 0.0; if (*e2 == ',') vol = strtod(e2 + 1, nullptr); // col5 = base volume
+                if (c > 0) { long long d = ts / 86400000LL;
+                    xsec2.seed_daily(s, d, c, c * vol); ++xr; }
+            }
+            if (xr > 0) ++x2seeded;
+        }
+        double nav2 = (runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0);
+        std::printf("[XSEC2] Phase-5 shadow book installed: warm-seeded %d/%zu symbols, %zu days; "
+                    "composite/adaptive/core+challenger, BREADTH-gate (NO 200DMA) nav=$%.0f SHADOW (allocator TRACK-ONLY)\n",
+                    x2seeded, xu.size(), xsec2.num_days(), nav2);
+        if (x2rejected > 0) std::printf("[DATA-QUALITY] XSEC2 seed: %d symbol(s) REFUSED for corrupt history\n", x2rejected);
+        { size_t i2 = xsec2.num_days()?xsec2.num_days()-1:0; bool b2;
+          auto w2 = xsec2.compute_target_weights(i2, b2);
+          std::string p; for (auto& kv : w2) if (kv.second > 0) { char z[48];
+              std::snprintf(z, sizeof z, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); p += z; }
+          std::printf("[XSEC2] startup: bull=%d breadth=%.2f -> %s\n",
+                      b2?1:0, xsec2.breadth_latest(), b2 ? (p.empty()?"(none)":p.c_str()) : "CASH (breadth gate)"); }
+        std::fflush(stdout);
+        xsec2.set_rebalance_callback([&gateway, &exec_ok, nav2, &xsec2](int64_t day,
+                                     const std::map<std::string,double>& tw, bool bull){
+            static std::map<std::string,double> hold;
+            std::string picks; for (auto& kv : tw) if (kv.second > 0) { char b[48];
+                std::snprintf(b, sizeof b, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); picks += b; }
+            std::printf("[XSEC2] REBALANCE day=%lld bull=%d -> %s\n", (long long)day, bull?1:0,
+                        bull ? (picks.empty()?"(none)":picks.c_str()) : "CASH (breadth gate)"); std::fflush(stdout);
+            if (exec_ok) for (auto& kv : tw) {
+                std::string lc = kv.first; for (auto& ch : lc) if (ch>='A'&&ch<='Z') ch += 32;
+                int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
+                double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
+                double tgt = kv.second * nav2, dusd = tgt - hold[kv.first];
+                if (std::fabs(dusd) < 25.0) continue;
+                gateway.submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px, /*is_exit*/ dusd < 0.0, "XSEC2" });
+                hold[kv.first] = tgt;
+            }
+            // also zero-out held names no longer targeted (rebalance to CASH/out)
+            if (exec_ok) for (auto& kv : hold) if (kv.second > 0 && !tw.count(kv.first)) {
+                std::string lc = kv.first; for (auto& ch : lc) if (ch>='A'&&ch<='Z') ch += 32;
+                int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
+                double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
+                gateway.submit({ kv.first + "USDT", false, (kv.second)/px, px, /*is_exit*/ true, "XSEC2" });
+                kv.second = 0.0;
+            }
+            // Phase-3 TRACK-ONLY: declare XSEC2 targets to the allocator (one
+            // MOMENTUM/XSEC factor with v1). Does NOT emit (shadow record preserved).
+            {
+                std::lock_guard<std::mutex> lk(g_alloc_mtx);
+                g_allocator.set_regime_inputs(xsec2.breadth_latest(), xsec2.dispersion_latest(), /*severe*/false);
+                for (auto& kv : tw) g_allocator.set_target("XSEC2", kv.first + "USDT",
+                        bull ? kv.second * nav2 : 0.0, chimera::Factor::MOMENTUM, chimera::Family::XSEC);
+                g_allocator.plan(&g_ledger);
+            }
+        });
     }
 
     // ── Sleeve 3: RipRiderEngine — per-symbol regime-gated rip-rider ──────────
@@ -8053,6 +8151,7 @@ int main() {
           const char* xss = chimera::sym_short(id);
           xsec_btc.on_tick(xss, mid, xnow);
           xsec_br.on_tick(xss, mid, xnow);
+          xsec2.on_tick(xss, mid, xnow);          // Phase-5 XSec 2.0 shadow book
           riprider.on_tick(xss, mid, xnow); }
 
         // S34: log BTC ticks into rolling chart buffer (~last 1000 ticks)

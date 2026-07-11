@@ -154,6 +154,7 @@
 #include "live/SpotExecutor.hpp"
 #include "live/RuntimeMode.hpp"        // Phase-1: ONE immutable process mode
 #include "live/ExecutionGateway.hpp"   // Phase-1: single order chokepoint
+#include "live/StartupReconciler.hpp"  // Phase-2: boot reconcile gate (ledger/filters/clock via gateway)
 #include "live/HttpControlAuth.hpp"    // Phase-1: control-API auth/method helpers
 #include "core/EdgeEngine.hpp"
 #include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
@@ -1809,6 +1810,12 @@ struct LiveRuntimeConfig {
     bool        shadow_mode      = true;
     double      max_position_usd = 10000.0;
     double      min_edge_bps     = 10.0;
+    // Phase-2 review (2026-07-11): total portfolio cash the ExchangeLedger
+    // reserves against. >0 => cash reservation ENFORCES (rejects/resizes the
+    // cross-sleeve overbook). 0 (default) => track-only: the ledger records
+    // position/attribution/cash but never blocks, preserving the existing SHADOW
+    // research record until the operator opts in.
+    double      portfolio_cash_usd = 0.0;
     // S44d: testing-mode protection bypass. When TRUE + shadow_mode=true,
     // the portfolio ratchet does NOT halt entries (lets testing flow
     // through). Going live (shadow_mode=false) with this set = FATAL abort.
@@ -1879,6 +1886,7 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     cfg.shadow_mode      = lrc_extract_bool(content, "shadow_mode", true);
     cfg.max_position_usd = lrc_extract_double(content, "max_position_usd", 10000.0);
     cfg.min_edge_bps     = lrc_extract_double(content, "min_edge_bps", 10.0);
+    cfg.portfolio_cash_usd = lrc_extract_double(content, "portfolio_cash_usd", 0.0);
     cfg.protection_disabled_for_testing =
         lrc_extract_bool(content, "protection_disabled_for_testing", false);
     // Phase-1: optional explicit runtime mode + control-API bind/token.
@@ -2378,6 +2386,83 @@ int main() {
     };
 
     // ════════════════════════════════════════════════════════════════════
+    // Phase-2 review (2026-07-11) — EXCHANGE TRUTH. Attach the authoritative
+    // ledger + exchange filters + clock-sync + deterministic-id registry +
+    // user-data-stream path to the ONE gateway, so every order the sleeves
+    // already route through submit() now: reserves cash before it books,
+    // normalizes to exchange filters, and drives the ledger from the resulting
+    // execution report (holdings from truth, not intent). SHADOW: the shadow
+    // fill's OrderResult IS the report, so the exact live code path is exercised.
+    // ════════════════════════════════════════════════════════════════════
+    static chimera::ExchangeLedger   g_ledger;
+    static chimera::ExchangeFilters  g_filters;
+    static chimera::ExchangeTimeSync g_clock;
+    static chimera::OrderIdRegistry  g_idreg;
+    static chimera::UserDataStream   g_userstream;
+    {
+        // Cash: portfolio_cash_usd>0 => ENFORCE reservation (rejects/resizes the
+        // cross-sleeve overbook); 0 (default) => track-only, preserving the SHADOW
+        // research record. LIVE deploys seed this from the real USDT balance.
+        double seed_cash = runtime_cfg.portfolio_cash_usd;
+        bool enforce = runtime_cfg.portfolio_cash_usd > 0.0;
+        g_ledger.configure(seed_cash, enforce, /*fee*/0.001);
+
+        // The user-data stream drives the ledger from every execution report.
+        // LIVE: real executionReport events. SHADOW: the simulated fill fed by the
+        // gateway. Either way the same handler updates the one ledger.
+        g_userstream.set_handler([](const chimera::ExecReport& r){ g_ledger.apply_report(r); });
+        g_userstream.set_shadow_driven(runtime_cfg.shadow_mode);
+
+        // Clock (item 6): sync to Binance server time via the public /time probe
+        // (works in shadow too). The gateway only HALTS signed (LIVE) orders on
+        // drift; in shadow it never blocks. Fall back to synced-0 if the probe
+        // fails so the shadow path stays open.
+        g_clock.set_threshold_ms(1000);
+        if (exec_ok) {
+            int64_t local0 = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            int64_t srv = executor.server_time();
+            if (srv > 0) { g_clock.record_pair(srv, local0);
+                std::printf("[CLOCK] Binance server-time synced: offset=%lldms\n",
+                            (long long)g_clock.offset_ms()); }
+            else         { g_clock.record_offset(0);
+                std::fprintf(stderr, "[CLOCK] server-time probe failed — assuming synced (shadow-safe)\n"); }
+        } else {
+            g_clock.record_offset(0);
+        }
+
+        // Filters (item 5): cache real exchangeInfo LOT_SIZE/MIN_NOTIONAL/step so
+        // every order is normalized before submit. Public endpoint — loaded in
+        // shadow too; a failure leaves the cache empty (gateway passes through).
+        if (exec_ok) {
+            std::string info = executor.exchange_info();
+            int nf = info.empty() ? 0 : g_filters.load_from_json(info);
+            std::printf("[FILTERS] exchangeInfo cached: %d symbols%s\n",
+                        nf, info.empty() ? " (probe failed — pass-through)" : "");
+            std::fflush(stdout);
+        }
+
+        gateway.set_ledger(&g_ledger);
+        gateway.set_filters(&g_filters);   // empty until exchangeInfo is loaded (pass-through)
+        gateway.set_clock(&g_clock);
+        gateway.set_id_registry(&g_idreg);
+        gateway.set_stream(&g_userstream);
+
+        // Startup reconciliation (item 9): the ledger must agree with the exchange
+        // before trading. SHADOW clean-boot => empty snapshot reconciles trivially;
+        // the hard-block on mismatch/fetch-failure is proven by the regression test
+        // and ACTIVATES LIVE once a full account snapshot is wired to the reconciler.
+        chimera::StartupReconciler reconciler;
+        chimera::ExchangeSnapshot snap; snap.ok = true;   // clean shadow boot: no working orders
+        auto rec = reconciler.reconcile(snap, g_ledger, &g_idreg,
+            (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        std::printf("[LEDGER] Phase-2 exchange-truth wired: cash=$%.2f enforce=%d | reconcile: %s (%s)\n",
+                    seed_cash, enforce ? 1 : 0, rec.passed ? "PASS" : "BLOCK", rec.detail.c_str());
+        std::fflush(stdout);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // S-2026-06-18: CrossSectionalMomentumEngine — FIRST OOS-validated Chimera
     // edge, installed as a STANDALONE allocator (not a sizing tilt). Curated
     // QUALITY universe (ex-meme), lb30/top3/rebal14/inverse-vol, BTC>200d gate
@@ -2495,14 +2580,18 @@ int main() {
             if (exec_ok && px > 0)
                 gateway.submit({ sym + "USDT", true, (rip_nav/8.0)/px, px, /*is_exit*/false, "RIP" });
         });
-        riprider.set_close_callback([&gateway, &exec_ok, rip_nav](const chimera::RipClose& t){
+        riprider.set_close_callback([&gateway, &exec_ok](const chimera::RipClose& t){
             double ret = t.entryPrice>0 ? (t.exitPrice/t.entryPrice-1)*100.0 : 0.0;
             std::printf("[RIP] EXIT %s entry=%.6f exit=%.6f ret=%+.1f%% %s\n",
                         t.symbol.c_str(), t.entryPrice, t.exitPrice, ret, t.exitReason.c_str()); std::fflush(stdout);
-            // Phase-1: risk-reducing EXIT -> is_exit=true (never blocked by halts).
-            if (exec_ok && t.exitPrice > 0)
-                gateway.submit({ t.symbol + "USDT", false, (rip_nav/8.0)/t.exitPrice, t.exitPrice,
-                                 /*is_exit*/true, "RIP" });
+            // Phase-2 (item 4): close the EXCHANGE-CONFIRMED remaining qty from the
+            // ledger — NOT rip_nav/exitPrice (which mis-sizes because exit!=entry
+            // price and ignores partial fills, leaving a residual or overselling).
+            // is_exit=true => risk-reducing, never blocked by halts.
+            std::string sym = t.symbol + "USDT";
+            double held = g_ledger.attributed_qty("RIP", sym);
+            if (exec_ok && t.exitPrice > 0 && held > 0.0)
+                gateway.submit({ sym, false, held, t.exitPrice, /*is_exit*/true, "RIP" });
         });
     }
 

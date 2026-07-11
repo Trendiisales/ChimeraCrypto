@@ -251,6 +251,54 @@ public:
     }
 
     // -----------------------------------------------------------------------
+    // get_server_time — GET /api/v3/time (public). Returns Binance server epoch
+    // ms, or 0 on failure. Phase-2 item 6: drive ExchangeTimeSync's offset.
+    // -----------------------------------------------------------------------
+    int64_t get_server_time() {
+        static std::once_flag curl_init_once;
+        std::call_once(curl_init_once, [](){ curl_global_init(CURL_GLOBAL_DEFAULT); });
+        CURL* curl = curl_easy_init(); if (!curl) return 0;
+        std::string body; long http_code = 0;
+        curl_easy_setopt(curl, CURLOPT_URL, "https://api.binance.com/api/v3/time");
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_cleanup(curl);
+        if (res != CURLE_OK || http_code != 200) return 0;
+        auto p = body.find("\"serverTime\":");
+        if (p == std::string::npos) return 0;
+        return (int64_t)strtoll(body.c_str() + p + 13, nullptr, 10);
+    }
+
+    // -----------------------------------------------------------------------
+    // fetch_exchange_info — GET /api/v3/exchangeInfo (public). Returns the raw
+    // JSON body (empty on failure). Phase-2 item 5: populate ExchangeFilters.
+    // Pass a comma-free single symbol to scope the response, or "" for all.
+    // -----------------------------------------------------------------------
+    std::string fetch_exchange_info(const std::string& symbol = "") {
+        static std::once_flag curl_init_once;
+        std::call_once(curl_init_once, [](){ curl_global_init(CURL_GLOBAL_DEFAULT); });
+        CURL* curl = curl_easy_init(); if (!curl) return "";
+        std::string url = "https://api.binance.com/api/v3/exchangeInfo";
+        if (!symbol.empty()) {
+            std::string up; for (char c : symbol) up.push_back((c>='a'&&c<='z')?char(c-32):c);
+            url += "?symbol=" + up;
+        }
+        std::string body; long http_code = 0;
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_cleanup(curl);
+        if (res != CURLE_OK || http_code != 200) return "";
+        return body;
+    }
+
+    // -----------------------------------------------------------------------
     // place_order — Market BUY or SELL
     //
     // symbol:   "BTCUSDT"

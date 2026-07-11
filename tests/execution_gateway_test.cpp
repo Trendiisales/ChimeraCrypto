@@ -12,7 +12,8 @@ using namespace chimera;
 struct MockExec {
     int calls = 0;
     std::string last_sym; bool last_buy = false; double last_qty = 0, last_px = 0;
-    OrderResult execute(const std::string& sym, bool is_buy, double qty, double px) {
+    OrderResult execute(const std::string& sym, bool is_buy, double qty, double px,
+                        const std::string& = "") {
         ++calls; last_sym = sym; last_buy = is_buy; last_qty = qty; last_px = px;
         OrderResult r; r.ok = true; r.shadow = true; r.status = "FILLED";
         r.executed_qty = qty; r.avg_price = px; return r;

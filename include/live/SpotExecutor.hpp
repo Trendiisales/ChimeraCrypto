@@ -105,10 +105,15 @@ private:
     // -----------------------------------------------------------------------
     // execute — market order entry/exit, returns OrderResult with fill details
     // -----------------------------------------------------------------------
+    // Phase-2 review fix (item 7): accept a DETERMINISTIC client id from the
+    // gateway so a retry after an ambiguous send reuses the same id (Binance
+    // dedups newClientOrderId) instead of minting a new one and double-buying.
+    // Empty => fall back to the legacy timestamp id (unit tests / direct calls).
     OrderResult execute(const std::string& symbol,
                         bool is_buy,
                         double qty,
-                        double price) {
+                        double price,
+                        const std::string& client_id = "") {
         OrderResult r;
         if (!rest_.is_ready()) {
             std::fprintf(stderr, "[EXECUTOR] Not ready — order dropped: %s %s %.8f\n",
@@ -119,11 +124,14 @@ private:
         std::string sym_upper = symbol;
         for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
 
-        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        std::string cid = sym_upper.substr(0, 3)
-                        + (is_buy ? "B" : "S")
-                        + std::to_string(now_us);
+        std::string cid = client_id;
+        if (cid.empty()) {
+            auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            cid = sym_upper.substr(0, 3)
+                + (is_buy ? "B" : "S")
+                + std::to_string(now_us);
+        }
         if (cid.size() > 36) cid = cid.substr(cid.size() - 36);
 
         std::printf("[EXECUTOR] %s %s %.8f @ %.4f signal_px\n",
@@ -243,6 +251,11 @@ public:
         std::fflush(stdout);
         fills_.fetch_add(1, std::memory_order_relaxed);
     }
+
+    // Phase-2: public pass-throughs to the (public, unsigned) Binance endpoints
+    // used to populate exchange filters + clock sync. Safe in shadow.
+    int64_t     server_time()                              { return rest_.get_server_time(); }
+    std::string exchange_info(const std::string& s = "")   { return rest_.fetch_exchange_info(s); }
 
     bool  is_shadow() const { return rest_.is_shadow(); }
     bool  is_ready()  const { return rest_.is_ready();  }

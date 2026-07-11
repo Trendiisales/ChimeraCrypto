@@ -2950,6 +2950,36 @@ int main() {
         std::fflush(stdout);
     }
 
+    // ── Phase-6b (S-2026-07-11): REMAINING long-only families + two-stage ignition
+    //    — SALVAGE CHECK, ALL REJECTED, NOTHING WIRED (documentation stamp only).
+    // Screened the other 6 families (breakout-retest, relative-strength acceleration,
+    // BTC-lead alt confirmation, breadth-thrust, capitulation-recovery, liquidity-
+    // sweep-reversal) + young-liquid-coin momentum + item 28 two-stage ignition.
+    // Long-only spot, NO shorts, NO 200DMA. Led with Phase-6's exposure-matched
+    // pick-edge control (a breadth-gated RANDOM basket ~ ex-2022 Sharpe 1.20).
+    // VERDICT (backtest/phase6b_families_bt.cpp): ALL 7 FAIL the control — ex-2022
+    // Sharpe breakout-retest 0.73 / RS-accel 0.75 / BTC-lead 0.80 / breadth-thrust
+    // 0.90 / capitulation 0.44 / liq-sweep −0.16 / young-coin 0.45, each beating
+    // 0-4% of 200 random draws. Their edge is breadth TIMING, not entry SELECTION;
+    // the momentum-flavoured ones carry HIGH corr (0.55-0.58) to XSec v1 so they
+    // LOAD the momentum factor, not diversify; capitulation/liq-sweep/young also
+    // FAIL walk-forward outright. ITEM 28 (backtest/phase6b_twostage_bt.cpp): at
+    // IDENTICAL per-signal capital, NO tranche/split variant beats the immediate-
+    // only RipRider parent (net/alloc +23351%, Sharpe 1.76) — pullback tranches
+    // fill cheaper (+2.5-6%) and lift win-rate, but UNDER-DEPLOY on the non-
+    // pullback runners that carry the fat tail, so capital-matched net is equal-to-
+    // worse across every depth/ratio; confirmation tranches (buy higher) are
+    // strictly worse. Parent EXIT logic unchanged. NONE promoted, NONE wired — no
+    // engine instance, no on_tick, no allocator target. Engine headers + both
+    // backtests + tests/run_phase6b_tests.sh are the documented salvage record.
+    // See [[ChimeraReviewPhase6b]]. The 32-cell UpJump grid + every shadow book
+    // are untouched; MODE=SHADOW.
+    std::printf("[P6b] SALVAGE CHECK — 6 remaining families + young-coin + item-28 two-stage: "
+                "ALL REJECTED (fail exposure-matched pick-edge control = breadth timing not selection; "
+                "two-stage under-deploys vs immediate-only RipRider at equal capital). NONE wired. "
+                "See ChimeraReviewPhase6b. SHADOW.\n");
+    std::fflush(stdout);
+
     // ── Sleeve 3: RipRiderEngine — per-symbol regime-gated rip-rider ──────────
     // Catches individual coin RIPS, rides them (no tight trail — that amputates the
     // tail), exits on regime-flip (BTC<200d). Validated FAITHFUL (C++ BT == python

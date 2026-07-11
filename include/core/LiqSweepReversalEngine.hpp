@@ -1,0 +1,76 @@
+// ============================================================================
+//  LiqSweepReversalEngine.hpp — Phase-6b family (liquidity-SWEEP reversal).
+//  Long-only spot, NO shorts, NO 200DMA (regime = breadth in the base).
+//
+//  THESIS: a "stop hunt" — price sweeps intrabar BELOW a recent swing low
+//  (triggering resting sell-stops / liquidations) then CLOSES back above it: a
+//  bear-trap that often reverses. Enter on the reclaim. COST-SENSITIVE (fine-
+//  structure, tighter targets) — it is screened on the same 15bp/side and 2×
+//  cost as every family; if it only survives at zero cost it is rejected.
+//
+//  ENTRY (close i, eligible):
+//    * swing low = lowest low over [i−sweep_lb, i−1].
+//    * sweep: today's low < swing low (took it out intrabar).
+//    * reclaim: close > swing low AND bullish (close>prev close).
+//  Ranking: strongest 10d return first.
+//  EXIT (own — entries can sit below emaSlow):
+//    * target: close >= emaFast (reverted).
+//    * hard stop: close < entry*(1−stop).
+//    * time stop: held >= max_hold.
+// ============================================================================
+#pragma once
+#include "core/LongOnlyDailyBase.hpp"
+
+namespace chimera {
+
+struct LiqSweepReversalConfig {
+    int    ema_fast       = 20;
+    int    ema_slow       = 50;
+    int    sweep_lb       = 15;    // swing-low lookback
+    double stop           = 0.08;  // hard stop below entry
+    int    max_hold       = 12;
+    int    max_positions  = 8;
+    double per_name_cap   = 0.20;
+    double breadth_thresh = 0.40;
+    double cost_bps       = 15.0;
+};
+
+class LiqSweepReversalEngine : public LongOnlyDailyBase {
+public:
+    explicit LiqSweepReversalEngine(LiqSweepReversalConfig c = {})
+        : LongOnlyDailyBase(make_base(c)), ls_(c) {}
+protected:
+    bool entry_signal(const std::string& s, size_t i) const override {
+        if ((int)i < ls_.sweep_lb + 2) return false;
+        double lo = lowAt(s,i), cl = closeAt(s,i), clPrev = closeAt(s,i-1);
+        if (std::isnan(lo)||std::isnan(cl)||std::isnan(clPrev)) return false;
+        double swingLow = 1e18;                                        // lowest low [i-sweep_lb, i-1]
+        for (int j=(int)i-ls_.sweep_lb; j<(int)i; ++j){ if(j<0) continue;
+            double l=lowAt(s,j); if(!std::isnan(l)) swingLow=std::min(swingLow,l); }
+        if (swingLow > 1e17) return false;
+        if (!(lo < swingLow)) return false;                            // swept the low
+        if (!(cl > swingLow && cl > clPrev)) return false;             // reclaimed + bullish
+        return true;
+    }
+    bool exit_signal(const std::string& s, size_t i, const Position& p) const override {
+        double cl = closeAt(s,i), ef = emaF(s,i);
+        if (std::isnan(cl)) return false;
+        if (!std::isnan(ef) && cl >= ef) return true;                  // reverted to mean
+        if (cl < p.entry_price*(1.0 - ls_.stop)) return true;          // hard stop
+        if (p.bars_held >= ls_.max_hold) return true;                  // time stop
+        return false;
+    }
+    double entry_score(const std::string& s, size_t i) const override {
+        double r10 = ret(s, i, 10); return std::isnan(r10) ? -1.0 : r10;
+    }
+private:
+    LiqSweepReversalConfig ls_;
+    static LODConfig make_base(const LiqSweepReversalConfig& c) {
+        LODConfig b; b.ema_fast_n=c.ema_fast; b.ema_slow_n=c.ema_slow;
+        b.max_positions=c.max_positions; b.per_name_cap=c.per_name_cap;
+        b.breadth_thresh=c.breadth_thresh; b.cost_bps=c.cost_bps; b.inverse_vol=true;
+        return b;
+    }
+};
+
+} // namespace chimera

@@ -2588,11 +2588,14 @@ int main() {
     // forward. Composite score (vol-adj 7/30/90d + accel − liq/corr penalty),
     // adaptive rebalance + hysteresis, core+challenger sizing, POINT-IN-TIME
     // dynamic universe. Regime gate = BREADTH (participation ratio), NO 200DMA.
-    // BACKTEST verdict (backtest/xsec2_bt.cpp): does NOT beat v1 standalone
-    // (+1330% Sh0.94 vs v1 +3052% Sh1.11) but IMPROVES the combined book
-    // (50/50 v1+v2 Sh1.21 vs 1.11, corr 0.44); WF both halves +, 2×-cost +,
-    // broad param plateau, beats 95% of random draws. NOT promotion-ready —
-    // SHADOW-for-observation, allocator TRACK-ONLY. See [[ChimeraReviewPhase5]].
+    // BACKTEST verdict (backtest/xsec2_bt.cpp; long-only spot SITS OUT bears, so
+    // 2022 is SHOWN-not-gated per standing rule feedback-crypto-omit-2022-longonly):
+    // EX-2022 v2.0 +3354% Sh1.28 maxDD53% is a risk-adjusted DEAD HEAT with v1
+    // (Sh1.29 maxDD57%; v1 higher raw net +4112%). Clears the corrected gate — WF
+    // both halves +, 2×-cost +, broad plateau, beats 95% random, point-in-time.
+    // KEEP as a complementary DIVERSIFIER: 50/50 v1+v2 Sh1.51 (>v1 1.29), DD 47%,
+    // corr 0.44. Both sleeves run via the allocator (ONE MOMENTUM/XSEC factor —
+    // aggregate momentum cap bounds the combined risk). See [[ChimeraReviewPhase5]].
     chimera::XSec2Config xsec2_cfg;
     chimera::CrossSectionalMomentum2Engine xsec2(xsec2_cfg);
     {

@@ -152,6 +152,30 @@ int main(int argc, char** argv) {
     pr("XSec v1", m1); pr("XSec v2.0", m2);
     printf("  turnover(2-sided, whole period): v1=%.1fx  v2=%.1fx\n", v1_turn, v2_turn);
 
+    // ---- EX-2022 re-judgment (long-only sits out bears; 2022 shown-not-gated) --
+    // Standing rule (feedback-crypto-omit-2022-longonly): a long-only spot book
+    // cannot trade a bear, so 2022 is NOT a pass/fail gate — remove the 2022 window
+    // and re-judge on the non-bear span. (2022 bleed is still shown above.)
+    printf("\n================= EX-2022 (long-only, bear NOT gated) =================\n");
+    auto drop = [&](const std::vector<std::pair<int64_t,double>>& d, int64_t lo, int64_t hi){
+        std::vector<std::pair<int64_t,double>> o; for (auto& kv : d){ int64_t t=kv.first*86400000LL;
+            if (!(t>=lo && t<hi)) o.push_back(kv); } return o; };
+    int64_t X22lo=1640995200000LL, X22hi=1672531200000LL; // 2022 window
+    auto v1_ex = drop(v1_daily, X22lo, X22hi);
+    auto v2_ex = drop(v2_daily, X22lo, X22hi);
+    Metrics m1e = metrics(v1_ex), m2e = metrics(v2_ex);
+    pr("v1 ex-2022", m1e); pr("v2.0 ex-2022", m2e);
+    Metrics x1a=metrics(half(v1_ex,0)), x1b=metrics(half(v1_ex,1));
+    Metrics x2a=metrics(half(v2_ex,0)), x2b=metrics(half(v2_ex,1));
+    printf("  v1  ex22 WF: H1 %+8.1f%% Sh%5.2f | H2 %+8.1f%% Sh%5.2f  %s\n",
+           x1a.total*100,x1a.sharpe,x1b.total*100,x1b.sharpe,(x1a.total>0&&x1b.total>0)?"BOTH+":"FAIL");
+    printf("  v2  ex22 WF: H1 %+8.1f%% Sh%5.2f | H2 %+8.1f%% Sh%5.2f  %s\n",
+           x2a.total*100,x2a.sharpe,x2b.total*100,x2b.sharpe,(x2a.total>0&&x2b.total>0)?"BOTH+":"FAIL");
+    { auto comb = blend(v1_ex, v2_ex, 0.5, 0.5); Metrics mc = metrics(comb);
+      pr("50/50 ex-2022", mc);
+      printf("  -> ex-2022 combined Sharpe %.2f vs v1-alone %.2f : v2 %s the combined book\n",
+             mc.sharpe, m1e.sharpe, (mc.sharpe>m1e.sharpe)?"IMPROVES":"does NOT improve"); }
+
     // ---- WF both halves ----
     printf("\n================= WALK-FORWARD (both halves) =================\n");
     Metrics h1a=metrics(half(v1_daily,0)), h1b=metrics(half(v1_daily,1));

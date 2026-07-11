@@ -130,6 +130,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -1298,7 +1299,17 @@ static void restore_companion_det_state() {
 }
 
 // Live per-leg companion snapshot for the Omega desk CRYPTO COMPANIONS panel.
-// Schema: {"ts":<unix>,"legs":[{sym,armed,peak_mfe_pct,bars_since_high,clips,bank_bp}]}.
+// Schema (S-2026-07-12 grid identity fix): {"ts":<unix>,"legs":[{sym,tag,cell,det_w,
+// det_thr_pct,parent_tag,parent_w,parent_thr_pct,canonical,armed,peak_mfe_pct,
+// bars_since_high,clips,bank_bp,bank_bp_real,bank_bp_real_w,mult,retired,sublegs}]}.
+// Pre-fix the legs carried ONLY the truncated coin sym ("ADA-UJ2" -> "ADA"), so the 4
+// grid cells per coin were indistinguishable downstream and the desk panel fell back to
+// a hardcoded pre-finalize roster (stale windows, no XRP). Now each leg carries its full
+// cell identity + detector window/threshold + the tuned parent's window/threshold, and
+// `canonical` marks the ONE promoted cell per coin (CRYPTO_SPOTLONG_PLAN.md): the cell
+// whose det_thr equals its tuned parent's upjump_thr (ETH-UJ2/BTC-UJ4/BNB-UJ3/SOL-UJ5/
+// DOGE-UJ4/ADA-UJ5/XRP-UJ4/TRX-UJ5) — data-driven, no second hand-kept list to rot.
+// bank_bp_real stays per-leg (the desk _cctot fold sums it over ALL legs — shape kept).
 // Cross-box pushed to C:\Omega\crypto_companion_state.json (Mac launchd scp) where
 // /api/crypto_companion serves it. Caller MUST hold g_companion_mtx. Atomic write
 // (tmp+rename). Read-only view of settled companion state — never touches a parent.
@@ -1309,10 +1320,22 @@ static void emit_companion_state() {
     bool first = true;
     for (const auto& kv : g_companion_by_parent) {
         const auto snap = kv.second.second->snapshot();
-        std::string sym = kv.first.substr(0, kv.first.find('-'));  // "BTC-UPJUMP-H1" -> "BTC"
+        const auto& ccfg = kv.second.second->config();
+        const auto& pcfg = kv.second.first->cfg();
+        std::string sym  = kv.first.substr(0, kv.first.find('-'));  // "BTC-UJ4" -> "BTC"
+        std::string cell = kv.first.find('-') == std::string::npos
+                             ? "" : kv.first.substr(kv.first.find('-') + 1);  // "BTC-UJ4" -> "UJ4"
+        // canonical = this cell's detector threshold IS the coin's tuned parent threshold
+        const bool canonical = std::fabs(ccfg.det_thr - pcfg.upjump_thr) < 1e-9;
         if (!first) js << ",";
         first = false;
-        js << "{\"sym\":\"" << sym << "\",\"armed\":" << (snap.armed ? "true" : "false")
+        js << "{\"sym\":\"" << sym << "\",\"tag\":\"" << ccfg.tag << "\",\"cell\":\"" << cell << "\""
+           << ",\"det_w\":" << ccfg.det_w
+           << std::setprecision(1) << ",\"det_thr_pct\":" << ccfg.det_thr * 100.0
+           << ",\"parent_tag\":\"" << pcfg.tag << "\",\"parent_w\":" << pcfg.upjump_w
+           << ",\"parent_thr_pct\":" << pcfg.upjump_thr * 100.0
+           << ",\"canonical\":" << (canonical ? "true" : "false")
+           << ",\"armed\":" << (snap.armed ? "true" : "false")
            << std::setprecision(4) << ",\"peak_mfe_pct\":" << snap.peak_mfe_pct
            << ",\"bars_since_high\":" << snap.bars_since_high
            << ",\"clips\":" << snap.clips

@@ -177,6 +177,34 @@ public:
     size_t num_days() const { return days_.size(); }
     const XSecConfig& cfg() const { return cfg_; }
 
+    // ── Phase-3 (item 19): READ-ONLY regime telemetry for the portfolio
+    // allocator's continuous regime overlay. These do NOT change what XSec trades
+    // (they mirror the npos/ntot the gate already computes); they only expose the
+    // breadth + cross-sectional dispersion the allocator needs to size families.
+    // breadth = share of the universe with positive trailing-lb return.
+    double breadth(size_t i) const {
+        int npos = 0, ntot = 0;
+        for (auto& kv : close_) {
+            double tr = trailing_ret(kv.second, i, cfg_.lookback_days);
+            if (std::isnan(tr)) continue;
+            ++ntot; if (tr > 0) ++npos;
+        }
+        return ntot > 0 ? (double)npos / ntot : 0.0;
+    }
+    double breadth_latest() const { return days_.empty() ? 0.0 : breadth(days_.size()-1); }
+    // dispersion = stdev of trailing-lb returns across the universe (cross-sectional
+    // spread — XSec has nothing to rank when this is ~0).
+    double dispersion(size_t i) const {
+        std::vector<double> rs;
+        for (auto& kv : close_) { double tr = trailing_ret(kv.second, i, cfg_.lookback_days);
+            if (!std::isnan(tr)) rs.push_back(tr); }
+        if (rs.size() < 2) return 0.0;
+        double m = 0; for (double x : rs) m += x; m /= rs.size();
+        double v = 0; for (double x : rs) v += (x-m)*(x-m); v /= rs.size();
+        return v > 0 ? std::sqrt(v) : 0.0;
+    }
+    double dispersion_latest() const { return days_.empty() ? 0.0 : dispersion(days_.size()-1); }
+
 private:
     XSecConfig cfg_;
     std::vector<int64_t> days_;                       // dense sorted UTC day axis

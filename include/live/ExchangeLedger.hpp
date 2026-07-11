@@ -228,6 +228,20 @@ public:
         double p = position(symbol);
         return a > p ? p : a;   // clamp to the exchange-confirmed position
     }
+    // Phase-3 (item 15): per-symbol reads the SpotPortfolioAllocator nets against.
+    // Mark-to-ref value of the held position, and the notional of any pending BUY
+    // for this symbol (an in-flight buy the allocator must not double-order).
+    double position_value(const std::string& symbol, double ref_px) const {
+        return position(symbol) * ref_px;
+    }
+    double pending_buy_value(const std::string& symbol) const {
+        double v = 0.0;
+        for (auto& kv : pending_)
+            if (kv.second.is_buy && kv.second.symbol == symbol)
+                v += kv.second.qty * kv.second.px;
+        return v;
+    }
+
     bool has_pending(const std::string& client_id) const { return pending_.count(client_id) != 0; }
     OrderState pending_state(const std::string& client_id) const {
         auto it = pending_.find(client_id); return it == pending_.end() ? OrderState::UNKNOWN : it->second.state;

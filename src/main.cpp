@@ -155,6 +155,7 @@
 #include "live/RuntimeMode.hpp"        // Phase-1: ONE immutable process mode
 #include "live/ExecutionGateway.hpp"   // Phase-1: single order chokepoint
 #include "live/StartupReconciler.hpp"  // Phase-2: boot reconcile gate (ledger/filters/clock via gateway)
+#include "live/SpotPortfolioAllocator.hpp" // Phase-3: portfolio unification (merge/cap/net + regime/DD/factor overlays)
 #include "live/HttpControlAuth.hpp"    // Phase-1: control-API auth/method helpers
 #include "core/EdgeEngine.hpp"
 #include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
@@ -1816,6 +1817,13 @@ struct LiveRuntimeConfig {
     // position/attribution/cash but never blocks, preserving the existing SHADOW
     // research record until the operator opts in.
     double      portfolio_cash_usd = 0.0;
+    // Phase-3 review (2026-07-11): SpotPortfolioAllocator enforcement. false
+    // (default) => TRACK-ONLY: the allocator merges/caps/nets every sleeve's
+    // target and LOGS the unified vector ([ALLOC-TRACK]) so the whole layer is
+    // exercised, but does NOT emit — the per-sleeve shadow books + the 32-cell
+    // UpJump threshold GRID keep their own records. true => ENFORCE: the allocator
+    // emits the netted deltas and the raw per-sleeve orders defer to it.
+    bool        portfolio_alloc_enforce = false;
     // S44d: testing-mode protection bypass. When TRUE + shadow_mode=true,
     // the portfolio ratchet does NOT halt entries (lets testing flow
     // through). Going live (shadow_mode=false) with this set = FATAL abort.
@@ -1887,6 +1895,7 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     cfg.max_position_usd = lrc_extract_double(content, "max_position_usd", 10000.0);
     cfg.min_edge_bps     = lrc_extract_double(content, "min_edge_bps", 10.0);
     cfg.portfolio_cash_usd = lrc_extract_double(content, "portfolio_cash_usd", 0.0);
+    cfg.portfolio_alloc_enforce = lrc_extract_bool(content, "portfolio_alloc_enforce", false);
     cfg.protection_disabled_for_testing =
         lrc_extract_bool(content, "protection_disabled_for_testing", false);
     // Phase-1: optional explicit runtime mode + control-API bind/token.
@@ -2463,6 +2472,59 @@ int main() {
     }
 
     // ════════════════════════════════════════════════════════════════════
+    // Phase-3 review (2026-07-11) — PORTFOLIO UNIFICATION. "Strategies produce
+    // TARGETS, not orders." Each production sleeve DECLARES a desired (symbol,
+    // target_usd, factor, family) with the allocator; the allocator MERGES the
+    // overlapping per-symbol targets, applies the FAMILY regime exposure + global
+    // drawdown scale + AGGREGATE momentum-factor cap + portfolio vol/cluster/beta
+    // risk scale, caps ONCE at the symbol level, nets the delta vs the exchange-
+    // truth ledger (actual + pending), and would emit the netted order.
+    //
+    // TRACK-ONLY by default (portfolio_alloc_enforce=false): the allocator COMPUTES
+    // + LOGS the unified vector ([ALLOC-TRACK]) so the whole layer is exercised on
+    // live targets, but does NOT emit — the per-sleeve shadow books and the 32-cell
+    // UpJump threshold GRID keep their own records untouched (the grid cells never
+    // register a target, so they are preserved by construction). Set enforce=true
+    // (go-live) to make the netted deltas the real orders. The allocator NEVER
+    // edits a validated sleeve's signal/exit logic.
+    // ════════════════════════════════════════════════════════════════════
+    static chimera::SpotPortfolioAllocator g_allocator;
+    static std::mutex                      g_alloc_mtx;
+    {
+        double nav = runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0;
+        // Research starting caps (track-only; operator tunes before enforce). One
+        // symbol cap = 1 NAV unit; aggregate momentum cap = 4 NAV units (XSec +
+        // UpJump + RipRider are ONE factor); vol/beta OFF until the rolling
+        // covariance warms (apply_risk returns 1.0 cold); cluster cap 50%.
+        g_allocator.configure(/*enforce*/runtime_cfg.portfolio_alloc_enforce,
+                              /*symbol_cap*/nav, /*momentum_cap*/4.0*nav,
+                              /*target_vol*/0.0, /*cluster_frac*/0.50, /*beta*/0.0);
+        g_allocator.regime().configure(/*hysteresis*/0.05);
+        g_allocator.drawdown().configure();
+        g_allocator.risk().configure(/*window*/30, /*shrink*/0.30);
+        g_allocator.ref_px = [](const std::string& usym) -> double {
+            std::string lc = usym; for (auto& ch : lc) if (ch>='A'&&ch<='Z') ch += 32;
+            int sid = chimera::sym_id(lc); if (sid < 0) return 0.0;
+            return load_dbl_atomic(g_last_spot_px_bits[sid]);
+        };
+        g_allocator.cluster_of = [](const std::string& usym) -> int {
+            std::string lc = usym; for (auto& ch : lc) if (ch>='A'&&ch<='Z') ch += 32;
+            return symbol_cluster(chimera::symbol_to_id(lc));
+        };
+        // ENFORCE sink (never called in track-only): route the netted delta through
+        // the ONE Phase-1/2 gateway (mode + kill-switch + filters + cash + ledger).
+        g_allocator.emit = [&gateway](const chimera::AllocDelta& d, chimera::Factor, chimera::Family){
+            gateway.submit({ d.symbol, d.is_buy, d.qty, d.usd>0.0 ? d.usd/d.qty : 0.0,
+                             /*is_exit*/ !d.is_buy, "ALLOC" });
+        };
+        std::printf("[ALLOC] Phase-3 portfolio allocator wired: %s | symbol_cap=$%.0f "
+                    "momentum_cap=$%.0f cluster<=50%% (regime+DD+factor overlays ON)\n",
+                    runtime_cfg.portfolio_alloc_enforce ? "ENFORCE" : "TRACK-ONLY (shadow record + grid preserved)",
+                    nav, 4.0*nav);
+        std::fflush(stdout);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // S-2026-06-18: CrossSectionalMomentumEngine — FIRST OOS-validated Chimera
     // edge, installed as a STANDALONE allocator (not a sizing tilt). Curated
     // QUALITY universe (ex-meme), lb30/top3/rebal14/inverse-vol, BTC>200d gate
@@ -2516,7 +2578,8 @@ int main() {
         std::fflush(stdout);
         auto fire = [&gateway, &exec_ok](const char* tag, double sleeve_nav,
                     std::map<std::string,double>& hold, int64_t day,
-                    const std::map<std::string,double>& tw, bool bull) {
+                    const std::map<std::string,double>& tw, bool bull,
+                    double breadth, double dispersion) {
             std::string picks; for (const auto& kv : tw) if (kv.second > 0.0) { char b[48];
                 std::snprintf(b, sizeof b, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); picks += b; }
             std::printf("[%s] REBALANCE day=%lld bull=%d -> %s\n", tag, (long long)day, bull?1:0,
@@ -2534,11 +2597,27 @@ int main() {
                                  /*is_exit*/ dusd < 0.0, tag });
                 hold[kv.first] = tgt;
             }
+            // Phase-3 TRACK-ONLY: declare this sleeve's DESIRED per-symbol targets to
+            // the portfolio allocator and log the merged/capped/netted unified vector.
+            // Does NOT alter the gateway.submit above (shadow book preserved).
+            {
+                std::lock_guard<std::mutex> lk(g_alloc_mtx);
+                g_allocator.set_regime_inputs(breadth, dispersion, /*severe*/false);
+                for (const auto& kv : tw) {
+                    std::string usym = kv.first + "USDT";
+                    double tgt = bull ? kv.second * sleeve_nav : 0.0;
+                    g_allocator.set_target(tag, usym, tgt, chimera::Factor::MOMENTUM,
+                                           chimera::Family::XSEC);
+                }
+                g_allocator.plan(&g_ledger);
+            }
         };
-        xsec_btc.set_rebalance_callback([fire, nav_btc](int64_t d, const std::map<std::string,double>& tw, bool b){
-            static std::map<std::string,double> hold; fire("XSEC-BTC", nav_btc, hold, d, tw, b); });
-        xsec_br.set_rebalance_callback([fire, nav_br](int64_t d, const std::map<std::string,double>& tw, bool b){
-            static std::map<std::string,double> hold; fire("XSEC-BR", nav_br, hold, d, tw, b); });
+        xsec_btc.set_rebalance_callback([fire, nav_btc, &xsec_btc](int64_t d, const std::map<std::string,double>& tw, bool b){
+            static std::map<std::string,double> hold;
+            fire("XSEC-BTC", nav_btc, hold, d, tw, b, xsec_btc.breadth_latest(), xsec_btc.dispersion_latest()); });
+        xsec_br.set_rebalance_callback([fire, nav_br, &xsec_br](int64_t d, const std::map<std::string,double>& tw, bool b){
+            static std::map<std::string,double> hold;
+            fire("XSEC-BR", nav_br, hold, d, tw, b, xsec_br.breadth_latest(), xsec_br.dispersion_latest()); });
     }
 
     // ── Sleeve 3: RipRiderEngine — per-symbol regime-gated rip-rider ──────────
@@ -2579,6 +2658,14 @@ int main() {
             std::printf("[RIP] ENTRY %s @ %.6f\n", sym.c_str(), px); std::fflush(stdout);
             if (exec_ok && px > 0)
                 gateway.submit({ sym + "USDT", true, (rip_nav/8.0)/px, px, /*is_exit*/false, "RIP" });
+            // Phase-3 TRACK-ONLY: declare the RipRider target (one factor with XSec/
+            // UpJump); the allocator caps aggregate momentum. Shadow book unchanged.
+            if (px > 0) {
+                std::lock_guard<std::mutex> lk(g_alloc_mtx);
+                g_allocator.set_target("RIP", sym + "USDT", rip_nav/8.0,
+                                       chimera::Factor::MOMENTUM, chimera::Family::RIPRIDER);
+                g_allocator.plan(&g_ledger);
+            }
         });
         riprider.set_close_callback([&gateway, &exec_ok](const chimera::RipClose& t){
             double ret = t.entryPrice>0 ? (t.exitPrice/t.entryPrice-1)*100.0 : 0.0;
@@ -2592,6 +2679,12 @@ int main() {
             double held = g_ledger.attributed_qty("RIP", sym);
             if (exec_ok && t.exitPrice > 0 && held > 0.0)
                 gateway.submit({ sym, false, held, t.exitPrice, /*is_exit*/true, "RIP" });
+            // Phase-3 TRACK-ONLY: RipRider exited this coin -> clear its target.
+            {
+                std::lock_guard<std::mutex> lk(g_alloc_mtx);
+                g_allocator.clear_target("RIP", sym);
+                g_allocator.plan(&g_ledger);
+            }
         });
     }
 
@@ -2783,6 +2876,25 @@ int main() {
                     std::fprintf(stderr,
                         "[ORDER-INTENT] execute failed tag=%s symbol=%s err=%s\n",
                         intent.tag.c_str(), intent.symbol.c_str(), result.error.c_str());
+                }
+                // Phase-3 TRACK-ONLY: declare the EdgeEngine/UpJump-parent target to
+                // the allocator (a BUY sets the target notional; a SELL/exit clears
+                // it). UPJUMP tags are the momentum factor + UPJUMP family (weaker
+                // macro, reduced size); other EdgeEngines are per-symbol EDGE books.
+                // Grid CLIP companions never reach here (own book) — preserved.
+                {
+                    std::string usym = intent.symbol;
+                    for (auto& ch : usym) if (ch>='a'&&ch<='z') ch -= 32;
+                    bool is_uj = intent.tag.find("UPJUMP") != std::string::npos;
+                    bool is_mom = is_uj || intent.tag.find("TSMOM") != std::string::npos;
+                    std::lock_guard<std::mutex> lk(g_alloc_mtx);
+                    if (intent.is_buy)
+                        g_allocator.set_target(intent.tag, usym, qty * intent.ref_px,
+                            is_mom ? chimera::Factor::MOMENTUM : chimera::Factor::OTHER,
+                            is_uj  ? chimera::Family::UPJUMP   : chimera::Family::EDGE);
+                    else
+                        g_allocator.clear_target(intent.tag, usym);
+                    g_allocator.plan(&g_ledger);
                 }
             });
         // ── Smart Pyramid callback: only fires after BE-lock armed + profit >= pyramid_arm_atr ─

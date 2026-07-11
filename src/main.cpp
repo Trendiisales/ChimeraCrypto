@@ -848,6 +848,55 @@ static void persist_trade(const chimera::EdgeEngine::TradeRecord& t) {
     std::fflush(stdout);
 }
 
+// ── CHIMERA→OMEGA DESK trade export (S-2026-07-12) ──────────────────────────
+// Appends every CLOSED shadow trade (slot engines TSMOM/ICHI/BOLL + UPJUMP
+// parents via set_on_trade in the g_slots wiring loop, UpJump companion clips
+// via persist_companion_clip, XSec/XSec2 rebalance legs) to
+// data/chimera_inbound.csv in the Omega desk's crypto_inbound schema plus a
+// trailing reason column:
+//   id,entry_ts,exit_ts,sym,strat,side,entry,exit,net_usd,reason
+// (entry_ts/exit_ts in SECONDS — matches crypto_inbound.csv; the desk parser
+//  gmtime()s field 2.)
+// TRANSPORT: the Mac relay (Omega repo tools/gui/refresh_crypto_companion.sh,
+// launchd com.omega.crypto-companion-push every 120s) pulls this file and
+// pushes it to omega-new:C:/Omega/logs/trades/chimera_inbound.csv, where the
+// :7779 /api/crypto_trades endpoint merges it into the LAST-15-TRADES panel
+// tagged book="chimera".
+// DISPLAY-ONLY on the desk: the ALL-TIME PnL fold reads crypto_inbound.csv
+// only (Omega CryptoLedgerInbound) — chimera shadow PnL is NOT folded.
+// net_usd uses the desk pool convention (operator 2026-07-04): $ = bp ×
+// POOL/10000 with POOL=$10,000 → 1 bp = $1. These are REAL FORWARD shadow
+// trades, never backtest/replay rows (feedback-no-backtest-in-live-gui).
+// reason=="SHUTDOWN" closes are NOT exported — they are bookkeeping snapshots
+// (the position resumes from open_positions.json on restart), not real exits.
+static constexpr const char* DESK_INBOUND_FILE = "data/chimera_inbound.csv";
+static std::mutex g_desk_export_mtx;
+static void export_desk_trade(int64_t entry_ts_ms, int64_t exit_ts_ms,
+                              std::string sym, const std::string& strat,
+                              const char* side, double entry_px, double exit_px,
+                              double net_bp, const std::string& reason) {
+    if (reason == "SHUTDOWN") return;   // bookkeeping close, position resumes
+    // "suiusdt" -> "SUI"
+    for (auto& c : sym) if (c >= 'a' && c <= 'z') c -= 32;
+    if (sym.size() > 4 && sym.compare(sym.size() - 4, 4, "USDT") == 0)
+        sym.resize(sym.size() - 4);
+    const double POOL_USD = 10000.0;                 // desk pool convention
+    double net_usd = net_bp * POOL_USD / 10000.0;    // 1 bp = $1 at $10k pool
+    std::lock_guard<std::mutex> lk(g_desk_export_mtx);
+    bool fresh = false;
+    { FILE* t = fopen(DESK_INBOUND_FILE, "r"); if (!t) fresh = true; else fclose(t); }
+    FILE* f = fopen(DESK_INBOUND_FILE, "a");
+    if (!f) { std::fprintf(stderr, "[DESK_EXPORT] failed to open %s\n", DESK_INBOUND_FILE); return; }
+    if (fresh) std::fprintf(f, "id,entry_ts,exit_ts,sym,strat,side,entry,exit,net_usd,reason\n");
+    std::fprintf(f, "%lld,%lld,%lld,%s,%s,%s,%.6f,%.6f,%.2f,%s\n",
+        (long long)exit_ts_ms, (long long)(entry_ts_ms / 1000), (long long)(exit_ts_ms / 1000),
+        sym.c_str(), strat.c_str(), side, entry_px, exit_px, net_usd, reason.c_str());
+    fclose(f);
+    std::printf("[DESK_EXPORT] %s %s %s net=$%.2f (%s)\n",
+        strat.c_str(), sym.c_str(), side, net_usd, reason.c_str());
+    std::fflush(stdout);
+}
+
 // ── S34: Multi-tier protection state persistence ───────────────────────────
 // Persists g_all_time_peak_bp, g_all_time_cum_bp, g_daily_kill_until_ms so
 // protections survive process restarts. Without this PER (Peak Equity Ratchet)
@@ -1140,6 +1189,13 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
     std::string line = js.str();
     fwrite(line.c_str(), 1, line.size(), f);
     fclose(f);
+    // CHIMERA→OMEGA DESK export (S-2026-07-12): companion clips ride to the
+    // desk trades list too. net = REAL column × per-coin weight (the honest
+    // worse-of fill minus RT cost, S-2026-07-07f) — same figure the desk
+    // companion panel folds. STANDALONE additive book, never vs-WIDE.
+    export_desk_trade(r.entry_ts_ms, r.exit_ts_ms, r.symbol, r.tag, "BUY",
+                      r.entry_px, r.exit_px, r.net_bp_real * r.size_mult,
+                      r.reason);
 }
 
 // Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from
@@ -2776,6 +2832,17 @@ int main() {
                 governed_submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px,
                                  /*is_exit*/ dusd < 0.0, tag }, chimera::Factor::MOMENTUM);
                 hold[kv.first] = tgt;
+                // DESK export (S-2026-07-12): rebalance leg = notional shift,
+                // not a realized round-trip -> net 0.00; the $ delta rides in
+                // the reason column so the desk row is honest, not fake pnl.
+                {
+                    int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    char why[48];
+                    std::snprintf(why, sizeof why, "REBAL%s$%.0f", dusd > 0 ? "+" : "-", std::fabs(dusd));
+                    export_desk_trade(now_ms, now_ms, kv.first, tag,
+                                      dusd > 0.0 ? "BUY" : "SELL", px, px, 0.0, why);
+                }
             }
             // Phase-3 TRACK-ONLY: declare this sleeve's DESIRED per-symbol targets to
             // the portfolio allocator and log the merged/capped/netted unified vector.
@@ -2865,6 +2932,15 @@ int main() {
                 // Phase-8A: governed BUY (MOMENTUM/XSEC); SELL passes through.
                 governed_submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px, /*is_exit*/ dusd < 0.0, "XSEC2" }, chimera::Factor::MOMENTUM);
                 hold[kv.first] = tgt;
+                // DESK export (S-2026-07-12): rebalance leg (see XSEC fire()).
+                {
+                    int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    char why[48];
+                    std::snprintf(why, sizeof why, "REBAL%s$%.0f", dusd > 0 ? "+" : "-", std::fabs(dusd));
+                    export_desk_trade(now_ms, now_ms, kv.first, "XSEC2",
+                                      dusd > 0.0 ? "BUY" : "SELL", px, px, 0.0, why);
+                }
             }
             // also zero-out held names no longer targeted (rebalance to CASH/out)
             if (exec_ok) for (auto& kv : hold) if (kv.second > 0 && !tw.count(kv.first)) {
@@ -2872,6 +2948,15 @@ int main() {
                 int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
                 double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
                 gateway.submit({ kv.first + "USDT", false, (kv.second)/px, px, /*is_exit*/ true, "XSEC2" });
+                // DESK export (S-2026-07-12): full exit of a dropped name.
+                {
+                    int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    char why[48];
+                    std::snprintf(why, sizeof why, "REBAL-$%.0f", kv.second);
+                    export_desk_trade(now_ms, now_ms, kv.first, "XSEC2",
+                                      "SELL", px, px, 0.0, why);
+                }
                 kv.second = 0.0;
             }
             // Phase-3 TRACK-ONLY: declare XSEC2 targets to the allocator (one
@@ -7801,6 +7886,21 @@ int main() {
     // ── Wire up bar callbacks for persistence + audit trail ────────────────
     for (auto& slot : g_slots) {
         if (slot.engine) slot.engine->set_on_bar(on_bar_callback);
+        // CHIMERA→OMEGA DESK export (S-2026-07-12): slot engines (TSMOM/ICHI/
+        // BOLL + UPJUMP parents) had NO on_trade wired — wire_engine() is
+        // legacy-gated (CHIMERA_WIRE_LEGACY) and this loop only set on_bar —
+        // so every close died in journalctl and the operator's desk was blind
+        // (SUI-TSMOM-H4 +12.79bp on 11-07 never left the box). EXPORT-ONLY
+        // hook: appends to data/chimera_inbound.csv for the desk relay. It
+        // does NOT feed g_trade_log / PER / streak-halt / live-tiers — wiring
+        // slot closes into those protections would be a risk-behavior change
+        // needing its own backtested verdict (finding logged, not smuggled).
+        if (slot.engine) slot.engine->set_on_trade(
+            [](const chimera::EdgeEngine::TradeRecord& rec) {
+                export_desk_trade(rec.entry_ts_ms, rec.exit_ts_ms, rec.symbol,
+                    rec.tag, "BUY", rec.entry_px, rec.exit_px,
+                    rec.net_bp + rec.pyramid_bp, rec.reason);
+            });
     }
 
     // ── Activate vol_filter + mtf_gate on all counter-trend engines ──────

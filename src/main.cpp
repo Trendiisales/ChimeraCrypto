@@ -170,6 +170,9 @@
 #include "core/CrossSectionalMomentumEngine.hpp"  // S-2026-06-18: validated standalone XSec allocator
 #include "core/CrossSectionalMomentum2Engine.hpp" // S-2026-07-11: Phase-5 XSec 2.0 SHADOW comparison book
 #include "core/RipRiderEngine.hpp"                 // S-2026-06-18: sleeve 3 — per-symbol regime-gated rip-rider
+#include "core/TrendPullbackReclaimEngine.hpp"     // S-2026-07-11: Phase-6 family 1 — SHADOW OBSERVATION-ONLY
+#include "core/CompressionBreakoutDailyEngine.hpp" // S-2026-07-11: Phase-6 family 2 — SHADOW OBSERVATION-ONLY
+#include "core/BullRegimeMeanReversionEngine.hpp"  // S-2026-07-11: Phase-6 family 3 — SHADOW OBSERVATION-ONLY
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
 #include "core/LiquidationCascadeDetector.hpp"
 #include "live/LiquidationWSFeed.hpp"
@@ -2782,6 +2785,94 @@ int main() {
                 g_allocator.plan(&g_ledger);
             }
         });
+    }
+
+    // ── Phase-6 (S-2026-07-11): NEW long-only families — SHADOW OBSERVATION-ONLY
+    // Three daily long-only spot families (trend-pullback/reclaim, compression
+    // breakout, bull-regime mean-reversion). Long-only, NO shorts, NO 200DMA
+    // (regime = smoothed BREADTH participation, never a price MA).
+    // BACKTEST VERDICT (backtest/phase6_families_bt.cpp; corrected long-only gate,
+    // 2022 shown-not-gated): ALL THREE FAIL the exposure-matched random-pick
+    // control — ex-2022 Sharpe 0.71/0.69/0.51 vs a breadth-gated RANDOM basket's
+    // MEDIAN 1.20 (beat 0% of 200 draws). Their apparent edge is breadth TIMING,
+    // not entry SELECTION. Trend-pullback full-WF FAILS (H2 −1.7%); compression
+    // ex-2022 WF H2 −5%; bull-MR plateau FAILS (edge only at RSI-os=35: os30→−0.4%,
+    // os40→−21%) + barely trades (43 days). The 80/20 "improvement" is mechanical
+    // de-levering (a lower-vol sleeve trims combined DD), and two are momentum-
+    // correlated (~0.4 → they LOAD the momentum factor the backlog says to CAP,
+    // not diversify). NONE is a promotion candidate. Wired OBSERVATION-ONLY: own
+    // shadow tag + forward record, NOT fed to the SpotPortfolioAllocator, NOT in
+    // the promoted-sleeve track. The 32-cell UpJump grid + shadow record untouched.
+    // See [[ChimeraReviewPhase6]]. (Phase-6b: the other 6 families + two-stage
+    // ignition — NOT built, noted for a future session.)
+    chimera::TrendPullbackReclaimEngine     p6_tpr;
+    chimera::CompressionBreakoutDailyEngine p6_cbd;
+    chimera::BullRegimeMeanReversionEngine  p6_bmr;
+    {
+        std::vector<std::string> xu = {
+            "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
+            "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
+            "SAND","MANA","CRV","COMP","BCH","LTC","ETC","XLM","VET","RUNE","FET","LDO"};
+        double nav6 = (runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0);
+        auto install6 = [&](chimera::LongOnlyDailyBase& eng, const char* tag) {
+            eng.set_universe(xu);
+            int seeded = 0, rejected = 0;
+            for (const auto& s : xu) {
+                std::string path = "data/xsec_seed/" + s + "USDT_1d.csv";
+                {   auto dq = g_dq_gate.validate_csv(path, /*now*/ 0);
+                    if (dq.rows > 0 && !dq.ok) { std::printf("[DATA-QUALITY] REFUSE %s seed %s — %s\n",
+                            tag, path.c_str(), dq.reason.c_str()); ++rejected; continue; } }
+                std::ifstream f(path); if (!f) continue;
+                std::string l; std::getline(f, l); int r = 0;   // header
+                while (std::getline(f, l)) {
+                    char* p = l.data(); char* e; long long ts = strtoll(p, &e, 10); if (*e != ',') continue;
+                    double o  = strtod(e+1, &e); double h  = strtod(e+1, &e);
+                    double lo = strtod(e+1, &e); double c  = strtod(e+1, &e);
+                    double v  = strtod(e+1, &e);
+                    if (c > 0) { long long d = ts / 86400000LL; eng.seed_daily(s, d, o, h, lo, c, v); ++r; }
+                }
+                if (r > 0) ++seeded;
+            }
+            std::printf("[%s] Phase-6 OBSERVATION-ONLY book installed: seeded %d/%zu symbols, %zu days; "
+                        "long-only daily, BREADTH-gate (NO 200DMA); NOT allocator-fed (failed pick-edge control) "
+                        "nav=$%.0f SHADOW\n", tag, seeded, xu.size(), eng.num_days(), nav6);
+            if (rejected > 0) std::printf("[DATA-QUALITY] %s seed: %d symbol(s) REFUSED for corrupt history\n", tag, rejected);
+            { size_t i6 = eng.num_days()?eng.num_days()-1:0; bool b6; auto w6 = eng.compute_target_weights(i6, b6);
+              std::string p; for (auto& kv : w6) if (kv.second > 0) { char z[48];
+                  std::snprintf(z, sizeof z, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); p += z; }
+              std::printf("[%s] startup: bull=%d breadth=%.2f -> %s\n",
+                          tag, b6?1:0, eng.breadth_latest(), b6 ? (p.empty()?"(none)":p.c_str()) : "CASH (breadth gate)"); }
+            std::fflush(stdout);
+            eng.set_rebalance_callback([&gateway, &exec_ok, nav6, tag](int64_t day,
+                                        const std::map<std::string,double>& tw, bool bull){
+                static std::map<std::string,std::map<std::string,double>> holds;  // per-tag hold
+                auto& hold = holds[tag];
+                std::string picks; for (auto& kv : tw) if (kv.second > 0) { char b[48];
+                    std::snprintf(b, sizeof b, "%s:%.0f%% ", kv.first.c_str(), kv.second*100.0); picks += b; }
+                std::printf("[%s] REBALANCE day=%lld bull=%d -> %s\n", tag, (long long)day, bull?1:0,
+                            bull ? (picks.empty()?"(none)":picks.c_str()) : "CASH (breadth gate)"); std::fflush(stdout);
+                if (exec_ok) {
+                    for (auto& kv : tw) { std::string lc = kv.first; for (auto& ch : lc) if (ch>='A'&&ch<='Z') ch += 32;
+                        int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
+                        double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
+                        double tgt = kv.second * nav6, dusd = tgt - hold[kv.first];
+                        if (std::fabs(dusd) < 25.0) continue;
+                        gateway.submit({ kv.first + "USDT", dusd > 0.0, std::fabs(dusd)/px, px, /*is_exit*/ dusd < 0.0, tag });
+                        hold[kv.first] = tgt; }
+                    for (auto& kv : hold) if (kv.second > 0 && !tw.count(kv.first)) {
+                        std::string lc = kv.first; for (auto& ch : lc) if (ch>='A'&&ch<='Z') ch += 32;
+                        int sid = chimera::sym_id(lc + "usdt"); if (sid < 0) continue;
+                        double px = load_dbl_atomic(g_last_spot_px_bits[sid]); if (px <= 0.0) continue;
+                        gateway.submit({ kv.first + "USDT", false, (kv.second)/px, px, /*is_exit*/ true, tag });
+                        kv.second = 0.0; }
+                }
+                // OBSERVATION-ONLY: deliberately NOT declared to g_allocator (this
+                // family failed the pick-edge control — no promotion track).
+            });
+        };
+        install6(p6_tpr, "P6-TPR");   // trend-pullback / reclaim
+        install6(p6_cbd, "P6-CBD");   // compression breakout
+        install6(p6_bmr, "P6-BMR");   // bull-regime mean-reversion
     }
 
     // ── Sleeve 3: RipRiderEngine — per-symbol regime-gated rip-rider ──────────
@@ -8155,7 +8246,10 @@ int main() {
           xsec_btc.on_tick(xss, mid, xnow);
           xsec_br.on_tick(xss, mid, xnow);
           xsec2.on_tick(xss, mid, xnow);          // Phase-5 XSec 2.0 shadow book
-          riprider.on_tick(xss, mid, xnow); }
+          riprider.on_tick(xss, mid, xnow);
+          p6_tpr.on_tick(xss, mid, xnow);         // Phase-6 observation-only books
+          p6_cbd.on_tick(xss, mid, xnow);
+          p6_bmr.on_tick(xss, mid, xnow); }
 
         // S34: log BTC ticks into rolling chart buffer (~last 1000 ticks)
         if (id == chimera::SYM_BTC) {

@@ -1,0 +1,145 @@
+Loaded 54/54 symbols from ../data/xsec_seed
+Reference existing book: XSec v1 dual-sleeve (60/40).   XSec v1          total=   +3051.7%  Sharpe= 1.11  maxDD= 57.2%  PF=1.29  days=2360 active=1288
+
+############################################################
+### FAMILY: TREND-PULLBACK
+############################################################
+
+--- HEADLINE (net 15bp/side, full history) ---
+  TREND-PULLBACK   total=    +130.0%  Sharpe= 0.52  maxDD= 66.8%  PF=1.14  days=2360 active=1033
+
+--- EX-2022 (bear NOT gated) ---
+  ex-2022          total=    +225.8%  Sharpe= 0.71  maxDD= 53.0%  PF=1.18  days=1995 active=981
+  ex22 WF: H1   +178.5% Sh 0.97 | H2    +17.0% Sh 0.34  BOTH+
+
+--- WALK-FORWARD both halves (full) ---
+  H1   +133.9% Sh 0.80 | H2     -1.7% Sh 0.16  FAIL
+
+--- BEAR behaviour (shown, not gated) ---
+  2022 total=  -29.4% (active 52/365)  |  2025 total=   +6.4% (active 214/365)
+
+--- 2x-COST (30bp/side) ---
+  full total=   +89.3% Sh 0.45 + | ex-2022 total=  +172.1% +
+
+--- PARAM-NEIGHBOURHOOD PLATEAU (ex-2022) ---
+  atr_mult=2.5         ex22 total=   +230.6%  Sharpe= 0.71  +
+  atr_mult=3.5         ex22 total=   +221.8%  Sharpe= 0.70  +
+  ema 15/40            ex22 total=   +253.8%  Sharpe= 0.72  +
+  ema 25/60            ex22 total=    +97.2%  Sharpe= 0.51  +
+  pullback_lb=4        ex22 total=   +225.8%  Sharpe= 0.71  +
+  pullback_lb=8        ex22 total=   +225.8%  Sharpe= 0.71  +
+  breadth=0.35         ex22 total=   +192.2%  Sharpe= 0.67  +
+  breadth=0.45         ex22 total=    +98.9%  Sharpe= 0.52  +
+  max_pos=6            ex22 total=   +193.6%  Sharpe= 0.67  +
+  max_pos=10           ex22 total=   +249.4%  Sharpe= 0.73  +
+
+--- EX-BEST-EPISODE (ex-2022) ---
+  best 30d block x2.22; ex-episode total=   +47.0% Sharpe 0.39 STILL+
+
+--- RANDOM-ENTRY CONTROL (exposure-matched, ex-2022 Sharpe) ---
+  random gated pick (N=200): median Sharpe=1.20  p90=1.44
+  family ex-2022 Sharpe=0.71 -> beats 0% of random draws  WEAK(<median)
+
+--- PORTFOLIO-INCREMENT (family alongside XSec v1) ---
+  corr(XSec v1, TREND-PULLBACK) [ex-2022] = +0.440  (lower = more diversifying)
+  XSec v1 alone    total=   +4112.5%  Sharpe= 1.29  maxDD= 57.2%  PF=1.33  days=1995 active=1208
+  TREND-PULLBACK   total=    +225.8%  Sharpe= 0.71  maxDD= 53.0%  PF=1.18  days=1995 active=981
+  80/20 combined   total=   +2853.9%  Sharpe= 1.30  maxDD= 52.5%  PF=1.32  days=1995 active=1312
+  -> combined Sharpe 1.30 vs XSec-v1 1.29, maxDD 52.5% vs 57.2% : IMPROVES the combined book
+
+
+############################################################
+### FAMILY: COMPRESSION-BREAKOUT
+############################################################
+
+--- HEADLINE (net 15bp/side, full history) ---
+  COMPRESSION-BREAKOUT total=    +180.0%  Sharpe= 0.62  maxDD= 46.0%  PF=1.20  days=2360 active=748
+
+--- EX-2022 (bear NOT gated) ---
+  ex-2022          total=    +169.5%  Sharpe= 0.69  maxDD= 41.2%  PF=1.22  days=1995 active=661
+  ex22 WF: H1   +183.5% Sh 1.06 | H2     -5.0% Sh 0.02  FAIL
+
+--- WALK-FORWARD both halves (full) ---
+  H1    +81.6% Sh 0.64 | H2    +54.2% Sh 0.64  BOTH+
+
+--- BEAR behaviour (shown, not gated) ---
+  2022 total=   +3.9% (active 87/365)  |  2025 total=  -20.0% (active 76/365)
+
+--- 2x-COST (30bp/side) ---
+  full total=  +140.1% Sh 0.55 + | ex-2022 total=  +136.3% +
+
+--- PARAM-NEIGHBOURHOOD PLATEAU (ex-2022) ---
+  pct_thresh=0.20      ex22 total=   +178.9%  Sharpe= 0.73  +
+  pct_thresh=0.30      ex22 total=   +192.7%  Sharpe= 0.71  +
+  vol_mult=1.0         ex22 total=   +158.9%  Sharpe= 0.66  +
+  vol_mult=1.5         ex22 total=    +94.4%  Sharpe= 0.52  +
+  atr_mult=2.5         ex22 total=   +169.9%  Sharpe= 0.69  +
+  atr_mult=3.5         ex22 total=   +168.6%  Sharpe= 0.68  +
+  range_lb=15          ex22 total=   +169.9%  Sharpe= 0.69  +
+  range_lb=25          ex22 total=   +182.2%  Sharpe= 0.73  +
+  breadth=0.35         ex22 total=   +167.9%  Sharpe= 0.69  +
+  breadth=0.45         ex22 total=    +71.9%  Sharpe= 0.46  +
+
+--- EX-BEST-EPISODE (ex-2022) ---
+  best 30d block x2.03; ex-episode total=   +32.6% Sharpe 0.33 STILL+
+
+--- RANDOM-ENTRY CONTROL (exposure-matched, ex-2022 Sharpe) ---
+  random gated pick (N=200): median Sharpe=1.20  p90=1.44
+  family ex-2022 Sharpe=0.69 -> beats 0% of random draws  WEAK(<median)
+
+--- PORTFOLIO-INCREMENT (family alongside XSec v1) ---
+  corr(XSec v1, COMPRESSION-BREAKOUT) [ex-2022] = +0.410  (lower = more diversifying)
+  XSec v1 alone    total=   +4112.5%  Sharpe= 1.29  maxDD= 57.2%  PF=1.33  days=1995 active=1208
+  COMPRESSION-BREAKOUT total=    +169.5%  Sharpe= 0.69  maxDD= 41.2%  PF=1.22  days=1995 active=661
+  80/20 combined   total=   +2764.6%  Sharpe= 1.30  maxDD= 48.9%  PF=1.33  days=1995 active=1319
+  -> combined Sharpe 1.30 vs XSec-v1 1.29, maxDD 48.9% vs 57.2% : IMPROVES the combined book
+
+
+############################################################
+### FAMILY: BULL-MEANREV
+############################################################
+
+--- HEADLINE (net 15bp/side, full history) ---
+  BULL-MEANREV     total=     +17.9%  Sharpe= 0.56  maxDD=  6.8%  PF=2.35  days=2360 active=47
+
+--- EX-2022 (bear NOT gated) ---
+  ex-2022          total=     +14.1%  Sharpe= 0.51  maxDD=  8.7%  PF=2.10  days=1995 active=43
+  ex22 WF: H1     +8.4% Sh 0.53 | H2     +5.3% Sh 0.50  BOTH+
+
+--- WALK-FORWARD both halves (full) ---
+  H1    +15.8% Sh 0.88 | H2     +1.9% Sh 0.16  BOTH+
+
+--- BEAR behaviour (shown, not gated) ---
+  2022 total=   +3.4% (active 4/365)  |  2025 total=   +1.8% (active 6/365)
+
+--- 2x-COST (30bp/side) ---
+  full total=   +15.0% Sh 0.49 + | ex-2022 total=   +11.6% +
+
+--- PARAM-NEIGHBOURHOOD PLATEAU (ex-2022) ---
+  os=30                ex22 total=     -0.4%  Sharpe=-0.44  NEG
+  os=40                ex22 total=    -21.5%  Sharpe=-0.33  NEG
+  os_lb=3              ex22 total=    +14.1%  Sharpe= 0.51  +
+  os_lb=7              ex22 total=    +14.1%  Sharpe= 0.51  +
+  max_hold=10          ex22 total=    +14.1%  Sharpe= 0.51  +
+  max_hold=20          ex22 total=    +14.1%  Sharpe= 0.51  +
+  ema 15/40            ex22 total=     +2.5%  Sharpe= 0.18  +
+  ema 25/60            ex22 total=    +16.9%  Sharpe= 0.51  +
+  breadth=0.35         ex22 total=    +16.9%  Sharpe= 0.58  +
+  breadth=0.45         ex22 total=    +13.8%  Sharpe= 0.50  +
+
+--- EX-BEST-EPISODE (ex-2022) ---
+  best 30d block x1.10; ex-episode total=    +3.8% Sharpe 0.19 STILL+
+
+--- RANDOM-ENTRY CONTROL (exposure-matched, ex-2022 Sharpe) ---
+  random gated pick (N=200): median Sharpe=1.20  p90=1.44
+  family ex-2022 Sharpe=0.51 -> beats 0% of random draws  WEAK(<median)
+
+--- PORTFOLIO-INCREMENT (family alongside XSec v1) ---
+  corr(XSec v1, BULL-MEANREV) [ex-2022] = +0.080  (lower = more diversifying)
+  XSec v1 alone    total=   +4112.5%  Sharpe= 1.29  maxDD= 57.2%  PF=1.33  days=1995 active=1208
+  BULL-MEANREV     total=     +14.1%  Sharpe= 0.51  maxDD=  8.7%  PF=2.10  days=1995 active=43
+  80/20 combined   total=   +2373.1%  Sharpe= 1.29  maxDD= 48.6%  PF=1.33  days=1995 active=1215
+  -> combined Sharpe 1.29 vs XSec-v1 1.29, maxDD 48.6% vs 57.2% : IMPROVES the combined book
+
+
+================= DONE =================

@@ -21,6 +21,7 @@
 // ============================================================================
 #include <string>
 #include <vector>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <cstdint>
@@ -75,6 +76,20 @@ public:
         horizon_ms_ = horizon_ms; tp_bp_ = tp_bp; sl_bp_ = sl_bp;
     }
 
+    // Bound the in-memory per-signal store to at most `max_records` records with
+    // OLDEST-FIRST eviction (a FIFO ring). 0 = unbounded (legacy default). The
+    // aggregated per-gate counterfactual stats (per_gate_) are PRESERVED across
+    // eviction — only the granular per-signal detail is bounded. This caps the
+    // ~15MB/month unbounded growth over a long shadow run while keeping the
+    // rolling counterfactual research value intact. Thread-safe.
+    void set_capacity(size_t max_records) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        cap_ = max_records;
+        evict_oldest_locked();
+    }
+    size_t capacity() const { std::lock_guard<std::mutex> lk(mtx_); return cap_; }
+    size_t evicted() const  { std::lock_guard<std::mutex> lk(mtx_); return evicted_; }
+
     // Begin a raw signal -> returns its correlation id. Call once per raw fire.
     uint64_t begin_signal(const std::string& tag, const std::string& symbol,
                           const std::string& kind, double signal_px, int64_t ts_ms) {
@@ -85,6 +100,7 @@ public:
         r.kind = kind; r.signal_px = signal_px;
         records_[id] = r;
         order_.push_back(id);
+        evict_oldest_locked();
         return id;
     }
 
@@ -186,8 +202,9 @@ public:
 
     void print_summary(const char* prefix = "[GATE-ATTR]") const {
         std::lock_guard<std::mutex> lk(mtx_);
-        std::printf("%s %zu signals recorded, per-gate helpfulness (avg counterfactual bp):\n",
-                    prefix, records_.size());
+        std::printf("%s %zu signals in-store (cap=%zu, %zu evicted oldest-first), "
+                    "per-gate helpfulness (avg counterfactual bp):\n",
+                    prefix, records_.size(), cap_, evicted_);
         for (const auto& kv : per_gate_) {
             const GateStat& st = kv.second;
             std::printf("%s   %-18s suppressed=%d cf_resolved=%d cf_pos=%d avg=%+.1fbp -> %s\n",
@@ -201,12 +218,34 @@ public:
     }
 
 private:
+    // Evict oldest records (FIFO by insertion order) until size <= cap_.
+    // Caller MUST hold mtx_. Aggregated per_gate_ stats are intentionally left
+    // untouched — they are the retained research value; only granular per-signal
+    // records are bounded. Any evicted record with a still-open counterfactual
+    // is dropped from open_cf_ so that vector stays bounded too.
+    void evict_oldest_locked() {
+        while (cap_ > 0 && records_.size() > cap_ && !order_.empty()) {
+            uint64_t old = order_.front();
+            order_.pop_front();
+            auto it = records_.find(old);
+            if (it == records_.end()) continue;   // defensive: already gone
+            if (it->second.cf_open) {
+                auto p = std::find(open_cf_.begin(), open_cf_.end(), old);
+                if (p != open_cf_.end()) open_cf_.erase(p);
+            }
+            records_.erase(it);
+            ++evicted_;
+        }
+    }
+
     mutable std::mutex mtx_;
     uint64_t seq_ = 0;
     int64_t  horizon_ms_ = 0;
     double   tp_bp_ = 0.0, sl_bp_ = 0.0;
+    size_t   cap_ = 0;        // 0 = unbounded (legacy). set_capacity() to bound.
+    size_t   evicted_ = 0;    // count of oldest-first evictions (observability).
     std::map<uint64_t, GateRecord> records_;
-    std::vector<uint64_t>          order_;
+    std::deque<uint64_t>           order_;    // FIFO insertion order for eviction.
     std::vector<uint64_t>          open_cf_;
     std::map<std::string, GateStat> per_gate_;
 };

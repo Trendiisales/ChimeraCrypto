@@ -61,6 +61,44 @@ int main() {
     rec = attr.find(cid3);
     check(rec && rec->entered && !rec->suppressed, "passed signal recorded as entered");
 
+    // (d) BOUNDED EVICTION — store past the cap: size stays capped, NEWEST
+    //     retained, OLDEST evicted (FIFO ring). Guards the ~15MB/month unbounded
+    //     growth fix while preserving aggregated per-gate research stats.
+    {
+        GateAttribution cap_attr;
+        cap_attr.configure(3600 * 1000, 0, 0);
+        cap_attr.set_capacity(/*max_records*/ 3);
+        uint64_t ids[6];
+        for (int i = 0; i < 6; ++i) {                 // insert 6 into a cap-3 store
+            ids[i] = cap_attr.begin_signal("BTC-TSMOM-D1", "btcusdt", "TSMOM",
+                                           100.0 + i, /*ts*/ i);
+        }
+        check(cap_attr.size() == 3, "store size stays capped at 3 after 6 inserts");
+        check(cap_attr.evicted() == 3, "exactly 3 oldest records evicted");
+        // oldest 3 (ids[0..2]) evicted, newest 3 (ids[3..5]) retained
+        check(cap_attr.find(ids[0]) == nullptr && cap_attr.find(ids[1]) == nullptr &&
+              cap_attr.find(ids[2]) == nullptr, "oldest records evicted (unresolvable)");
+        check(cap_attr.find(ids[3]) != nullptr && cap_attr.find(ids[4]) != nullptr &&
+              cap_attr.find(ids[5]) != nullptr, "newest records retained (resolvable)");
+        std::printf("  (d) cap=3: size=%zu evicted=%zu newest-retained oldest-evicted\n",
+                    cap_attr.size(), cap_attr.evicted());
+
+        // (d2) aggregated per-gate stats survive eviction; open_cf_ stays bounded.
+        GateAttribution cap2;
+        cap2.configure(3600 * 1000, 0, 0);
+        cap2.set_capacity(2);
+        for (int i = 0; i < 5; ++i) {
+            uint64_t c = cap2.begin_signal("X", "btcusdt", "K", 100.0, /*ts*/ i);
+            cap2.suppressed(c, "VOL_REGIME", "suppressed");   // opens a counterfactual
+        }
+        check(cap2.size() == 2, "cap2 store capped at 2");
+        check(cap2.open_counterfactuals() <= 2, "open counterfactuals bounded by cap (no leak)");
+        auto cs = cap2.per_gate_stats();
+        check(cs["VOL_REGIME"].suppressed == 5, "aggregated per-gate suppressed count survives eviction");
+        std::printf("  (d2) cap=2: size=%zu open_cf=%zu gate.suppressed=%d (aggregate retained)\n",
+                    cap2.size(), cap2.open_counterfactuals(), cs["VOL_REGIME"].suppressed);
+    }
+
     if (failures == 0) { std::printf("PASS gate_attribution_test\n"); return 0; }
     std::printf("FAIL gate_attribution_test (%d)\n", failures); return 1;
 }

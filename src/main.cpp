@@ -8679,6 +8679,11 @@ int main() {
         g_registry.print_summary("[REGISTRY]");
         // Phase-4 item 21/22: configure the observability sinks (SHADOW, additive).
         g_gate_attr.configure(/*horizon*/ (int64_t)6 * 3600 * 1000, /*tp_bp*/ 0.0, /*sl_bp*/ 0.0);
+        // Bound the per-signal store (oldest-first eviction) so a long shadow run
+        // can't grow the counterfactual record set without limit (~15MB/month
+        // unbounded). 20k records keeps a deep rolling window while the aggregated
+        // per-gate stats are retained across eviction. Additive/observational.
+        g_gate_attr.set_capacity(/*max_records*/ 20000);
         g_fill_realism.configure(chimera::FillModelParams{});   // Binance-spot-like defaults
         // Attach the gate-attribution sink to every CONNECTED EdgeEngine (g_slots
         // + any legacy-wired). Observational only — records each raw signal's

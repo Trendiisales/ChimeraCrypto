@@ -155,6 +155,7 @@
 #include "live/RuntimeMode.hpp"        // Phase-1: ONE immutable process mode
 #include "live/ExecutionGateway.hpp"   // Phase-1: single order chokepoint
 #include "live/StartupReconciler.hpp"  // Phase-2: boot reconcile gate (ledger/filters/clock via gateway)
+#include "live/UserStreamHaltGuard.hpp"// Phase-8G: user-stream heartbeat-lapse AUTO-HALT (go-live blocker)
 #include "live/SpotPortfolioAllocator.hpp" // Phase-3: portfolio unification (merge/cap/net + regime/DD/factor overlays)
 #include "live/EngineRegistry.hpp"     // Phase-4 item 20: honest lifecycle registry (reconcile declared vs actual)
 #include "live/GateAttribution.hpp"    // Phase-4 item 21: gate-attribution + counterfactual + correlation-ID
@@ -1886,6 +1887,11 @@ struct LiveRuntimeConfig {
     // token (env CHIMERA_CTRL_TOKEN overrides) guards the mutating endpoints.
     std::string http_bind     = "127.0.0.1";
     std::string control_token = "";
+    // Phase-8G review (2026-07-11): user-data-stream heartbeat-lapse AUTO-HALT
+    // threshold (ms). If the LIVE stream goes silent longer than this, new
+    // entries auto-halt until a clean reconcile (exits always pass). Inert in
+    // shadow (no live stream to lapse). Default 45s.
+    double      user_stream_halt_ms = 45000.0;
 };
 
 static std::string lrc_extract_string(const std::string& s, const char* key) {
@@ -1975,6 +1981,8 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
         std::string ct = lrc_extract_string(content, "control_token");
         if (!ct.empty()) cfg.control_token = ct;
     }
+    // Phase-8G: user-data-stream heartbeat-lapse auto-halt threshold (ms).
+    cfg.user_stream_halt_ms = lrc_extract_double(content, "user_stream_halt_ms", 45000.0);
     std::printf("[STARTUP] live_config loaded from %s: creds=%s shadow=%d max_pos=%.2f min_edge=%.2fbp protection_disabled=%d\n",
                 opened.c_str(), cfg.credentials_file.c_str(),
                 cfg.shadow_mode ? 1 : 0, cfg.max_position_usd, cfg.min_edge_bps,
@@ -2443,14 +2451,6 @@ int main() {
     // The gateway applies mode + kill-switch (daily-loss / emergency halt) +
     // exchange filters; risk-reducing EXITS are never blocked.
     chimera::ExecutionGatewayT<chimera::SpotExecutor> gateway(executor, g_runtime_mode);
-    gateway.kill_switch_active = []() -> bool {
-        int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        // Do NOT honour the testing bypass here: the gateway is the last line of
-        // defence for the XSec/RipRider sleeves that bypassed ALL risk before.
-        return now < g_daily_kill_until_ms.load(std::memory_order_relaxed)
-            || now < g_emergency_halt_until_ms.load(std::memory_order_relaxed);
-    };
 
     // ════════════════════════════════════════════════════════════════════
     // Phase-2 review (2026-07-11) — EXCHANGE TRUTH. Attach the authoritative
@@ -2466,6 +2466,7 @@ int main() {
     static chimera::ExchangeTimeSync g_clock;
     static chimera::OrderIdRegistry  g_idreg;
     static chimera::UserDataStream   g_userstream;
+    static chimera::UserStreamHaltGuard g_stream_halt;   // Phase-8G auto-halt latch
     {
         // Cash: portfolio_cash_usd>0 => ENFORCE reservation (rejects/resizes the
         // cross-sleeve overbook); 0 (default) => track-only, preserving the SHADOW
@@ -2479,6 +2480,11 @@ int main() {
         // gateway. Either way the same handler updates the one ledger.
         g_userstream.set_handler([](const chimera::ExecReport& r){ g_ledger.apply_report(r); });
         g_userstream.set_shadow_driven(runtime_cfg.shadow_mode);
+
+        // Phase-8G: user-stream heartbeat-lapse AUTO-HALT threshold. Inert in
+        // shadow (the stream is shadow-driven => never lapses); arms on the live
+        // path the instant the real WS user-stream goes silent past this gap.
+        g_stream_halt.set_threshold_ms((int64_t)runtime_cfg.user_stream_halt_ms);
 
         // Clock (item 6): sync to Binance server time via the public /time probe
         // (works in shadow too). The gateway only HALTS signed (LIVE) orders on
@@ -2540,7 +2546,30 @@ int main() {
         std::printf("[LEDGER] Phase-2 exchange-truth wired: cash=$%.2f enforce=%d | reconcile: %s (%s)\n",
                     seed_cash, enforce ? 1 : 0, rec.passed ? "PASS" : "BLOCK", rec.detail.c_str());
         std::fflush(stdout);
+        // Phase-8G: a clean boot reconcile also clears any pre-armed auto-halt
+        // (defensive; latch starts clear). The live periodic reconcile below is
+        // what auto-clears an in-session heartbeat-lapse halt.
+        g_stream_halt.on_reconcile(rec.passed);
     }
+
+    // ── Phase-8G (2026-07-11): USER-STREAM HEARTBEAT AUTO-HALT (go-live blocker).
+    // Wire the auto-halt latch into the ONE gateway kill-switch — REUSING the
+    // existing entry chokepoint (entries blocked while true; EXITS always pass).
+    // The lambda POLLS the latch against the live user-stream every time entries
+    // are gated: if the live WS heartbeat has lapsed > threshold, g_stream_halt
+    // latches ON and new entries halt until a clean reconcile clears it. In
+    // shadow the stream is shadow-driven, heartbeat_lapsed() is always false, so
+    // poll() never arms and this is a pure no-op (identical to prior behaviour).
+    gateway.kill_switch_active = []() -> bool {
+        int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        bool stream_halted = g_stream_halt.poll(g_userstream, now);   // AUTO-arm (no-op in shadow)
+        // Do NOT honour the testing bypass here: the gateway is the last line of
+        // defence for the XSec/RipRider sleeves that bypassed ALL risk before.
+        return stream_halted
+            || now < g_daily_kill_until_ms.load(std::memory_order_relaxed)
+            || now < g_emergency_halt_until_ms.load(std::memory_order_relaxed);
+    };
 
     // ════════════════════════════════════════════════════════════════════
     // Phase-3 review (2026-07-11) — PORTFOLIO UNIFICATION. "Strategies produce
@@ -9605,6 +9634,26 @@ int main() {
                     if (now_ms_l - last >= 60000) {
                         recompute_live_tiers();
                         g_last_live_recalc_ms.store(now_ms_l, std::memory_order_relaxed);
+                    }
+                }
+
+                // ── Phase-8G: auto-CLEAR the user-stream heartbeat halt on
+                // stream-resume + clean reconcile. Runs ONLY while the auto-halt
+                // is armed — which happens ONLY on the live path (shadow never
+                // arms, heartbeat_lapsed()==false), so this is a no-op in shadow.
+                // When the live WS user-stream has resumed (heartbeat fresh
+                // again) AND a reconcile re-agrees the ledger with the exchange,
+                // the latch clears and entries resume. The full-account snapshot
+                // fetch is the same LIVE-activation surface as the Phase-2 boot
+                // reconcile (empty clean snapshot until the account fetch is wired).
+                if (g_stream_halt.halted()) {
+                    int64_t now_hb = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    if (!g_userstream.heartbeat_lapsed(now_hb, g_stream_halt.threshold_ms())) {
+                        chimera::StartupReconciler rec8g;
+                        chimera::ExchangeSnapshot snap8g; snap8g.ok = true;   // LIVE: fill from account fetch
+                        auto rr8g = rec8g.reconcile(snap8g, g_ledger, &g_idreg, now_hb);
+                        g_stream_halt.on_reconcile(rr8g.passed);
                     }
                 }
 

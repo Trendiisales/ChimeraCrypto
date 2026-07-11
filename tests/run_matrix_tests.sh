@@ -6,6 +6,10 @@
 # phase tests — this runner adds only the gaps:
 #   * stale-user-stream  — a stale user-data stream HALTS entries (exits pass)
 #                          until a clean StartupReconciler pass resumes.
+#   * user-stream-autohalt — Phase-8G LIVE-path: the halt AUTO-ARMS on a live
+#                          heartbeat lapse (no explicit trigger) via the gateway
+#                          kill-switch, exits pass, clears on stream-resume +
+#                          clean reconcile; SHADOW no-op (never arms).
 #   * allocator-vs-legacy — the track-only allocator's would-do target vs the
 #                          legacy per-sleeve sum is a fully TRACEABLE diff, and
 #                          track-only emits nothing.
@@ -40,8 +44,9 @@ run_pos() { # name  source  extra_flags
 }
 
 echo "=== CI-matrix supplemental suite (gaps not covered by a phase suite) ==="
-run_pos "stale_user_stream"   stale_user_stream_test.cpp   "$BREW_INC"
-run_pos "allocator_vs_legacy" allocator_vs_legacy_test.cpp
+run_pos "stale_user_stream"     stale_user_stream_test.cpp     "$BREW_INC"
+run_pos "user_stream_autohalt"  user_stream_autohalt_test.cpp  "$BREW_INC"
+run_pos "allocator_vs_legacy"   allocator_vs_legacy_test.cpp
 
 echo "================================================"
 [ $rc -eq 0 ] && echo "ALL MATRIX TESTS PASS" || echo "SOME TESTS FAILED"

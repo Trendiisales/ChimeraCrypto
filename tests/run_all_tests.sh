@@ -20,6 +20,7 @@
 #   restart-open-position ...... P2 startup_reconcile (position mismatch blocks)
 #   restart-working-order ...... P2 startup_reconcile (adopt, no dup)
 #   stale-user-stream .......... MATRIX stale_user_stream            [added]
+#   user-stream-autohalt ....... MATRIX user_stream_autohalt (P8G live-path) [added]
 #   mode-mismatch .............. P1 runtime_mode
 #   registry-mismatch .......... P4 engine_registry
 #   regime-boundary-oscillation  P3 regime_exposure (+ P5 hysteresis)

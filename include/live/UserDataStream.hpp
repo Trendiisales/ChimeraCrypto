@@ -35,6 +35,7 @@ public:
     // state machine so renewal timing is testable and the wiring is explicit.
     void set_listen_key(const std::string& k, int64_t now_ms) {
         listen_key_ = k; last_keepalive_ms_ = now_ms; active_ = !k.empty();
+        last_heartbeat_ms_ = now_ms;   // fresh stream => heartbeat clock starts now (Phase-8G)
     }
     const std::string& listen_key() const { return listen_key_; }
     bool active() const { return active_; }
@@ -45,6 +46,26 @@ public:
     }
     void mark_keepalive(int64_t now_ms) { last_keepalive_ms_ = now_ms; }
     void close() { active_ = false; listen_key_.clear(); }
+
+    // --- heartbeat-lapse auto-halt (Phase-8G, 2026-07-11) -------------------
+    // A LIVE user-data stream pushes execution events + WS pongs frequently; a
+    // long gap since the last one means the stream is presumed dropped and
+    // holdings may have silently drifted from the exchange's truth. The LIVE WS
+    // event/pong handler calls mark_heartbeat(now) on every message; the gateway
+    // kill-switch polls heartbeat_lapsed() to AUTO-arm the entry halt the instant
+    // the gap exceeds a short threshold (default 45s; Binance heartbeats far more
+    // often). Distinct from needs_keepalive() (the 30-min listenKey RENEWAL).
+    //
+    // SHADOW no-op guarantee: a shadow-driven stream (set_shadow_driven(true),
+    // the default) NEVER lapses — there is no live stream to drop — so this always
+    // returns false in shadow and the auto-halt is inert. It ARMS only once the
+    // real WS user-stream is connected at go-live (set_shadow_driven(false)).
+    void mark_heartbeat(int64_t now_ms) { last_heartbeat_ms_ = now_ms; }
+    int64_t last_heartbeat_ms() const { return last_heartbeat_ms_; }
+    bool heartbeat_lapsed(int64_t now_ms, int64_t threshold_ms) const {
+        return active_ && !shadow_driven_ && last_heartbeat_ms_ > 0
+            && (now_ms - last_heartbeat_ms_) >= threshold_ms;
+    }
 
     // --- report ingestion (LIVE stream OR shadow simulation) ----------------
     // The single entry point every execution report flows through. LIVE: called
@@ -64,6 +85,7 @@ private:
     bool          shadow_driven_ = true;
     int64_t       last_keepalive_ms_ = 0;
     int64_t       keepalive_interval_ms_ = 30 * 60 * 1000;
+    int64_t       last_heartbeat_ms_ = 0;   // Phase-8G: last live event/pong ts
     uint64_t      reports_ = 0;
 };
 

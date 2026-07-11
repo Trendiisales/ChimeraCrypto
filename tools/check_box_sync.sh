@@ -41,15 +41,21 @@ if [ "$box_head" = "BOX_UNREACHABLE" ]; then
 fi
 [ "$local_head" != "$box_head" ] && echo "note: HEADs differ — checking the actual deploy surface (engine files)…"
 
-# AUTHORITATIVE: byte-compare the live engine files (the deploy surface).
+# AUTHORITATIVE: byte-compare the Mac's COMMITTED BASE (git show HEAD:file — NOT the
+# working tree, which holds the new edits you are about to deploy) to the box's LIVE
+# files. This answers the real question — "were my edits re-based onto the box's current
+# files?" — so a legitimate new deploy (working-tree ahead of a matching base) is allowed,
+# while a STALE base (my HEAD behind the box) is BLOCKED. Deploy the working tree only
+# once this passes.
 sha() { shasum -a 256 2>/dev/null || sha256sum; }
 drift=0
 for f in "${FILES[@]}"; do
-  lh="$(sha < "$LOCAL_REPO/$f" | awk '{print $1}')"
+  lh="$(git -C "$LOCAL_REPO" show "HEAD:$f" 2>/dev/null | sha | awk '{print $1}')"
   bh="$(ssh -o ConnectTimeout=15 "$BOX" "shasum -a 256 $BOX_REPO/$f 2>/dev/null || sha256sum $BOX_REPO/$f" 2>/dev/null | awk '{print $1}')"
+  if [ -z "$lh" ]; then echo "WARN: could not read Mac HEAD:$f"; drift=1; continue; fi
   if [ -z "$bh" ]; then echo "WARN: could not hash box:$f"; drift=1; continue; fi
-  if [ "$lh" != "$bh" ]; then echo "DRIFT: $f  (Mac ${lh:0:12} != box ${bh:0:12})"; drift=1
-  else echo "match: $f"; fi
+  if [ "$lh" != "$bh" ]; then echo "DRIFT: $f  (Mac HEAD:${lh:0:12} != box-live:${bh:0:12})"; drift=1
+  else echo "base-match: $f (Mac committed base == box live)"; fi
 done
 
 if [ "$drift" = "1" ]; then

@@ -2833,53 +2833,53 @@ int main() {
         return c;
     };
     using LTier = chimera::UpJumpLadderCompanion::Tier;
-    // roster_cfg.csv rows (S-2026-07-05 all-6 roster; W/thr = detector window):
-    //                                                                                        W  thr    TIGHT{arm,stall,gb}   WIDE{arm,stall,gb}   mult  retire_bp(-2xBTmaxDD)
-    chimera::UpJumpLadderCompanion btc_clip (make_lad_companion("BTC-UPJUMP-H1",  "BTC-UPJUMP-CLIP",  "btcusdt",  8, 0.05, LTier{3,0,0.5,0},  LTier{5,0,0.5,0},  1.0,  -32000.0));
-    chimera::UpJumpLadderCompanion eth_clip (make_lad_companion("ETH-UPJUMP-H1",  "ETH-UPJUMP-CLIP",  "ethusdt",  6, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -101000.0));
-    chimera::UpJumpLadderCompanion sol_clip (make_lad_companion("SOL-UPJUMP-H1",  "SOL-UPJUMP-CLIP",  "solusdt",  4, 0.05, LTier{2,0,0.5,0},  LTier{8,0,0.5,0},  2.0,  -78500.0));
-    chimera::UpJumpLadderCompanion doge_clip(make_lad_companion("DOGE-UPJUMP-H1", "DOGE-UPJUMP-CLIP", "dogeusdt", 8, 0.08, LTier{3,3,0,0},    LTier{8,8,0.4,0},  1.0, -141000.0));
-    chimera::UpJumpLadderCompanion bnb_clip (make_lad_companion("BNB-UPJUMP-H1",  "BNB-UPJUMP-CLIP",  "bnbusdt",  4, 0.05, LTier{3,3,0.3,0},  LTier{8,0,0.5,0},  1.0,  -52000.0));
-    chimera::UpJumpLadderCompanion ada_clip (make_lad_companion("ADA-UPJUMP-H1",  "ADA-UPJUMP-CLIP",  "adausdt",  6, 0.05, LTier{3,4,0.5,0},  LTier{5,6,0,0},    1.0, -102500.0));
-    chimera::UpJumpLadderCompanion near_clip(make_lad_companion("NEAR-UPJUMP-H1", "NEAR-UPJUMP-CLIP", "nearusdt", 6, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -136000.0));
-    chimera::UpJumpLadderCompanion xrp_clip(make_lad_companion("XRP-UPJUMP-H1", "XRP-UPJUMP-CLIP", "xrpusdt", 4, 0.05, LTier{3,0,0.5,0},  LTier{8,0,0.5,0},  1.0, -132000.0));
-    // ── FULL BULL ROSTER companions (2026-07-11) — additive, shadow. DRAWDOWN-CANCEL = gb0.50
-    // giveback + MTM window-exit flush (+ cascade ≤1-un-BE cap / + single reclip re-arm);
-    // retire_bp = −2× BT maxDD. 4 BE-CASCADE (ETH/BTC/BNB/SOL) + 4 single (DOGE/ADA/XRP/TRX).
-    chimera::UpJumpLadderCompanion eth_upjump2_clip(make_stagger_companion(
-        "ETH-UPJUMP2-H1", "ETH-UPJUMP2-CLIP", "ethusdt", 1, 0.02, {0.2,2,3,4,6,8},        /*BE_CASCADE*/1, 0, 1.0, -31500.0));
-    chimera::UpJumpLadderCompanion btc_upjump4_clip(make_stagger_companion(
-        "BTC-UPJUMP4-H2", "BTC-UPJUMP4-CLIP", "btcusdt", 2, 0.04, {3,4,6,8,10,12},         /*BE_CASCADE*/1, 0, 1.0, -30000.0));
-    chimera::UpJumpLadderCompanion bnb_upjump3_clip(make_stagger_companion(
-        "BNB-UPJUMP3-H1", "BNB-UPJUMP3-CLIP", "bnbusdt", 1, 0.03, {3,4,6,8,10,12,14,16},   /*BE_CASCADE*/1, 0, 1.0, -38500.0));
-    chimera::UpJumpLadderCompanion sol_upjump5_clip(make_stagger_companion(
-        "SOL-UPJUMP5-H1", "SOL-UPJUMP5-CLIP", "solusdt", 1, 0.05, {0.2,2,3,4,6,8,10,12},   /*BE_CASCADE*/1, 0, 1.0, -47000.0));
-    chimera::UpJumpLadderCompanion doge_upjump4_clip(make_lad_companion(
-        "DOGE-UPJUMP4-H4", "DOGE-UPJUMP4-CLIP", "dogeusdt", 4, 0.04, LTier{3,0,0.5,0}, LTier{8,0,0.5,0}, 1.0, -185000.0));
-    chimera::UpJumpLadderCompanion ada_upjump5_clip(make_lad_companion(
-        "ADA-UPJUMP5-H1",  "ADA-UPJUMP5-CLIP",  "adausdt",  1, 0.05, LTier{3,0,0.5,0}, LTier{8,0,0.5,0}, 1.0, -183000.0));
-    chimera::UpJumpLadderCompanion xrp_upjump4_clip(make_lad_companion(
-        "XRP-UPJUMP4-H1",  "XRP-UPJUMP4-CLIP",  "xrpusdt",  1, 0.04, LTier{3,0,0.5,0}, LTier{8,0,0.5,0}, 1.0,  -82000.0));
-    chimera::UpJumpLadderCompanion trx_upjump5_clip(make_lad_companion(
-        "TRX-UPJUMP5-H1",  "TRX-UPJUMP5-CLIP",  "trxusdt",  1, 0.05, LTier{3,0,0.5,0}, LTier{8,0,0.5,0}, 0.5,  -70000.0));
-    // AAVE/OP: parent-only (not in the winner roster — AAVE PF1.04 noise, OP fails all-6).
-    // NEAR companion CUT S-2026-07-11 (near_clip declared above but NOT registered): re-judged under
-    //   the corrected long-only gate NEAR FAILs at EVERY threshold (6h/5% net +1756 but PF 1.21<1.3;
-    //   every other W/thr net-neg or PF<1.3; verified Crypto/backtest/upjump_earlyarm_bt). near_upjump_h1
-    //   parent stays wired (price feed / desk panel) = PARENT-ONLY. Un-drop = operator act.
-    chimera::UpJumpLadderCompanion* _all_clips[] = {
-        &btc_clip,&eth_clip,&sol_clip,&doge_clip,&bnb_clip,&ada_clip,&xrp_clip,            // fat-tail roster (NEAR companion dropped -> parent-only)
-        &eth_upjump2_clip,&btc_upjump4_clip,&bnb_upjump3_clip,&sol_upjump5_clip,           // 4 BE-CASCADE bull cells
-        &doge_upjump4_clip,&ada_upjump5_clip,&xrp_upjump4_clip,&trx_upjump5_clip };        // 4 single bull cells
-    chimera::EdgeEngine* _all_clip_parents[] = {
-        &btc_upjump_h1,&eth_upjump_h1,&sol_upjump_h1,&doge_upjump_h1,&bnb_upjump_h1,
-        &ada_upjump_h1,&xrp_upjump_h1,
-        &eth_upjump2_h1,&btc_upjump4_h1,&bnb_upjump3_h1,&sol_upjump5_h1,
-        &doge_upjump4_h4,&ada_upjump5_h1,&xrp_upjump4_h1,&trx_upjump5_h1 };  // 1:1 with _all_clips (price feed only)
+    (void)sizeof(LTier);   // LTier retained for make_lad_companion callers; grid uses make_stagger_companion
+    // ── THRESHOLD-COMPARISON GRID (S-2026-07-11, operator) ───────────────────────
+    // ONE canonical set: per coin, 4 SEPARATE shadow companion books at thr {2,3,4,5%},
+    // SAME BE-cascade mimic + detect window, so the operator watches the real-time forward
+    // difference per threshold and lets live real-fills pick the winner (extra bp cost accepted).
+    // RETIRES the older fat-tail *-UPJUMP-CLIP + single *-UPJUMP{2..5}-CLIP companions (no
+    // 3-overlapping-sets). 8 coins x 4 thr = 32 BE-cascade cells (NEAR excluded — stays cut).
+    // ALL shadow, long-only, NO 200DMA; each cell's cascade mimic carries the ≤1-un-BE'd DD-cut
+    // (reclip OFF, cap=#tiers). Parity (Crypto/backtest/upjump_earlyarm_bt `grid`): tuned-thr
+    // cells reproduce the deployed singles EXACTLY (ETH@2%+3336, BTC@4%+658, BNB@3%+3759,
+    // SOL@5%+3721); 31/32 clear the corrected long-only gate (BTC@5% soft WF-H1, kept for the
+    // forward comparison). Feeds = the 8 tuned parents (already g_slots'd/ARMED/SEEDED, right
+    // window per coin: ETH/rest 1h, BTC 2h, DOGE 4h); the fat-tail *-UPJUMP-H1 parent legs are
+    // retired (g_slots below). retire_bp = −2× the coin's worst-thr BT maxDD.
+    struct GridCoin { const char* pfx; const char* sym; chimera::EdgeEngine* feed; int det_w;
+                      std::vector<double> arms; double retire_bp; };
+    std::vector<GridCoin> _gcoins = {
+        {"ETH", "ethusdt", &eth_upjump2_h1, 1, {0.2,2,3,4,6,8},        -31500.0},   // BE-cascade N6
+        {"BTC", "btcusdt", &btc_upjump4_h1, 2, {3,4,6,8,10,12},        -43000.0},   // arm>=3 N6, 2h window
+        {"BNB", "bnbusdt", &bnb_upjump3_h1, 1, {3,4,6,8,10,12,14,16},  -38500.0},   // arm>=3 N8
+        {"SOL", "solusdt", &sol_upjump5_h1, 1, {0.2,2,3,4,6,8,10,12}, -100000.0},   // BE-cascade N8
+        {"DOGE","dogeusdt",&doge_upjump4_h4,4, {0.2,2,3,4,6,8},        -40500.0},   // BE-cascade N6, 4h window
+        {"ADA", "adausdt", &ada_upjump5_h1, 1, {0.2,2,3,4,6,8},        -45000.0},   // BE-cascade N6
+        {"XRP", "xrpusdt", &xrp_upjump4_h1, 1, {0.2,2,3,4,6,8},        -33000.0},   // BE-cascade N6
+        {"TRX", "trxusdt", &trx_upjump5_h1, 1, {0.2,2,3,4,6,8},        -25500.0},   // BE-cascade N6
+    };
+    // stable tag storage: make_stagger_companion copies the char* into std::string, but keep
+    // the backing strings alive for the whole run anyway (main never returns).
+    std::vector<std::string> _grid_ptags, _grid_ctags;
+    std::vector<chimera::UpJumpLadderCompanion> _grid; _grid.reserve(32);   // reserve => &_grid[i] stable
+    std::vector<chimera::EdgeEngine*> _grid_feeds;
+    for (auto& gc : _gcoins)
+        for (int thr : {2, 3, 4, 5}) {
+            _grid_ptags.push_back(std::string(gc.pfx) + "-UJ" + std::to_string(thr));           // distinct map key
+            _grid_ctags.push_back(std::string(gc.pfx) + "-UJ" + std::to_string(thr) + "-CLIP"); // desk book tag
+            _grid.emplace_back(make_stagger_companion(
+                _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), gc.sym,
+                gc.det_w, thr / 100.0, gc.arms, /*BE_CASCADE*/1, 0, 1.0, gc.retire_bp));
+            _grid_feeds.push_back(gc.feed);
+        }
+    std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
+    std::vector<chimera::EdgeEngine*>            _all_clip_parents;
+    for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
-        const int _NCLIP = (int)(sizeof(_all_clips)/sizeof(_all_clips[0]));  // was hard-coded 9; now size-derived (DOGE dropped)
+        const int _NCLIP = (int)_all_clips.size();   // 32 grid cells
         for (int i = 0; i < _NCLIP; ++i) {
             _all_clips[i]->shadow_mode = true;
             {   // durable-counter rehydrate: panel clips/bank_bp survive restarts.
@@ -6578,16 +6578,18 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d1,  "linkusdt", 86400, "LINK-TSMOM-D1",  2.18, 1.92, 100,  23, 13});
     g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1,   "bnbusdt",  86400, "BNB-TSMOM-D1",   3.16, 2.91,  90,  32, 14});
 
-    // UPJUMP-H1 (5) — S-2026-07-03 faithful CryptoUpJump port, ride-to-flip, no stops
-    g_slots.push_back({chimera::SYM_BTC,  &btc_upjump_h1,  "btcusdt",  3600, "BTC-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_ETH,  &eth_upjump_h1,  "ethusdt",  3600, "ETH-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_upjump_h1,  "solusdt",  3600, "SOL-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_upjump_h1, "dogeusdt", 3600, "DOGE-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump_h1,  "bnbusdt",  3600, "BNB-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    // UPJUMP-H1 remaining 5 (S-2026-07-03b) — ADA/TRX/AAVE/NEAR/OP (OP parent-only)
-    g_slots.push_back({chimera::SYM_ADA,  &ada_upjump_h1,  "adausdt",  3600, "ADA-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_NEAR, &near_upjump_h1, "nearusdt", 3600, "NEAR-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_upjump_h1, "xrpusdt", 3600, "XRP-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    // UPJUMP-H1 fat-tail parent legs — RETIRED S-2026-07-11 (threshold-comparison grid supersedes;
+    // no 3-overlapping-sets). Their companion books were retired above; these parent legs are now
+    // un-slotted so they no longer trade/clutter the desk. Objects stay declared+wired (untraded,
+    // no g_slot => never ticked). The grid's 8 feeds are the tuned parents slotted just below.
+    // g_slots.push_back({chimera::SYM_BTC,  &btc_upjump_h1,  "btcusdt",  3600, "BTC-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_ETH,  &eth_upjump_h1,  "ethusdt",  3600, "ETH-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_SOL,  &sol_upjump_h1,  "solusdt",  3600, "SOL-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_DOGE, &doge_upjump_h1, "dogeusdt", 3600, "DOGE-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump_h1,  "bnbusdt",  3600, "BNB-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_ADA,  &ada_upjump_h1,  "adausdt",  3600, "ADA-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_NEAR, &near_upjump_h1, "nearusdt", 3600, "NEAR-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_XRP, &xrp_upjump_h1, "xrpusdt", 3600, "XRP-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
     // FULL BULL ROSTER parents (S-2026-07-11) — price feed + ARM+SEED for the 8 new companion cells
     // (companions self-detect their own window; parent position not read for det_w books). SHADOW.
     g_slots.push_back({chimera::SYM_ETH,  &eth_upjump2_h1,  "ethusdt",  3600, "ETH-UPJUMP2-H1",  0.0, 0.0, 0, 0, 57});

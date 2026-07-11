@@ -1,4 +1,5 @@
 build/
+build-*/
 logs/
 *.log
 config/binance_credentials.json

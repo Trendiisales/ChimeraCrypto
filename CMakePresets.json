@@ -1,0 +1,46 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Full build (live chimera binary + tests)",
+      "description": "Release build of the live chimera binary AND the ctest regression harness. Requires OpenSSL, libcurl, libwebsockets.",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CHIMERA_TESTS_ONLY": "OFF",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "tests-only",
+      "displayName": "Tests-only (ctest harness, no live binary)",
+      "description": "Configures ONLY the regression suites so a clean CI machine can run ctest with just a C++20 compiler (no libwebsockets link).",
+      "binaryDir": "${sourceDir}/build-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CHIMERA_TESTS_ONLY": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default",    "configurePreset": "default" },
+    { "name": "tests-only", "configurePreset": "tests-only" }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    },
+    {
+      "name": "tests-only",
+      "configurePreset": "tests-only",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    }
+  ]
+}

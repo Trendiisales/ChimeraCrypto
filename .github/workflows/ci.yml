@@ -1,0 +1,45 @@
+name: chimera-ci
+
+# Runs the consolidated regression matrix + a clean-build reproducibility check
+# on every push / PR. Nothing here touches the live box — this is repo tooling.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ── Regression matrix: every per-phase suite + the CI-matrix supplemental ──
+  tests:
+    name: regression matrix (ctest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libssl-dev libcurl4-openssl-dev
+          # (libwebsockets NOT needed for the tests-only harness)
+      - name: Configure (tests-only)
+        run: cmake -S . -B build-tests -DCHIMERA_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Run all suites
+        run: ctest --test-dir build-tests --output-on-failure
+
+  # ── Build reproducibility: live chimera binary from a fresh tree (roadmap P0) ─
+  clean-build:
+    name: clean-build reproducibility (live binary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps (full live binary)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libssl-dev libcurl4-openssl-dev libwebsockets-dev
+      - name: Clean build chimera
+        # -march=native on a hosted runner is fine (built + run on the same host);
+        # for a portable artifact the operator overrides the arch flag.
+        run: bash ci/clean_build.sh

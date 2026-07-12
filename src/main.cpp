@@ -3865,11 +3865,11 @@ int main() {
             {
                 const auto& cc = _all_clips[i]->config();
                 if (cc.be_floor)
-                    std::printf("[CLIP-INIT] %s -> price %s  BE-FLOOR be=%.0fbp trail(T%.0f/W%.0f)bp det=%dh/%+.0f%% cap=%d shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> price %s  BE-FLOOR be=%.0fbp trail(T%.0f/W%.0f)bp det=%dh/%+.2f%% cap=%d shadow=1\n",
                         cc.tag.c_str(), cc.parent_tag.c_str(), cc.be_bp,
                         cc.tight.trail_bp, cc.wide.trail_bp, cc.det_w, cc.det_thr * 100, cc.cap);
                 else
-                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.0f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp mult=x%.1f retire@%.0fbp%s NO-FLOOR shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp mult=x%.1f retire@%.0fbp%s NO-FLOOR shadow=1\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
                         cc.tight.arm, cc.tight.stall, cc.tight.gb,
                         cc.wide.arm, cc.wide.stall, cc.wide.gb,

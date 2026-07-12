@@ -7454,6 +7454,28 @@ int main() {
     chimera::EdgeEngine aave_kelt_d1(aave_kelt_d1_cfg);
     wire_engine(aave_kelt_d1);
 
+    // ── S-2026-07-12 UNIVERSE SCAN winners (Kelt cells; deployed settings, 2x-cost robust) ──
+    // XLM daily Keltner-break — the STRONGEST candidate in the whole universe (OOS +250%/PF11.9,
+    // 2x-cost PF 11.3). XRP daily Kelt (OOS +163/PF6.0, 2x 5.76) — stronger than its grid up-jump.
+    // Both fed (SYM_XLM=60, SYM_XRP=6). KELTNER_BREAK = upper-band breakout, ride-to-flip.
+    chimera::EdgeEngine::Config xlm_kelt_d1_cfg{
+        .symbol="xlmusdt", .tag="XLM-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
+        .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
+        .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
+        .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+    };
+    chimera::EdgeEngine xlm_kelt_d1(xlm_kelt_d1_cfg);
+    wire_engine(xlm_kelt_d1);
+
+    chimera::EdgeEngine::Config xrp_kelt_d1_cfg{
+        .symbol="xrpusdt", .tag="XRP-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
+        .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
+        .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
+        .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+    };
+    chimera::EdgeEngine xrp_kelt_d1(xrp_kelt_d1_cfg);
+    wire_engine(xrp_kelt_d1);
+
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
         .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=14,

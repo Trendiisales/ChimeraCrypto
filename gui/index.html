@@ -768,7 +768,15 @@ function updateClock() {
 
 $('#killAll').addEventListener('click', async () => {
   if (!confirm('Kill all positions?')) return;
-  try { await fetch('/api/kill', { method: 'POST' }); refresh(); } catch(e) { alert('Failed: ' + e.message); }
+  // S-2026-07-13: /api/kill sits behind nginx basic-auth since the A4 hardening. The old
+  // handler ignored the response, so a 401 (not logged in / dialog cancelled) LOOKED like a
+  // successful kill — silent-fail on the panic button. Now every non-2xx is loud.
+  try {
+    const r = await fetch('/api/kill', { method: 'POST' });
+    if (r.status === 401) { alert('KILL NOT SENT — auth required. Enter the control user/password when the browser prompts, then press KILL again.'); return; }
+    if (!r.ok) { alert('KILL NOT SENT — HTTP ' + r.status); return; }
+    refresh();
+  } catch(e) { alert('KILL NOT SENT — ' + e.message); }
 });
 
 $('#bellIndicator').addEventListener('click', () => {

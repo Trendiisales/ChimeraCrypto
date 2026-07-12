@@ -63,6 +63,11 @@ public:
         // +10,283% roster cap5, 8/8 coins all-6, 2x-cost robust. Ladder spawns still use `wide`.
         std::vector<Tier> extra_base;
         double  reclip_pct    = 0.05;  // re-enter when fav > prior_peak*(1+reclip_pct)
+        double  loss_cut_bp   = 0.0;   // COLD-LOSS CUT (operator 2026-07-13): >0 = an UNARMED leg
+                                       // (never made BE / mfe<arm) that goes -loss_cut_bp adverse is
+                                       // cut HERE at a bounded loss, instead of holding to the parent-
+                                       // exit flush. "if we don't make BE, why hold the loss." A real
+                                       // stop (bounds the tail); 0 = OFF (legacy no-floor behaviour).
         int     cap           = 5;     // max concurrent legs (2 base + up to cap-2 ladder)
         double  cost_gate_bp  = 0.0;   // >0 = hard cost-cover clip gate (suppress sub-cost clips)
         double  confirm_bp    = 25.0;  // OPTION-B confirmed-entry: a leg stays FLAT (books nothing,
@@ -225,12 +230,23 @@ public:
     // settled position only, never writes to it. Long-only (UPJUMP is always long).
     void observe(bool parent_in_pos, double parent_entry_px, double cur_px, int64_t ts_ms) {
         const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
-        if (cfg_.det_w > 0) { feed_selfdetect_(cur_px, ts_ms); return; }             // internal detector (live, both modes)
+        if (cfg_.det_w > 0) {
+            feed_selfdetect_(cur_px, ts_ms);
+            if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(cur_px, ts_ms, bar);   // per-tick HARD STOP
+            return;                                                                    // internal detector (live, both modes)
+        }
+        if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(cur_px, ts_ms, bar);       // per-tick HARD STOP (det_w==0 path too)
         if (cfg_.be_floor) {
             observe_be_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (validation harness)
             return;
         }
         observe_ladder_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (parent-driven)
+    }
+    // Stop-ONLY tick: runs the hard reversal cut against px WITHOUT feeding the detector
+    // (backtest feeds the bar LOW here; live, observe() already runs the cut per tick).
+    void stop_check_only(double px, int64_t ts_ms) {
+        if (cfg_.loss_cut_bp <= 0.0) return;
+        intrabar_reversal_cut_(px, ts_ms, ts_ms / (cfg_.tf_secs * 1000));
     }
 
     // ── LADDER mode window driver (the faithful python run_trade walk). in_pos/entry_px
@@ -581,6 +597,25 @@ private:
         lg.pk = lg.mfe; lg.clipped = true;
         gross_out = gross; reason_out = reason;
         return true;
+    }
+
+    // HARD REVERSAL CUT (operator 2026-07-13b, after UNI-UJH -146bp / -1402 tail): runs on
+    // EVERY tick (live) / fed price (backtest LOW), NOT just bar close — so a leg that reverses
+    // below entry by loss_cut_bp is cut INTRA-BAR at the stop price, before the parent-reversal
+    // flush can book it at a deep bar-close loss. Long-only spot => once below entry the up-move
+    // is over; cutting here bounds EVERY loss and is edge-neutral (a leg still above entry never
+    // trips it — winners exit via giveback). Cuts ALL open legs (parent + every mimic) together.
+    void intrabar_reversal_cut_(double cur, int64_t ts, int64_t bar) {
+        if (cur <= 0.0) return;
+        for (auto& lg : legs_) {
+            if (!lg.open || lg.clipped || !lg.eligible || lg.le <= 0.0 || lg.epx <= 0.0) continue;
+            const double fav = (cur - lg.epx) / lg.epx * 100.0;              // % from FIXED entry
+            if (fav * 100.0 > -cfg_.loss_cut_bp) continue;                    // still above the stop
+            const double stop_px = lg.epx * (1.0 - cfg_.loss_cut_bp / 1e4);  // exit ~at the stop
+            const double gross   = (stop_px / lg.le - 1.0) * 1e4;
+            emit_clip_(lg, stop_px, ts, bar, gross, gross - cfg_.round_trip_bp, "REVERSAL_CUT");
+            lg.open = false; lg.clipped = true; lg.pk = lg.mfe;
+        }
     }
 
     void flush_leg_(Leg& lg, double px, int64_t ts, int64_t bar) {   // always MTM (no abandon)

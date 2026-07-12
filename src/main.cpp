@@ -3738,6 +3738,11 @@ int main() {
         c.size_mult = size_mult; c.rank_out = false; c.retire_bp = retire_bp;
         c.retire_override = unretired(ctag);
         c.stagger_mode = stagger_mode; c.stagger_k = stagger_k; c.stagger_be_bp = 20.0;
+        // S-2026-07-13 operator HARD REVERSAL STOP: cut ANY leg (parent + every mimic) at 50bp
+        // below entry, per-tick on the reversal signal. Backtest (upjump_earlyarm_bt coldcut,
+        // REAL column): worst clip -900..-1800bp -> -70bp on ALL coins, net preserved within
+        // ~10% (some higher), PF 2.5 -> ~4.5. Long-only spot: cutting below entry is edge-neutral.
+        c.loss_cut_bp = 50.0;
         return c;
     };
     using LTier = chimera::UpJumpLadderCompanion::Tier;

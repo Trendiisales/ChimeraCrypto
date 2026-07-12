@@ -3754,6 +3754,26 @@ int main() {
     // forward comparison). Feeds = the 8 tuned parents (already g_slots'd/ARMED/SEEDED, right
     // window per coin: ETH/rest 1h, BTC 2h, DOGE 4h); the fat-tail *-UPJUMP-H1 parent legs are
     // retired (g_slots below). retire_bp = −2× the coin's worst-thr BT maxDD.
+    // ── S-2026-07-12 DAILY UP-JUMP WINNERS (universe scan) — PARENT engines, declared here so
+    // the grid below can feed them the BE-cascade MIMIC overlay. Each backtested long-only spot,
+    // 2x-cost robust, 2022 omitted; the daily BE-cascade MIMIC dominates the parent ride
+    // (upjump_earlyarm_bt UJW_TF=1d grid): NEAR PF7.4-8.0 · AVAX 13.9-16.9 · LINK 5.4-10.6 ·
+    // BCH 2.6-3.5 · UNI 11.3-15.2 · LDO 4.5-5.9 (parent ride PF was 1.6-3.7). Parent rides WIDE,
+    // mimic clips safe — BOTH run, additive (operator: not one or the other).
+    auto make_uj = [](const char* sym, const char* tag, int64_t tf, int w, double thr) {
+        return chimera::EdgeEngine::Config{
+            .symbol=sym, .tag=tag, .kind=chimera::StrategyKind::UPJUMP, .tf_secs=tf,
+            .atr_period=14, .upjump_w=w, .upjump_thr=thr, .ride_to_flip=true,
+            .round_trip_bp=20.0, .max_history=96 };
+    };
+    chimera::EdgeEngine near_uj8_d1 (make_uj("nearusdt","NEAR-UPJUMP8-D1", 86400,24,0.08)); wire_engine(near_uj8_d1);
+    chimera::EdgeEngine avax_uj5_d1 (make_uj("avaxusdt","AVAX-UPJUMP5-D1", 86400,24,0.05)); wire_engine(avax_uj5_d1);
+    chimera::EdgeEngine link_uj8_d1 (make_uj("linkusdt","LINK-UPJUMP8-D1", 86400,24,0.08)); wire_engine(link_uj8_d1);
+    chimera::EdgeEngine bch_uj4_d1  (make_uj("bchusdt", "BCH-UPJUMP4X48-D1",86400,48,0.04)); wire_engine(bch_uj4_d1);
+    chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08)); wire_engine(uni_uj8_d1);
+    chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03)); wire_engine(ldo_uj3_d1);
+    chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03)); wire_engine(op_uj3_h4);
+
     struct GridCoin { const char* pfx; const char* sym; chimera::EdgeEngine* feed; int det_w;
                       std::vector<double> arms; double retire_bp; };
     std::vector<GridCoin> _gcoins = {
@@ -3765,11 +3785,19 @@ int main() {
         {"ADA", "adausdt", &ada_upjump5_h1, 1, {0.2,2,3,4,6,8},        -45000.0},   // BE-cascade N6
         {"XRP", "xrpusdt", &xrp_upjump4_h1, 1, {0.2,2,3,4,6,8},        -33000.0},   // BE-cascade N6
         {"TRX", "trxusdt", &trx_upjump5_h1, 1, {0.2,2,3,4,6,8},        -25500.0},   // BE-cascade N6
+        // S-2026-07-12 daily/4h up-jump winners — MIMIC overlay on the parents above (additive).
+        {"NEAR","nearusdt",&near_uj8_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 7.4-8.0
+        {"AVAX","avaxusdt",&avax_uj5_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 13.9-16.9
+        {"LINK","linkusdt",&link_uj8_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 5.4-10.6
+        {"BCH", "bchusdt", &bch_uj4_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 2.6-3.5
+        {"UNI", "uniusdt", &uni_uj8_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 11.3-15.2
+        {"LDO", "ldousdt", &ldo_uj3_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 4.5-5.9
+        {"OP",  "opusdt",  &op_uj3_h4,   1, {0.2,2,3,4,6,8}, -50000.0},   // 4h, mimic overlay on OP parent
     };
     // stable tag storage: make_stagger_companion copies the char* into std::string, but keep
     // the backing strings alive for the whole run anyway (main never returns).
     std::vector<std::string> _grid_ptags, _grid_ctags;
-    std::vector<chimera::UpJumpLadderCompanion> _grid; _grid.reserve(32);   // reserve => &_grid[i] stable
+    std::vector<chimera::UpJumpLadderCompanion> _grid; _grid.reserve(96);   // reserve => &_grid[i] stable (15 coins x4 = 60 cells; 96 headroom)
     std::vector<chimera::EdgeEngine*> _grid_feeds;
     for (auto& gc : _gcoins)
         for (int thr : {2, 3, 4, 5}) {
@@ -7488,26 +7516,9 @@ int main() {
     chimera::EdgeEngine grt_kelt_d1(grt_kelt_d1_cfg);
     wire_engine(grt_kelt_d1);
 
-    // ── S-2026-07-12 UNIVERSE-SCAN up-jump winners (daily/4h parents; deployed settings) ──
-    // Each backtested at its winning config, long-only, 2x-cost robust, 2022 omitted:
-    //   NEAR UJ8 1d OOS PF3.70 · AVAX UJ5 1d 3.51 · LINK UJ8 1d 2.65 · BCH UJ4x48 1d 2.54
-    //   UNI UJ8 1d 2.32 · LDO UJ3 1d 1.58 · OP UJ3 4h 1.34 (OP has no daily file).
-    // UPJUMP kind, ride_to_flip (exit on symmetric down-jump, no stops). These are the PARENT
-    // engines; the BE-cascade companion overlay (safer arm-after-BE mimic) is an additive
-    // follow-up on top of these feeds — it does NOT gate the validated edge.
-    auto make_uj = [](const char* sym, const char* tag, int64_t tf, int w, double thr) {
-        return chimera::EdgeEngine::Config{
-            .symbol=sym, .tag=tag, .kind=chimera::StrategyKind::UPJUMP, .tf_secs=tf,
-            .atr_period=14, .upjump_w=w, .upjump_thr=thr, .ride_to_flip=true,
-            .round_trip_bp=20.0, .max_history=96 };
-    };
-    chimera::EdgeEngine near_uj8_d1 (make_uj("nearusdt","NEAR-UPJUMP8-D1", 86400,24,0.08)); wire_engine(near_uj8_d1);
-    chimera::EdgeEngine avax_uj5_d1 (make_uj("avaxusdt","AVAX-UPJUMP5-D1", 86400,24,0.05)); wire_engine(avax_uj5_d1);
-    chimera::EdgeEngine link_uj8_d1 (make_uj("linkusdt","LINK-UPJUMP8-D1", 86400,24,0.08)); wire_engine(link_uj8_d1);
-    chimera::EdgeEngine bch_uj4_d1  (make_uj("bchusdt", "BCH-UPJUMP4X48-D1",86400,48,0.04)); wire_engine(bch_uj4_d1);
-    chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08)); wire_engine(uni_uj8_d1);
-    chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03)); wire_engine(ldo_uj3_d1);
-    chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03)); wire_engine(op_uj3_h4);
+    // NOTE: the S-2026-07-12 universe-scan up-jump PARENT winners (NEAR/AVAX/LINK/BCH/UNI/LDO
+    // daily + OP 4h) are declared EARLIER (just before the _gcoins grid) so the grid can feed
+    // them the BE-cascade mimic overlay. See the "DAILY UP-JUMP WINNERS" block above the grid.
 
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,

@@ -3809,22 +3809,20 @@ int main() {
                 gc.det_w, thr / 100.0, gc.arms, /*BE_CASCADE*/1, 0, 1.0, gc.retire_bp));
             _grid_feeds.push_back(gc.feed);
         }
-    // ── S-2026-07-13 LOW-THRESHOLD family (operator: "implement all 8 with the new setting,
-    // different engine so we can monitor the actual difference"). thr=0.5% cells for the 8
-    // ORIGINAL grid coins, SEPARATE tag family UJH (half-pct) — the 2-5% grid is untouched.
-    // Backtested (Crypto repo thrfloor mode, live-header stagger book, 20bp RT, 2x re-sim):
-    // all 8 PASS every gate at 0.5% — PF 2.4-3.2, both WF halves +, y2022 POSITIVE on all 8
-    // (the chop protection is structural: fast -thr reversal exit + spawn-only-on-BE + g50).
-    // FAITHFUL to the tested config: BE-N6 arms {0.2,2,3,4,6,8} for ALL 8 (the study's arm set,
-    // NOT the per-coin grid arms), det_w = the coin's tested window. Bracket-confirm tested
-    // and REJECTED (skips net-positive triggers). Gold/index port tested: FAILS (bears bleed) —
-    // this family is crypto-only by evidence.
+    // ── S-2026-07-13 LOW-THRESHOLD (UJH) family, SEPARATE tag from the 2-5% grid.
+    // Operator (2026-07-13b): run the low-thr study on ALL traded crypto, not just the 8 grid
+    // coins — no reason to do half. thrfloor mode (Crypto repo) re-run over EVERY coin with 1h
+    // data: ALL PASS at 0.5% (PF 2.4-2.8, both WF halves +, y2022 POSITIVE, maxDD shrinks at
+    // low thr). So the UJH cell is added to every _gcoins coin that has passing evidence:
+    //   8 grid (BTC/ETH/BNB/SOL/DOGE/ADA/XRP/TRX) + daily-cascade NEAR/AVAX/LINK/BCH/UNI/OP.
+    // LDO EXCLUDED — no 1h data to backtest 0.5% on it (add when data exists; do not wire blind).
+    // XLM/GRT/AAVE also pass but are Keltner engines (not in _gcoins) — separate feed wiring.
+    // BE-N6 arms {0.2,2,3,4,6,8}, det_w = coin's window. Chop protection structural.
     {
         static const std::vector<double> _lowarms = {0.2, 2, 3, 4, 6, 8};
         for (auto& gc : _gcoins) {
             const std::string pfx = gc.pfx;
-            if (pfx != "ETH" && pfx != "BTC" && pfx != "BNB" && pfx != "SOL" &&
-                pfx != "DOGE" && pfx != "ADA" && pfx != "XRP" && pfx != "TRX") continue;
+            if (pfx == "LDO") continue;   // no 1h thrfloor evidence — not wired blind
             _grid_ptags.push_back(pfx + "-UJH");
             _grid_ctags.push_back(pfx + "-UJH-CLIP");
             _grid.emplace_back(make_stagger_companion(

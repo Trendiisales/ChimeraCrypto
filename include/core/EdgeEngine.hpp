@@ -508,9 +508,6 @@ public:
     const Config& cfg() const { return cfg_; }
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
-        // CH-09 (audit 2026-07-13): class contract — a zero/negative timeframe would
-        // divide-by-zero in on_tick; fail LOUD at construction, not silently at tick time.
-        if (cfg_.tf_secs <= 0) { std::fprintf(stderr, "[EDGE][FATAL] %s tf_secs=%d invalid\n", cfg_.tag.c_str(), cfg_.tf_secs); std::abort(); }
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
         if (cfg_.max_history < cfg_.atr_period + 5) cfg_.max_history = cfg_.atr_period + 5;
         if (cfg_.max_history < cfg_.sma_len + 5)    cfg_.max_history = cfg_.sma_len + 5;
@@ -548,22 +545,11 @@ public:
     // Returns the number of bars actually inserted (after max_history trim).
     // Safe to call with an empty vector (no-op).
     // -----------------------------------------------------------------------
-    // CH-04 (audit 2026-07-13): typed price accessor so callers never substring-parse
-    // state_json() for numbers (the +16 off-by-one parsed -6.2 as 6.2).
-    double last_price() const { return cur_close_ > 0.0 ? cur_close_ : last_close_; }
-
     int seed_bars(const std::vector<SeedBar>& bars) {
         if (bars.empty()) return 0;
 
-        int64_t prev_ts = bar_ts_ms_.empty() ? 0 : bar_ts_ms_.back();
         for (const auto& b : bars) {
             if (b.o <= 0.0 || b.h <= 0.0 || b.l <= 0.0 || b.c <= 0.0) continue;
-            // CH-10 (audit 2026-07-13): reject NaN/inf, non-monotonic timestamps and
-            // inconsistent OHLC — a poisoned REST batch must not seed the indicators.
-            if (!(std::isfinite(b.o) && std::isfinite(b.h) && std::isfinite(b.l) && std::isfinite(b.c))) continue;
-            if (b.open_ts_ms <= prev_ts) continue;               // duplicate / out-of-order seed bar
-            if (b.h < b.l || b.h < b.o || b.h < b.c || b.l > b.o || b.l > b.c) continue;  // malformed OHLC
-            prev_ts = b.open_ts_ms;
             opens_.push_back(b.o);
             highs_.push_back(b.h);
             lows_.push_back(b.l);
@@ -623,22 +609,11 @@ public:
             cur_open_ = cur_high_ = cur_low_ = cur_close_ = price;
             cur_open_ts_ms_ = bar_id * cfg_.tf_secs * 1000;
             cur_tick_count_ = 1;
-        } else if (bar_id < cur_bar_id_) {
-            // CH-01 (audit 2026-07-13): LATE/OUT-OF-ORDER tick. Previously this fell into
-            // the boundary branch, rewound cur_bar_id_ backwards and re-closed already-closed
-            // bars — corrupting indicator history on ONE delayed exchange event (reproduced:
-            // 120000,180000,120000,180000 => duplicate closes). Stale ticks are DROPPED and
-            // counted; they cannot affect a bar that has already closed.
-            stale_tick_count_++;
-            return;
         } else if (bar_id != cur_bar_id_) {
             // Bar boundary crossed — close out the previous bar then open new ones
             // for every full bar gap (in case of feed silence).
             close_bar_();
             int64_t gap = bar_id - cur_bar_id_;
-            // CH-01: cap synthetic filler bars — a bogus far-future timestamp must not
-            // spin millions of empty closes. Beyond the cap, jump directly to the new bar.
-            if (gap > 500) { stale_tick_count_++; gap = 1; }
             for (int64_t i = 1; i < gap; ++i) {
                 // synthesise an empty filler bar at last close (rare in crypto;
                 // happens during exchange outages)
@@ -726,23 +701,6 @@ public:
     bool resume_position(const ResumeState& rs) {
         if (in_position_) return false;  // already in a trade somehow
         if (rs.entry_px <= 0.0) return false;
-        // CH-10 (audit 2026-07-13): a corrupt crash-state file must not resurrect a
-        // position with NaN prices, a stop above entry (long book), negative hold
-        // counters or an impossible pyramid count — fail the resume LOUDLY instead.
-        auto bad = [](double v){ return !std::isfinite(v); };
-        if (bad(rs.entry_px) || bad(rs.sl_px) || bad(rs.atr_at_entry) ||
-            bad(rs.trail_stop_px) || bad(rs.trail_arm_px) || bad(rs.mfe_px) || bad(rs.mfe_bp)) {
-            std::fprintf(stderr, "[EDGE][RESUME-REJECT] %s non-finite state field\n", cfg_.tag.c_str());
-            return false;
-        }
-        if (rs.sl_px < 0.0 || rs.sl_px >= rs.entry_px * 2.0) {
-            std::fprintf(stderr, "[EDGE][RESUME-REJECT] %s implausible sl_px=%.6f entry=%.6f\n", cfg_.tag.c_str(), rs.sl_px, rs.entry_px);
-            return false;
-        }
-        if (rs.bars_held < 0 || rs.pyramid_count < 0 || rs.pyramid_count > 16) {
-            std::fprintf(stderr, "[EDGE][RESUME-REJECT] %s bars_held=%d pyramid_count=%d\n", cfg_.tag.c_str(), rs.bars_held, rs.pyramid_count);
-            return false;
-        }
 
         in_position_     = true;
         entry_px_        = rs.entry_px;
@@ -1185,7 +1143,6 @@ private:
 
     // Tick counter for volume proxy (Session 29)
     int     cur_tick_count_ = 0;
-    int64_t stale_tick_count_ = 0;   // CH-01: dropped out-of-order ticks (telemetry)
 
     // Closed-bar history (back is most recent)
     std::deque<double> opens_;

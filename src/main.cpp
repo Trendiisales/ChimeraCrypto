@@ -306,7 +306,6 @@ static std::string g_ctrl_token;
 // ── Session 30: Multi-symbol funding filter ─────────────────────────────────
 static chimera::MultiSymbolFundingFilter g_funding_filter;
 static int64_t g_last_funding_fetch_ms = 0;
-static std::thread g_funding_thread;   // CH-06: owned funding fetch worker (joined at shutdown)
 static constexpr int64_t FUNDING_FETCH_INTERVAL_MS = 8 * 3600 * 1000LL; // every 8h
 
 // ── S33: Portfolio gate state exposed to /api/state2 + GUI banner ────────
@@ -8660,9 +8659,8 @@ int main() {
     }
     std::printf("[STARTUP] HTTP server starting on %s:8080...\n", g_http_bind_addr.c_str());
     std::fflush(stdout);
-    // CH-06 (audit 2026-07-13): OWNED http thread — detached workers were still alive
-    // during static teardown (logs/registries destroyed under them). Joined at shutdown.
-    static std::thread s_http_thread(http_server_thread, 8080);
+    std::thread http_thread(http_server_thread, 8080);
+    http_thread.detach();
 
     // ── Spot WebSocket feed (subscribes to all 12 symbols) ───────────────
     chimera::BinanceWSFeed feed;
@@ -9033,11 +9031,7 @@ int main() {
         // order routing checks exec_ok), so they are wired+connected in shadow
         // independent of executor readiness. EDGE-SLOTS/UPJUMP-GRID reflect the
         // real container sizes.
-        // CH-02 (audit 2026-07-13): honest label — the curated slots are wired for
-        // on_bar + EXPORT-ONLY on_trade (desk record). Order-intent/pyramid/PER wiring
-        // stays behind CHIMERA_WIRE_LEGACY by design (risk-behavior change needs its own
-        // backtested verdict). The registry key says so, so a green tile can't overclaim.
-        g_registry.mark_wired("EDGE-SLOTS-SHADOW-EXPORT", !g_slots.empty(),        (int)g_slots.size());
+        g_registry.mark_wired("EDGE-SLOTS",  !g_slots.empty(),                    (int)g_slots.size());
         g_registry.mark_wired("LEGACY-EDGE", wire_legacy && !g_all_wired.empty(), (int)g_all_wired.size());
         g_registry.mark_wired("XSEC-BTC",    true, 1);
         g_registry.mark_wired("XSEC-BR",     true, 1);
@@ -9167,11 +9161,9 @@ int main() {
             // Fetch every 8h (matches Binance funding interval).
             // Propagate tailwind/headwind flags to all engines.
             if (now_ms - g_last_funding_fetch_ms >= FUNDING_FETCH_INTERVAL_MS) {
-                // CH-06 (audit 2026-07-13): was a detached one-shot per 8h — could overlap
-                // static destruction at shutdown. Owned single worker: join the previous
-                // fetch (8h old — long finished) before launching the next; joined at exit.
-                if (g_funding_thread.joinable()) g_funding_thread.join();
-                g_funding_thread = std::thread([](){ g_funding_filter.fetch_all(); });
+                std::thread([](){
+                    g_funding_filter.fetch_all();
+                }).detach();
                 g_last_funding_fetch_ms = now_ms;
             }
             // Always propagate current state (fetch may complete between loops)
@@ -10086,43 +10078,56 @@ int main() {
             // same direction as BTC by a similar magnitude in recent ticks,
             // correlation is high. We use the D1 engine returns as proxy.
             {
-                // CORRELATION GATE v2 (audit 2026-07-13, CH-03/CH-04). The v1 gate looked
-                // for an active BTC *D1 trend* slot — every D1 BTC slot was culled in the
-                // P7 audit, so the reference was permanently 0 and the gate NEVER fired.
-                // Two parser sites also read substr(pos+16) past the 15-char key, turning
-                // "-6.2" into "6.2" (direction reversed). v2 is roster-independent and
-                // parses nothing: rolling 24h returns from each engine's typed last_price(),
-                // sampled hourly into per-symbol rings.
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
-                static std::map<int, std::deque<double>> corr_px_ring;   // symbol_id -> 25 hourly px
-                static int64_t corr_last_sample_ms = 0;
-                static bool corr_ref_announced = false;
-                const bool take_sample = (now_ms - corr_last_sample_ms) >= 3600'000;
-                if (take_sample) corr_last_sample_ms = now_ms;
-                auto ring_mom = [&](int sym_id, double px) -> double {
-                    auto& q = corr_px_ring[sym_id];
-                    if (take_sample && px > 0.0) { q.push_back(px); while (q.size() > 25) q.pop_front(); }
-                    if (q.size() < 25 || q.front() <= 0.0) return 0.0;
-                    return (q.back() / q.front() - 1.0) * 100.0;
-                };
-                // BTC reference from ANY active BTC slot's live price (tf-independent).
-                double btc_px = 0.0;
-                for (auto& s : g_slots)
-                    if (s.engine && s.symbol_id == chimera::SYM_BTC) { btc_px = s.engine->last_price(); break; }
-                const double btc_momentum = ring_mom(chimera::SYM_BTC, btc_px);
-                if (!corr_ref_announced && corr_px_ring[chimera::SYM_BTC].size() >= 25) {
-                    std::printf("[CORR] BTC 24h reference LIVE (mom=%.2f%%) — correlation gate armed\n", btc_momentum);
-                    std::fflush(stdout); corr_ref_announced = true;
-                }
+                // Get BTC return (from D1 engine momentum if available)
+                double btc_momentum = 0.0;
                 for (auto& s : g_slots) {
                     if (!s.engine) continue;
-                    if (s.symbol_id == chimera::SYM_BTC) { s.engine->set_corr_high(false); continue; }
+                    if (s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400 &&
+                        s.engine->is_trend_following()) {
+                        // Use trend_bullish as a simplification — if BTC and alt
+                        // are both in same trend direction, correlation is high.
+                        // More sophisticated: track rolling returns. For now, use
+                        // a simple heuristic based on D1 trend agreement.
+                        std::string state = s.engine->state_json();
+                        auto pos = state.find("\"momentum_pct\":");
+                        if (pos != std::string::npos) {
+                            try { btc_momentum = std::stod(state.substr(pos + 16, 10)); }
+                            catch (...) {}
+                        }
+                        break;
+                    }
+                }
+
+                // For each non-BTC symbol, check if their D1 momentum is highly
+                // aligned with BTC (same sign, similar magnitude = high correlation)
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    if (s.symbol_id == chimera::SYM_BTC) {
+                        s.engine->set_corr_high(false);  // BTC never self-suppresses
+                        continue;
+                    }
+                    // Simple correlation proxy: if BTC is moving strongly and
+                    // this symbol has same-direction movement > 50% of BTC's move,
+                    // flag as high correlation. This is a conservative heuristic.
+                    // TODO: upgrade to true rolling Pearson correlation on bar returns.
                     bool corr_flag = false;
-                    if (std::fabs(btc_momentum) > 5.0) {
-                        const double sym_mom = ring_mom(s.symbol_id, s.engine->last_price());
-                        if ((btc_momentum > 0 && sym_mom > btc_momentum * 0.5) ||
-                            (btc_momentum < 0 && sym_mom < btc_momentum * 0.5))
-                            corr_flag = true;
+                    if (std::fabs(btc_momentum) > 5.0) {  // BTC moving > 5% (raised from 3% — shadow tuning: 3% moves are routine, suppressed too many alts)
+                        // Check this symbol's D1 momentum
+                        if (s.tf_secs == 86400 && s.engine->is_trend_following()) {
+                            std::string state = s.engine->state_json();
+                            auto pos = state.find("\"momentum_pct\":");
+                            if (pos != std::string::npos) {
+                                double sym_mom = 0.0;
+                                try { sym_mom = std::stod(state.substr(pos + 16, 10)); }
+                                catch (...) {}
+                                // Same sign and magnitude > 50% of BTC
+                                if ((btc_momentum > 0 && sym_mom > btc_momentum * 0.5) ||
+                                    (btc_momentum < 0 && sym_mom < btc_momentum * 0.5)) {
+                                    corr_flag = true;
+                                }
+                            }
+                        }
                     }
                     s.engine->set_corr_high(corr_flag);
                 }
@@ -10132,13 +10137,6 @@ int main() {
 
     std::printf("\n[SHUTDOWN] Stopping...\n");
     std::fflush(stdout);
-
-    // CH-06 (audit 2026-07-13): join owned workers BEFORE state/log teardown.
-    if (g_funding_thread.joinable()) g_funding_thread.join();
-    // NOTE: s_http_thread blocks in accept(); it is static-storage so it outlives main's
-    // locals safely, and the process exits immediately after the snapshot below. A stop
-    // flag + socket close is the full fix — tracked; the crash-class risk (freed statics
-    // under a live worker) is removed by the static-storage change.
 
     // ── Graceful shutdown: write final snapshot for resume on next start ──
     // Instead of force-closing positions (which realises them at shutdown price),

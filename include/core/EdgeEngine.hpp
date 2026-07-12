@@ -508,6 +508,12 @@ public:
     const Config& cfg() const { return cfg_; }
 
     explicit EdgeEngine(const Config& cfg) : cfg_(cfg) {
+        // CH-09 (audit 2026-07-13): zero/negative timeframe divides-by-zero in on_tick.
+        // Audit suggested std::abort() — REJECTED (a config typo must not crash-loop a live
+        // book). Clamp to safe defaults + log LOUD so boot review catches it.
+        if (cfg_.tf_secs   <= 0) { std::fprintf(stderr, "[EDGE][CONFIG-GUARD] %s tf_secs=%lld -> clamp 3600\n", cfg_.tag.c_str(), (long long)cfg_.tf_secs); cfg_.tf_secs = 3600; }
+        if (cfg_.atr_period <= 0) cfg_.atr_period = 14;
+        if (cfg_.lookback   <= 0) cfg_.lookback   = 20;
         if (cfg_.max_history < cfg_.lookback + 5)  cfg_.max_history = cfg_.lookback + 5;
         if (cfg_.max_history < cfg_.atr_period + 5) cfg_.max_history = cfg_.atr_period + 5;
         if (cfg_.max_history < cfg_.sma_len + 5)    cfg_.max_history = cfg_.sma_len + 5;
@@ -548,8 +554,14 @@ public:
     int seed_bars(const std::vector<SeedBar>& bars) {
         if (bars.empty()) return 0;
 
+        int64_t prev_ts = bar_ts_ms_.empty() ? 0 : bar_ts_ms_.back();
         for (const auto& b : bars) {
             if (b.o <= 0.0 || b.h <= 0.0 || b.l <= 0.0 || b.c <= 0.0) continue;
+            // CH-10 (audit 2026-07-13): reject NaN/inf, non-monotonic ts, malformed OHLC.
+            if (!(std::isfinite(b.o) && std::isfinite(b.h) && std::isfinite(b.l) && std::isfinite(b.c))) continue;
+            if (b.open_ts_ms <= prev_ts) continue;
+            if (b.h < b.l || b.h < b.o || b.h < b.c || b.l > b.o || b.l > b.c) continue;
+            prev_ts = b.open_ts_ms;
             opens_.push_back(b.o);
             highs_.push_back(b.h);
             lows_.push_back(b.l);
@@ -609,11 +621,23 @@ public:
             cur_open_ = cur_high_ = cur_low_ = cur_close_ = price;
             cur_open_ts_ms_ = bar_id * cfg_.tf_secs * 1000;
             cur_tick_count_ = 1;
+        } else if (bar_id < cur_bar_id_) {
+            // CH-01 (audit 2026-07-13, test_edge_bar_chronology.cpp): a LATE / out-of-order
+            // tick lands in a bar that has already closed. The old code fell straight into
+            // the boundary branch below, rewound cur_bar_id_ backwards and re-closed the
+            // already-closed period — corrupting indicator history on ONE delayed event.
+            // Drop it (and count it for telemetry); a closed bar is immutable.
+            stale_tick_count_++;
+            return;
         } else if (bar_id != cur_bar_id_) {
             // Bar boundary crossed — close out the previous bar then open new ones
             // for every full bar gap (in case of feed silence).
             close_bar_();
             int64_t gap = bar_id - cur_bar_id_;
+            // CH-01: cap synthetic filler bars — a single bogus far-future timestamp
+            // must not spin millions of empty closes. Beyond the cap, jump straight to
+            // the new bar (still forward, still monotonic).
+            if (gap > 1000) { stale_tick_count_++; gap = 1; }
             for (int64_t i = 1; i < gap; ++i) {
                 // synthesise an empty filler bar at last close (rare in crypto;
                 // happens during exchange outages)
@@ -701,6 +725,18 @@ public:
     bool resume_position(const ResumeState& rs) {
         if (in_position_) return false;  // already in a trade somehow
         if (rs.entry_px <= 0.0) return false;
+        // CH-10 (audit 2026-07-13): corrupt crash-state must not resurrect a position.
+        auto bad = [](double v){ return !std::isfinite(v); };
+        if (bad(rs.entry_px) || bad(rs.sl_px) || bad(rs.atr_at_entry) || bad(rs.trail_stop_px) ||
+            bad(rs.trail_arm_px) || bad(rs.mfe_px) || bad(rs.mfe_bp)) {
+            std::fprintf(stderr, "[EDGE][RESUME-REJECT] %s non-finite state\n", cfg_.tag.c_str());
+            return false;
+        }
+        if (rs.sl_px < 0.0 || rs.sl_px >= rs.entry_px * 2.0 ||
+            rs.bars_held < 0 || rs.pyramid_count < 0 || rs.pyramid_count > 16) {
+            std::fprintf(stderr, "[EDGE][RESUME-REJECT] %s implausible sl/bars/pyramid\n", cfg_.tag.c_str());
+            return false;
+        }
 
         in_position_     = true;
         entry_px_        = rs.entry_px;
@@ -1143,6 +1179,7 @@ private:
 
     // Tick counter for volume proxy (Session 29)
     int     cur_tick_count_ = 0;
+    int64_t stale_tick_count_ = 0;   // CH-01: dropped out-of-order ticks (telemetry)
 
     // Closed-bar history (back is most recent)
     std::deque<double> opens_;

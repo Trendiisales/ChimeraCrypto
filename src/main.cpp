@@ -3774,6 +3774,13 @@ int main() {
     chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08)); wire_engine(uni_uj8_d1);
     chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03)); wire_engine(ldo_uj3_d1);
     chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03)); wire_engine(op_uj3_h4);
+    // S-2026-07-13c operator: XLM/GRT/AAVE passed the thrfloor up-jump BE-cascade study at
+    // every threshold (0.5-3%, PF 2.4-2.8, both WF halves +, y2022 +). They were Keltner-only
+    // (greyed on the desk = no mimic). Give them the SAME up-jump grid + mimics as the other
+    // daily coins; the Keltner engines above stay as separate ADDITIVE books.
+    chimera::EdgeEngine xlm_uj5_d1  (make_uj("xlmusdt", "XLM-UPJUMP5-D1",  86400,24,0.05)); wire_engine(xlm_uj5_d1);
+    chimera::EdgeEngine grt_uj5_d1  (make_uj("grtusdt", "GRT-UPJUMP5-D1",  86400,24,0.05)); wire_engine(grt_uj5_d1);
+    chimera::EdgeEngine aave_uj5_d1 (make_uj("aaveusdt","AAVE-UPJUMP5-D1", 86400,24,0.05)); wire_engine(aave_uj5_d1);
 
     struct GridCoin { const char* pfx; const char* sym; chimera::EdgeEngine* feed; int det_w;
                       std::vector<double> arms; double retire_bp; };
@@ -3794,6 +3801,10 @@ int main() {
         {"UNI", "uniusdt", &uni_uj8_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 11.3-15.2
         {"LDO", "ldousdt", &ldo_uj3_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 4.5-5.9
         {"OP",  "opusdt",  &op_uj3_h4,   1, {0.2,2,3,4,6,8}, -50000.0},   // 4h, mimic overlay on OP parent
+        // S-2026-07-13c: Keltner coins promoted to full up-jump grid+mimic (thrfloor PASS).
+        {"XLM", "xlmusdt", &xlm_uj5_d1,  1, {0.2,2,3,4,6,8}, -50000.0},
+        {"GRT", "grtusdt", &grt_uj5_d1,  1, {0.2,2,3,4,6,8}, -50000.0},
+        {"AAVE","aaveusdt",&aave_uj5_d1, 1, {0.2,2,3,4,6,8}, -50000.0},
     };
     // stable tag storage: make_stagger_companion copies the char* into std::string, but keep
     // the backing strings alive for the whole run anyway (main never returns).

@@ -7431,6 +7431,29 @@ int main() {
     chimera::EdgeEngine ada_kelt_d1(ada_kelt_d1_cfg);
     wire_engine(ada_kelt_d1);
 
+    // ADA daily Regime-switch — 2nd folded Mac mimic (Mac ibkrcrypto ADA Regime OOS PF 1.67).
+    // REGIME_SWITCH = ER>0.40 trending->momentum long / ER<0.25 chop->IBS mean-rev long; ride_to_flip.
+    chimera::EdgeEngine::Config ada_reg_d1_cfg{
+        .symbol="adausdt", .tag="ADA-REGIME-D1", .kind=chimera::StrategyKind::REGIME_SWITCH,
+        .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=14,
+        .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
+        .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+    };
+    chimera::EdgeEngine ada_reg_d1(ada_reg_d1_cfg);
+    wire_engine(ada_reg_d1);
+
+    // AAVE daily Keltner-breakout — folds the Mac ibkrcrypto AAVE Kelt mimic (OOS PF 1.56,
+    // DD 11.5%, 2x-robust; the ONLY viable AAVE mimic — operator hard-no on the 62%-DD UpJump).
+    // aaveusdt already fed (SYM_AAVE=26 < MAX_SYMBOLS=62). Same KELTNER_BREAK as ADA.
+    chimera::EdgeEngine::Config aave_kelt_d1_cfg{
+        .symbol="aaveusdt", .tag="AAVE-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
+        .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
+        .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
+        .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+    };
+    chimera::EdgeEngine aave_kelt_d1(aave_kelt_d1_cfg);
+    wire_engine(aave_kelt_d1);
+
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
         .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=14,

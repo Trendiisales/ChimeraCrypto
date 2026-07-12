@@ -92,7 +92,8 @@ enum class StrategyKind {
     STOCH_RSI,      // Stochastic RSI cross up from oversold (Session 29b)
     BREAKOUT_PULLBACK, // S38: N-bar high breakout, enter on pullback that holds the breakout level
     UPJUMP,         // S-2026-07-03: wide W-bar up-jump, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
-    KELTNER_BREAK   // S-2026-07-12: upper-Keltner breakout TREND (close>EMA+M*ATR -> long), ride to lower-band flip; NO stops. Folds the Mac ibkrcrypto Kelt(20,2.0). NOT KELTNER_REVERT (that's the opposite lower-band mean-revert).
+    KELTNER_BREAK,  // S-2026-07-12: upper-Keltner breakout TREND (close>EMA+M*ATR -> long), ride to lower-band flip; NO stops. Folds the Mac ibkrcrypto Kelt(20,2.0). NOT KELTNER_REVERT (that's the opposite lower-band mean-revert).
+    REGIME_SWITCH   // S-2026-07-12: efficiency-ratio regime switch (ER>hi trending->momentum long; ER<lo chop->IBS mean-rev long; else flat). Folds the Mac ibkrcrypto Regime(20,0.40,0.25); ride_to_flip (exit when signal != long).
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -112,6 +113,7 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::BREAKOUT_PULLBACK: return "BREAKOUT_PULLBACK";
         case StrategyKind::UPJUMP:         return "UPJUMP";
         case StrategyKind::KELTNER_BREAK:  return "KELTNER_BREAK";
+        case StrategyKind::REGIME_SWITCH:  return "REGIME_SWITCH";
     }
     return "UNK";
 }
@@ -1530,6 +1532,7 @@ private:
             bool flip_out = false;
             if (cfg_.kind == StrategyKind::UPJUMP)             flip_out = (upjump_state_() == 0);
             else if (cfg_.kind == StrategyKind::KELTNER_BREAK) flip_out = keltner_break_flipped_out_();
+            else if (cfg_.kind == StrategyKind::REGIME_SWITCH) flip_out = regime_switch_flipped_out_();
             if (flip_out) {
                 exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
             }
@@ -1741,6 +1744,32 @@ private:
         return closes_.back() < lower;
     }
 
+    // ── REGIME_SWITCH (S-2026-07-12): efficiency-ratio regime switch, folds the
+    //    Mac ibkrcrypto Regime(N,0.40,0.25). ER>0.40 trending -> 50-bar momentum
+    //    long; ER<0.25 chop -> IBS<0.15 mean-rev long; else flat. Long-only. ─────
+    int regime_switch_state_() const {
+        const int N  = cfg_.lookback > 0 ? cfg_.lookback : 20;
+        const int sz = (int)closes_.size();
+        if (sz < N + 1) return 0;
+        double net = std::fabs(closes_[sz - 1] - closes_[sz - 1 - N]);
+        double vol = 0.0;
+        for (int j = sz - N; j <= sz - 1; ++j) vol += std::fabs(closes_[j] - closes_[j - 1]);
+        double er = vol > 0.0 ? net / vol : 0.0;
+        if (er > 0.40) {                                    // trending -> momentum long
+            int lag = (sz - 1 >= 50) ? 50 : (sz - 1);
+            return (closes_[sz - 1] - closes_[sz - 1 - lag]) > 0.0 ? 1 : 0;
+        }
+        if (er < 0.25) {                                    // chop -> IBS mean-rev long
+            double rng = highs_[sz - 1] - lows_[sz - 1];
+            if (rng <= 0.0) return 0;
+            double v = (closes_[sz - 1] - lows_[sz - 1]) / rng;
+            if (v < 0.15) return 1;
+        }
+        return 0;
+    }
+    bool signal_regime_switch_() const      { return regime_switch_state_() == 1; }
+    bool regime_switch_flipped_out_() const { return regime_switch_state_() != 1; }
+
     // ── BREAKOUT_PULLBACK (S38): N-bar high breakout, enter on pullback ────
     // Search the last [1..bp_max_age] bars for a prior bar whose close
     // exceeded the highest high over the `lookback` bars ending just before it
@@ -1950,6 +1979,7 @@ private:
             case StrategyKind::WEEKDAY:        fire = signal_weekday_();        break;
             case StrategyKind::KELTNER_REVERT: fire = signal_keltner_revert_(); break;
             case StrategyKind::KELTNER_BREAK:  fire = signal_keltner_break_();  break;
+            case StrategyKind::REGIME_SWITCH:  fire = signal_regime_switch_();  break;
             case StrategyKind::DUAL_THRUST:    fire = signal_dual_thrust_();    break;
             case StrategyKind::ICHIMOKU:       fire = signal_ichimoku_();       break;
             case StrategyKind::SUPERTREND:     fire = signal_supertrend_(st_flip); break;

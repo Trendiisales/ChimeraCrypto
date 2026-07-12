@@ -7420,10 +7420,12 @@ int main() {
     // NO trade-level stops (ride_to_flip) — NOT KELTNER_REVERT (opposite lower-band revert).
     // Params matched to Mac Kelt(20,2.0): keltner_ema_len=20, keltner_atr_mult=2.0, atr20.
     chimera::EdgeEngine::Config ada_kelt_d1_cfg{
+        // keltner_ema_len(20)/keltner_atr_mult(2.0) left at struct defaults = Mac Kelt(20,2.0);
+        // atr_period=20 sets the ATR window to match. (Explicit keltner_* designators would
+        // violate GCC's declaration-order rule vs trail_* — defaults are identical anyway.)
         .symbol="adausdt", .tag="ADA-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
         .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
         .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
-        .keltner_ema_len=20, .keltner_atr_mult=2.0,
         .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
     };
     chimera::EdgeEngine ada_kelt_d1(ada_kelt_d1_cfg);

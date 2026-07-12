@@ -391,7 +391,13 @@ void BinanceWSFeed::run() {
     if (!wsi_) {
         std::printf("[WS] Failed to connect\n");
         std::fflush(stdout);
+        // CH-05 (audit 2026-07-13): destroy left context_ NON-NULL — the destructor's stop()
+        // then called lws_cancel_service(context_) on freed memory (use-after-free on failed
+        // startup). Null BOTH pointers + drop running_ so stop() becomes a safe no-op.
         lws_context_destroy(context_);
+        context_ = nullptr;
+        wsi_     = nullptr;
+        running_ = false;
         return;
     }
 
@@ -401,6 +407,7 @@ void BinanceWSFeed::run() {
 
     lws_context_destroy(context_);
     context_ = nullptr;
+    wsi_     = nullptr;   // CH-05: never leave a stale wsi after the context dies
 }
 
 // ============================================================================

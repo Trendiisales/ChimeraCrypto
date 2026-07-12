@@ -306,6 +306,7 @@ static std::string g_ctrl_token;
 // ── Session 30: Multi-symbol funding filter ─────────────────────────────────
 static chimera::MultiSymbolFundingFilter g_funding_filter;
 static int64_t g_last_funding_fetch_ms = 0;
+static std::thread g_funding_thread;   // CH-06 (audit 2026-07-13): owned funding worker
 static constexpr int64_t FUNDING_FETCH_INTERVAL_MS = 8 * 3600 * 1000LL; // every 8h
 
 // ── S33: Portfolio gate state exposed to /api/state2 + GUI banner ────────
@@ -8659,8 +8660,10 @@ int main() {
     }
     std::printf("[STARTUP] HTTP server starting on %s:8080...\n", g_http_bind_addr.c_str());
     std::fflush(stdout);
-    std::thread http_thread(http_server_thread, 8080);
-    http_thread.detach();
+    // CH-06 (audit 2026-07-13): static-storage http thread — a detached local could be
+    // running while main's locals/statics tear down. Static outlives them; process exits
+    // right after the shutdown snapshot. (Full stop-flag+socket-close = larger, tracked.)
+    static std::thread s_http_thread(http_server_thread, 8080);
 
     // ── Spot WebSocket feed (subscribes to all 12 symbols) ───────────────
     chimera::BinanceWSFeed feed;
@@ -9161,9 +9164,10 @@ int main() {
             // Fetch every 8h (matches Binance funding interval).
             // Propagate tailwind/headwind flags to all engines.
             if (now_ms - g_last_funding_fetch_ms >= FUNDING_FETCH_INTERVAL_MS) {
-                std::thread([](){
-                    g_funding_filter.fetch_all();
-                }).detach();
+                // CH-06: owned funding worker — join the prior fetch (8h old, long done)
+                // before launching the next; joined at shutdown. No detached overlap.
+                if (g_funding_thread.joinable()) g_funding_thread.join();
+                g_funding_thread = std::thread([](){ g_funding_filter.fetch_all(); });
                 g_last_funding_fetch_ms = now_ms;
             }
             // Always propagate current state (fetch may complete between loops)
@@ -10081,6 +10085,26 @@ int main() {
                 std::lock_guard<std::mutex> lk(g_engine_mtx);
                 // Get BTC return (from D1 engine momentum if available)
                 double btc_momentum = 0.0;
+                // CH-03 (audit 2026-07-13): this gate needs an active BTC *D1 trend* slot as
+                // its reference. Every D1 BTC slot is currently culled, so btc_momentum stays
+                // 0 and the gate NEVER fires — a protection that LOOKS enabled but is inert.
+                // ONE-SHOT visibility so this dead state is on the record (fixing the trap the
+                // audit flagged). ENABLING the gate (rebuild reference + backtest the alt
+                // suppression) is a behaviour change owed a separate verdict — NOT done here.
+                {
+                    static bool corr_state_announced = false;
+                    if (!corr_state_announced) {
+                        bool have_btc_d1_ref = false;
+                        for (auto& s : g_slots)
+                            if (s.engine && s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400
+                                && s.engine->is_trend_following()) { have_btc_d1_ref = true; break; }
+                        std::printf("[CORR-GATE] reference %s — alt-suppression %s\n",
+                                    have_btc_d1_ref ? "LIVE (BTC-D1 slot present)" : "INACTIVE (no BTC-D1 slot; gate cannot fire)",
+                                    have_btc_d1_ref ? "armed" : "OFF");
+                        std::fflush(stdout);
+                        corr_state_announced = true;
+                    }
+                }
                 for (auto& s : g_slots) {
                     if (!s.engine) continue;
                     if (s.symbol_id == chimera::SYM_BTC && s.tf_secs == 86400 &&
@@ -10092,7 +10116,7 @@ int main() {
                         std::string state = s.engine->state_json();
                         auto pos = state.find("\"momentum_pct\":");
                         if (pos != std::string::npos) {
-                            try { btc_momentum = std::stod(state.substr(pos + 16, 10)); }
+                            try { btc_momentum = std::stod(state.substr(pos + 15, 14)); }  // CH-04 (audit 2026-07-13): key "momentum_pct": is 15 chars; +16 dropped the first digit, flipping -6.2 -> 6.2
                             catch (...) {}
                         }
                         break;
@@ -10119,7 +10143,7 @@ int main() {
                             auto pos = state.find("\"momentum_pct\":");
                             if (pos != std::string::npos) {
                                 double sym_mom = 0.0;
-                                try { sym_mom = std::stod(state.substr(pos + 16, 10)); }
+                                try { sym_mom = std::stod(state.substr(pos + 15, 14)); }  // CH-04 (audit 2026-07-13): +16 -> +15 (see BTC site)
                                 catch (...) {}
                                 // Same sign and magnitude > 50% of BTC
                                 if ((btc_momentum > 0 && sym_mom > btc_momentum * 0.5) ||
@@ -10137,6 +10161,7 @@ int main() {
 
     std::printf("\n[SHUTDOWN] Stopping...\n");
     std::fflush(stdout);
+    if (g_funding_thread.joinable()) g_funding_thread.join();  // CH-06: join owned worker before teardown
 
     // ── Graceful shutdown: write final snapshot for resume on next start ──
     // Instead of force-closing positions (which realises them at shutdown price),

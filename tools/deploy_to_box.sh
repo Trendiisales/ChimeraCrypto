@@ -24,7 +24,7 @@ set -uo pipefail
 BOX="${CHIMERA_BOX:-chimera-direct}"
 BOX_REPO="${CHIMERA_BOX_REPO:-~/ChimeraCrypto}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp")
+FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "src/live/BinanceWSFeed.cpp" "include/live/BinanceWSFeed.hpp")  # S-2026-07-13: WS feed added — the CH-05 lifetime fix silently missed the box because this list was 3 files
 MSG="${DEPLOY_MSG:?set DEPLOY_MSG to the commit message}"
 
 echo "### 1/6 PRE-DEPLOY FRESHNESS GUARD ###"

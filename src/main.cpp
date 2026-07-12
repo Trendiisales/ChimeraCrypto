@@ -7476,6 +7476,39 @@ int main() {
     chimera::EdgeEngine xrp_kelt_d1(xrp_kelt_d1_cfg);
     wire_engine(xrp_kelt_d1);
 
+    // GRT — the only fed coin with NO engine (operator gap). Backtested this session with the
+    // deployed settings: GRT 1d Kelt OOS +48.6/PF2.93 (2x 2.78); UpJump4 even stronger (PF3.12,
+    // -> joins the daily up-jump mimic). Kelt cell closes the gap now. Fed SYM_GRT.
+    chimera::EdgeEngine::Config grt_kelt_d1_cfg{
+        .symbol="grtusdt", .tag="GRT-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
+        .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
+        .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
+        .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+    };
+    chimera::EdgeEngine grt_kelt_d1(grt_kelt_d1_cfg);
+    wire_engine(grt_kelt_d1);
+
+    // ── S-2026-07-12 UNIVERSE-SCAN up-jump winners (daily/4h parents; deployed settings) ──
+    // Each backtested at its winning config, long-only, 2x-cost robust, 2022 omitted:
+    //   NEAR UJ8 1d OOS PF3.70 · AVAX UJ5 1d 3.51 · LINK UJ8 1d 2.65 · BCH UJ4x48 1d 2.54
+    //   UNI UJ8 1d 2.32 · LDO UJ3 1d 1.58 · OP UJ3 4h 1.34 (OP has no daily file).
+    // UPJUMP kind, ride_to_flip (exit on symmetric down-jump, no stops). These are the PARENT
+    // engines; the BE-cascade companion overlay (safer arm-after-BE mimic) is an additive
+    // follow-up on top of these feeds — it does NOT gate the validated edge.
+    auto make_uj = [](const char* sym, const char* tag, int64_t tf, int w, double thr) {
+        return chimera::EdgeEngine::Config{
+            .symbol=sym, .tag=tag, .kind=chimera::StrategyKind::UPJUMP, .tf_secs=tf,
+            .atr_period=14, .upjump_w=w, .upjump_thr=thr, .ride_to_flip=true,
+            .round_trip_bp=20.0, .max_history=96 };
+    };
+    chimera::EdgeEngine near_uj8_d1 (make_uj("nearusdt","NEAR-UPJUMP8-D1", 86400,24,0.08)); wire_engine(near_uj8_d1);
+    chimera::EdgeEngine avax_uj5_d1 (make_uj("avaxusdt","AVAX-UPJUMP5-D1", 86400,24,0.05)); wire_engine(avax_uj5_d1);
+    chimera::EdgeEngine link_uj8_d1 (make_uj("linkusdt","LINK-UPJUMP8-D1", 86400,24,0.08)); wire_engine(link_uj8_d1);
+    chimera::EdgeEngine bch_uj4_d1  (make_uj("bchusdt", "BCH-UPJUMP4X48-D1",86400,48,0.04)); wire_engine(bch_uj4_d1);
+    chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08)); wire_engine(uni_uj8_d1);
+    chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03)); wire_engine(ldo_uj3_d1);
+    chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03)); wire_engine(op_uj3_h4);
+
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
         .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=14,

@@ -7413,6 +7413,22 @@ int main() {
     chimera::EdgeEngine ada_tsmom_d1(ada_tsmom_d1_cfg);
 // S44-CULL:     wire_engine(ada_tsmom_d1);
 
+    // ── S-2026-07-12 MAC-FOLD (crypto consolidation onto josgp1) ───────────────
+    // ADA daily Keltner-breakout — folds the validated Mac ibkrcrypto ADA Kelt mimic
+    // (faithful --protect-sweep: OOS_23-26 PF 4.60, DD 6.6%, 2x-cost-robust). KELTNER_BREAK
+    // = upper-band breakout TREND (close>EMA20+2*ATR20 -> long), ride to lower-band flip,
+    // NO trade-level stops (ride_to_flip) — NOT KELTNER_REVERT (opposite lower-band revert).
+    // Params matched to Mac Kelt(20,2.0): keltner_ema_len=20, keltner_atr_mult=2.0, atr20.
+    chimera::EdgeEngine::Config ada_kelt_d1_cfg{
+        .symbol="adausdt", .tag="ADA-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
+        .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
+        .ride_to_flip=true, .bb_k=2.0, .rsi_threshold=30.0, .round_trip_bp=22, .max_history=64,
+        .keltner_ema_len=20, .keltner_atr_mult=2.0,
+        .trail_arm_atr=1.0, .trail_dist_atr=0.4, .trail_tighten_atr=3.0, .trail_tighten_dist_atr=0.25,
+    };
+    chimera::EdgeEngine ada_kelt_d1(ada_kelt_d1_cfg);
+    wire_engine(ada_kelt_d1);
+
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
         .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=14,

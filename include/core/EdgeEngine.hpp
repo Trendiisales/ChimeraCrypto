@@ -91,7 +91,8 @@ enum class StrategyKind {
     WILLIAMS_R,     // Williams %R cross up from oversold (Session 29b)
     STOCH_RSI,      // Stochastic RSI cross up from oversold (Session 29b)
     BREAKOUT_PULLBACK, // S38: N-bar high breakout, enter on pullback that holds the breakout level
-    UPJUMP          // S-2026-07-03: wide W-bar up-jump, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
+    UPJUMP,         // S-2026-07-03: wide W-bar up-jump, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
+    KELTNER_BREAK   // S-2026-07-12: upper-Keltner breakout TREND (close>EMA+M*ATR -> long), ride to lower-band flip; NO stops. Folds the Mac ibkrcrypto Kelt(20,2.0). NOT KELTNER_REVERT (that's the opposite lower-band mean-revert).
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -110,6 +111,7 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::STOCH_RSI:      return "STOCH_RSI";
         case StrategyKind::BREAKOUT_PULLBACK: return "BREAKOUT_PULLBACK";
         case StrategyKind::UPJUMP:         return "UPJUMP";
+        case StrategyKind::KELTNER_BREAK:  return "KELTNER_BREAK";
     }
     return "UNK";
 }
@@ -127,6 +129,7 @@ inline bool is_trend_kind(StrategyKind k) {
         case StrategyKind::SUPERTREND:
         case StrategyKind::BREAKOUT_PULLBACK:
         case StrategyKind::UPJUMP:
+        case StrategyKind::KELTNER_BREAK:  // upper-band breakout = trend kind
             return true;
         default:               // BOLLINGER/RSI_REVERT/KELTNER_REVERT/WILLIAMS_R/
             return false;      // STOCH_RSI/OVERNIGHT/WEEKDAY — ok in chop
@@ -1523,8 +1526,11 @@ private:
             // exit at this bar's close
             exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "TIME");
         }
-        if (cfg_.ride_to_flip && in_position_ && cfg_.kind == StrategyKind::UPJUMP) {
-            if (upjump_state_() == 0) {
+        if (cfg_.ride_to_flip && in_position_) {
+            bool flip_out = false;
+            if (cfg_.kind == StrategyKind::UPJUMP)             flip_out = (upjump_state_() == 0);
+            else if (cfg_.kind == StrategyKind::KELTNER_BREAK) flip_out = keltner_break_flipped_out_();
+            if (flip_out) {
                 exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
             }
         }
@@ -1640,6 +1646,13 @@ private:
         if (e <= 0.0 || a <= 0.0) return 0.0;
         return e - cfg_.keltner_atr_mult * a;
     }
+    // S-2026-07-12: upper Keltner band (EMA + M*ATR) for KELTNER_BREAK (trend breakout).
+    double keltner_upper_() const {
+        double e = ema_(cfg_.keltner_ema_len);
+        double a = atr_(cfg_.atr_period);
+        if (e <= 0.0 || a <= 0.0) return 0.0;
+        return e + cfg_.keltner_atr_mult * a;
+    }
 
     // ── Volatility regime ratio: ATR(14) / ATR(50) ──────────────────────────
     double vol_ratio_() const {
@@ -1706,6 +1719,26 @@ private:
         double lower = keltner_lower_();
         if (lower <= 0.0) return false;
         return (lows_.back() <= lower) && (closes_.back() > lower);
+    }
+
+    // ── KELTNER_BREAK (S-2026-07-12): upper-band breakout TREND, folds the Mac
+    //    ibkrcrypto Kelt(N,M): long when close > EMA+M*ATR; ride until close <
+    //    lower band (symmetric flip), NO trade-level stops (ride_to_flip). This
+    //    is the OPPOSITE of KELTNER_REVERT — do not conflate. ────────────────
+    bool signal_keltner_break_() const {
+        if ((int)closes_.size() < std::max(cfg_.keltner_ema_len, cfg_.atr_period) + 1)
+            return false;
+        double upper = keltner_upper_();
+        if (upper <= 0.0) return false;
+        return closes_.back() > upper;         // entry: close breaks the upper band
+    }
+    // flip-out: long exits when close falls back through the LOWER band
+    bool keltner_break_flipped_out_() const {
+        if ((int)closes_.size() < std::max(cfg_.keltner_ema_len, cfg_.atr_period) + 1)
+            return false;
+        double lower = keltner_lower_();
+        if (lower <= 0.0) return false;
+        return closes_.back() < lower;
     }
 
     // ── BREAKOUT_PULLBACK (S38): N-bar high breakout, enter on pullback ────
@@ -1916,6 +1949,7 @@ private:
             case StrategyKind::OVERNIGHT:      fire = signal_overnight_();      break;
             case StrategyKind::WEEKDAY:        fire = signal_weekday_();        break;
             case StrategyKind::KELTNER_REVERT: fire = signal_keltner_revert_(); break;
+            case StrategyKind::KELTNER_BREAK:  fire = signal_keltner_break_();  break;
             case StrategyKind::DUAL_THRUST:    fire = signal_dual_thrust_();    break;
             case StrategyKind::ICHIMOKU:       fire = signal_ichimoku_();       break;
             case StrategyKind::SUPERTREND:     fire = signal_supertrend_(st_flip); break;

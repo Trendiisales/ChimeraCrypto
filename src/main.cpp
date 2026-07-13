@@ -351,7 +351,7 @@ static constexpr double SYMBOL_LIQ_DEFAULT[chimera::MAX_SYMBOLS] = {
     /*45 MASK*/0.30, /*46 RUNE*/0.40, /*47 JTO*/0.30, /*48 W*/0.25, /*49 TURBO*/0.20,
     /*50 BOME*/0.20, /*51 FLOKI*/0.20, /*52 ETHFI*/0.30, /*53 EIGEN*/0.30, /*54 ZRO*/0.30,
     /*55 GMT*/0.30, /*56 SHIB*/0.30, /*57 BCH*/0.60, /*58 LTC*/0.60, /*59 ETC*/0.50,
-    /*60 XLM*/0.50, /*61 VET*/0.35,
+    /*60 XLM*/0.50, /*61 VET*/0.35, /*62 THETA*/0.35, /*63 SUSHI*/0.30,
 };
 static double liq_mult_for_symbol(const std::string& sym) {
     auto it = g_symbol_liq.find(sym);  // config override wins if present
@@ -470,7 +470,7 @@ static constexpr int SYMBOL_CLUSTER[chimera::MAX_SYMBOLS] = {
     /*48 W   */CL_OTHER, /*49 TURBO*/CL_MEME, /*50 BOME*/CL_MEME, /*51 FLOKI*/CL_MEME,
     /*52 ETHFI*/CL_DEFI, /*53 EIGEN*/CL_OTHER,/*54 ZRO */CL_OTHER,/*55 GMT */CL_MEME,
     /*56 SHIB*/CL_MEME,  /*57 BCH */CL_MAJORS,/*58 LTC */CL_MAJORS,/*59 ETC */CL_MAJORS,
-    /*60 XLM */CL_L1,    /*61 VET */CL_OTHER,
+    /*60 XLM */CL_L1,    /*61 VET */CL_OTHER, /*62 THETA*/CL_L1,   /*63 SUSHI*/CL_DEFI,
 };
 static inline int symbol_cluster(int sid) {
     return (sid >= 0 && sid < chimera::MAX_SYMBOLS) ? SYMBOL_CLUSTER[sid] : CL_OTHER;
@@ -3842,9 +3842,10 @@ int main() {
     // detection (det_thr) and books a -70bp REVERSAL_CUT when price reverses -- an
     // immediate-entry structure that "trades into a loss" (forbidden). The same-day 50bp
     // loss_cut (2330a8a) was insufficient (clips still booked the reversal cut), so the
-    // clips are removed ENTIRELY rather than cut-protected. Skipping population leaves
-    // _grid/_all_clips empty => g_companion_by_parent stays empty => on_bar_callback steps
-    // nothing => zero new clips arm/book. The PARENT EdgeEngine UPJUMP legs (wire_engine +
+    // clips are removed ENTIRELY rather than cut-protected. Skipping population keeps
+    // the up-jump cells out of _grid/_all_clips (Phase-3 BE-entry mimics below DO
+    // populate _grid — they are NOT this failure class: they open only past BE).
+    // The PARENT EdgeEngine UPJUMP legs (wire_engine +
     // g_slots, ride_to_flip) are UNTOUCHED -- the core crypto strategy keeps riding to flip.
     // NOT the clip failure class. StallCompanion (retired-Mac python) is not native here, so
     // there is no at-BE mimic to preserve. Re-enable = flip this flag back to false + rebuild.
@@ -3882,13 +3883,93 @@ int main() {
             _grid_feeds.push_back(gc.feed);
         }
     }
+    // ── PHASE 3 (2026-07-13): REGIME_SWITCH parents + BE-ENTRY MIMIC ─────────────
+    // The replacement for the killed up-jump family (operator: "replace with our mimic
+    // engine", SESSION_HANDOFF_2026-07-13b). Parent kind decided by the Phase-1 scan
+    // (backtest/parent_scan_bt.cpp, 54 coins, gate-certified data, random-entry control):
+    // REGIME_SWITCH = 30/54 net+ @2x cost, ~59% time-past-BE, flat in chop/bear.
+    // Config mirrors backtest/companion_be_mimic_bt.cpp EXACTLY (Phase-2 parity) —
+    // these slots are EXEMPT from the tier-preset / S44N / vol_filter override loops
+    // below, because this config IS the backtested protection verdict.
+    // ADVERSE-PROTECTION (parent): staged BE-ratchet (start=20bp, be_arm=30bp,
+    // lock 75/85/90/95%) + 3-ATR stop + ride_to_flip; Phase-1 worst coin-year −7..−21%.
+    auto make_regime = [](const char* sym, const char* tag) {
+        chimera::EdgeEngine::Config c{};
+        c.symbol=sym; c.tag=tag; c.kind=chimera::StrategyKind::REGIME_SWITCH;
+        c.tf_secs=86400; c.lookback=20; c.hold_bars=12; c.sl_atr_mult=3.0;
+        c.atr_period=14; c.ride_to_flip=true;
+        c.round_trip_bp=20.0; c.max_history=64;
+        c.hard_floor_bp=0.0; c.early_kill_bp=0.0; c.early_kill_mfe=0.0;
+        c.early_kill_min_hold_ms=0; c.giveback_arm_bp=0.0; c.signal_confirm_bars=1;
+        c.ratchet_start_bp=20.0; c.be_arm_bp=30.0; c.ratchet_lock_pct=0.75;
+        c.prog_lock_pct_2=0.85; c.prog_lock_pct_3=0.90; c.prog_lock_pct_4=0.95;
+        c.trail_arm_atr=1.0; c.trail_dist_atr=0.4;
+        c.trail_tighten_atr=3.0; c.trail_tighten_dist_atr=0.25;
+        // realistic_gap_fill left at default (true): live fills are real ticks, not
+        // bar-path replay — the backtest's false was its coarse-OHLC fill model.
+        return c;
+    };
+    chimera::EdgeEngine near_regime_d1 (make_regime("nearusdt", "NEAR-REGIME_SWITCH"));
+    chimera::EdgeEngine theta_regime_d1(make_regime("thetausdt","THETA-REGIME_SWITCH"));
+    chimera::EdgeEngine sushi_regime_d1(make_regime("sushiusdt","SUSHI-REGIME_SWITCH"));
+    chimera::EdgeEngine ada_regime_d1  (make_regime("adausdt",  "ADA-REGIME_SWITCH"));
+    chimera::EdgeEngine dot_regime_d1  (make_regime("dotusdt",  "DOT-REGIME_SWITCH"));
+    // BE-ENTRY MIMIC factory — reuses UpJumpLadderCompanion in LADDER mode: det_w=0
+    // observes the EXTERNAL parent above (never self-detects), confirm_bp=20 keeps
+    // every leg PENDING (booking nothing, paying no cost) until the parent's move has
+    // already cleared +20bp (== BE == RT cost) — it can never open underwater, the
+    // exact property the killed immediate-entry clips lacked. Tight peak-giveback
+    // trail once armed, reversal exit, re-clips on +5% continuation.
+    // Standalone additive shadow book; judged STANDALONE, never vs the parent
+    // (feedback-companion-independent-engine).
+    // ADVERSE-PROTECTION (mimic): loss_cut_bp=60 — backtested verdict
+    // (companion_be_mimic_bt, certified data): improves PF on 4/5 basket coins
+    // (DOT 1.70→2.43, ADA 21.2→36.9) and bounds the tail; per-coin auto-retire below.
+    auto make_be_mimic = [&unretired](const char* ptag, const char* ctag, const char* sym,
+                                      double retire_bp) {
+        chimera::UpJumpLadderCompanion::Config c;
+        c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
+        c.tight = {0.30, 0, 0.40, 0.0};   // arm 0.30%  giveback 40% (banks fast)
+        c.wide  = {0.80, 0, 0.55, 0.0};   // arm 0.80%  giveback 55% (rides far)
+        c.reclip_pct = 0.05;              // re-enter on +5% new peak after a clip
+        c.confirm_bp = 20.0;              // BE-ENTRY: open ONLY once fav >= BE (== RT cost)
+        c.cap        = 2;                 // 2 base tiers, NO self-funding ladder (BE book)
+        c.cost_gate_bp = 0.0; c.be_floor = false;   // LADDER honest-MTM (be_floor family retired)
+        c.det_w = 0; c.det_thr = 0.0;     // observe the EXTERNAL parent, not self-detect
+        c.tf_secs = 86400; c.round_trip_bp = 20.0;
+        c.loss_cut_bp = 60.0;
+        c.retire_bp = retire_bp;          // per-coin auto-retire on negative real bank
+        c.retire_override = unretired(ctag);
+        return c;
+    };
+    // Core basket = coins whose standalone mimic book cleared the Phase-2 gate at
+    // confirm=20/losscut=60 (net+, PF>=1.3, 2x-cost robust; scratchpad/
+    // bemimic_regime_results.csv). AVAX (PF 0.62) + KSM (PF 0.39) FAILED — left out.
+    // XTZ (PF 1.48) + CRV (PF 1.82) pass net/PF but their FIRST WF half is negative
+    // (−2759 / −3794) — left out until a half-split passes (do not wire soft-WF coins).
+    // retire_bp ≈ −1.5–2x the coin's Phase-2 worst clip.
+    struct RegimeParent { const char* pfx; const char* sym; chimera::EdgeEngine* eng; double retire_bp; };
+    const std::vector<RegimeParent> _regime_basket = {
+        {"NEAR",  "nearusdt",  &near_regime_d1,  -2000.0},   // mimic PF 1.65, worst −978
+        {"THETA", "thetausdt", &theta_regime_d1, -1000.0},   // mimic PF 33.7, worst −421
+        {"SUSHI", "sushiusdt", &sushi_regime_d1, -2000.0},   // mimic PF 1.78, worst −1063
+        {"ADA",   "adausdt",   &ada_regime_d1,   -1000.0},   // mimic PF 36.9, worst −260
+        {"DOT",   "dotusdt",   &dot_regime_d1,   -1800.0},   // mimic PF 2.43, worst −878
+    };
+    for (const auto& rp : _regime_basket) {
+        _grid_ptags.push_back(std::string(rp.pfx) + "-REGIME_SWITCH");
+        _grid_ctags.push_back(std::string(rp.pfx) + "-REGIME-BEMIMIC");
+        _grid.emplace_back(make_be_mimic(_grid_ptags.back().c_str(), _grid_ctags.back().c_str(),
+                                         rp.sym, rp.retire_bp));
+        _grid_feeds.push_back(rp.eng);    // det_w=0 => driven off THIS parent's bar closes
+    }
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
-        const int _NCLIP = (int)_all_clips.size();   // 32 grid cells
+        const int _NCLIP = (int)_all_clips.size();   // Phase-3: 5 BE-entry mimics (up-jump grid killed)
         g_grid_clip_count = _NCLIP;   // Phase-4 item 20: real grid-cell count for the honest registry
         for (int i = 0; i < _NCLIP; ++i) {
             _all_clips[i]->shadow_mode = true;
@@ -7665,7 +7746,7 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_d1,   "ethusdt",  86400, "ETH-TSMOM-D1",   3.15, 3.17,  91,  26, 13});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_d1,   "solusdt",  86400, "SOL-TSMOM-D1",   2.25, 2.41,  89,  15, 13});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d1,  "linkusdt", 86400, "LINK-TSMOM-D1",  2.18, 1.92, 100,  23, 13});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1,   "bnbusdt",  86400, "BNB-TSMOM-D1",   3.16, 2.91,  90,  32, 14});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1,   "bnbusdt",  86400, "BNB-TSMOM-D1",   3.16, 2.91,  90,  32, 14});
 
     // UPJUMP-H1 fat-tail parent legs — RETIRED S-2026-07-11 (threshold-comparison grid supersedes;
     // no 3-overlapping-sets). Their companion books were retired above; these parent legs are now
@@ -7695,9 +7776,21 @@ int main() {
     g_slots.push_back({chimera::SYM_TRX,  &trx_upjump5_h1,  "trxusdt",  3600, "TRX-UPJUMP5-H1",  0.0, 0.0, 0, 0, 57});
     }
 
+    // ── PHASE 3 (2026-07-13): REGIME_SWITCH D1 trend parents — the live book ─────
+    // Phase-1 winner kind (parent_scan_bt, 54 coins, certified data, random-entry
+    // control). Stats = today's certified-data rerun (parent_scan_bt REGIME_SWITCH
+    // cost=20 seed=20): PF / trades per coin. These feed the *-REGIME-BEMIMIC
+    // companions (registered above) via on_bar_callback. EXEMPT from tier-preset/
+    // S44N/vol_filter overrides — config is the Phase-2 backtest parity config.
+    g_slots.push_back({chimera::SYM_NEAR,  &near_regime_d1,  "nearusdt",  86400, "NEAR-REGIME_SWITCH",  1.98, 0.0, 0, 33, 60});
+    g_slots.push_back({chimera::SYM_THETA, &theta_regime_d1, "thetausdt", 86400, "THETA-REGIME_SWITCH", 6.98, 0.0, 0, 12, 60});
+    g_slots.push_back({chimera::SYM_SUSHI, &sushi_regime_d1, "sushiusdt", 86400, "SUSHI-REGIME_SWITCH", 4.00, 0.0, 0, 23, 60});
+    g_slots.push_back({chimera::SYM_ADA,   &ada_regime_d1,   "adausdt",   86400, "ADA-REGIME_SWITCH",   5.78, 0.0, 0, 30, 60});
+    g_slots.push_back({chimera::SYM_DOT,   &dot_regime_d1,   "dotusdt",   86400, "DOT-REGIME_SWITCH",   2.58, 0.0, 0, 24, 60});
+
     // H12 engines (3)
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12,  "btcusdt",  43200, "BTC-TSMOM-H12",  3.63, 3.40,  96,  31, 14});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h12, "dogeusdt", 43200, "DOGE-TSMOM-H12", 2.78, 3.66, 100,  82, 14});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h12, "dogeusdt", 43200, "DOGE-TSMOM-H12", 2.78, 3.66, 100,  82, 14});
 
     // H6 engines (8) — NEW Session 15
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h6,   "xrpusdt",  21600, "XRP-TSMOM-H6",   2.68, 4.41, 100, 120, 15});
@@ -7705,7 +7798,7 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_h6,    "ethusdt",  21600, "ETH-TSMOM-H6",   2.07, 3.70, 100, 151, 15});
 // S44-CULL:     g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h6,    "solusdt",  21600, "SOL-TSMOM-H6",   2.07, 3.25, 100, 127, 15});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h6,    "bnbusdt",  21600, "BNB-TSMOM-H6",   2.07, 2.76, 100,  95, 15});
-    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h6,   "linkusdt", 21600, "LINK-TSMOM-H6",  1.33, 1.12, 100, 549, 15});  // AUDIT-2026 revived: bvr PF=1.33 n=549 Sh=1.12
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h6,   "linkusdt", 21600, "LINK-TSMOM-H6",  1.33, 1.12, 100, 549, 15});  // AUDIT-2026 revived: bvr PF=1.33 n=549 Sh=1.12
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h6,   "dogeusdt", 21600, "DOGE-TSMOM-H6",  1.72, 2.24,  77,  91, 15});
 // S44-CULL:     g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h6,   "avaxusdt", 21600, "AVAX-TSMOM-H6",  1.48, 2.03, 100, 1157, 15});  // AUDIT-2026 revived: bvr PF=1.48 n=1157 Sh=2.03 (top dark engine)
 
@@ -7713,7 +7806,7 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h4,   "xrpusdt",  14400, "XRP-TSMOM-H4",   2.43, 5.80, 100, 267, 14});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h4,    "bnbusdt",  14400, "BNB-TSMOM-H4",   1.91, 3.79, 100, 291, 14});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h4,   "linkusdt", 14400, "LINK-TSMOM-H4",  1.91, 4.07,  95, 205, 14});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h4,    "solusdt",  14400, "SOL-TSMOM-H4",   1.89, 3.82, 100, 208, 14});  // AUDIT-2026-S35 revived: protected-bvr PF=19.26 Sharpe=15.6 worst=-70bp MDD/cum=0.1%
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h4,    "solusdt",  14400, "SOL-TSMOM-H4",   1.89, 3.82, 100, 208, 14});  // AUDIT-2026-S35 revived: protected-bvr PF=19.26 Sharpe=15.6 worst=-70bp MDD/cum=0.1%
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h4,    "btcusdt",  14400, "BTC-TSMOM-H4",   1.82, 3.54, 100, 167, 14});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH,  &eth_tsmom_h4,    "ethusdt",  14400, "ETH-TSMOM-H4",   1.76, 3.26, 100, 196, 14});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h4,   "avaxusdt", 14400, "AVAX-TSMOM-H4",  1.47, 2.17,  83, 231, 14});
@@ -7743,12 +7836,12 @@ int main() {
 
     // ── NEW SYMBOL engines (Session 20) — NEAR/SUI/APT/ARB ─────────────────
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_d1,  "nearusdt", 86400, "NEAR-TSMOM-D1",  2.79, 2.61, 100,  46, 20});
-    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h12, "nearusdt", 43200, "NEAR-TSMOM-H12", 1.92, 3.03,  95, 126, 20});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h12, "nearusdt", 43200, "NEAR-TSMOM-H12", 1.92, 3.03,  95, 126, 20});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h6,  "nearusdt", 21600, "NEAR-TSMOM-H6",  1.85, 3.62, 100, 257, 20});
-    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h4,  "nearusdt", 14400, "NEAR-TSMOM-H4",  2.17, 3.59, 100, 209, 20});  // AUDIT-2026-S35 revived: protected-bvr PF=22.66 Sharpe=13.6 worst=-72bp MDD/cum=0.1%
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h4,  "nearusdt", 14400, "NEAR-TSMOM-H4",  2.17, 3.59, 100, 209, 20});  // AUDIT-2026-S35 revived: protected-bvr PF=22.66 Sharpe=13.6 worst=-72bp MDD/cum=0.1%
     // DISABLED-AUDIT2026: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h3,  "nearusdt", 10800, "NEAR-TSMOM-H3",  1.75, 3.65,  87, 351, 20});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI,  &sui_tsmom_h6,   "suiusdt",  21600, "SUI-TSMOM-H6",   1.80, 3.22, 100, 129, 20});
-    g_slots.push_back({chimera::SYM_SUI,  &sui_tsmom_h4,   "suiusdt",  14400, "SUI-TSMOM-H4",   1.44, 2.11,  88, 169, 20});  // AUDIT-2026-S35 revived: protected-bvr PF=16.46 Sharpe=16.6 worst=-72bp MDD/cum=0.2%
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_SUI,  &sui_tsmom_h4,   "suiusdt",  14400, "SUI-TSMOM-H4",   1.44, 2.11,  88, 169, 20});  // AUDIT-2026-S35 revived: protected-bvr PF=16.46 Sharpe=16.6 worst=-72bp MDD/cum=0.2%
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h6,   "aptusdt",  21600, "APT-TSMOM-H6",   1.82, 3.32,  92, 149, 20});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_h6,   "arbusdt",  21600, "ARB-TSMOM-H6",   1.48, 2.31,  80, 131, 20});
 
@@ -7769,18 +7862,18 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_h8, "btcusdt", 28800, "BTC-TSMOM-H8", 1.99, 2.55, 82, 77, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ETH, &eth_tsmom_h8, "ethusdt", 28800, "ETH-TSMOM-H8", 2.90, 5.10, 100, 121, 21});
 // S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h8, "linkusdt", 28800, "LINK-TSMOM-H8", 2.95, 4.78, 100, 119, 21});  // AUDIT-2026-S35 revived: protected-bvr PF=31.02 Sharpe=13.7 worst=-72bp MDD/cum=0.1%
-    g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h8, "nearusdt", 28800, "NEAR-TSMOM-H8", 2.10, 3.79, 97, 171, 21});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_NEAR, &near_tsmom_h8, "nearusdt", 28800, "NEAR-TSMOM-H8", 2.10, 3.79, 97, 171, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_h8, "bnbusdt", 28800, "BNB-TSMOM-H8", 2.86, 3.67, 100, 138, 21});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h8, "dogeusdt", 28800, "DOGE-TSMOM-H8", 2.02, 2.54, 100, 107, 21});
-    g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h8, "avaxusdt", 28800, "AVAX-TSMOM-H8", 1.38, 1.05, 100, 609, 21});  // AUDIT-2026 revived: bvr PF=1.38 n=609 Sh=1.05
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h8, "dogeusdt", 28800, "DOGE-TSMOM-H8", 2.02, 2.54, 100, 107, 21});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_AVAX, &avax_tsmom_h8, "avaxusdt", 28800, "AVAX-TSMOM-H8", 1.38, 1.05, 100, 609, 21});  // AUDIT-2026 revived: bvr PF=1.38 n=609 Sh=1.05
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_h8, "suiusdt", 28800, "SUI-TSMOM-H8", 2.27, 2.50, 81, 62, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ARB, &arb_tsmom_h8, "arbusdt", 28800, "ARB-TSMOM-H8", 2.01, 2.84, 50, 86, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_h16, "btcusdt", 57600, "BTC-TSMOM-H16", 5.16, 4.01, 100, 22, 21});
 // S44-CULL:     g_slots.push_back({chimera::SYM_SOL, &sol_tsmom_h16, "solusdt", 57600, "SOL-TSMOM-H16", 3.47, 3.77, 100, 54, 21});
-    g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_h16, "xrpusdt", 57600, "XRP-TSMOM-H16", 4.72, 4.14, 100, 55, 21});
-    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h16, "linkusdt", 57600, "LINK-TSMOM-H16", 1.37, 0.85, 100, 272, 21});  // AUDIT-2026 revived: bvr PF=1.37 n=272 Sh=0.85
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_XRP, &xrp_tsmom_h16, "xrpusdt", 57600, "XRP-TSMOM-H16", 4.72, 4.14, 100, 55, 21});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h16, "linkusdt", 57600, "LINK-TSMOM-H16", 1.37, 0.85, 100, 272, 21});  // AUDIT-2026 revived: bvr PF=1.37 n=272 Sh=0.85
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB, &bnb_tsmom_h16, "bnbusdt", 57600, "BNB-TSMOM-H16", 2.76, 2.70, 100, 61, 21});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h16, "dogeusdt", 57600, "DOGE-TSMOM-H16", 2.16, 2.33, 92, 54, 21});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_DOGE, &doge_tsmom_h16, "dogeusdt", 57600, "DOGE-TSMOM-H16", 2.16, 2.33, 92, 54, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SUI, &sui_tsmom_h16, "suiusdt", 57600, "SUI-TSMOM-H16", 2.13, 2.16, 85, 40, 21});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_ARB, &arb_tsmom_h16, "arbusdt", 57600, "ARB-TSMOM-H16", 2.33, 2.84, 40, 43, 21});
 // S44-CULL:     g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_d2, "btcusdt", 172800, "BTC-TSMOM-D2", 38.30, 7.17, 100, 10, 21});
@@ -7795,26 +7888,26 @@ int main() {
 
     // AUDIT-2026-S35: NEW SYMBOL engines — FET/TIA/ONDO TSMOM at slower TFs.
     // Validated protected-bvr stats noted below (sym, tf, PF, Sharpe, MDD bp).
-    g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_h8,   "fetusdt",  28800, "FET-TSMOM-H8",   68.23, 13.71, 100, 1479, 35});  // S35 new: PF=68 Sh=13.7 worst=-72bp MDD=-144bp
-    g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_h12,  "fetusdt",  43200, "FET-TSMOM-H12", 120.29, 11.57, 100,  980, 35});  // S35 new: PF=120 Sh=11.6
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_h8,   "fetusdt",  28800, "FET-TSMOM-H8",   68.23, 13.71, 100, 1479, 35});  // S35 new: PF=68 Sh=13.7 worst=-72bp MDD=-144bp
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_h12,  "fetusdt",  43200, "FET-TSMOM-H12", 120.29, 11.57, 100,  980, 35});  // S35 new: PF=120 Sh=11.6
 // S44-CULL:     g_slots.push_back({chimera::SYM_FET,  &fet_tsmom_d1,   "fetusdt",  86400, "FET-TSMOM-D1",  331.33,  8.66, 100,  451, 35});  // S35 new: PF=331 Sh=8.7
-    g_slots.push_back({chimera::SYM_TIA,  &tia_tsmom_h8,   "tiausdt",  28800, "TIA-TSMOM-H8",   56.38, 12.73, 100,  631, 35});  // S35 new: PF=56 Sh=12.7
-    g_slots.push_back({chimera::SYM_TIA,  &tia_tsmom_h12,  "tiausdt",  43200, "TIA-TSMOM-H12",  61.89, 10.53, 100,  425, 35});  // S35 new: PF=62 Sh=10.5
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_TIA,  &tia_tsmom_h8,   "tiausdt",  28800, "TIA-TSMOM-H8",   56.38, 12.73, 100,  631, 35});  // S35 new: PF=56 Sh=12.7
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_TIA,  &tia_tsmom_h12,  "tiausdt",  43200, "TIA-TSMOM-H12",  61.89, 10.53, 100,  425, 35});  // S35 new: PF=62 Sh=10.5
 // S44-CULL:     g_slots.push_back({chimera::SYM_ONDO, &ondo_tsmom_h12, "ondousdt", 43200, "ONDO-TSMOM-H12", 33.54, 11.08, 100,  180, 35});  // S35 new: PF=33 Sh=11.1 (shortest history, ~1yr)
 
     // AUDIT-2026-S35 WAVE 2: HBAR / INJ / ADA / TRX / SEI TSMOM engines.
 // S44-CULL:     g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_h8,  "hbarusdt", 28800, "HBAR-TSMOM-H8",  34.94, 10.00, 100, 1458, 35});  // S35 w2: PF=35 Sh=10.0
 // S44-CULL:     g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_h12, "hbarusdt", 43200, "HBAR-TSMOM-H12", 47.04,  8.36, 100,  934, 35});  // S35 w2: PF=47 Sh=8.4
 // S44-CULL:     g_slots.push_back({chimera::SYM_HBAR, &hbar_tsmom_d1,  "hbarusdt", 86400, "HBAR-TSMOM-D1",  72.48,  7.40, 100,  430, 35});  // S35 w2: PF=72 Sh=7.4
-    g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_h8,   "injusdt",  28800, "INJ-TSMOM-H8",   42.00, 13.00, 100, 1546, 35});  // S35 w2: PF=42 Sh=13.0
-    g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_h12,  "injusdt",  43200, "INJ-TSMOM-H12",  80.88, 11.17, 100, 1043, 35});  // S35 w2: PF=81 Sh=11.2
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_h8,   "injusdt",  28800, "INJ-TSMOM-H8",   42.00, 13.00, 100, 1546, 35});  // S35 w2: PF=42 Sh=13.0
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_h12,  "injusdt",  43200, "INJ-TSMOM-H12",  80.88, 11.17, 100, 1043, 35});  // S35 w2: PF=81 Sh=11.2
 // S44-CULL:     g_slots.push_back({chimera::SYM_INJ,  &inj_tsmom_d1,   "injusdt",  86400, "INJ-TSMOM-D1",  146.79,  8.81, 100,  479, 35});  // S35 w2: PF=147 Sh=8.8
 // S44-CULL:     g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_h8,   "adausdt",  28800, "ADA-TSMOM-H8",   27.17, 11.48, 100, 1438, 35});  // S35 w2: PF=27 Sh=11.5
 // S44-CULL:     g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_h12,  "adausdt",  43200, "ADA-TSMOM-H12",  41.00, 10.27, 100,  954, 35});  // S35 w2: PF=41 Sh=10.3
 // S44-CULL:     g_slots.push_back({chimera::SYM_ADA,  &ada_tsmom_d1,   "adausdt",  86400, "ADA-TSMOM-D1",   72.66,  7.20, 100,  423, 35});  // S35 w2: PF=73 Sh=7.2
 // S44-CULL:     g_slots.push_back({chimera::SYM_TRX,  &trx_tsmom_d1,   "trxusdt",  86400, "TRX-TSMOM-D1",   23.00,  6.61, 100,  612, 35});  // S35 w2: PF=23 Sh=6.6 (stable carry — slow TF only)
 // S44-CULL:     g_slots.push_back({chimera::SYM_TRX,  &trx_tsmom_d2,   "trxusdt", 172800, "TRX-TSMOM-D2",   42.34,  5.62, 100,  305, 35});  // S35 w2: PF=42 Sh=5.6
-    g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_h8,   "seiusdt",  28800, "SEI-TSMOM-H8",   49.69, 13.39, 100,  722, 35});  // S35 w2: PF=50 Sh=13.4
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_h8,   "seiusdt",  28800, "SEI-TSMOM-H8",   49.69, 13.39, 100,  722, 35});  // S35 w2: PF=50 Sh=13.4
 // S44-CULL:     g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_h12,  "seiusdt",  43200, "SEI-TSMOM-H12",  66.76, 10.13, 100,  461, 35});  // S35 w2: PF=67 Sh=10.1
 // S44-CULL:     g_slots.push_back({chimera::SYM_SEI,  &sei_tsmom_d1,   "seiusdt",  86400, "SEI-TSMOM-D1",  124.40,  7.42, 100,  208, 35});  // S35 w2: PF=124 Sh=7.4
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC, &btc_tsmom_d3, "btcusdt", 259200, "BTC-TSMOM-D3", 242.75, 6.40, 100, 15, 21});
@@ -7862,7 +7955,7 @@ int main() {
     // S37-WF-KILL: g_slots.push_back({chimera::SYM_NEAR, &near_donch_h12, "nearusdt", 43200, "NEAR-DONCH-H12", 2.25, 1.43,  65,  21, 24});  // walk-forward: PF 90d=0.39 365d=0.82 730d=1.06 5yr=1.28 — losing 4 of 4 windows
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_SOL,  &sol_tsmom_h12,  "solusdt",  43200, "SOL-TSMOM-H12",  1.91, 2.30,  86, 120, 24});
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_h12,  "bnbusdt",  43200, "BNB-TSMOM-H12",  2.45, 3.08, 100,  96, 24});
-    g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h12, "linkusdt", 43200, "LINK-TSMOM-H12", 1.34, 1.24, 100, 643, 24});  // AUDIT-2026 revived: bvr PF=1.34 n=643 Sh=1.24
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_h12, "linkusdt", 43200, "LINK-TSMOM-H12", 1.34, 1.24, 100, 643, 24});  // AUDIT-2026 revived: bvr PF=1.34 n=643 Sh=1.24
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_XRP,  &xrp_tsmom_h12,  "xrpusdt",  43200, "XRP-TSMOM-H12",  1.54, 1.52,  73, 153, 24});
 
     // ── Session 26 — RSI_REVERT H4 + BOLLINGER H4/H2 (10 engines) ────────
@@ -7892,9 +7985,9 @@ int main() {
 // S44-CULL:     g_slots.push_back({chimera::SYM_DOGE, &doge_ichi_d1, "dogeusdt", 86400, "DOGE-ICHI-D1", 3.38, 2.45,  84,  25, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_XRP,  &xrp_ichi_d1,  "xrpusdt",  86400, "XRP-ICHI-D1",  4.98, 2.86,  94,  51, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_ETH,  &eth_ichi_h12, "ethusdt",  43200, "ETH-ICHI-H12", 3.87, 3.86,  94, 169, 37});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_SOL,  &sol_ichi_h8,  "solusdt",  28800, "SOL-ICHI-H8",  5.92, 6.20,  94, 188, 37});
 // S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_keltner_h6, "linkusdt", 21600, "LINK-KELTNER-H6", 6.12, 2.69, 91, 35, 37});
-    g_slots.push_back({chimera::SYM_NEAR, &near_ichi_h8, "nearusdt", 28800, "NEAR-ICHI-H8", 2.92, 4.67, 89, 192, 37});  // S37: bear-stress passed all 4 windows PF>=2.35
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_NEAR, &near_ichi_h8, "nearusdt", 28800, "NEAR-ICHI-H8", 2.92, 4.67, 89, 192, 37});  // S37: bear-stress passed all 4 windows PF>=2.35
 
     // SuperTrend engines (6) — Session 29
 
@@ -7911,7 +8004,7 @@ int main() {
 // S44-CULL:     g_slots.push_back({chimera::SYM_LINK, &link_donch_h16, "linkusdt",  57600, "LINK-DONCH-H16",1.75, 0.67,  85, 72, 31});
     // ── AUDIT-2026 ROUND 2: ETH-RSI + APT/ARB revival ──────────────────────
     // S37-KILL: g_slots.push_back({chimera::SYM_ETH,  &eth_rsi_h12,    "ethusdt",   43200, "ETH-RSI-H12",   2.37, 0.92,  69, 39, 31});  // prod_tiered PF=0.966 bp=-59 n=7
-    g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h8,   "aptusdt",   28800, "APT-TSMOM-H8",  1.49, 1.42,  85, 404, 31});
+    // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_APT,  &apt_tsmom_h8,   "aptusdt",   28800, "APT-TSMOM-H8",  1.49, 1.42,  85, 404, 31});
     // S37-WF-KILL: g_slots.push_back({chimera::SYM_APT,  &apt_donch_h6,   "aptusdt",   21600, "APT-DONCH-H6",  1.67, 1.03,  69, 97, 31});  // walk-forward: PF 90d=0.90 365d=0.81 730d=0.77 5yr=1.32 — losing 3 of 4 windows
 // S44-CULL:     g_slots.push_back({chimera::SYM_ARB,  &arb_tsmom_d2,   "arbusdt",  172800, "ARB-TSMOM-D2",  1.98, 1.38,  74, 81, 31});
 // S44-CULL:     g_slots.push_back({chimera::SYM_ARB,  &arb_donch_h6,   "arbusdt",   21600, "ARB-DONCH-H6",  1.70, 1.13,  80, 83, 31});
@@ -8008,6 +8101,10 @@ int main() {
         int elite = 0, tight = 0, blocked_tight = 0;
         for (auto& slot : g_slots) {
             if (!slot.engine) continue;
+            // PHASE3: REGIME_SWITCH parents keep their make_regime config verbatim —
+            // it IS the Phase-1/2 backtested protection (staged ratchet 20/30,
+            // lock 75/85/90/95, no floor/kill/giveback). Presets would break parity.
+            if (slot.engine->cfg().kind == chimera::StrategyKind::REGIME_SWITCH) continue;
             if (slot.pf_blocked) {
                 slot.engine->apply_safety_preset();
                 blocked_tight++;
@@ -8031,6 +8128,8 @@ int main() {
         int n_reapplied = 0;
         for (auto& slot : g_slots) {
             if (!slot.engine) continue;
+            // PHASE3: parity exemption (see tier loop above).
+            if (slot.engine->cfg().kind == chimera::StrategyKind::REGIME_SWITCH) continue;
             slot.engine->set_be_arm_bp(25.0);
             slot.engine->set_ratchet_lock_pct(0.85);
             slot.engine->set_hard_floor_bp(-170.0);
@@ -8119,6 +8218,9 @@ int main() {
         int vol_count = 0, mtf_count = 0;
         for (auto& slot : g_slots) {
             if (!slot.engine) continue;
+            // PHASE3: REGIME_SWITCH is trend-riding (not counter-trend) but isn't in
+            // is_trend_following(); exempt it from the counter-trend filters (parity).
+            if (slot.engine->cfg().kind == chimera::StrategyKind::REGIME_SWITCH) continue;
             if (!slot.engine->is_trend_following()) {
                 // Counter-trend engine — enable both filters
                 slot.engine->enable_vol_filter(true);
@@ -9065,7 +9167,7 @@ int main() {
         bool wire_legacy = std::getenv("CHIMERA_WIRE_LEGACY") != nullptr;
         // Programmatic defaults (authoritative fallback) …
         g_registry.declare("EDGE-SLOTS", chimera::Lifecycle::SHADOW,
-                           "validated TSMOM/UPJUMP/ICHI EdgeEngines (g_slots)");
+                           "REGIME_SWITCH D1 parents (g_slots) — TSMOM/ICHI book culled Phase-3 2026-07-13");
         g_registry.declare("LEGACY-EDGE", chimera::Lifecycle::DISABLED,
                            "285 per-symbol EdgeEngines — CULLED unless CHIMERA_WIRE_LEGACY");
         g_registry.declare("XSEC-BTC",   chimera::Lifecycle::SHADOW, "cross-sectional momentum, BTC-gated sleeve");
@@ -9076,7 +9178,7 @@ int main() {
         // callback aborts startup). Re-enabling the grid restores g_grid_clip_count>0 -> SHADOW again.
         g_registry.declare("UPJUMP-GRID",
                            g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
-                           "UpJump threshold grid (clip companions)");
+                           "companion grid — Phase-3 BE-entry mimics riding REGIME_SWITCH parents (up-jump clips killed 2026-07-13)");
         // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
         // the shadow desk: SHADOW when the executor is ready, HALTED when creds
         // failed (sleeves still compute signals+books; only routing is a no-op).
@@ -9086,6 +9188,14 @@ int main() {
         // … then the env truth for the legacy layer wins regardless of the json.
         g_registry.set_state("LEGACY-EDGE",
                              wire_legacy ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
+        // PHASE3 (2026-07-13): runtime truth wins for the companion grid too. Its
+        // population is a COMPILE-TIME fact (KILL_UPJUMP_CLIPS / Phase-3 mimic
+        // registration), so a stale json override can only abort the desk — which it
+        // did twice today (json SHADOW vs killed grid crash-loop on the old binary;
+        // json DISABLED vs Phase-3 mimics abort on the new one). Same pattern as
+        // LEGACY-EDGE above: the json may annotate, the wiring decides the state.
+        g_registry.set_state("UPJUMP-GRID",
+                             g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
         // Executor-readiness reflected as a non-aborting HALTED when not ready.
         g_registry.set_state("EXECUTOR", exec_ok ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::HALTED);
         // Runtime wiring truth. The XSec/RipRider/grid sleeves are installed +

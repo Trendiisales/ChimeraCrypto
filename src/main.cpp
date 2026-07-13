@@ -3816,8 +3816,22 @@ int main() {
     std::vector<std::string> _grid_ptags, _grid_ctags;
     std::vector<chimera::UpJumpLadderCompanion> _grid; _grid.reserve(96);   // reserve => &_grid[i] stable (15 coins x4 = 60 cells; 96 headroom)
     std::vector<chimera::EdgeEngine*> _grid_feeds;
+    // ── KILL_UPJUMP_CLIPS (operator 2026-07-13, both systems) ────────────────────
+    // The ENTIRE UpJumpLadderCompanion clip layer (the 2/3/4/5% threshold grid + the
+    // 0.5% UJH low-thr family) is DISABLED. Every cell enters IMMEDIATELY on the up-jump
+    // detection (det_thr) and books a -70bp REVERSAL_CUT when price reverses -- an
+    // immediate-entry structure that "trades into a loss" (forbidden). The same-day 50bp
+    // loss_cut (2330a8a) was insufficient (clips still booked the reversal cut), so the
+    // clips are removed ENTIRELY rather than cut-protected. Skipping population leaves
+    // _grid/_all_clips empty => g_companion_by_parent stays empty => on_bar_callback steps
+    // nothing => zero new clips arm/book. The PARENT EdgeEngine UPJUMP legs (wire_engine +
+    // g_slots, ride_to_flip) are UNTOUCHED -- the core crypto strategy keeps riding to flip.
+    // NOT the clip failure class. StallCompanion (retired-Mac python) is not native here, so
+    // there is no at-BE mimic to preserve. Re-enable = flip this flag back to false + rebuild.
+    const bool KILL_UPJUMP_CLIPS = true;
     for (auto& gc : _gcoins)
         for (int thr : {2, 3, 4, 5}) {
+            if (KILL_UPJUMP_CLIPS) continue;   // immediate-entry clip layer disabled (see above)
             _grid_ptags.push_back(std::string(gc.pfx) + "-UJ" + std::to_string(thr));           // distinct map key
             _grid_ctags.push_back(std::string(gc.pfx) + "-UJ" + std::to_string(thr) + "-CLIP"); // desk book tag
             _grid.emplace_back(make_stagger_companion(
@@ -3837,6 +3851,7 @@ int main() {
     {
         static const std::vector<double> _lowarms = {0.2, 2, 3, 4, 6, 8};
         for (auto& gc : _gcoins) {
+            if (KILL_UPJUMP_CLIPS) continue;   // immediate-entry UJH 0.5% clip family disabled (see above)
             const std::string pfx = gc.pfx;
             if (pfx == "LDO") continue;   // no 1h thrfloor evidence — not wired blind
             _grid_ptags.push_back(pfx + "-UJH");
@@ -9031,7 +9046,12 @@ int main() {
         g_registry.declare("XSEC-BTC",   chimera::Lifecycle::SHADOW, "cross-sectional momentum, BTC-gated sleeve");
         g_registry.declare("XSEC-BR",    chimera::Lifecycle::SHADOW, "cross-sectional momentum, breadth-gated sleeve");
         g_registry.declare("RIPRIDER",   chimera::Lifecycle::SHADOW, "RipRider next-open sleeve");
-        g_registry.declare("UPJUMP-GRID",chimera::Lifecycle::SHADOW, "32-cell UpJump threshold grid (clip companions)");
+        // KILL_UPJUMP_CLIPS (2026-07-13): the immediate-entry clip grid is disabled (g_grid_clip_count==0),
+        // so declare it DISABLED to keep the honest registry consistent (an ACTIVE decl with no wired
+        // callback aborts startup). Re-enabling the grid restores g_grid_clip_count>0 -> SHADOW again.
+        g_registry.declare("UPJUMP-GRID",
+                           g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
+                           "UpJump threshold grid (clip companions)");
         // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
         // the shadow desk: SHADOW when the executor is ready, HALTED when creds
         // failed (sleeves still compute signals+books; only routing is a no-op).

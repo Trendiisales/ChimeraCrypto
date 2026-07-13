@@ -26,8 +26,8 @@
   },
   {
     "name": "UPJUMP-GRID",
-    "state": "SHADOW",
-    "note": "32-cell UpJump threshold-comparison grid (clip companions) — live shadow experiment; do NOT net or disturb"
+    "state": "DISABLED",
+    "note": "UpJump clip grid DISABLED S-2026-07-13 (KILL_UPJUMP_CLIPS): immediate-entry clips booked -70bp REVERSAL_CUT; g_grid_clip_count=0 so declared DISABLED to keep registry reconcile consistent"
   },
   {
     "name": "EXECUTOR",

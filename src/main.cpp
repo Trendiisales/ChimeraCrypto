@@ -165,6 +165,9 @@
 #include "live/HttpControlAuth.hpp"    // Phase-1: control-API auth/method helpers
 #include "core/EdgeEngine.hpp"
 #include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
+#include "core/CryptoCostLedger.hpp"       // S-2026-07-13 campaign architecture (13j §2.11): measured per-symbol effective cost
+#include "core/CryptoOpportunityGate.hpp"  // S-2026-07-13 campaign architecture: cost-viability entry gate
+#include "core/CryptoCampaignManager.hpp"  // S-2026-07-13 campaign architecture: virtual-lot parent campaigns (SHADOW, mimic OFF)
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
@@ -1299,6 +1302,49 @@ static void restore_companion_det_state() {
     }
 }
 
+// ── S-2026-07-13 CAMPAIGN ARCHITECTURE (13j §2.11 task 3) ───────────────────
+// CryptoCostLedger + CryptoOpportunityGate + CryptoCampaignManager: SHADOW
+// virtual-lot parent campaigns on the 4 PASS cells from
+// Crypto/backtest/CAMPAIGN_LEVERS_2026-07-13.md (UNI-W1/W2 fused one-campaign-
+// per-symbol, TRX-W8 small tier, LDO-W8 smallest tier). Mimic lots OFF (no
+// robust standalone H1 edge — revisit at tick granularity). STANDALONE
+// ADDITIVE books; the SWEET/REGIME companions above are untouched instruments.
+// Clips ride the same companion ledger (persist_companion_clip) + desk export.
+static chimera::CryptoCostLedger      g_camp_cost_ledger;
+static chimera::CryptoOpportunityGate g_camp_gate;
+static std::vector<chimera::CryptoCampaignManager*> g_campaigns;  // guarded by g_companion_mtx
+static int g_campaign_cell_count = 0;
+static constexpr const char* CAMPAIGN_STATE_FILE = "data/campaign_state.json";
+// Caller MUST hold g_companion_mtx. Atomic write (tmp+rename), one line per manager.
+static void save_campaign_state() {
+    if (g_campaigns.empty()) return;
+    std::ostringstream js;
+    for (const auto* m : g_campaigns) js << m->state_json() << "\n";
+    const std::string tmp = std::string(CAMPAIGN_STATE_FILE) + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "w");
+    if (!f) return;
+    const std::string s = js.str();
+    fwrite(s.c_str(), 1, s.size(), f);
+    fclose(f);
+    std::rename(tmp.c_str(), CAMPAIGN_STATE_FILE);
+}
+static void restore_campaign_state() {
+    std::ifstream f(CAMPAIGN_STATE_FILE);
+    if (!f) { std::printf("[CAMP-SEED] no %s — campaign books cold-start their windows honestly\n",
+                          CAMPAIGN_STATE_FILE); return; }
+    int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::string line;
+    while (std::getline(f, line)) {
+        auto sp = line.find("\"sym\":\"");
+        if (sp == std::string::npos) continue;
+        sp += 7; auto se = line.find("\"", sp);
+        std::string sym = line.substr(sp, se - sp);
+        for (auto* m : g_campaigns)
+            if (m->config().symbol == sym) { m->restore_state(line, now_ms); break; }
+    }
+}
+
 // Live per-leg companion snapshot for the Omega desk CRYPTO COMPANIONS panel.
 // Schema (S-2026-07-12 grid identity fix): {"ts":<unix>,"legs":[{sym,tag,cell,det_w,
 // det_thr_pct,parent_tag,parent_w,parent_thr_pct,canonical,armed,peak_mfe_pct,
@@ -1359,6 +1405,37 @@ static void emit_companion_state() {
                << ",\"bars_since_high\":" << ls.bars_since_high << "}";
         }
         js << "]}";
+    }
+    // S-2026-07-13 campaign books (13j §2.11): same leg field contract as the
+    // companions so the desk panel renders them with zero GUI changes.
+    // parent_tag=CAMPAIGN-SELF marks the class; armed = parent stop protected
+    // at-or-above entry; sublegs carries the ONE open parent lot (if any).
+    for (const auto* mgr : g_campaigns) {
+        for (const auto& s : mgr->snapshots()) {
+            if (!first) js << ",";
+            first = false;
+            js << "{\"sym\":\"" << s.sym << "\",\"tag\":\"" << s.tag << "\",\"cell\":\"" << s.cell << "\""
+               << ",\"det_w\":" << s.det_w
+               << std::setprecision(1) << ",\"det_thr_pct\":" << s.det_thr * 100.0
+               << ",\"parent_tag\":\"CAMPAIGN-SELF\",\"parent_w\":" << s.det_w
+               << ",\"parent_thr_pct\":" << s.det_thr * 100.0
+               << ",\"canonical\":true"
+               << ",\"armed\":" << (s.armed ? "true" : "false")
+               << std::setprecision(4) << ",\"peak_mfe_pct\":" << s.peak_mfe_pct
+               << ",\"bars_since_high\":" << s.bars_since_high
+               << ",\"clips\":" << s.clips
+               << std::setprecision(2) << ",\"bank_bp\":" << s.bank_bp
+               << ",\"bank_bp_real\":" << s.bank_bp_real
+               << ",\"bank_bp_real_w\":" << s.bank_bp_real_w
+               << ",\"mult\":" << s.size_mult
+               << ",\"retired\":" << (s.retired ? "true" : "false")
+               << ",\"sublegs\":[";
+            if (s.open)
+                js << "{\"id\":\"P\",\"armed\":" << (s.armed ? "true" : "false")
+                   << std::setprecision(4) << ",\"peak_mfe_pct\":" << s.peak_mfe_pct
+                   << ",\"bars_since_high\":" << s.bars_since_high << "}";
+            js << "]}";
+        }
     }
     js << "]}";
     const std::string tmp = std::string(COMPANION_STATE_FILE) + ".tmp";
@@ -4096,6 +4173,58 @@ int main() {
                         x2.c_str(), x1.c_str(), ro.c_str(), rt.c_str());
         }
         emit_companion_state();   // one-shot startup emit so the Omega desk panel lights up immediately (not after 1st H1 close)
+    }
+    std::fflush(stdout);
+
+    // ── S-2026-07-13 CAMPAIGN ARCHITECTURE books (13j §2.11 task 3) ─────────
+    // The 4 PASS parent cells from CAMPAIGN_LEVERS_2026-07-13.md, re-verified
+    // this session (net/PF/worst @20bp: UNI-W1 +74%/2.53/-155, UNI-W2
+    // +156%/2.65/-236, TRX-W8 +92%/4.88/-131, LDO-W8 +68%/1.39/-431; all pass
+    // 30/40bp re-sims + 1-bar delay + random-entry z 3.66/5.50/4.73/2.02).
+    // ONE campaign per symbol: UNI W1+W2 are two detectors on one campaign
+    // slot. Size tiers via mult: UNI x1.0, TRX x0.5 (episode-concentration
+    // flag), LDO x0.25 (borderline z). retire_bp ≈ -3x worst 2x-cost clip.
+    // MIMIC LOTS OFF (no standalone H1 edge — tick-granularity revisit).
+    // ADVERSE-PROTECTION: backtested structural stops + fee-BE floor +
+    // net-lock + HWM trail per cell (see CryptoCampaignManager.hpp header).
+    chimera::CryptoCampaignManager uni_campaign(
+        {"uniusdt", "UNI", 3600, /*mimic*/ false, {
+            {"UNI-CAMP-W1", "CW1-3.5", 1, 0.035, 20.0, 135.0, 270.0, 38.0, 1.0,  -550.0, 40.0},
+            {"UNI-CAMP-W2", "CW2-4.0", 2, 0.040, 20.0, 216.0, 270.0, 38.0, 1.0,  -800.0, 40.0},
+        }}, &g_camp_cost_ledger, &g_camp_gate);
+    chimera::CryptoCampaignManager trx_campaign(
+        {"trxusdt", "TRX", 3600, /*mimic*/ false, {
+            {"TRX-CAMP-W8", "CW8-3.5", 8, 0.035, 20.0, 111.0, 0.0,   13.0, 0.5,  -450.0, 40.0},
+        }}, &g_camp_cost_ledger, &g_camp_gate);
+    chimera::CryptoCampaignManager ldo_campaign(
+        {"ldousdt", "LDO", 3600, /*mimic*/ false, {
+            {"LDO-CAMP-W8", "CW8-7.0", 8, 0.070, 20.0, 411.0, 342.0, 48.0, 0.25, -1400.0, 40.0},
+        }}, &g_camp_cost_ledger, &g_camp_gate);
+    {
+        std::lock_guard<std::mutex> lk(g_companion_mtx);
+        g_camp_cost_ledger.configure("uniusdt", 20.0, 3.0, 2.0);
+        g_camp_cost_ledger.configure("trxusdt", 20.0, 3.0, 2.0);
+        g_camp_cost_ledger.configure("ldousdt", 20.0, 3.0, 2.0);
+        g_campaigns = { &uni_campaign, &trx_campaign, &ldo_campaign };
+        auto _camp_totals = load_companion_clip_totals();
+        for (auto* m : g_campaigns) {
+            g_campaign_cell_count += m->cell_count();
+            for (int ci = 0; ci < m->cell_count(); ++ci) {
+                auto ct = _camp_totals.find(m->config().cells[ci].tag);
+                if (ct != _camp_totals.end())
+                    m->rehydrate_cell(ci, ct->second.n, ct->second.net,
+                                      ct->second.net_real, ct->second.net_real_w);
+            }
+            m->set_on_clip(persist_companion_clip);
+            for (const auto& cc : m->config().cells)
+                std::printf("[CAMP-INIT] %s W=%d thr=%+.1f%% conf=%.0fbp stop=%.0fbp trail=%s "
+                            "mult=x%.2f retire@%.0fbp maxRT=%.0fbp SHADOW mimic=OFF\n",
+                            cc.tag.c_str(), cc.W, cc.thr * 100, cc.confirm_bp, cc.pstop_bp,
+                            cc.ptrail_bp > 0 ? std::to_string((int)cc.ptrail_bp).c_str() : "RIDE",
+                            cc.size_mult, cc.retire_bp, cc.max_validated_rt_bp);
+        }
+        restore_campaign_state();   // verbatim window/campaign restore (stale >24 bars discarded)
+        emit_companion_state();     // include campaign legs in the startup emit
     }
     std::fflush(stdout);
 
@@ -9167,6 +9296,12 @@ int main() {
                     comp->observe(par->in_position(), par->entry_px(), mid, now_ms);
                     clips_after  += comp->clips();
                 }
+                // S-2026-07-13 campaign books: same per-tick drive (H1 closes roll
+                // internally; structural stops fire per tick like the BT's bar-low).
+                for (auto* mgr : g_campaigns) {
+                    if (chimera::symbol_to_id(mgr->config().symbol) != id) continue;
+                    mgr->on_tick(mid, now_ms);
+                }
                 // Refresh the desk snapshot when a clip fired this tick, or on a
                 // light 5s time-throttle so armed/peak/bank track intra-bar (the
                 // desk panel polls ~15s). Avoids per-tick file I/O.
@@ -9174,6 +9309,7 @@ int main() {
                 if (clips_after != clips_before || now_ms - last_cc_emit_ms >= 5000) {
                     last_cc_emit_ms = now_ms;
                     emit_companion_state();
+                    save_campaign_state();   // durable window/campaign state (tiny file, throttled)
                 }
             }
         }
@@ -9258,6 +9394,12 @@ int main() {
         g_registry.declare("UPJUMP-GRID",
                            g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
                            "companion grid — Phase-3 BE-entry mimics (REGIME_SWITCH parents) + S-2026-07-13 sweet-spot confirmed-entry cells BNB/UNI/NEAR (up-jump immediate-entry clips killed 2026-07-13)");
+        // S-2026-07-13 campaign architecture (13j §2.11): guarded by the real
+        // cell count so a zero-instance build declares DISABLED instead of
+        // aborting validate() (same pattern as UPJUMP-GRID below).
+        g_registry.declare("CAMPAIGN-MGR",
+                           g_campaign_cell_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
+                           "virtual-lot parent campaigns (CostLedger+OpportunityGate+CampaignManager) — 4 PASS cells UNI-W1/W2 fused, TRX-W8, LDO-W8; mimic lots OFF");
         // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
         // the shadow desk: SHADOW when the executor is ready, HALTED when creds
         // failed (sleeves still compute signals+books; only routing is a no-op).
@@ -9275,6 +9417,9 @@ int main() {
         // LEGACY-EDGE above: the json may annotate, the wiring decides the state.
         g_registry.set_state("UPJUMP-GRID",
                              g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
+        // Campaign books: wiring truth wins over any stale json, same pattern.
+        g_registry.set_state("CAMPAIGN-MGR",
+                             g_campaign_cell_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
         // Executor-readiness reflected as a non-aborting HALTED when not ready.
         g_registry.set_state("EXECUTOR", exec_ok ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::HALTED);
         // Runtime wiring truth. The XSec/RipRider/grid sleeves are installed +
@@ -9288,6 +9433,7 @@ int main() {
         g_registry.mark_wired("XSEC-BR",     true, 1);
         g_registry.mark_wired("RIPRIDER",    true, 1);
         g_registry.mark_wired("UPJUMP-GRID", g_grid_clip_count > 0, g_grid_clip_count);
+        g_registry.mark_wired("CAMPAIGN-MGR", g_campaign_cell_count > 0, g_campaign_cell_count);
         g_registry.mark_wired("EXECUTOR",    exec_ok, 1);
         std::string reg_err;
         if (!g_registry.validate(reg_err)) {

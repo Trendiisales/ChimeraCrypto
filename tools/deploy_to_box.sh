@@ -24,7 +24,7 @@ set -uo pipefail
 BOX="${CHIMERA_BOX:-chimera-direct}"
 BOX_REPO="${CHIMERA_BOX_REPO:-~/ChimeraCrypto}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "src/live/BinanceWSFeed.cpp" "include/live/BinanceWSFeed.hpp" "include/core/SymbolIndex.hpp")  # S-2026-07-13: WS feed added — the CH-05 lifetime fix silently missed the box because this list was 3 files. PHASE3: SymbolIndex.hpp added (THETA/SUSHI feed slots)
+FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "src/live/BinanceWSFeed.cpp" "include/live/BinanceWSFeed.hpp" "include/core/SymbolIndex.hpp" "include/core/CryptoCostLedger.hpp" "include/core/CryptoOpportunityGate.hpp" "include/core/CryptoCampaignManager.hpp")  # S-2026-07-13: WS feed added — the CH-05 lifetime fix silently missed the box because this list was 3 files. PHASE3: SymbolIndex.hpp added (THETA/SUSHI feed slots). CAMPAIGN: 3 architecture headers added (13j §2.11)
 MSG="${DEPLOY_MSG:?set DEPLOY_MSG to the commit message}"
 
 echo "### 1/6 PRE-DEPLOY FRESHNESS GUARD ###"

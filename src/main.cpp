@@ -9046,7 +9046,12 @@ int main() {
         g_registry.declare("XSEC-BTC",   chimera::Lifecycle::SHADOW, "cross-sectional momentum, BTC-gated sleeve");
         g_registry.declare("XSEC-BR",    chimera::Lifecycle::SHADOW, "cross-sectional momentum, breadth-gated sleeve");
         g_registry.declare("RIPRIDER",   chimera::Lifecycle::SHADOW, "RipRider next-open sleeve");
-        g_registry.declare("UPJUMP-GRID",chimera::Lifecycle::SHADOW, "32-cell UpJump threshold grid (clip companions)");
+        // KILL_UPJUMP_CLIPS (2026-07-13): the immediate-entry clip grid is disabled (g_grid_clip_count==0),
+        // so declare it DISABLED to keep the honest registry consistent (an ACTIVE decl with no wired
+        // callback aborts startup). Re-enabling the grid restores g_grid_clip_count>0 -> SHADOW again.
+        g_registry.declare("UPJUMP-GRID",
+                           g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
+                           "UpJump threshold grid (clip companions)");
         // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
         // the shadow desk: SHADOW when the executor is ready, HALTED when creds
         // failed (sleeves still compute signals+books; only routing is a no-op).

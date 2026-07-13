@@ -12,9 +12,11 @@ namespace chimera {
 //
 // Session 30: Added PEPE, WIF, FET, ONDO, TIA (5 new meme/AI/RWA symbols)
 // Session 35 (AUDIT-2026-S35): Added HBAR, INJ, ADA, TRX, SEI (5 L1/DeFi)
+// PHASE3 (2026-07-13): Added THETA, SUSHI — REGIME_SWITCH core-basket coins
+//   (Phase-1 parent scan winners) that had no feed slot.
 // ============================================================================
 
-static constexpr int MAX_SYMBOLS = 62;
+static constexpr int MAX_SYMBOLS = 64;
 
 // Short names (for logging)
 static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
@@ -27,7 +29,8 @@ static constexpr const char* SYM_SHORT[MAX_SYMBOLS] = {
     "CRV", "COMP", "MKR", "IMX", "STX", "ARKM", "MASK",
     "RUNE", "JTO", "W", "TURBO", "BOME", "FLOKI",
     "ETHFI", "EIGEN", "ZRO", "GMT", "SHIB", "BCH",
-    "LTC", "ETC", "XLM", "VET"
+    "LTC", "ETC", "XLM", "VET",
+    "THETA", "SUSHI"
 };
 
 // Full Binance stream names (lowercase)
@@ -42,7 +45,8 @@ static constexpr const char* SYM_FULL[MAX_SYMBOLS] = {
     "crvusdt", "compusdt", "mkrusdt", "imxusdt", "stxusdt", "arkmusdt", "maskusdt",
     "runeusdt", "jtousdt", "wusdt", "turbousdt", "bomeusdt", "flokiusdt",
     "ethfiusdt", "eigenusdt", "zrousdt", "gmtusdt", "shibusdt", "bchusdt",
-    "ltcusdt", "etcusdt", "xlmusdt", "vetusdt"
+    "ltcusdt", "etcusdt", "xlmusdt", "vetusdt",
+    "thetausdt", "sushiusdt"
 };
 
 inline const char* sym_short(int id) {
@@ -125,6 +129,8 @@ enum SymbolId : uint8_t {
     SYM_ETC   = 59,
     SYM_XLM   = 60,
     SYM_VET   = 61,
+    SYM_THETA = 62,
+    SYM_SUSHI = 63,
     SYM_COUNT = MAX_SYMBOLS
 };
 

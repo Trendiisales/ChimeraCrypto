@@ -3963,6 +3963,50 @@ int main() {
                                          rp.sym, rp.retire_bp));
         _grid_feeds.push_back(rp.eng);    // det_w=0 => driven off THIS parent's bar closes
     }
+    // ── S-2026-07-13 SWEET-SPOT CONFIRMED-ENTRY MIMIC CELLS (operator: "wire all 3") ──
+    // Full 18-coin × 0.5%-step threshold grid, evaluated on 2023-26 windows ONLY (2022 is
+    // FULLY IRRELEVANT for long-only spot — operator final ruling, feedback-crypto-omit-
+    // 2022-longonly). Survivors of the complete validation stack (WF halves + 0.5%-plateau
+    // + exbestEpi>0 + 2x-cost re-sim + 20-seed random-entry z), harness
+    // Crypto/backtest/upjump_earlyarm_bt confirmcut/confirmrand with CC_FROMYEAR=2023:
+    //   NEAR 4.0%: +603%/PF3.34 n=168, 2x +570/PF3.02, z=+7.4, plateau 3.5-5.5%
+    //   UNI  3.5%: +278%/PF1.93 n=235, 2x +231/PF1.70, z=+2.9, plateau 3.5-4.5%
+    //   BNB  4.0%: +125%/PF3.91 n=34 (THIN), 2x +119/PF3.51, z=+4.4, plateau 3.5-5.0%
+    // CONFIRMED entry (confirm_bp=20): every leg stays PENDING — books nothing, pays no
+    // cost — until the move has already covered BE. It can never open underwater; this is
+    // the permitted mimic class, NOT the killed immediate-entry clips above (those entered
+    // ON the jump). Self-detect det_w=1(h1)/det_thr windows: the feed objects below are
+    // symbol/tag holders ONLY — never g_slots'd, never wire_engine'd, never ticked — so
+    // KILL_UPJUMP_PARENTS stands (observe() ignores parent state for det_w>0 books; the
+    // per-tick companion driver matches on the feed's symbol and drives self-detection).
+    // NEAR is a SEPARATE book from NEAR-REGIME-BEMIMIC (operator instruction; distinct
+    // parent_tag key, distinct desk tag, own bank).
+    // ADVERSE-PROTECTION (mimic): loss_cut_bp=50 per-tick hard stop (factory) + gb 0.50
+    // peak-giveback + MTM window-exit flush + BE-cascade ≤1-un-BE'd leg; retire_bp = −1500
+    // ≈ 2.3–3x the worst 2023-26 BT clip (BNB −503 / UNI −664 / NEAR −656 bp).
+    chimera::EdgeEngine bnb_sweet_feed (make_uj("bnbusdt",  "BNB-UJ4-SWEETFEED",  3600, 1, 0.040));
+    chimera::EdgeEngine uni_sweet_feed (make_uj("uniusdt",  "UNI-UJ35-SWEETFEED", 3600, 1, 0.035));
+    chimera::EdgeEngine near_sweet_feed(make_uj("nearusdt", "NEAR-UJ4-SWEETFEED", 3600, 1, 0.040));
+    {
+        const std::vector<double> _sw_arms = {0.2, 2, 3, 4, 6, 8};   // BE-N6 (the validated cell form)
+        struct SweetCell { const char* pfx; const char* tagsfx; const char* sym;
+                           chimera::EdgeEngine* feed; double thr; };
+        const std::vector<SweetCell> _sweet_cells = {
+            {"BNB",  "UJ4-SWEET",  "bnbusdt",  &bnb_sweet_feed,  0.040},
+            {"UNI",  "UJ35-SWEET", "uniusdt",  &uni_sweet_feed,  0.035},
+            {"NEAR", "UJ4-SWEET",  "nearusdt", &near_sweet_feed, 0.040},
+        };
+        for (const auto& sc : _sweet_cells) {
+            _grid_ptags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx + "FEED");
+            _grid_ctags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx);
+            auto c = make_stagger_companion(
+                _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), sc.sym,
+                /*det_w*/1, sc.thr, _sw_arms, /*BE_CASCADE*/1, 0, 1.0, /*retire_bp*/-1500.0);
+            c.confirm_bp = 20.0;   // CONFIRMED entry — the defining property of this class
+            _grid.emplace_back(c);
+            _grid_feeds.push_back(sc.feed);
+        }
+    }
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
@@ -9178,7 +9222,7 @@ int main() {
         // callback aborts startup). Re-enabling the grid restores g_grid_clip_count>0 -> SHADOW again.
         g_registry.declare("UPJUMP-GRID",
                            g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
-                           "companion grid — Phase-3 BE-entry mimics riding REGIME_SWITCH parents (up-jump clips killed 2026-07-13)");
+                           "companion grid — Phase-3 BE-entry mimics (REGIME_SWITCH parents) + S-2026-07-13 sweet-spot confirmed-entry cells BNB/UNI/NEAR (up-jump immediate-entry clips killed 2026-07-13)");
         // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
         // the shadow desk: SHADOW when the executor is ready, HALTED when creds
         // failed (sleeves still compute signals+books; only routing is a no-op).

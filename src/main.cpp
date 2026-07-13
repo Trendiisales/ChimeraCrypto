@@ -3596,6 +3596,18 @@ int main() {
             .max_history    = 720,   // ~30d of 1h klines so the up-jump event is visible on restart
         };
     };
+    // ── KILL_UPJUMP_PARENTS (operator 2026-07-13, both systems) ──────────────────
+    // NO up-jump on ANY engine. Every StrategyKind::UPJUMP parent is taken OFF the live
+    // path: the g_slots push (the tick-loop driver — the ONLY thing that actually trades,
+    // since wire_engine no-ops without CHIMERA_WIRE_LEGACY) is skipped, and the wire_engine
+    // calls are guarded too (future-proof: a CHIMERA_WIRE_LEGACY run can't resurrect up-jump).
+    // The EdgeEngine OBJECTS remain constructed (GridCoin feed refs need them; the grid is
+    // already dead via KILL_UPJUMP_CLIPS) — an un-slotted/un-wired engine never ticks, never
+    // trades (its boot "[..] ARMED" line is just a constructor log, not a live signal). Parents
+    // are tracked only by the aggregate EDGE-SLOTS registry bucket, which stays wired via the
+    // 24 remaining TSMOM/ICHI slots (incl. BTC-TSMOM-D1) -> no per-engine registry abort.
+    // Re-enable = flip false + rebuild. KEEP btc_tsmom_d1 (TSMOM) — NOT an up-jump engine.
+    const bool KILL_UPJUMP_PARENTS = true;
     // per-coin intraday W(h)/thr — crypto_upjump_tiered_ladder_sweep.py roster (05-07b)
     chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  4, 0.02);
     chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  4, 0.02);
@@ -3607,11 +3619,13 @@ int main() {
     chimera::EdgeEngine sol_upjump_h1(sol_upjump_cfg);
     chimera::EdgeEngine doge_upjump_h1(doge_upjump_cfg);
     chimera::EdgeEngine bnb_upjump_h1(bnb_upjump_cfg);
+    if (!KILL_UPJUMP_PARENTS) {   // no up-jump on any engine (2026-07-13)
     wire_engine(btc_upjump_h1);
     wire_engine(eth_upjump_h1);
     wire_engine(sol_upjump_h1);
     wire_engine(doge_upjump_h1);
     wire_engine(bnb_upjump_h1);
+    }
     // UPJUMP-H1 remaining 5 legs — S-2026-07-03b: feeds already subscribed (all 62
     // SYM_FULL). Per-coin thr from Crypto 437337c. OP = parent-only (no companion).
     chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  4, 0.02);
@@ -3620,9 +3634,11 @@ int main() {
     chimera::EdgeEngine ada_upjump_h1(ada_upjump_cfg);
     chimera::EdgeEngine near_upjump_h1(near_upjump_cfg);
     chimera::EdgeEngine xrp_upjump_h1(xrp_upjump_cfg);
+    if (!KILL_UPJUMP_PARENTS) {   // no up-jump on any engine (2026-07-13)
     wire_engine(ada_upjump_h1);
     wire_engine(near_upjump_h1);
     wire_engine(xrp_upjump_h1);
+    }
 
     // ── FULL BULL ROSTER (operator-approved 2026-07-10/11) — 8 ADDITIVE up-jump cells, SHADOW ──
     // On TOP of the fat-tail roster above (never replace it). Validated STANDALONE
@@ -3653,6 +3669,7 @@ int main() {
     chimera::EdgeEngine ada_upjump5_h1(ada_upjump5_cfg);
     chimera::EdgeEngine xrp_upjump4_h1(xrp_upjump4_cfg);
     chimera::EdgeEngine trx_upjump5_h1(trx_upjump5_cfg);
+    if (!KILL_UPJUMP_PARENTS) {   // no up-jump on any engine (2026-07-13)
     wire_engine(eth_upjump2_h1);
     wire_engine(btc_upjump4_h1);
     wire_engine(bnb_upjump3_h1);
@@ -3661,6 +3678,7 @@ int main() {
     wire_engine(ada_upjump5_h1);
     wire_engine(xrp_upjump4_h1);
     wire_engine(trx_upjump5_h1);
+    }
 
     // ── UPJUMP clip companions — NO-FLOOR TIERED LADDER + STACKED ARMS + cap8 ──
     // (S-2026-07-07w, operator item 5 — REVERT from BE-floor mode.) The BE-floor book
@@ -3772,20 +3790,22 @@ int main() {
             .atr_period=14, .upjump_w=w, .upjump_thr=thr, .ride_to_flip=true,
             .round_trip_bp=20.0, .max_history=96 };
     };
-    chimera::EdgeEngine near_uj8_d1 (make_uj("nearusdt","NEAR-UPJUMP8-D1", 86400,24,0.08)); wire_engine(near_uj8_d1);
-    chimera::EdgeEngine avax_uj5_d1 (make_uj("avaxusdt","AVAX-UPJUMP5-D1", 86400,24,0.05)); wire_engine(avax_uj5_d1);
-    chimera::EdgeEngine link_uj8_d1 (make_uj("linkusdt","LINK-UPJUMP8-D1", 86400,24,0.08)); wire_engine(link_uj8_d1);
-    chimera::EdgeEngine bch_uj4_d1  (make_uj("bchusdt", "BCH-UPJUMP4X48-D1",86400,48,0.04)); wire_engine(bch_uj4_d1);
-    chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08)); wire_engine(uni_uj8_d1);
-    chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03)); wire_engine(ldo_uj3_d1);
-    chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03)); wire_engine(op_uj3_h4);
+    // KILL_UPJUMP_PARENTS (2026-07-13): objects kept (GridCoin feed refs need them; grid is dead)
+    // but NOT wired — no up-jump on any engine. wire_engine is a live no-op anyway (CHIMERA_WIRE_LEGACY).
+    chimera::EdgeEngine near_uj8_d1 (make_uj("nearusdt","NEAR-UPJUMP8-D1", 86400,24,0.08));
+    chimera::EdgeEngine avax_uj5_d1 (make_uj("avaxusdt","AVAX-UPJUMP5-D1", 86400,24,0.05));
+    chimera::EdgeEngine link_uj8_d1 (make_uj("linkusdt","LINK-UPJUMP8-D1", 86400,24,0.08));
+    chimera::EdgeEngine bch_uj4_d1  (make_uj("bchusdt", "BCH-UPJUMP4X48-D1",86400,48,0.04));
+    chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08));
+    chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03));
+    chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03));
     // S-2026-07-13c operator: XLM/GRT/AAVE passed the thrfloor up-jump BE-cascade study at
     // every threshold (0.5-3%, PF 2.4-2.8, both WF halves +, y2022 +). They were Keltner-only
     // (greyed on the desk = no mimic). Give them the SAME up-jump grid + mimics as the other
     // daily coins; the Keltner engines above stay as separate ADDITIVE books.
-    chimera::EdgeEngine xlm_uj5_d1  (make_uj("xlmusdt", "XLM-UPJUMP5-D1",  86400,24,0.05)); wire_engine(xlm_uj5_d1);
-    chimera::EdgeEngine grt_uj5_d1  (make_uj("grtusdt", "GRT-UPJUMP5-D1",  86400,24,0.05)); wire_engine(grt_uj5_d1);
-    chimera::EdgeEngine aave_uj5_d1 (make_uj("aaveusdt","AAVE-UPJUMP5-D1", 86400,24,0.05)); wire_engine(aave_uj5_d1);
+    chimera::EdgeEngine xlm_uj5_d1  (make_uj("xlmusdt", "XLM-UPJUMP5-D1",  86400,24,0.05));   // KILL_UPJUMP_PARENTS: not wired
+    chimera::EdgeEngine grt_uj5_d1  (make_uj("grtusdt", "GRT-UPJUMP5-D1",  86400,24,0.05));   // KILL_UPJUMP_PARENTS: not wired
+    chimera::EdgeEngine aave_uj5_d1 (make_uj("aaveusdt","AAVE-UPJUMP5-D1", 86400,24,0.05));   // KILL_UPJUMP_PARENTS: not wired
 
     struct GridCoin { const char* pfx; const char* sym; chimera::EdgeEngine* feed; int det_w;
                       std::vector<double> arms; double retire_bp; };
@@ -7661,6 +7681,10 @@ int main() {
     // g_slots.push_back({chimera::SYM_XRP, &xrp_upjump_h1, "xrpusdt", 3600, "XRP-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
     // FULL BULL ROSTER parents (S-2026-07-11) — price feed + ARM+SEED for the 8 new companion cells
     // (companions self-detect their own window; parent position not read for det_w books). SHADOW.
+    // KILL_UPJUMP_PARENTS (2026-07-13): the 8 UPJUMP2-5 legs were the ONLY live-driven up-jump
+    // engines (tick loop iterates g_slots). Skip them -> no up-jump trades. EDGE-SLOTS drops 32->24
+    // (TSMOM/ICHI incl BTC-TSMOM-D1 remain) so the registry bucket stays wired (no abort).
+    if (!KILL_UPJUMP_PARENTS) {
     g_slots.push_back({chimera::SYM_ETH,  &eth_upjump2_h1,  "ethusdt",  3600, "ETH-UPJUMP2-H1",  0.0, 0.0, 0, 0, 57});
     g_slots.push_back({chimera::SYM_BTC,  &btc_upjump4_h1,  "btcusdt",  3600, "BTC-UPJUMP4-H2",  0.0, 0.0, 0, 0, 57});
     g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump3_h1,  "bnbusdt",  3600, "BNB-UPJUMP3-H1",  0.0, 0.0, 0, 0, 57});
@@ -7669,6 +7693,7 @@ int main() {
     g_slots.push_back({chimera::SYM_ADA,  &ada_upjump5_h1,  "adausdt",  3600, "ADA-UPJUMP5-H1",  0.0, 0.0, 0, 0, 57});
     g_slots.push_back({chimera::SYM_XRP,  &xrp_upjump4_h1,  "xrpusdt",  3600, "XRP-UPJUMP4-H1",  0.0, 0.0, 0, 0, 57});
     g_slots.push_back({chimera::SYM_TRX,  &trx_upjump5_h1,  "trxusdt",  3600, "TRX-UPJUMP5-H1",  0.0, 0.0, 0, 0, 57});
+    }
 
     // H12 engines (3)
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12,  "btcusdt",  43200, "BTC-TSMOM-H12",  3.63, 3.40,  96,  31, 14});

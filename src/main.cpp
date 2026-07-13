@@ -3987,21 +3987,56 @@ int main() {
     chimera::EdgeEngine bnb_sweet_feed (make_uj("bnbusdt",  "BNB-UJ4-SWEETFEED",  3600, 1, 0.040));
     chimera::EdgeEngine uni_sweet_feed (make_uj("uniusdt",  "UNI-UJ35-SWEETFEED", 3600, 1, 0.035));
     chimera::EdgeEngine near_sweet_feed(make_uj("nearusdt", "NEAR-UJ4-SWEETFEED", 3600, 1, 0.040));
+    // ── S-2026-07-13 WINDOW×THRESHOLD FULL GRID (operator: "give me the sweet spot for the
+    // other crypto") — the 13i grid fixed W per coin (mostly 1h); this pass swept the WINDOW
+    // dimension too: 19 coins × W{1,2,3,4,6,8,12,24}h × thr{0.5..8, 0.5-step} = 2432 cells,
+    // 2023-26 ONLY, same stack (gate PF>=1.3/n>=30/H1>0/H2>0/exbestEpi>0 + plateau[isolated
+    // cells REJECTED: ETH/XLM/GRT/OP/XRP neighbors flip deep negative] + 2x-cost re-sim +
+    // 20-seed random-entry z>=2). NEW survivors (base / 2x / z):
+    //   TRX  8h/+3.5%: +612%/PF5.38 n=175 / +577/PF4.59 / z=+10.4  plateau W6-12 x 3-5.5%
+    //   UNI  2h/+4.0%: +667%/PF2.39 n=371 / +592/PF2.13 / z=+5.3   (2nd UNI book — overlap
+    //        with UNI-UJ35-SWEET accepted in shadow; forward real-fills pick the winner)
+    //   AAVE 3h/+4.5%: +348%/PF1.66 n=358 / +277/PF1.48 / z=+4.4
+    //   ADA  8h/+3.5%: +440%/PF1.45 n=833 / +274/PF1.25 / z=+2.5   (separate book from
+    //        ADA-REGIME-BEMIMIC — different parent family, companions are additive)
+    //   DOGE 1h/+5.5%: +188%/PF7.19 n=45 THIN / +179/PF6.24 / z=+4.1  plateau 4.5-6%
+    //   LINK 8h/+4.5%: +312%/PF1.51 n=509 / +211/PF1.31 / z=+2.5   (W24/+7.5% alternate also
+    //        passed z=+2.5 but H1-heavy; one LINK book only)
+    //   LDO  8h/+7.0%: +174%/PF1.53 n=262 / +122/PF1.33 / z=+2.2 MARGINAL (weakest wire)
+    // DEAD — NO cell survives the stack on ANY window: BTC (rand long placement earns +110%
+    // = drift not edge, z<=0.9), ETH, SOL, XRP, XLM, GRT, OP, BCH, AVAX, LTC.
+    // ADVERSE-PROTECTION unchanged (lc50 per-tick + gb 0.50 + BE-cascade); retire_bp per cell
+    // ≈ 3x its worst 2x-cost clip. W8 detector warms in 9 H1 closes (cold-start honest).
+    chimera::EdgeEngine trx_sweet_feed (make_uj("trxusdt",  "TRX-UJ35W8-SWEETFEED",  3600, 8, 0.035));
+    chimera::EdgeEngine uni2_sweet_feed(make_uj("uniusdt",  "UNI-UJ4W2-SWEETFEED",   3600, 2, 0.040));
+    chimera::EdgeEngine aave_sweet_feed(make_uj("aaveusdt", "AAVE-UJ45W3-SWEETFEED", 3600, 3, 0.045));
+    chimera::EdgeEngine ada_sweet_feed (make_uj("adausdt",  "ADA-UJ35W8-SWEETFEED",  3600, 8, 0.035));
+    chimera::EdgeEngine doge_sweet_feed(make_uj("dogeusdt", "DOGE-UJ55-SWEETFEED",   3600, 1, 0.055));
+    chimera::EdgeEngine link_sweet_feed(make_uj("linkusdt", "LINK-UJ45W8-SWEETFEED", 3600, 8, 0.045));
+    chimera::EdgeEngine ldo_sweet_feed (make_uj("ldousdt",  "LDO-UJ7W8-SWEETFEED",   3600, 8, 0.070));
     {
         const std::vector<double> _sw_arms = {0.2, 2, 3, 4, 6, 8};   // BE-N6 (the validated cell form)
         struct SweetCell { const char* pfx; const char* tagsfx; const char* sym;
-                           chimera::EdgeEngine* feed; double thr; };
+                           chimera::EdgeEngine* feed; int det_w; double thr; double retire_bp; };
         const std::vector<SweetCell> _sweet_cells = {
-            {"BNB",  "UJ4-SWEET",  "bnbusdt",  &bnb_sweet_feed,  0.040},
-            {"UNI",  "UJ35-SWEET", "uniusdt",  &uni_sweet_feed,  0.035},
-            {"NEAR", "UJ4-SWEET",  "nearusdt", &near_sweet_feed, 0.040},
+            {"BNB",  "UJ4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, -1500.0},
+            {"UNI",  "UJ35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, -1500.0},
+            {"NEAR", "UJ4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, -1500.0},
+            // S-2026-07-13 window-sweep survivors (validation stack in the comment above)
+            {"TRX",  "UJ35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, -1200.0},
+            {"UNI",  "UJ4W2-SWEET",  "uniusdt",  &uni2_sweet_feed, 2, 0.040, -2400.0},
+            {"AAVE", "UJ45W3-SWEET", "aaveusdt", &aave_sweet_feed, 3, 0.045, -2300.0},
+            {"ADA",  "UJ35W8-SWEET", "adausdt",  &ada_sweet_feed,  8, 0.035, -1600.0},
+            {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, -1200.0},
+            {"LINK", "UJ45W8-SWEET", "linkusdt", &link_sweet_feed, 8, 0.045, -2000.0},
+            {"LDO",  "UJ7W8-SWEET",  "ldousdt",  &ldo_sweet_feed,  8, 0.070, -1800.0},
         };
         for (const auto& sc : _sweet_cells) {
             _grid_ptags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx + "FEED");
             _grid_ctags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx);
             auto c = make_stagger_companion(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), sc.sym,
-                /*det_w*/1, sc.thr, _sw_arms, /*BE_CASCADE*/1, 0, 1.0, /*retire_bp*/-1500.0);
+                sc.det_w, sc.thr, _sw_arms, /*BE_CASCADE*/1, 0, 1.0, sc.retire_bp);
             c.confirm_bp = 20.0;   // CONFIRMED entry — the defining property of this class
             _grid.emplace_back(c);
             _grid_feeds.push_back(sc.feed);

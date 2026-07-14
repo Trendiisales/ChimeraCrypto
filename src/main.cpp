@@ -9019,6 +9019,67 @@ int main() {
         std::fflush(stdout);
     }
 
+    // ── S-2026-07-14 companion detector warm-seed (operator: NEVER wait for warmup) ──
+    // restore_companion_det_state() above only covers RESTARTS. A brand-new det_w
+    // cell (first deploy) — or one whose persisted ring went stale across an outage —
+    // cold-started its W-bar window and sat blind up to det_w hours (ETH-PJ7W24 ≈25h
+    // on the 14-07 deploy). Fill every cold/stale ring from Binance REST 1h klines
+    // (public endpoint, same source as engine seeding). State-only: entries can only
+    // fire on LIVE ticks at real prices (see seed_det_ring_hist header note).
+    {
+        struct DetSeedJob { chimera::UpJumpLadderCompanion* comp; std::string sym; int det_w; };
+        std::vector<DetSeedJob> jobs;
+        {
+            std::lock_guard<std::mutex> lk(g_companion_mtx);
+            for (auto& kv : g_companion_by_parent) {
+                chimera::UpJumpLadderCompanion* comp = kv.second.second;
+                if (!comp) continue;
+                const auto& cc = comp->config();
+                if (cc.det_w <= 0) continue;
+                if (cc.tf_secs != 3600) {   // all det_w books are H1 today; guard future drift
+                    std::printf("[CLIP-SEED] %s tf=%llds != 1h — det ring warm-seed skipped\n",
+                        cc.tag.c_str(), (long long)cc.tf_secs);
+                    continue;
+                }
+                jobs.push_back({comp, cc.symbol, cc.det_w});
+            }
+        }
+        if (!jobs.empty()) {
+            chimera::BinanceREST det_rest;   // fetch OUTSIDE the companion lock (ticks may already flow)
+            const int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            std::map<std::string, int> need;                      // symbol -> max W among its cells
+            for (auto& j : jobs) { int& n = need[j.sym]; if (j.det_w > n) n = j.det_w; }
+            std::map<std::string, std::vector<double>> closes_by_sym;
+            std::map<std::string, int64_t> lastbar_by_sym;
+            for (auto& kv : need) {
+                auto kl = det_rest.fetch_klines(kv.first, "1h", kv.second + 6);
+                while (!kl.empty() && kl.back().open_ts_ms + 3600000LL > now_ms)
+                    kl.pop_back();                                // drop the in-progress bar: FINALIZED closes only
+                if ((int)kl.size() < 2) {
+                    std::fprintf(stderr, "[CLIP-SEED] %s: fetch_klines(1h) gave %d closed bars — "
+                        "det ring stays cold (honest warmup)\n", kv.first.c_str(), (int)kl.size());
+                    continue;
+                }
+                std::vector<double> cs; cs.reserve(kl.size());
+                for (const auto& k : kl) cs.push_back(k.c);
+                closes_by_sym[kv.first] = std::move(cs);
+                lastbar_by_sym[kv.first] = kl.back().open_ts_ms / 3600000LL;
+            }
+            std::lock_guard<std::mutex> lk(g_companion_mtx);
+            int warmed = 0;
+            for (auto& j : jobs) {
+                auto it = closes_by_sym.find(j.sym);
+                if (it == closes_by_sym.end()) continue;
+                j.comp->seed_det_ring_hist(it->second, lastbar_by_sym[j.sym]);
+                warmed++;
+            }
+            std::printf("[CLIP-SEED] det-ring warm-seed pass: %d det_w book(s) over %zu symbol fetch(es) — no cold-start wait\n",
+                warmed, closes_by_sym.size());
+            std::fflush(stdout);
+        }
+    }
+
     // ── Trade journal: load history ──────────────────────────────────────
     load_trade_history();
 

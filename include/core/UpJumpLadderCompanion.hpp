@@ -122,6 +122,25 @@ public:
         bool    jump_floor       = false;
         double  jf_giveback      = 1.0;   // g: fraction of MFE given back before trail exit; 1.0 = reversal-only
         double  jf_prebe_stop_bp = 0.0;   // s: pre-BE hard stop bp below entry; 0 = none
+        // ── MIMIC-FLOOR mode (S-2026-07-15, operator: unify EVERY mimic/companion cell
+        // to ONE exit = BE-floored tight-giveback trail — the honest jump_floor floor+HWM
+        // trail math ported onto the CONFIRMED-ENTRY ladder path so all SWEET/REGIME cells
+        // share it). When true, an OPEN leg is managed by this instead of the floorless
+        // Tier.gb / stall exits:
+        //   • hwm tracks the leg high since its fill (le); floor arms once a mark covers
+        //     le*(1+RT) (the leg pays its OWN round-trip — NOT the retired be_floor "move
+        //     already paid it" fiction; this books the honest worse-of fill).
+        //   • per-tick trail stop = max(le*(1+RT), le*(1+(hwm/le-1)*(1-g))), checked INTRA-
+        //     BAR (stop_check path / live per tick), booked at the stop -> after arming a
+        //     leg CANNOT close below BE (net_bp_real >= 0, jump_floor parity). Fixes the
+        //     H1-close giveback RACE (INJ T1 -96.8bp) + the floorless negative-clip gap.
+        //   • g = mimic_giveback: fraction of the run above le given back before the trail
+        //     exits. 1.0 = ride to window-exit (still floored). smaller g = tighter/earlier.
+        //   • entry/confirm/reclip/window structure unchanged; loss_cut still bounds the
+        //     PRE-arm tail (a leg that never covers its cost). hwm gauged from le (the fill),
+        //     not epx, so the floor guarantees the LEG's own book, not the detector's.
+        bool    mimic_floor    = false;
+        double  mimic_giveback = 1.0;
         // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/upjump_weighting_bt.cpp) ──
         // size_mult: per-coin notional weight (x2 robust top performer / x1 baseline).
         //   Stamped on every ClipRecord; weighted bank = Σ net_bp_real * size_mult
@@ -180,6 +199,7 @@ public:
     explicit UpJumpLadderCompanion(Config c) : cfg_(std::move(c)) {}
 
     void set_on_clip(ClipCallback cb) { on_clip_ = std::move(cb); }
+    void set_rank_out(bool v) { cfg_.rank_out = v; }   // MIMIC-FLOOR-GATE: refuse-to-arm (no new windows)
     const Config& config() const { return cfg_; }
     bool  is_open() const { for (auto& l : legs_) if (l.open) return true; return false; }
     int   clips()   const { return clip_num_; }
@@ -312,10 +332,12 @@ public:
         int     tier_idx = 0;          // base-tier open order (T1=0,T2=1,S1=2,...) for staggered release
         double  pk = 0.0, mfe = 0.0;
         int64_t ext_bar = 0, open_bar = 0, open_ts = 0;
-        // BE-floor mode state
+        // BE-floor / MIMIC-FLOOR mode state
         double  trail_bp = 0.0;   // bp giveback-from-hwm (0 = ride to parent exit)
         double  hwm = 0.0;        // high-water price since open
         double  ref_px = 0.0;     // reference the +be_bp open gate is measured from (resets to exit px on reclip)
+        bool    floored = false;  // MIMIC-FLOOR: a mark has covered le*(1+RT) -> post-arm exit can't go negative
+        double  stop_px = -1.0;   // MIMIC-FLOOR: resting trail stop px (ratcheted on close, checked intrabar); <0 = none
     };
 
     // Drive ONCE per completed parent bar (byte-exact vs python) OR per tick
@@ -328,9 +350,11 @@ public:
             feed_selfdetect_(cur_px, ts_ms);
             if (cfg_.jump_floor) { jf_on_tick_(cur_px, ts_ms); return; }               // JUMP-FLOOR: fills + intrabar stops
             if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(cur_px, ts_ms, bar);   // per-tick HARD STOP
+            if (cfg_.mimic_floor)       intrabar_mimic_floor_(cur_px, ts_ms, bar);    // per-tick BE-floored trail stop
             return;                                                                    // internal detector (live, both modes)
         }
         if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(cur_px, ts_ms, bar);       // per-tick HARD STOP (det_w==0 path too)
+        if (cfg_.mimic_floor)       intrabar_mimic_floor_(cur_px, ts_ms, bar);        // per-tick BE-floored trail (det_w==0 too)
         if (cfg_.be_floor) {
             observe_be_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (validation harness)
             return;
@@ -340,8 +364,9 @@ public:
     // Stop-ONLY tick: runs the hard reversal cut against px WITHOUT feeding the detector
     // (backtest feeds the bar LOW here; live, observe() already runs the cut per tick).
     void stop_check_only(double px, int64_t ts_ms) {
-        if (cfg_.loss_cut_bp <= 0.0) return;
-        intrabar_reversal_cut_(px, ts_ms, ts_ms / (cfg_.tf_secs * 1000));
+        const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
+        if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(px, ts_ms, bar);
+        if (cfg_.mimic_floor)       intrabar_mimic_floor_(px, ts_ms, bar);   // BE-floored trail: bar LOW tests the stop
     }
 
     // ── LADDER mode window driver (the faithful python run_trade walk). in_pos/entry_px
@@ -707,6 +732,11 @@ private:
 
     void init_base_legs_(double epx, int64_t ts, int64_t bar) {
         legs_.push_back(make_leg_("T1", epx, cfg_.tight, ts, bar, false));
+        // MIMIC-FLOOR = ONE managed position per event (operator: trail from peak, exit on
+        // giveback, re-enter). Extra arm tiers are meaningless under a single-g floor trail
+        // (arm level is unused once the floor governs exits) — they would just N-multiply an
+        // identical clip. So a mimic_floor cell runs a single T1 leg (== jump_floor's J1).
+        if (cfg_.mimic_floor) return;
         legs_.push_back(make_leg_("T2", epx, cfg_.wide,  ts, bar, false));
         int i = 0;   // stacked base arms (item 5): one more base leg per extra tier
         for (const auto& t : cfg_.extra_base)
@@ -751,6 +781,7 @@ private:
         if (lg.clipped) {
             if (lg.rc > 0.0 && lg.pk > 0.0 && fav > lg.pk * (1.0 + lg.rc)) {
                 lg.clipped = false; lg.le = cur;      // RECLIP = re-enter at current price
+                if (cfg_.mimic_floor) { lg.hwm = cur; lg.floored = false; lg.stop_px = -1.0; }  // fresh floor on the new fill
             } else return false;
         }
         if (!lg.open) {
@@ -758,13 +789,71 @@ private:
             lg.open = true; lg.open_ts = bar * cfg_.tf_secs * 1000; lg.open_bar = bar;
             if (lg.confirm > 0.0 || lg.seeded_flat) lg.le = cur;               // le = confirm price / first live mark (rehydrate-FLAT: never backdated)
             lg.mfe = fav; lg.ext_bar = bar;
+            if (cfg_.mimic_floor) { lg.hwm = lg.le; lg.floored = false; lg.stop_px = -1.0; }     // floor gauged from the fill (le)
         }
         if (fav > lg.mfe + 1e-9) { lg.mfe = fav; lg.ext_bar = bar; }
+        // ── MIMIC-FLOOR: BE-floored HWM-trail replaces the floorless gb/stall exits ──
+        // Ratchet the floor/stop from this close; the actual booking happens intrabar in
+        // intrabar_mimic_floor_ (per tick / bar-low) so a fast reversal can't blow the
+        // giveback between H1 closes (INJ T1 fix). A close that already sits at/below the
+        // ratcheted stop is booked here too (covers the det_w==0 per-tick observe path).
+        if (cfg_.mimic_floor) {
+            mimic_ratchet_(lg, cur);
+            if (lg.floored && lg.stop_px > 0.0 && cur <= lg.stop_px) {
+                book_mimic_stop_(lg, cur_ts_(bar), bar);   // book at the resting stop (>= BE)
+            }
+            return false;   // never routes through the gb/stall return path
+        }
         const bool armed = lg.mfe >= lg.arm;
         const int  stall = (int)(bar - lg.ext_bar);
         if (armed && lg.stall > 0 && stall >= lg.stall)                 return clip_leg_(lg, cur, gross_out, reason_out, "STALL_CLIP");
         if (armed && lg.gb > 0.0 && fav <= lg.mfe * (1.0 - lg.gb))      return clip_leg_(lg, cur, gross_out, reason_out, "REVERSAL_CLIP");
         return false;
+    }
+
+    // MIMIC-FLOOR helpers — the honest jump_floor floor+trail math, per ladder leg.
+    // hwm/floor gauged from le (the fill). Floor arms once a mark covers the leg's own RT
+    // cost; the trail gives back fraction g of the run above le but never drops below BE.
+    void mimic_ratchet_(Leg& lg, double cur) {
+        if (!lg.open || lg.le <= 0.0) return;
+        if (cur > lg.hwm) lg.hwm = cur;
+        const double rt = cfg_.round_trip_bp * 1e-4;
+        if (!lg.floored && lg.hwm >= lg.le * (1.0 + rt)) lg.floored = true;   // covered own cost -> floor arms
+        if (!lg.floored) { lg.stop_px = -1.0; return; }                       // pre-arm: no floor (loss_cut bounds tail)
+        double ns = lg.le * (1.0 + rt);                                       // BE floor incl. cost
+        if (cfg_.mimic_giveback < 1.0)
+            ns = std::max(ns, lg.le * (1.0 + (lg.hwm / lg.le - 1.0) * (1.0 - cfg_.mimic_giveback)));
+        if (ns > lg.stop_px) lg.stop_px = ns;                                 // stop only ratchets up
+    }
+    // Book the floored trail exit at the resting stop (>= le*(1+RT) => net_bp_real >= 0).
+    void book_mimic_stop_(Leg& lg, int64_t ts, int64_t bar) {
+        const double gross = (lg.stop_px / lg.le - 1.0) * 1e4;
+        emit_clip_(lg, lg.stop_px, ts, bar, gross, gross - cfg_.round_trip_bp, "FLOOR_TRAIL_CLIP");
+        lg.pk = lg.mfe; lg.clipped = true;             // reclip-eligible from the exit peak (rc>0 cells)
+        lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
+    }
+    int64_t cur_ts_(int64_t bar) const { return bar * cfg_.tf_secs * 1000; }
+
+    // INTRABAR BE-floored trail stop — runs per tick (live) / on the fed bar-low (backtest),
+    // so the giveback fires the instant price crosses the resting stop, not at the next H1
+    // close. Books at the stop (>= BE). The ratchet (hwm/floor) is driven by CLOSES in
+    // step_leg_/mimic_ratchet_ (jump_floor parity: mfe from closes, stop checked intrabar).
+    void intrabar_mimic_floor_(double cur, int64_t ts, int64_t bar) {
+        if (cur <= 0.0) return;
+        const double lc = cfg_.loss_cut_bp;
+        for (auto& lg : legs_) {
+            if (!lg.open || lg.clipped || !lg.eligible || lg.le <= 0.0) continue;
+            if (lg.floored) {                                    // POST-arm: BE-floored trail stop
+                if (lg.stop_px <= 0.0 || cur > lg.stop_px) continue;
+                book_mimic_stop_(lg, ts, bar);                   // book at the stop (>= BE)
+            } else if (lc > 0.0) {                               // PRE-arm: hard cut anchored at the FILL (le), NOT epx
+                const double cut_px = lg.le * (1.0 - lc / 1e4);  // bounds every pre-arm loss to ~lc+RT from the fill
+                if (cur > cut_px) continue;                      // still above the pre-arm stop
+                const double gross = (cut_px / lg.le - 1.0) * 1e4;
+                emit_clip_(lg, cut_px, ts, bar, gross, gross - cfg_.round_trip_bp, "PREBE_CUT");
+                lg.pk = lg.mfe; lg.clipped = true; lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
+            }
+        }
     }
 
     // faithful python Leg._clip — HARD COST-COVER gate suppresses sub-cost clips.
@@ -786,6 +875,7 @@ private:
         if (cur <= 0.0) return;
         for (auto& lg : legs_) {
             if (!lg.open || lg.clipped || !lg.eligible || lg.le <= 0.0 || lg.epx <= 0.0) continue;
+            if (cfg_.mimic_floor) continue;                                    // mimic_floor legs are fully managed by intrabar_mimic_floor_ (le-anchored pre-arm cut + BE floor trail)
             const double fav = (cur - lg.epx) / lg.epx * 100.0;              // % from FIXED entry
             if (fav * 100.0 > -cfg_.loss_cut_bp) continue;                    // still above the stop
             const double stop_px = lg.epx * (1.0 - cfg_.loss_cut_bp / 1e4);  // exit ~at the stop

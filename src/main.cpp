@@ -3854,6 +3854,32 @@ int main() {
         c.loss_cut_bp = 50.0;
         return c;
     };
+    // ── S-2026-07-15 MIMIC-FLOOR cell factory (operator: unify EVERY mimic/companion cell to
+    // ONE exit = BE-floored tight-giveback trail — the honest jump_floor floor+HWM-trail math
+    // on the confirmed-entry path). Single managed leg (cap=1), confirmed entry (20bp, never
+    // opens underwater vs a +20bp move), per-tick BE floor (le*(1+RT), post-arm neg=0) + HWM
+    // trail by per-cell g, reclip re-entry on +0.5% continuation. NO pre-arm hard cut
+    // (loss_cut=0 — the epx-anchored cut churns the edge away; the detector reversal bounds the
+    // pre-arm tail). Per-cell g = SMALLEST that keeps the cell's OWN book net+/PF>=1.3/both WF
+    // halves/2x-cost (backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md, harness
+    // upjump_earlyarm_bt `mimicg`, real-engine parity). ADVERSE-PROTECTION: BE floor (backtested,
+    // jump_floor parity neg=0) + retire_bp backstop (~3x the cell's worst BT clip).
+    auto make_mimic_floor_cell = [&unretired](const char* ptag, const char* ctag, const char* sym,
+                                              int det_w, double det_thr, double g, double retire_bp) {
+        chimera::UpJumpLadderCompanion::Config c;
+        c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
+        c.tight = {0.2, 0, 0.0, 0};          // single managed leg; arm/gb unused under the floor trail
+        c.reclip_pct = 0.005;                // re-enter on +0.5% continuation past the prior peak (spec #4)
+        c.cap = 1;                           // ONE position per detected event (== jump_floor J1)
+        c.cost_gate_bp = 0.0;
+        c.confirm_bp = 20.0;                 // CONFIRMED entry — never opens underwater
+        c.det_w = det_w; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 20.0;
+        c.loss_cut_bp = 0.0;                 // NO pre-arm hard cut (destroys the edge; sweep verdict)
+        c.mimic_floor = true; c.mimic_giveback = g;
+        c.size_mult = 1.0; c.retire_bp = retire_bp;
+        c.retire_override = unretired(ctag);
+        return c;
+    };
     using LTier = chimera::UpJumpLadderCompanion::Tier;
     (void)sizeof(LTier);   // LTier retained for make_lad_companion callers; grid uses make_stagger_companion
     // ── THRESHOLD-COMPARISON GRID (S-2026-07-11, operator) ───────────────────────
@@ -4072,77 +4098,40 @@ int main() {
     // per-tick companion driver matches on the feed's symbol and drives self-detection).
     // NEAR is a SEPARATE book from NEAR-REGIME-BEMIMIC (operator instruction; distinct
     // parent_tag key, distinct desk tag, own bank).
-    // ADVERSE-PROTECTION (mimic): loss_cut_bp=50 per-tick hard stop (factory) + gb 0.50
-    // peak-giveback + MTM window-exit flush + BE-cascade ≤1-un-BE'd leg; retire_bp = −1500
-    // ≈ 2.3–3x the worst 2023-26 BT clip (BNB −503 / UNI −664 / NEAR −656 bp).
-    chimera::EdgeEngine bnb_sweet_feed (make_uj("bnbusdt",  "BNB-UJ4-SWEETFEED",  3600, 1, 0.040));
-    chimera::EdgeEngine uni_sweet_feed (make_uj("uniusdt",  "UNI-UJ35-SWEETFEED", 3600, 1, 0.035));
-    chimera::EdgeEngine near_sweet_feed(make_uj("nearusdt", "NEAR-UJ4-SWEETFEED", 3600, 1, 0.040));
-    // ── S-2026-07-13 WINDOW×THRESHOLD FULL GRID (operator: "give me the sweet spot for the
-    // other crypto") — the 13i grid fixed W per coin (mostly 1h); this pass swept the WINDOW
-    // dimension too: 19 coins × W{1,2,3,4,6,8,12,24}h × thr{0.5..8, 0.5-step} = 2432 cells,
-    // 2023-26 ONLY, same stack (gate PF>=1.3/n>=30/H1>0/H2>0/exbestEpi>0 + plateau[isolated
-    // cells REJECTED: ETH/XLM/GRT/OP/XRP neighbors flip deep negative] + 2x-cost re-sim +
-    // 20-seed random-entry z>=2). NEW survivors (base / 2x / z):
-    //   TRX  8h/+3.5%: +612%/PF5.38 n=175 / +577/PF4.59 / z=+10.4  plateau W6-12 x 3-5.5%
-    //   UNI  2h/+4.0%: +667%/PF2.39 n=371 / +592/PF2.13 / z=+5.3   (2nd UNI book — overlap
-    //        with UNI-UJ35-SWEET accepted in shadow; forward real-fills pick the winner)
-    //   AAVE 3h/+4.5%: +348%/PF1.66 n=358 / +277/PF1.48 / z=+4.4
-    //   ADA  8h/+3.5%: +440%/PF1.45 n=833 / +274/PF1.25 / z=+2.5   (separate book from
-    //        ADA-REGIME-BEMIMIC — different parent family, companions are additive)
-    //   DOGE 1h/+5.5%: +188%/PF7.19 n=45 THIN / +179/PF6.24 / z=+4.1  plateau 4.5-6%
-    //   LINK 8h/+4.5%: +312%/PF1.51 n=509 / +211/PF1.31 / z=+2.5   (W24/+7.5% alternate also
-    //        passed z=+2.5 but H1-heavy; one LINK book only)
-    //   LDO  8h/+7.0%: +174%/PF1.53 n=262 / +122/PF1.33 / z=+2.2 MARGINAL (weakest wire)
-    // DEAD — NO cell survives the stack on ANY window: BTC (rand long placement earns +110%
-    // = drift not edge, z<=0.9), ETH, SOL, XRP, XLM, GRT, OP, BCH, AVAX, LTC.
-    // ADVERSE-PROTECTION unchanged (lc50 per-tick + gb 0.50 + BE-cascade); retire_bp per cell
-    // ≈ 3x its worst 2x-cost clip. W8 detector warms in 9 H1 closes (cold-start honest).
+    // ── S-2026-07-15 MIMIC-FLOOR UNIFICATION (operator: every mimic -> ONE exit = BE-floored
+    // tight-giveback trail). The SWEET confirmed-entry cells move from the floorless BE-N6
+    // ladder to the honest jump_floor floor+HWM-trail (make_mimic_floor_cell). Faithful g-sweep
+    // (upjump_earlyarm_bt `mimicg`: confirm20 + BE-floor + trail-g + reclip, cut=0, 2x-cost,
+    // WF-halves, 2023-26; backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md) KEPT 5 of the 11:
+    //   BNB 1h/+4.0% g0.50 (+36%/PF2.80, 2x +19/1.60)   TRX 8h/+3.5% g0.40 (+53%/PF1.76, 2x +40/1.59)
+    //   UNI 1h/+3.5% g1.00 (+104%/PF1.78, 2x +92/1.62)  DOGE 1h/+5.5% g0.20 (+77%/PF1.73, 2x +58/1.50)
+    //   NEAR 1h/+4.0% g0.75 (+97%/PF1.64, 2x +68/1.42)
+    // DROPPED — fail net+/PF>=1.3/both-WF/2x on EVERY g under the honest floor (the old BE-N6
+    // pass leaned on a mechanism the floor removes): UNI-W2 (WF-H1<0), AAVE (2x PF<1.3), ADA
+    // (2x net<0), LINK (net<0), LDO (net<0), INJ (net<0 every g — the −242 cell). Their feed
+    // objects are removed with them. Finding: tightening g HURTS these trend cells (best g is
+    // high; small g exits winners early) + the pre-arm hard cut churned the edge away (cut=0).
+    chimera::EdgeEngine bnb_sweet_feed (make_uj("bnbusdt",  "BNB-UJ4-SWEETFEED",     3600, 1, 0.040));
+    chimera::EdgeEngine uni_sweet_feed (make_uj("uniusdt",  "UNI-UJ35-SWEETFEED",    3600, 1, 0.035));
+    chimera::EdgeEngine near_sweet_feed(make_uj("nearusdt", "NEAR-UJ4-SWEETFEED",    3600, 1, 0.040));
     chimera::EdgeEngine trx_sweet_feed (make_uj("trxusdt",  "TRX-UJ35W8-SWEETFEED",  3600, 8, 0.035));
-    chimera::EdgeEngine uni2_sweet_feed(make_uj("uniusdt",  "UNI-UJ4W2-SWEETFEED",   3600, 2, 0.040));
-    chimera::EdgeEngine aave_sweet_feed(make_uj("aaveusdt", "AAVE-UJ45W3-SWEETFEED", 3600, 3, 0.045));
-    chimera::EdgeEngine ada_sweet_feed (make_uj("adausdt",  "ADA-UJ35W8-SWEETFEED",  3600, 8, 0.035));
     chimera::EdgeEngine doge_sweet_feed(make_uj("dogeusdt", "DOGE-UJ55-SWEETFEED",   3600, 1, 0.055));
-    chimera::EdgeEngine link_sweet_feed(make_uj("linkusdt", "LINK-UJ45W8-SWEETFEED", 3600, 8, 0.045));
-    chimera::EdgeEngine ldo_sweet_feed (make_uj("ldousdt",  "LDO-UJ7W8-SWEETFEED",   3600, 8, 0.070));
-    // ── S-2026-07-14 INJ (operator "why is INJ not firing" → seed audit found INJ had
-    // NO validated cell and was ABSENT from the 13-07 19-coin sweep — so swept it):
-    // INJ 24h/+5.5%: +517%/PF1.50 n=782 / 2x +360/PF1.31 / randz=+2.9, plateau 5.0(+520)
-    // –6.0(+373), H1 +153 / H2 +364 both-positive at base AND 2x. Same full stack as
-    // ec81011 (gate PF>=1.3/n>=30/H1>0/H2>0/exbestEpi>0 + plateau + 2x-cost + 20-seed
-    // random-entry z>=2), 2023-26, CC_RT=20/CC_CUT=50/confirm=20bp. CAVEATS recorded:
-    // edge H2-weighted (late-sample heavy) + W=24 sits on the grid boundary (>24h
-    // untested). retire_bp=-2300 ≈ 3x worst clip (-762.6bp base).
-    // Sweep: Crypto/backtest/inj_sweetspot_sweep_2026-07-14.txt (data INJUSDT_1h.csv
-    // 30,968 bars 2023-01→2026-07, gap/price-sane checked).
-    chimera::EdgeEngine inj_sweet_feed (make_uj("injusdt",  "INJ-UJ55W24-SWEETFEED", 3600, 24, 0.055));
     {
-        const std::vector<double> _sw_arms = {0.2, 2, 3, 4, 6, 8};   // BE-N6 (the validated cell form)
         struct SweetCell { const char* pfx; const char* tagsfx; const char* sym;
-                           chimera::EdgeEngine* feed; int det_w; double thr; double retire_bp; };
+                           chimera::EdgeEngine* feed; int det_w; double thr; double g; double retire_bp; };
         const std::vector<SweetCell> _sweet_cells = {
-            {"BNB",  "UJ4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, -1500.0},
-            {"UNI",  "UJ35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, -1500.0},
-            {"NEAR", "UJ4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, -1500.0},
-            // S-2026-07-13 window-sweep survivors (validation stack in the comment above)
-            {"TRX",  "UJ35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, -1200.0},
-            {"UNI",  "UJ4W2-SWEET",  "uniusdt",  &uni2_sweet_feed, 2, 0.040, -2400.0},
-            {"AAVE", "UJ45W3-SWEET", "aaveusdt", &aave_sweet_feed, 3, 0.045, -2300.0},
-            {"ADA",  "UJ35W8-SWEET", "adausdt",  &ada_sweet_feed,  8, 0.035, -1600.0},
-            {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, -1200.0},
-            {"LINK", "UJ45W8-SWEET", "linkusdt", &link_sweet_feed, 8, 0.045, -2000.0},
-            {"LDO",  "UJ7W8-SWEET",  "ldousdt",  &ldo_sweet_feed,  8, 0.070, -1800.0},
-            // S-2026-07-14 INJ sweep survivor (validation stack in the feed comment above)
-            {"INJ",  "UJ55W24-SWEET","injusdt",  &inj_sweet_feed, 24, 0.055, -2300.0},
+            {"BNB",  "UJ4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, 0.50,  -6000.0},
+            {"UNI",  "UJ35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, 1.00,  -7700.0},
+            {"NEAR", "UJ4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, 0.75,  -5200.0},
+            {"TRX",  "UJ35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, 0.40,  -5400.0},
+            {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, 0.20, -12000.0},
         };
         for (const auto& sc : _sweet_cells) {
             _grid_ptags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx + "FEED");
             _grid_ctags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx);
-            auto c = make_stagger_companion(
+            _grid.emplace_back(make_mimic_floor_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), sc.sym,
-                sc.det_w, sc.thr, _sw_arms, /*BE_CASCADE*/1, 0, 1.0, sc.retire_bp);
-            c.confirm_bp = 20.0;   // CONFIRMED entry — the defining property of this class
-            _grid.emplace_back(c);
+                sc.det_w, sc.thr, sc.g, sc.retire_bp));
             _grid_feeds.push_back(sc.feed);
         }
     }
@@ -4203,6 +4192,36 @@ int main() {
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
+    // ── S-2026-07-15 MIMIC-FLOOR-VIOLATION GATE (operator mandate: Chimera has no canary
+    // harness — the drift that caused this session. This boot-time structural check makes a
+    // floorless mimic impossible to ship silently). Every live companion must carry a floor
+    // (jump_floor | be_floor | mimic_floor). A floorless one with no documented exception is a
+    // [MIMIC-FLOOR-VIOLATION] and is REFUSED (rank_out -> takes no new windows). The 5
+    // REGIME-BEMIMIC cells are a DOCUMENTED PENDING exception: parent-driven (det_w=0, external
+    // D1 REGIME_SWITCH) so their floored-g sweep needs a parent-replay harness not yet built —
+    // they run their current validated ladder exit with a loud [MIMIC-FLOOR-PENDING] warning
+    // until swept (backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md). Runs every boot.
+    {
+        static const std::set<std::string> _floor_pending = {
+            "NEAR-REGIME-BEMIMIC","THETA-REGIME-BEMIMIC","SUSHI-REGIME-BEMIMIC",
+            "ADA-REGIME-BEMIMIC","DOT-REGIME-BEMIMIC"};
+        int _viol = 0, _pend = 0;
+        for (auto* clip : _all_clips) {
+            const auto& cc = clip->config();
+            if (cc.jump_floor || cc.be_floor || cc.mimic_floor) continue;   // floored — OK
+            if (_floor_pending.count(cc.tag)) {
+                ++_pend;
+                std::printf("[MIMIC-FLOOR-PENDING] %s floorless (parent-driven) — floored-g sweep owed (harness TODO); running current validated ladder exit.\n", cc.tag.c_str());
+            } else {
+                ++_viol;
+                clip->set_rank_out(true);   // REFUSE to arm: no new windows
+                std::printf("[MIMIC-FLOOR-VIOLATION] %s is a LIVE mimic with NO floor (jump_floor|be_floor|mimic_floor) and no documented exception -> REFUSED (rank_out). Add a floor before wiring.\n", cc.tag.c_str());
+            }
+        }
+        std::printf("[MIMIC-FLOOR-GATE] scanned %zu companions: %d floored, %d pending-exception, %d VIOLATION(refused).\n",
+            _all_clips.size(), (int)_all_clips.size() - _pend - _viol, _pend, _viol);
+        std::fflush(stdout);
+    }
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
@@ -4232,6 +4251,12 @@ int main() {
                     std::printf("[CLIP-INIT] %s -> price %s  BE-FLOOR be=%.0fbp trail(T%.0f/W%.0f)bp det=%dh/%+.2f%% cap=%d shadow=1\n",
                         cc.tag.c_str(), cc.parent_tag.c_str(), cc.be_bp,
                         cc.tight.trail_bp, cc.wide.trail_bp, cc.det_w, cc.det_thr * 100, cc.cap);
+                else if (cc.mimic_floor)
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  MIMIC-FLOOR confirm=%.0fbp g=%.2f reclip=%.3f rt=%.0fbp cut=%.0fbp retire@%.0fbp%s BE-FLOORED shadow=1\n",
+                        cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
+                        cc.confirm_bp, cc.mimic_giveback, cc.reclip_pct, cc.round_trip_bp,
+                        cc.loss_cut_bp, cc.retire_bp,
+                        _all_clips[i]->is_retired() ? " [RETIRED]" : (cc.rank_out ? " [RANK-OUT]" : ""));
                 else
                     std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp mult=x%.1f retire@%.0fbp%s NO-FLOOR shadow=1\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,

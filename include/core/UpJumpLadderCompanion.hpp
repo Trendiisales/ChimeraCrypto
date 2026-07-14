@@ -100,6 +100,28 @@ public:
         // on restart (no warm-seed; per-trade legs are ephemeral).
         int     det_w         = 0;
         double  det_thr       = 0.0;
+        // ── JUMP-FLOOR mode (S-2026-07-14, operator: "add these to our trades") ──
+        // Third mode, faithful to Crypto/backtest/upjump2pct_be_bt.cpp `percoin`
+        // winning cells (17/19 plateau-validated per-coin lever map). EXPLICIT
+        // operator override of the immediate-entry ban for THESE backtested cells.
+        // Distinct from BOTH other modes: NOT the retired be_floor family (which
+        // waits for +be_bp before opening) and NOT the confirmed-entry mimics.
+        //   • ENTER immediately at the first tick after a detect close (== BT
+        //     "next open") when close/close[-W]-1 >= det_thr. Pays cost; CAN lose
+        //     pre-BE — that exposure is in the BT verdict (worst column shown).
+        //   • optional pre-BE hard stop jf_prebe_stop_bp below entry (intrabar).
+        //   • BE-FLOOR: once a CLOSE covers entry*(1+RT), stop >= entry*(1+RT) —
+        //     after arming the trade cannot close negative (barring gap-through).
+        //   • trail (jf_giveback<1): stop = max(floor, E*(1+mfe*(1-g))), close-
+        //     based mfe, intrabar fill. g=1.0 disables trail = ride-to-reversal.
+        //   • REVERSAL: j <= -det_thr at close -> exit at next tick (BT next open).
+        //   • re-entry requires a fresh jump: a close with j < det_thr must print
+        //     after ANY exit before the next entry may arm (BT `armed` flag).
+        // ADVERSE-PROTECTION: backtested verdict per cell — BE-floor yes, pre-BE
+        // hard stop harmful except LINK (s=2%); retire_bp = -2x the cell's BT maxDD.
+        bool    jump_floor       = false;
+        double  jf_giveback      = 1.0;   // g: fraction of MFE given back before trail exit; 1.0 = reversal-only
+        double  jf_prebe_stop_bp = 0.0;   // s: pre-BE hard stop bp below entry; 0 = none
         // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/upjump_weighting_bt.cpp) ──
         // size_mult: per-coin notional weight (x2 robust top performer / x1 baseline).
         //   Stamped on every ClipRecord; weighted bank = Σ net_bp_real * size_mult
@@ -196,6 +218,37 @@ public:
             h1c_.erase(h1c_.begin(), h1c_.end() - (cfg_.det_w + 1));
         det_bar_ = bar; det_close_ = close;
         det_in_ = in; det_entry_ = entry;
+        if (cfg_.jump_floor) {
+            // JUMP-FLOOR restore: rebuild jf state from the mirrored det fields.
+            // mfe restored from the last persisted close (understates an intra-gap
+            // peak slightly -> trail marginally looser until the next new high;
+            // floor level is exact). Flat books restore UN-armed: a j<thr close
+            // must print before the next entry (conservative fresh-jump rule).
+            jf_in_ = det_in_ && det_entry_ > 0.0;
+            jf_armed_ = false;
+            if (jf_in_) {
+                const double rt = cfg_.round_trip_bp * 1e-4;
+                jf_E_ = det_entry_;
+                jf_mfe_ = std::max(0.0, (close > 0.0 ? close / jf_E_ - 1.0 : 0.0));
+                jf_floored_ = jf_mfe_ >= rt;
+                jf_stop_ = (cfg_.jf_prebe_stop_bp > 0.0) ? jf_E_ * (1.0 - cfg_.jf_prebe_stop_bp / 1e4) : -1.0;
+                if (jf_floored_) {
+                    double ns = jf_E_ * (1.0 + rt);
+                    if (cfg_.jf_giveback < 1.0)
+                        ns = std::max(ns, jf_E_ * (1.0 + jf_mfe_ * (1.0 - cfg_.jf_giveback)));
+                    jf_stop_ = std::max(jf_stop_, ns);
+                }
+                jf_open_ts_ = now_ms; jf_open_bar_ = bar; jf_ext_bar_ = bar;   // held-bars restart at boot (open ts not persisted)
+                legs_.clear();
+                Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
+                l.open = true; l.open_ts = now_ms; l.open_bar = bar; l.ext_bar = bar;
+                l.mfe = jf_mfe_ * 100.0;
+                legs_.push_back(l);
+            }
+            std::printf("[CLIP-DETSEED] %s JUMPFLOOR in=%d entry=%.6f floored=%d stop=%.6f ring=%zu\n",
+                cfg_.tag.c_str(), jf_in_ ? 1 : 0, jf_E_, jf_floored_ ? 1 : 0, jf_stop_, h1c_.size());
+            return;
+        }
         if (det_in_ && det_entry_ > 0.0 && legs_.empty() && !cfg_.be_floor && arming_allowed_()) {
             entry_ref_ = det_entry_;
             cur_bar_   = now_ms / (cfg_.tf_secs * 1000);
@@ -232,6 +285,7 @@ public:
         const int64_t bar = ts_ms / (cfg_.tf_secs * 1000);
         if (cfg_.det_w > 0) {
             feed_selfdetect_(cur_px, ts_ms);
+            if (cfg_.jump_floor) { jf_on_tick_(cur_px, ts_ms); return; }               // JUMP-FLOOR: fills + intrabar stops
             if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(cur_px, ts_ms, bar);   // per-tick HARD STOP
             return;                                                                    // internal detector (live, both modes)
         }
@@ -384,6 +438,7 @@ private:
     void process_close_(double close, int64_t closed_bar) {
         h1c_.push_back(close);
         if ((int)h1c_.size() > cfg_.det_w + 1) h1c_.erase(h1c_.begin());
+        if (cfg_.jump_floor) { jf_on_close_(close, closed_bar); return; }   // JUMP-FLOOR: own state machine
         if ((int)h1c_.size() >= cfg_.det_w + 1) {               // have close[i] and close[i-W]
             const double past = h1c_.front();
             const double j = close / past - 1.0;
@@ -397,6 +452,87 @@ private:
         const int64_t ts = closed_bar * cfg_.tf_secs * 1000;
         if (cfg_.be_floor) observe_be_(det_in_, det_entry_, close, ts, closed_bar);      // BE-floor book
         else               observe_ladder_(det_in_, det_entry_, close, ts, closed_bar);  // LADDER book (S-2026-07-07w)
+    }
+
+    // ── JUMP-FLOOR mode (S-2026-07-14, faithful to upjump2pct_be_bt.cpp percoin cells) ──
+    // Single position per detected event. det_in_/det_entry_ mirror jf_in_/jf_E_ so
+    // det_state_json()/restore_det_state() persistence works unchanged. legs_ carries
+    // ONE display-only Leg ("J1") while in position so snapshot()/leg_snapshots()
+    // render on the desk with zero GUI changes (arm=0.2% => armed chip == floored).
+    void jf_on_close_(double close, int64_t closed_bar) {
+        if ((int)h1c_.size() < cfg_.det_w + 1) return;          // ring warming (W+1 closes)
+        const double j  = close / h1c_.front() - 1.0;
+        const double rt = cfg_.round_trip_bp * 1e-4;
+        cur_bar_ = closed_bar;
+        if (!jf_in_ && !jf_pending_open_) {
+            if (!jf_armed_) { if (j < cfg_.det_thr) jf_armed_ = true; return; }   // fresh-jump re-arm (BT `armed`)
+            if (j >= cfg_.det_thr && arming_allowed_()) {
+                jf_pending_open_ = true; jf_armed_ = false;     // fill at next tick == BT next open
+            }
+            return;
+        }
+        if (!jf_in_) return;                                    // pending open, nothing to manage yet
+        const double fav = close / jf_E_ - 1.0;
+        if (fav > jf_mfe_) { jf_mfe_ = fav; jf_ext_bar_ = closed_bar; }
+        if (!jf_floored_ && fav >= rt) jf_floored_ = true;      // close covered cost -> floor arms
+        if (jf_floored_) {
+            double ns = jf_E_ * (1.0 + rt);                     // BE floor incl. cost
+            if (cfg_.jf_giveback < 1.0)
+                ns = std::max(ns, jf_E_ * (1.0 + jf_mfe_ * (1.0 - cfg_.jf_giveback)));
+            if (ns > jf_stop_) jf_stop_ = ns;                   // stop only ratchets up
+        }
+        if (!legs_.empty()) { legs_[0].mfe = jf_mfe_ * 100.0; legs_[0].ext_bar = jf_ext_bar_; }
+        if (j <= -cfg_.det_thr) jf_pending_exit_ = true;        // reversal -> exit at next tick (BT next open)
+        det_in_ = jf_in_; det_entry_ = jf_E_;                   // persistence mirror
+    }
+    void jf_on_tick_(double px, int64_t ts_ms) {
+        if (px <= 0.0) return;
+        if (jf_pending_open_) {                                 // first tick after detect close == BT next open
+            jf_pending_open_ = false;
+            jf_in_ = true; jf_E_ = px; jf_mfe_ = 0.0; jf_floored_ = false;
+            jf_stop_ = (cfg_.jf_prebe_stop_bp > 0.0) ? px * (1.0 - cfg_.jf_prebe_stop_bp / 1e4) : -1.0;
+            jf_open_ts_ = ts_ms; jf_open_bar_ = ts_ms / (cfg_.tf_secs * 1000);
+            jf_ext_bar_ = jf_open_bar_;
+            det_in_ = true; det_entry_ = jf_E_;                 // persistence mirror
+            legs_.clear();                                      // ONE display leg for the desk panel
+            Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
+            l.open = true; l.open_ts = ts_ms; l.open_bar = jf_open_bar_; l.ext_bar = jf_open_bar_;
+            legs_.push_back(l);
+            std::printf("[CLIP-JF] %s OPEN px=%.6f stop=%s (det j>=+%.2f%%) shadow=%d\n",
+                cfg_.tag.c_str(), jf_E_,
+                jf_stop_ > 0 ? "preBE" : "none", cfg_.det_thr * 100.0, shadow_mode ? 1 : 0);
+            std::fflush(stdout);
+            return;
+        }
+        if (!jf_in_) return;
+        if (jf_pending_exit_) { jf_book_(px, ts_ms, "REVERSAL_EXIT"); return; }   // booked at next tick px
+        if (jf_stop_ > 0.0 && px <= jf_stop_)                   // intrabar stop: pre-BE / floor / trail
+            jf_book_(px, ts_ms, jf_floored_ ? "FLOOR_TRAIL_STOP" : "PREBE_STOP");
+    }
+    void jf_book_(double px, int64_t ts_ms, const char* reason) {
+        const double gross = (px / jf_E_ - 1.0) * 1e4;
+        const double net   = gross - cfg_.round_trip_bp;        // ONE honest column: real == model, no clamp
+        ClipRecord r;
+        r.tag = cfg_.tag + "-J1"; r.symbol = cfg_.symbol; r.reason = reason;
+        r.entry_ts_ms = jf_open_ts_; r.exit_ts_ms = ts_ms;
+        r.entry_px = jf_E_; r.exit_px = px;
+        r.gross_bp = gross; r.net_bp = net; r.mfe_pct = jf_mfe_ * 100.0;
+        r.gross_bp_real = gross; r.net_bp_real = net;
+        r.size_mult = cfg_.size_mult;
+        r.bars_held = (int)(ts_ms / (cfg_.tf_secs * 1000) - jf_open_bar_);
+        r.clip_num = ++clip_num_;
+        r.shadow = shadow_mode;
+        banked_bp_ += net; banked_bp_real_ += net; banked_bp_real_w_ += net * cfg_.size_mult;
+        if (on_clip_) on_clip_(r);
+        check_retire_();
+        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d JUMPFLOOR\n",
+            r.tag.c_str(), reason, net, gross, jf_mfe_ * 100.0, r.bars_held, jf_E_, px, shadow_mode ? 1 : 0);
+        std::fflush(stdout);
+        jf_in_ = false; jf_pending_exit_ = false; jf_pending_open_ = false;
+        jf_E_ = 0.0; jf_mfe_ = 0.0; jf_floored_ = false; jf_stop_ = -1.0;
+        det_in_ = false; det_entry_ = 0.0;                      // persistence mirror
+        legs_.clear();                                          // drop the display leg
+        // jf_armed_ stays false: the next entry needs a close with j < det_thr first (fresh jump)
     }
 
     // ── BE-FLOOR mode (faithful port of be_bptrail.py leg_book) ──────────────
@@ -665,6 +801,16 @@ private:
     double  det_close_ = 0.0;      // running close of det_bar_
     bool    det_in_    = false;    // in a detected long event
     double  det_entry_ = 0.0;      // event entry ref (~ next open)
+    // JUMP-FLOOR mode state (S-2026-07-14; det_in_/det_entry_ mirror for persistence)
+    bool    jf_armed_        = true;    // fresh-jump gate: entry allowed (j<thr seen since last exit)
+    bool    jf_pending_open_ = false;   // detect close seen -> fill at next tick (BT next open)
+    bool    jf_pending_exit_ = false;   // reversal close seen -> book at next tick
+    bool    jf_in_           = false;   // position open
+    bool    jf_floored_      = false;   // BE floor armed (a close covered entry*(1+RT))
+    double  jf_E_    = 0.0;             // entry fill px
+    double  jf_mfe_  = 0.0;             // close-based max favorable excursion (fraction)
+    double  jf_stop_ = -1.0;            // resting stop px (preBE / floor / trail); <0 = none
+    int64_t jf_open_ts_ = 0, jf_open_bar_ = 0, jf_ext_bar_ = 0;
 };
 
 } // namespace chimera

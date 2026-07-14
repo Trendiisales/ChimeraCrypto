@@ -18,10 +18,10 @@ same class as the Omega 2026-05-14 incident. Root causes:
 
 ## The trunk
 
-The live crypto line is **`xsec-deploy`**, NOT `main`. `main` is a divergent research line
-(the roster-expansion program) that xsec's 2026-06-14 honest revalidation **tombstoned as
-0/283 viable** (`TOMBSTONED_ROSTER_2026-06-14.md`). Do not merge `main` onto the live line
-without a faithful per-engine re-backtest — its "validated"/PF rankings were fill-optimism.
+The live crypto line is **`main`** (as of the 2026-07 migration; the old `xsec-deploy` trunk
+is GONE from origin). `tools/check_branch_freshness.sh` and `tools/deploy_hygiene_check.sh` were
+repointed xsec-deploy -> main on 2026-07-15j — until then they were pinned to the dead branch
+and were **inert** (see the 2026-07-15 recurrence below).
 
 ## The rules
 
@@ -57,3 +57,35 @@ survive any reconcile. Preferred long-term fix: move `live_config.json` out of v
 `git reset --soft` (pointer-only) or a stash/reapply — NEVER `git reset --hard` / `git pull`
 that would clobber them. Back up `live_config.json` before any git surgery and verify it is
 byte-identical after.
+
+## 2026-07-15j recurrence — the drift came back a THIRD way (config), now structurally closed
+
+Despite the 2026-07-05 fixes, drift recurred: mac `4d89f45` and box `c9b849a` were **content-
+identical commits with different SHAs** (both S-2026-07-15h "MIMIC-FLOOR", committed once on each
+side), and origin/main was ~4 logical commits behind on a **parallel re-implementation lineage**
+(each PHASE3/CAMPAIGN/SWEET/PERCOIN change committed twice, cross-referencing "Mac <sha>"/"box
+<sha>"). On top of that, the two runtime config JSONs **crossed**: origin had `theta/sushi` +
+`UPJUMP-GRID=SHADOW`; mac had neither + `DISABLED`; **the box-live (uncommitted) config was the
+only operational truth.** Why the existing guards missed it:
+
+- `check_branch_freshness.sh` + `deploy_hygiene_check.sh` were **pinned to the dead `xsec-deploy`
+  branch** → fetch failed → guards exited 0 (inert). *Fix: repointed to `main`.*
+- `check_box_sync.sh` byte-compared only the **3 engine files**, never the config JSONs, so
+  config edited-live-never-committed was invisible. *Fix: added a **CONFIG-RECONCILE GATE** — it
+  now byte-compares `config/symbol_whitelist.json` + `config/engine_registry.json` (mac-committed
+  vs box-live) and BLOCKS the deploy if they differ, forcing the live truth into git first.*
+- The canonical deploy (`deploy_to_box.sh`) **commits on the box** (step 4) and left "push to
+  origin + sync mac" as a MANUAL after-step — the async gap that forks the lineage. *Fix: **step 7
+  AUTO-RECONCILE** pushes box→origin (fast-forward) and fast-forwards mac in-process, so all three
+  share ONE lineage every deploy. If bypassed, the now-live freshness guards BLOCK the next deploy.*
+
+**Reconcile performed:** made mac-committed config == box-live (commit `1468f9a`), then
+`git merge -s ours origin/main` (keep mac tree, record origin as ancestor → fast-forward push past
+branch protection, no force) → origin/main `06bf2eb`; box `git reset --hard origin/main` → clean
+tree, service undisturbed. Backup of the pre-reconcile origin tip: remote tag
+`drift-archive/origin-main-pre-reconcile-20260715` (`07d19e6`).
+
+**The invariant now enforced by tooling:** *box-live config == mac-committed config == origin ==
+box HEAD, on `main`, every deploy.* Note this supersedes rule 1's absolute "NEVER commit on the
+box": box commits ARE allowed **only** because step 7 immediately pushes them to origin + syncs
+mac in the same automated run. A box commit that is not auto-reconciled is still forbidden.

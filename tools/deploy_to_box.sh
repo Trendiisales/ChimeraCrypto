@@ -65,4 +65,34 @@ if [ "$active" != "active" ] || [ "$run_hash" != "$want_hash" ]; then
   echo "DEPLOY-FAILED: service not active or hash mismatch. Prior binary restored."; exit 1
 fi
 echo "DEPLOY-OK: chimera active, running binary build=$run_hash == HEAD $want_hash. Verify [CLIP-INIT] shadow=1 lines next."
-echo "NOTE: box committed $want_hash locally — push to origin + sync the Mac after confirming CLIP-INIT."
+
+# ── 7/7 AUTO-RECONCILE (added S-2026-07-15j) ─────────────────────────────────
+# The box commit at step 4 is the DRIFT GENERATOR: the old flow left "push to
+# origin + sync Mac" as a MANUAL after-step, and skipping it (or re-committing the
+# same files on Mac) forked the lineage (2026-07-15: box c9b849a vs Mac 4d89f45,
+# identical content two SHAs). Close the gap IN-PROCESS: push box->origin now (a
+# fast-forward — origin was the pre-flight base), then fast-forward the Mac so all
+# three share ONE lineage before the session ends. The now-live freshness guards
+# (check_branch_freshness / deploy_hygiene_check, both repointed to main) BLOCK the
+# next deploy if this is ever bypassed, so a fork cannot silently compound.
+echo "### 7/7 AUTO-RECONCILE box -> origin -> Mac ###"
+if ssh "$BOX" "cd $BOX_REPO && git push origin main"; then
+  echo "pushed box $want_hash -> origin/main"
+  git -C "$HERE" fetch origin
+  # Mac fast-forwards only if HEAD is now an ancestor of origin AND the deployed
+  # files are the ONLY working-tree change (they already match origin -> go clean).
+  if git -C "$HERE" merge-base --is-ancestor HEAD origin/main; then
+    other="$(git -C "$HERE" status --porcelain -- . ':(exclude)'"${FILES[0]}" ':(exclude)'"${FILES[1]}" ':(exclude)'"${FILES[2]}" | grep -vE '^\?\?' || true)"
+    if [ -z "$other" ]; then
+      git -C "$HERE" reset --hard origin/main && echo "Mac fast-forwarded to origin/main $want_hash — no drift."
+    else
+      echo "WARN: Mac has other uncommitted tracked changes; NOT auto-resetting. Reconcile:"
+      echo "  git -C $HERE stash && git -C $HERE reset --hard origin/main && git -C $HERE stash pop"
+    fi
+  else
+    echo "WARN: Mac HEAD not an ancestor of origin/main (Mac diverged). Reconcile before next deploy."
+  fi
+else
+  echo "WARN: box->origin push FAILED — reconcile manually NOW (else lineage forks): "
+  echo "  ssh $BOX 'cd $BOX_REPO && git push origin main' ; git -C $HERE fetch origin && git -C $HERE reset --hard origin/main"
+fi

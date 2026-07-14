@@ -9,9 +9,12 @@
 #   - origin/xsec-deploy sat a content-step stale; the mac clone was SHALLOW so history
 #     was invisible and the divergence was misdiagnosed for a whole session.
 #
-# The LIVE TRUNK for crypto is `xsec-deploy`, NOT main (main is a divergent research line
-# that xsec's 2026-06-14 honest revalidation tombstoned as 0/283 viable). So freshness is
-# measured against origin/xsec-deploy.
+# LIVE TRUNK = `main` (repointed S-2026-07-15j). The crypto live line moved onto
+# main; the old `xsec-deploy` trunk is GONE from origin. This guard sat pinned to
+# the dead xsec-deploy branch and was therefore INERT during the 2026-07-15
+# Mac<->box parallel-lineage drift (mac 4d89f45 vs box c9b849a, same content two
+# SHAs) -- fetch origin/xsec-deploy failed -> "no network?" path -> exit 0. Pinning
+# to a dead branch = a guard that never fires. Repointed to main so it actually runs.
 #
 # Override with --force or environment STALE_OK=1.
 #
@@ -22,7 +25,7 @@
 
 set -e
 
-TRUNK=${TRUNK:-xsec-deploy}
+TRUNK=${TRUNK:-main}
 STALE_THRESHOLD=${STALE_THRESHOLD:-15}
 
 if [[ "$1" == "--force" || "${STALE_OK:-}" == "1" ]]; then
@@ -75,7 +78,7 @@ if [[ "$BEHIND" -ge "$STALE_THRESHOLD" ]]; then
   STALE BRANCH WARNING -- $BEHIND commits behind origin/$TRUNK (threshold $STALE_THRESHOLD)
 ================================================================================
   Working on '$BRANCH' this far behind WILL cause conflicts and may resurrect
-  engines the live line has tombstoned (2026-06-14: 0/283 viable).
+  engines the live line has tombstoned.
 
   Resolve before proceeding:
     git fetch origin

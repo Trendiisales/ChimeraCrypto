@@ -19,10 +19,14 @@
 #
 # SSH form MUST be literally `ssh chimera-direct` (feedback-vps-ssh-command-form).
 
+# LIVE TRUNK repointed xsec-deploy -> main S-2026-07-15j: the crypto live line
+# moved onto main and xsec-deploy is GONE from origin, so this gate compared a
+# non-existent branch (origin/xsec-deploy = "?") and its three-way HEAD agreement
+# check was inert during the 2026-07-15 Mac<->box parallel-lineage drift. Now on main.
 set -e
 cd "$(dirname "$0")/.."
 
-TRUNK=${TRUNK:-xsec-deploy}
+TRUNK=${TRUNK:-main}
 BOX_DIR=${BOX_DIR:-/home/jo/ChimeraCrypto}
 FAIL=0
 

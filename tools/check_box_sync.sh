@@ -75,4 +75,42 @@ MSG
   [ "${STALE_OK:-0}"  = "1" ] && { echo "STALE_OK=1 -> proceeding despite drift."; exit 0; }
   exit 1
 fi
-echo "OK: Mac engine files == live box. Safe to deploy."
+echo "OK: Mac engine files == live box."
+
+# ── CONFIG-RECONCILE GATE (added S-2026-07-15j) ──────────────────────────────
+# ROOT CAUSE of the recurring Mac<->box drift: runtime config JSONs are edited
+# LIVE on the box (whitelist tweaks, engine state flips) and NEVER committed back
+# to git, so every committed snapshot is wrong and the two dev lineages guess
+# differently (2026-07-15: origin had theta/sushi + UPJUMP-GRID SHADOW; Mac had
+# neither/DISABLED; box-live was the only truth). The engine-file check above is
+# blind to config. This gate enforces the invariant: Mac-committed config ==
+# box-live config. If the box edited config live without committing it back,
+# BLOCK and force a reconcile so the truth lands in git BEFORE any deploy.
+CONFIG_FILES=("config/symbol_whitelist.json" "config/engine_registry.json")
+cfg_drift=0
+for f in "${CONFIG_FILES[@]}"; do
+  lh="$(git -C "$LOCAL_REPO" show "HEAD:$f" 2>/dev/null | sha | awk '{print $1}')"
+  bh="$(ssh -o ConnectTimeout=15 "$BOX" "shasum -a 256 $BOX_REPO/$f 2>/dev/null || sha256sum $BOX_REPO/$f" 2>/dev/null | awk '{print $1}')"
+  if [ -z "$lh" ] || [ -z "$bh" ]; then echo "WARN: could not hash config $f"; cfg_drift=1; continue; fi
+  if [ "$lh" != "$bh" ]; then echo "CONFIG-DRIFT: $f  (Mac committed:${lh:0:12} != box-live:${bh:0:12})"; cfg_drift=1
+  else echo "config-match: $f (Mac committed == box live)"; fi
+done
+if [ "$cfg_drift" = "1" ]; then
+  cat <<MSG
+
+==========================================================================
+ CONFIG DRIFT: box-live config != Mac-committed config.
+ The box edited runtime config LIVE and never committed it back to git.
+ This is THE recurring drift root cause. Reconcile the LIVE truth into git
+ BEFORE deploying (else the deploy reverts live tuning / re-forks lineage):
+   scp $BOX:$BOX_REPO/config/symbol_whitelist.json config/symbol_whitelist.json
+   scp $BOX:$BOX_REPO/config/engine_registry.json  config/engine_registry.json
+   git add config/*.json && git commit -m "config reconcile: box-live truth" && git push origin main
+   ssh $BOX "cd $BOX_REPO && git fetch origin && git reset --hard origin/main"
+==========================================================================
+MSG
+  [ "${WARN_ONLY:-0}" = "1" ] && { echo "WARN_ONLY=1 -> surfacing only (exit 0)."; exit 0; }
+  [ "${STALE_OK:-0}"  = "1" ] && { echo "STALE_OK=1 -> proceeding despite config drift."; exit 0; }
+  exit 1
+fi
+echo "OK: Mac engine files + config == live box. Safe to deploy."

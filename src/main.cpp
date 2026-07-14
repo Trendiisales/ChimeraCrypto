@@ -4091,6 +4091,17 @@ int main() {
     chimera::EdgeEngine doge_sweet_feed(make_uj("dogeusdt", "DOGE-UJ55-SWEETFEED",   3600, 1, 0.055));
     chimera::EdgeEngine link_sweet_feed(make_uj("linkusdt", "LINK-UJ45W8-SWEETFEED", 3600, 8, 0.045));
     chimera::EdgeEngine ldo_sweet_feed (make_uj("ldousdt",  "LDO-UJ7W8-SWEETFEED",   3600, 8, 0.070));
+    // ── S-2026-07-14 INJ (operator "why is INJ not firing" → seed audit found INJ had
+    // NO validated cell and was ABSENT from the 13-07 19-coin sweep — so swept it):
+    // INJ 24h/+5.5%: +517%/PF1.50 n=782 / 2x +360/PF1.31 / randz=+2.9, plateau 5.0(+520)
+    // –6.0(+373), H1 +153 / H2 +364 both-positive at base AND 2x. Same full stack as
+    // ec81011 (gate PF>=1.3/n>=30/H1>0/H2>0/exbestEpi>0 + plateau + 2x-cost + 20-seed
+    // random-entry z>=2), 2023-26, CC_RT=20/CC_CUT=50/confirm=20bp. CAVEATS recorded:
+    // edge H2-weighted (late-sample heavy) + W=24 sits on the grid boundary (>24h
+    // untested). retire_bp=-2300 ≈ 3x worst clip (-762.6bp base).
+    // Sweep: Crypto/backtest/inj_sweetspot_sweep_2026-07-14.txt (data INJUSDT_1h.csv
+    // 30,968 bars 2023-01→2026-07, gap/price-sane checked).
+    chimera::EdgeEngine inj_sweet_feed (make_uj("injusdt",  "INJ-UJ55W24-SWEETFEED", 3600, 24, 0.055));
     {
         const std::vector<double> _sw_arms = {0.2, 2, 3, 4, 6, 8};   // BE-N6 (the validated cell form)
         struct SweetCell { const char* pfx; const char* tagsfx; const char* sym;
@@ -4107,6 +4118,8 @@ int main() {
             {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, -1200.0},
             {"LINK", "UJ45W8-SWEET", "linkusdt", &link_sweet_feed, 8, 0.045, -2000.0},
             {"LDO",  "UJ7W8-SWEET",  "ldousdt",  &ldo_sweet_feed,  8, 0.070, -1800.0},
+            // S-2026-07-14 INJ sweep survivor (validation stack in the feed comment above)
+            {"INJ",  "UJ55W24-SWEET","injusdt",  &inj_sweet_feed, 24, 0.055, -2300.0},
         };
         for (const auto& sc : _sweet_cells) {
             _grid_ptags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx + "FEED");

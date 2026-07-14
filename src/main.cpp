@@ -1699,6 +1699,15 @@ static std::string build_state_json() {
     return js.str();
 }
 
+// CH-H02 (external audit 2026-07-14): stop flag + listen-fd handle so main can
+// stop+join this thread before returning. Previously the loop was while(true)
+// with no stop path and the static jthread-less std::thread stayed joinable at
+// static teardown -> std::terminate() -> SIGABRT core-dump on every clean-path
+// systemd restart (seen: chimera.service "Failed with result 'core-dump'"
+// 2026-07-14 09:06 deploy restart).
+static std::atomic<bool> g_http_stop{false};
+static std::atomic<int>  g_http_listen_fd{-1};
+
 static void http_server_thread(int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { perror("socket"); return; }
@@ -1717,14 +1726,15 @@ static void http_server_thread(int port) {
     addr.sin_port        = htons(port);
     if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return; }
     listen(server_fd, 16);
+    g_http_listen_fd.store(server_fd);
     std::printf("[HTTP] GUI on %s:%d | root: %s | control-auth=%s\n",
                 g_http_bind_addr.c_str(), port, gui_root.c_str(),
                 g_ctrl_token.empty() ? "DENY-ALL(no token)" : "token");
     std::fflush(stdout);
 
-    while (true) {
+    while (!g_http_stop.load(std::memory_order_relaxed)) {
         int client = accept(server_fd, nullptr, nullptr);
-        if (client < 0) break;
+        if (client < 0) break;   // includes shutdown(server_fd) from main's stop path
         struct timeval tv{2, 0};
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         char req[512] = {};
@@ -3731,6 +3741,10 @@ int main() {
     //   XRP-UPJUMP4  1h/+4% single : +1483/1.46 · TRX-UPJUMP5 1h/+5% single x0.5 (thin ~23 win) : +1964/2.72
     // (all 4 cascades hold the ≤1-un-BE'd guarantee; smoke-tested N6+N8, both arm shapes.)
     chimera::EdgeEngine::Config eth_upjump2_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP2-H1",  1, 0.02);
+    // NOTE (external audit CH-M02, 2026-07-14): the -H2/-H4 tag suffix on UPJUMP tags is the
+    // JUMP-DETECTION WINDOW in hours (3rd make_upjump arg), NOT the bar timeframe (all these
+    // engines run 3600s bars). Audit flagged it as a tf mismatch — it is not. Dead path anyway
+    // while KILL_UPJUMP_PARENTS=true (operator 2026-07-13).
     chimera::EdgeEngine::Config btc_upjump4_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP4-H2",  2, 0.04);
     chimera::EdgeEngine::Config bnb_upjump3_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP3-H1",  1, 0.03);
     chimera::EdgeEngine::Config sol_upjump5_cfg  = make_upjump("solusdt",  "SOL-UPJUMP5-H1",  1, 0.05);
@@ -10787,6 +10801,20 @@ int main() {
         total_bp     += s.engine->total_bp();
     }
     std::printf("[SHUTDOWN] aggregate trades=%d  total=%+.1fbp\n", total_trades, total_bp);
+    std::fflush(stdout);
+
+    // CH-H02 (external audit 2026-07-14): stop+join the HTTP thread BEFORE main
+    // returns. Without this the static joinable s_http_thread hit its destructor
+    // at static teardown -> std::terminate() -> SIGABRT core-dump on every
+    // clean-path restart. shutdown() on the listen fd unblocks the accept();
+    // the thread then breaks, closes its own fd, and joins here.
+    g_http_stop.store(true);
+    {
+        int hfd = g_http_listen_fd.exchange(-1);
+        if (hfd >= 0) ::shutdown(hfd, SHUT_RDWR);
+    }
+    if (s_http_thread.joinable()) s_http_thread.join();
+    std::printf("[SHUTDOWN] HTTP thread joined -- clean exit\n");
     std::fflush(stdout);
 
     release_instance_lock();

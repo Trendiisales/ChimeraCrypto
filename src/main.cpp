@@ -4119,6 +4119,70 @@ int main() {
             _grid_feeds.push_back(sc.feed);
         }
     }
+    // ── S-2026-07-14 PER-COIN JUMP-FLOOR CELLS (operator: "revisit… pull every lever…
+    // where it becomes viable for each coin" -> then "add these to our trades as you
+    // have them here"). EXPLICIT operator override of the immediate-entry ban for
+    // THESE cells only (feedback-no-immediate-entry-upjump-mimic-only stands for
+    // everything else; KILL_UPJUMP_CLIPS above stays true — that grid remains dead).
+    // NOT the retired be_floor family: jump_floor enters ON the jump (pays cost, can
+    // lose pre-BE — the exposure IS in the BT verdict), floors at BE once a close
+    // covers cost, exits on reversal. Harness: Crypto/backtest/upjump2pct_be_bt.cpp
+    // `percoin` (936 lever combos/coin, corrected long-only gate + plateau check,
+    // 2x-cost re-sim, n>=30). 17/19 coins VIABLE; LDO + LTC NO-CELL (not wired).
+    // Dominant winning shape: s=0 g=1.0 (no bracket, no trail, ride-to-reversal);
+    // LINK alone wants a 2% pre-BE stop; BCH g=0.5, OP/UNI/XRP g=0.3 trails.
+    // Payoff concentration tiers (trade-list audit, UPJUMP2PCT_SPOT_PARENT_FINDINGS.md):
+    // ROBUST (top1<=45% of net): OP XRP TRX ADA UNI SOL AAVE AVAX; FRAGILE lottery
+    // (top1>=65% or n<35): BTC LINK BNB DOGE BCH XLM — all wired per operator ask,
+    // tier recorded here for the first forward re-weighting pass.
+    // ADVERSE-PROTECTION: backtested per cell (floor + bracket levers swept);
+    // retire_bp = -2x the cell's BT maxDD episode. Vault: UpJump2pctSpotParent.
+    {
+        struct PJCell { const char* pfx; const char* cell; const char* sym; int W;
+                        double thr; double s_bp; double g; double retire_bp; };
+        // cell code = PJ<thr%*10 when fractional, else thr%>W<W> (UJ tag convention;
+        // XRP PJ12 = 12%, not 1.2 — only cell at/above 10%)
+        static const std::vector<PJCell> _pj_cells = {
+            {"AAVE", "PJ4W1",   "aaveusdt", 1,  0.040,   0.0, 1.0, -18300.0},
+            {"ADA",  "PJ8W8",   "adausdt",  8,  0.080,   0.0, 1.0, -11100.0},
+            {"AVAX", "PJ8W2",   "avaxusdt", 2,  0.080,   0.0, 1.0, -10300.0},
+            {"BCH",  "PJ55W1",  "bchusdt",  1,  0.055,   0.0, 0.5,  -3200.0},
+            {"BNB",  "PJ7W12",  "bnbusdt",  12, 0.070,   0.0, 1.0,  -6500.0},
+            {"BTC",  "PJ4W1",   "btcusdt",  1,  0.040,   0.0, 1.0,  -1100.0},
+            {"DOGE", "PJ3W12",  "dogeusdt", 12, 0.030,   0.0, 1.0, -50300.0},
+            {"ETH",  "PJ7W24",  "ethusdt",  24, 0.070,   0.0, 1.0,  -9700.0},
+            {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050,   0.0, 1.0,  -8900.0},
+            {"LINK", "PJ6W1",   "linkusdt", 1,  0.060, 200.0, 1.0,  -4400.0},   // sole pre-BE stop cell (s=2%)
+            {"NEAR", "PJ55W1",  "nearusdt", 1,  0.055,   0.0, 1.0, -18900.0},
+            {"OP",   "PJ4W1",   "opusdt",   1,  0.040,   0.0, 0.3,  -8100.0},
+            {"SOL",  "PJ8W24",  "solusdt",  24, 0.080,   0.0, 1.0, -13700.0},
+            {"TRX",  "PJ45W2",  "trxusdt",  2,  0.045,   0.0, 1.0,  -3500.0},
+            {"UNI",  "PJ8W3",   "uniusdt",  3,  0.080,   0.0, 0.3,  -8400.0},
+            {"XLM",  "PJ5W1",   "xlmusdt",  1,  0.050,   0.0, 1.0, -12800.0},
+            {"XRP",  "PJ12W8",  "xrpusdt",  8,  0.120,   0.0, 0.3,  -4400.0},
+        };
+        // feed objects: symbol/tag holders ONLY (SWEET pattern) — never g_slots'd,
+        // never wire_engine'd; the per-tick companion driver matches on feed symbol.
+        static std::vector<chimera::EdgeEngine> _pj_feeds; _pj_feeds.reserve(_pj_cells.size());
+        for (const auto& pc : _pj_cells) {
+            _grid_ptags.push_back(std::string(pc.pfx) + "-" + pc.cell + "-FEED");
+            _grid_ctags.push_back(std::string(pc.pfx) + "-" + pc.cell);
+            _pj_feeds.emplace_back(make_uj(pc.sym, _grid_ptags.back().c_str(), 3600, pc.W, pc.thr));
+            chimera::UpJumpLadderCompanion::Config c;
+            c.parent_tag = _grid_ptags.back(); c.tag = _grid_ctags.back(); c.symbol = pc.sym;
+            c.det_w = pc.W; c.det_thr = pc.thr;
+            c.jump_floor = true; c.jf_giveback = pc.g; c.jf_prebe_stop_bp = pc.s_bp;
+            c.tf_secs = 3600; c.round_trip_bp = 20.0;
+            c.confirm_bp = 0.0;   // IMMEDIATE entry — the backtested lever (jf path never reads it)
+            c.loss_cut_bp = 0.0;  // pre-BE stop handled by jf_prebe_stop_bp, not the leg cut
+            c.be_floor = false; c.reclip_pct = 0.0; c.cap = 1; c.cost_gate_bp = 0.0;
+            c.size_mult = 1.0;
+            c.retire_bp = pc.retire_bp;
+            c.retire_override = unretired(_grid_ctags.back().c_str());
+            _grid.emplace_back(std::move(c));
+            _grid_feeds.push_back(&_pj_feeds.back());
+        }
+    }
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
@@ -4141,7 +4205,13 @@ int main() {
                 std::make_pair(_all_clip_parents[i], _all_clips[i]);
             {
                 const auto& cc = _all_clips[i]->config();
-                if (cc.be_floor)
+                if (cc.jump_floor)
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  JUMP-FLOOR imm-entry preBEstop=%.0fbp gb=%.2f rt=%.0fbp mult=x%.1f retire@%.0fbp%s shadow=1\n",
+                        cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
+                        cc.jf_prebe_stop_bp, cc.jf_giveback, cc.round_trip_bp,
+                        cc.size_mult, cc.retire_bp,
+                        _all_clips[i]->is_retired() ? " [RETIRED]" : (cc.rank_out ? " [RANK-OUT]" : ""));
+                else if (cc.be_floor)
                     std::printf("[CLIP-INIT] %s -> price %s  BE-FLOOR be=%.0fbp trail(T%.0f/W%.0f)bp det=%dh/%+.2f%% cap=%d shadow=1\n",
                         cc.tag.c_str(), cc.parent_tag.c_str(), cc.be_bp,
                         cc.tight.trail_bp, cc.wide.trail_bp, cc.det_w, cc.det_thr * 100, cc.cap);

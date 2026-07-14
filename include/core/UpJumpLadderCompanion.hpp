@@ -259,6 +259,47 @@ public:
             cfg_.tag.c_str(), det_in_ ? 1 : 0, det_entry_, h1c_.size());
     }
 
+    // ── S-2026-07-14 warm-seed: detector ring from historical H1 closes ─────
+    // restore_det_state() only covers RESTARTS (persisted ring). A BRAND-NEW
+    // det_w cell has nothing persisted, so its W-bar ring sat cold for det_w
+    // hours after first deploy (ETH-PJ7W24 ≈ 25h blind — operator: NEVER wait
+    // for warmup). This fills the ring from REST klines at boot; also refreshes
+    // a ring whose persisted state went stale across an outage (det_bar_ behind
+    // the last closed kline). STATE ONLY — faithful to a book that ran all along:
+    //   • closes[] = FINALIZED H1 bars oldest-first. The LAST one loads as the
+    //     pending (det_bar_/det_close_) bar, so the normal live path finalizes
+    //     it and can ENTER on it at the next real tick — real fill px, never a
+    //     backdated entry (the S-2026-07-08 forbidden class).
+    //   • jump_floor arm state replayed over the closes (historical would-enter
+    //     events consume the arm; fresh-jump rule preserved exactly).
+    //   • a restored IN-FLIGHT window is untouched (ring refresh only).
+    //   • ladder/be_floor books get the ring only, detector stays flat: first
+    //     LIVE close evaluates with a full window instead of waiting W bars.
+    int det_ring_size() const { return (int)h1c_.size(); }
+    void seed_det_ring_hist(const std::vector<double>& closes, int64_t last_closed_bar) {
+        if (cfg_.det_w <= 0 || closes.size() < 2) return;
+        const bool warm = (int)h1c_.size() >= cfg_.det_w + 1;
+        if (warm && det_bar_ >= last_closed_bar) return;          // persisted state current — nothing to do
+        const bool in_flight = det_in_ || jf_in_;
+        h1c_.clear();
+        bool armed = false;
+        for (size_t i = 0; i + 1 < closes.size(); ++i) {          // all but last -> finalized ring
+            if (closes[i] <= 0.0) continue;
+            h1c_.push_back(closes[i]);
+            if ((int)h1c_.size() > cfg_.det_w + 1) h1c_.erase(h1c_.begin());
+            if (!in_flight && cfg_.jump_floor && (int)h1c_.size() >= cfg_.det_w + 1) {
+                const double j = h1c_.back() / h1c_.front() - 1.0;
+                if (!armed) { if (j < cfg_.det_thr) armed = true; }
+                else if (j >= cfg_.det_thr) armed = false;        // would-enter historically: arm consumed, need fresh re-arm
+            }
+        }
+        det_bar_ = last_closed_bar; det_close_ = closes.back();   // pending bar: live path finalizes it (entry only on a live tick)
+        if (!in_flight && cfg_.jump_floor) jf_armed_ = armed;
+        std::printf("[CLIP-SEED] %s det ring warm-seeded from history: %zu closes ring=%zu W=%d armed=%d in_flight=%d\n",
+            cfg_.tag.c_str(), closes.size(), h1c_.size(), cfg_.det_w,
+            (cfg_.jump_floor && jf_armed_) ? 1 : 0, in_flight ? 1 : 0);
+    }
+
     // ── one independent clip leg (faithful python Leg) ─────────────────────
     struct Leg {
         std::string label;      // "T1" / "T2" / "L1".. (tier / ladder id for the GUI)

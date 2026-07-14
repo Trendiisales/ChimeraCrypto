@@ -149,7 +149,7 @@ def poll_omega():
         try:
             out = subprocess.run(["ssh","-o","ConnectTimeout=10","-o","BatchMode=yes",
                 "-o","ControlMaster=auto","-o","ControlPath=/tmp/ssh-omega-stall-%r@%h:%p","-o","ControlPersist=120",
-                "omega-vps","powershell -NoProfile -EncodedCommand "+enc],
+                "omega-new","powershell -NoProfile -EncodedCommand "+enc],
                 capture_output=True, text=True, timeout=20).stdout
             break
         except Exception as e:
@@ -175,7 +175,7 @@ def gold_4h_bull():
         try:
             out = subprocess.run(["ssh","-o","ConnectTimeout=10","-o","BatchMode=yes",
                 "-o","ControlMaster=auto","-o","ControlPath=/tmp/ssh-omega-stall-%r@%h:%p","-o","ControlPersist=120",
-                "omega-vps","powershell -NoProfile -EncodedCommand "+enc],
+                "omega-new","powershell -NoProfile -EncodedCommand "+enc],
                 capture_output=True, text=True, timeout=20).stdout
             break
         except Exception as e:
@@ -413,7 +413,7 @@ def main():
         try:
             subprocess.run(["scp","-o","ConnectTimeout=6","-o","BatchMode=yes","-o","ControlMaster=auto",
                 "-o","ControlPath=/tmp/ssh-omega-stall-%r@%h:%p","-o","ControlPersist=120",
-                STATE, os.environ.get("COMPANION_VPS_DEST","omega-vps:C:/Omega/companion_state.json")], capture_output=True, timeout=15)
+                STATE, os.environ.get("COMPANION_VPS_DEST","omega-new:C:/Omega/companion_state.json")], capture_output=True, timeout=15)
         except Exception as e:
             print("companion: VPS push failed", e)
     print(f"companion: open {len(pos)} | banked-now {banked} | realized ${round(realized_total,2)} | by_reason {by_reason}")

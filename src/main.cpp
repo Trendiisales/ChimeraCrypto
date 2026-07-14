@@ -9082,6 +9082,49 @@ int main() {
         }
     }
 
+    // ── S-2026-07-14 OVERLAY REST warm-seed ─────────────────────────────
+    // Boot audit found [OVERLAY] warm-start: 0/12 — the data/klines_spot/
+    // *_1h_extended.csv snapshots never existed on this box, so the
+    // xsec-momentum × vol-scale sizing multiplier sat at 1.00x (rank=-1)
+    // for every tradeable, silently disabling the overlay for the live
+    // g_slots parents (set_sizing_mult / set_risk_mult consumers below).
+    // Fix is structural: fetch 64 daily klines per tradeable from Binance
+    // REST and seed the overlay directly — no CSV file to rot (the Omega
+    // seed-freshness lesson). CSV path above stays primary when present;
+    // seed_daily_closes() no-ops on symbols already warm.
+    {
+        chimera::BinanceREST ov_rest;
+        const int64_t ov_now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        int ov_seeded = 0;
+        for (int i = 0; i < chimera::PortfolioOverlay::N_TRADEABLE; ++i) {
+            auto kl = ov_rest.fetch_klines(chimera::sym_full(i), "1d",
+                                           chimera::PortfolioOverlay::HIST_DAYS + 2);
+            while (!kl.empty() && kl.back().open_ts_ms + 86400000LL > ov_now_ms)
+                kl.pop_back();                       // FINALIZED daily closes only
+            if (kl.empty()) {
+                std::fprintf(stderr, "[OVERLAY] REST warm-seed: %s fetch_klines(1d) gave 0 closed bars\n",
+                             chimera::sym_full(i));
+                continue;
+            }
+            std::vector<double> cs; cs.reserve(kl.size());
+            for (const auto& k : kl) cs.push_back(k.c);
+            if (g_portfolio_overlay.seed_daily_closes(i, cs) > 0) ++ov_seeded;
+        }
+        std::printf("[OVERLAY] REST warm-seed: %d/%d symbols (1d klines, HIST_DAYS=%d)\n",
+                    ov_seeded, chimera::PortfolioOverlay::N_TRADEABLE,
+                    chimera::PortfolioOverlay::HIST_DAYS);
+        for (int i = 0; i < chimera::PortfolioOverlay::N_TRADEABLE; ++i) {
+            std::printf("[OVERLAY]   %-5s  ret28d=%+7.2f%%  vol20d=%6.4f  rank=%2d  mult=%.2fx\n",
+                        chimera::sym_short(i),
+                        g_portfolio_overlay.ret_28d(i) * 100.0,
+                        g_portfolio_overlay.realised_vol(i),
+                        g_portfolio_overlay.rank(i),
+                        g_portfolio_overlay.multiplier_for(i));
+        }
+        std::fflush(stdout);
+    }
+
     // ── Trade journal: load history ──────────────────────────────────────
     load_trade_history();
 

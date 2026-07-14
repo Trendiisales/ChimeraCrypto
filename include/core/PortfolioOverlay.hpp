@@ -126,6 +126,28 @@ public:
         return warmed;
     }
 
+    // S-2026-07-14 REST warm-seed fallback: the *_1h_extended.csv snapshots do
+    // not exist on the live box (boot audit: warm-start 0/12, multiplier stuck
+    // 1.00x for every tradeable all boot). main.cpp fetches 1d klines from
+    // Binance REST and seeds daily closes directly — no file to rot. No-ops on
+    // symbols already warm from CSV/live so the CSV path stays primary.
+    // Returns # closes kept (0 = already warm or nothing usable).
+    int seed_daily_closes(int symbol_id, const std::vector<double>& closes) {
+        if (symbol_id < 0 || symbol_id >= N_TRADEABLE || closes.empty()) return 0;
+        std::lock_guard<std::mutex> lk(mtx_);
+        auto& s = series_[symbol_id];
+        if (!s.daily_closes.empty()) return 0;
+        for (double c : closes) {
+            if (c <= 0.0) continue;
+            s.daily_closes.push_back(c);
+            if ((int)s.daily_closes.size() > HIST_DAYS) s.daily_closes.pop_front();
+        }
+        if (s.daily_closes.empty()) return 0;
+        s.last_close_seen = s.daily_closes.back();
+        recompute_();
+        return (int)s.daily_closes.size();
+    }
+
     // Called from spot tick callback. Maintains daily-close deque per symbol.
     void on_tick(int symbol_id, double px, int64_t now_ms) {
         if (symbol_id < 0 || symbol_id >= N_TRADEABLE) return;

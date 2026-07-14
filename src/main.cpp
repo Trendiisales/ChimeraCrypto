@@ -4145,7 +4145,9 @@ int main() {
                         double thr; double s_bp; double g; double retire_bp; };
         static const std::vector<PJCell> _pj_cells = {
             {"AAVE", "PJ4W1",   "aaveusdt", 1,  0.040, 100.0, 1.0, -10300.0},
-            {"DOGE", "PJ3W12",  "dogeusdt", 12, 0.030, 400.0, 1.0, -57300.0},
+            // DOGE PJ3W12 CULLED S-2026-07-14 (operator): edge 2021-concentrated
+            // (2021 +91,271bp; 2022 -15,358; 2023-26 -1,979bp) — see
+            // Crypto/backtest/UPJUMP_LOWTHR_STOPRESCUE_FINDINGS.md side-finding.
             {"ETH",  "PJ7W24",  "ethusdt",  24, 0.070, 400.0, 1.0,  -6700.0},
             {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050, 500.0, 1.0,  -9900.0},
         };

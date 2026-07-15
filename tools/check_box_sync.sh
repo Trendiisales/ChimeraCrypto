@@ -28,7 +28,7 @@ set -uo pipefail
 BOX="${CHIMERA_BOX:-chimera-direct}"
 BOX_REPO="${CHIMERA_BOX_REPO:-~/ChimeraCrypto}"
 LOCAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
-FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp")
+FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
 
 local_head="$(git -C "$LOCAL_REPO" rev-parse --short HEAD 2>/dev/null || echo LOCAL_UNKNOWN)"
 box_head="$(ssh -o ConnectTimeout=15 "$BOX" "git -C $BOX_REPO rev-parse --short HEAD" 2>/dev/null || echo BOX_UNREACHABLE)"

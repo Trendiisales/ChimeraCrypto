@@ -38,6 +38,15 @@ public:
         double reserve_bp  = 2.0;    // uncertainty reserve (13j funding equation)
         int    n_measured  = 0;      // real-fill slip samples folded in
         double slip_sum    = 0.0;    // running sum of measured slip bp
+        // Phase-2 (§2) fee decomposition + depth-adjusted slip reserves. These
+        // feed safe_cost_bps(); default so effective_rt_bp() is unchanged.
+        double buy_fee_bp   = 10.0;  // taker/side; maker entry can lower this
+        double sell_fee_bp  = 10.0;  // taker/side (exit is aggressive per §8)
+        double entry_slip99_bp = 0.0;// p99 buy-slip at campaign Q (depth model)
+        double exit_slip99_bp  = 0.0;// p99 sell-slip at campaign Q (depth model)
+        double spread_bp    = 2.0;   // spread/market-impact allowance (§2)
+        double latency_bp   = 5.0;   // latency allowance (§2)
+        double dust_bp      = 1.0;   // rounding/dust allowance (§2)
     };
 
     void configure(const std::string& sym, double known_rt_bp,
@@ -64,6 +73,39 @@ public:
     void record_measured_slip(const std::string& sym, double slip_bp) {
         auto& c = costs_[sym];
         c.slip_sum += slip_bp; c.n_measured++;
+    }
+
+    // ── Phase-2 (§2) depth-adjusted safe cost ────────────────────────────────
+    // Feed the p99 entry/exit slippage measured by DepthLiquidationModel at the
+    // campaign's actual quantity into the ledger. (Depth model lives separately
+    // so the ledger stays data-source-agnostic.)
+    void set_depth_slip(const std::string& sym, double entry_slip99_bp,
+                        double exit_slip99_bp) {
+        auto& c = costs_[sym];
+        c.entry_slip99_bp = entry_slip99_bp; c.exit_slip99_bp = exit_slip99_bp;
+    }
+    void set_fees(const std::string& sym, double buy_fee_bp, double sell_fee_bp) {
+        auto& c = costs_[sym]; c.buy_fee_bp = buy_fee_bp; c.sell_fee_bp = sell_fee_bp;
+    }
+
+    // The spec §2 authoritative safe cost: NOT the flat 20bp. Sums the fee
+    // decomposition + p99 depth-adjusted entry & exit slip + spread/latency/dust
+    // reserves. This is what the CORE break-even / campaign floor arithmetic uses
+    // (CoreNetLiquidationPnL clears break-even only when > this).
+    double safe_cost_bps(const std::string& sym) const {
+        const SymCost& c = get_(sym);
+        return c.buy_fee_bp + c.sell_fee_bp
+             + c.entry_slip99_bp + c.exit_slip99_bp
+             + c.spread_bp + c.latency_bp + c.dust_bp;
+    }
+
+    // Pure combiner form for callers that carry slip locally (e.g. a backtest
+    // walking the depth book per trade) without mutating ledger state.
+    double safe_cost_bps(const std::string& sym, double entry_slip_bp,
+                         double exit_slip_bp) const {
+        const SymCost& c = get_(sym);
+        return c.buy_fee_bp + c.sell_fee_bp + entry_slip_bp + exit_slip_bp
+             + c.spread_bp + c.latency_bp + c.dust_bp;
     }
 
     std::string state_json() const {

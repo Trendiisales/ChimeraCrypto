@@ -6,5 +6,8 @@ config/binance_credentials.json
 /tmp/chimera_*
 backtest/data/
 data/klines_spot/
+data/bookdepth_perp/
+data/aggtrades_spot/
+data/bookticker_perp/
 build/
 .build_version

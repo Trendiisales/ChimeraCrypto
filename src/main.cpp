@@ -168,6 +168,7 @@
 #include "core/CryptoCostLedger.hpp"       // S-2026-07-13 campaign architecture (13j §2.11): measured per-symbol effective cost
 #include "core/CryptoOpportunityGate.hpp"  // S-2026-07-13 campaign architecture: cost-viability entry gate
 #include "core/CryptoCampaignManager.hpp"  // S-2026-07-13 campaign architecture: virtual-lot parent campaigns (SHADOW, mimic OFF)
+#include "core/CoreTriggerEngine.hpp"       // S-2026-07-15 CORE-TRIGGER: streaming mirror of run_core (ETH+XRP, SHADOW, taker, parity-gated)
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
@@ -1314,6 +1315,8 @@ static chimera::CryptoCostLedger      g_camp_cost_ledger;
 static chimera::CryptoOpportunityGate g_camp_gate;
 static std::vector<chimera::CryptoCampaignManager*> g_campaigns;  // guarded by g_companion_mtx
 static int g_campaign_cell_count = 0;
+// S-2026-07-15 CORE-TRIGGER (ETH+XRP): streaming validated CORE, SHADOW, taker 28bp, parity-gated.
+static chimera::CoreTriggerEngine* g_core_eng = nullptr;          // guarded by g_companion_mtx
 static constexpr const char* CAMPAIGN_STATE_FILE = "data/campaign_state.json";
 // Caller MUST hold g_companion_mtx. Atomic write (tmp+rename), one line per manager.
 static void save_campaign_state() {
@@ -9252,6 +9255,36 @@ int main() {
     for (int i = 0; i < chimera::MAX_SYMBOLS; ++i)
         feed.add_symbol(chimera::sym_full(i));
 
+    // ── S-2026-07-15 CORE-TRIGGER campaign (ETH+XRP): validated taker CORE, SHADOW ──
+    // Streaming mirror of run_core (Crypto/backtest/core_trigger_p2_bt.cpp), parity-gated
+    // (backtest/parity_core_trigger.cpp == identical trades). MIMIC OFF. Cost 28bp taker RT
+    // (maker-only re-BT confirmed taker basis, CORE_MAKER_ONLY_FINDINGS_2026-07-15).
+    chimera::CoreTriggerEngine core_eng({
+        "btcusdt", 900, {
+            { "ethusdt", "CORE-ETH" },   // Cell defaults = validated cell: short0.64/med0.56/
+            { "xrpusdt", "CORE-XRP" },   //   trail240/stop5bp/Q$100k/28bp taker, enabled
+        }
+    });
+    {
+        chimera::BinanceREST core_rest;
+        auto seed_core = [&](const char* sym){
+            auto kl = core_rest.fetch_klines(sym, "15m", 260);   // >64 bars: warm SMA64+ATR+comp
+            chimera::SymbolId sid = chimera::symbol_to_id(sym);
+            for (const auto& k : kl)                             // tbb_frac neutral 0.5 on seed
+                core_eng.seed_bar(sid, k.open_ts_ms, k.o, k.h, k.l, k.c, 0.5);
+            std::printf("[SEED][CORE] %s 15m seeded=%d bars\n", sym, (int)kl.size());
+        };
+        seed_core("btcusdt"); seed_core("ethusdt"); seed_core("xrpusdt");   // BTC first (regime)
+        core_eng.set_on_clip(persist_companion_clip);   // clips -> companion ledger + desk blotter
+        { std::lock_guard<std::mutex> lk(g_companion_mtx); g_core_eng = &core_eng; }
+        for (const auto& c : core_eng.config().cells)
+            std::printf("[CORE-INIT] %s sym=%s short=%.2f med=%.2f trail=%.0f stop=%.0fbp Q=$%.0f "
+                        "cost=%.0fbp SHADOW mimic=OFF (parity-gated)\n",
+                        c.tag.c_str(), c.symbol.c_str(), c.short_thr, c.med_thr, c.trailmin,
+                        c.stopbuf, c.qusd, c.cost_rt_bp);
+        std::fflush(stdout);
+    }
+
     feed.set_callback([&](const chimera::MarketTick& tick) {
         int id = chimera::sym_id(tick.symbol);
         if (id < 0) return;
@@ -9260,6 +9293,14 @@ int main() {
         if (mid <= 0.0) return;
 
         store_dbl_atomic(g_last_spot_px_bits[id], mid);
+
+        // S-2026-07-15 CORE-TRIGGER: drive the streaming CORE engine off the aggTrade
+        // side feed (px, qty, taker side). Guard trade_qty>0 — bookTicker events carry
+        // stale trade fields. Engine routes by id internally (BTC regime + ETH/XRP cells).
+        if (g_core_eng && tick.trade_qty > 0.0 && tick.trade_time > 0) {
+            g_core_eng->on_trade(static_cast<chimera::SymbolId>(id), tick.last_price,
+                                 tick.trade_qty, tick.is_buyer_maker, tick.trade_time);
+        }
 
         // S55: tick the maker-grid sleeve (shadow). Buys gated by macro 200d-MA.
         if (!g_grids.empty()) {

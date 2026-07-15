@@ -4049,15 +4049,25 @@ int main() {
                                       double retire_bp) {
         chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
-        c.tight = {0.30, 0, 0.40, 0.0};   // arm 0.30%  giveback 40% (banks fast)
-        c.wide  = {0.80, 0, 0.55, 0.0};   // arm 0.80%  giveback 55% (rides far)
-        c.reclip_pct = 0.05;              // re-enter on +5% new peak after a clip
+        // S-2026-07-16 FLOOR-NOW (operator: "there should be NO more crypto with no floor").
+        // Migrated off the floorless BE-cascade ladder (confirm-gate + H1-close giveback race —
+        // the SAME class that booked the INJ −242: confirm ≠ floor, see [[MimicFloorUnification]])
+        // onto the honest mimic_floor. g=1.0 => the trail stop == the BE floor (le*(1+RT)): it
+        // never gives back below BE and rides the D1 REGIME_SWITCH parent to flip (ride_to_flip
+        // parity), so post-arm net_bp_real >= 0 (jump_floor guarantee). loss_cut=60 RETAINED
+        // (Phase-2 backtested protection) but now le-ANCHORED under the mimic_floor pre-arm
+        // branch — fixes the epx-anchor bug that produced the INJ T2 −125. This floors NOW
+        // (protection is unconditional; a BE floor can only cap downside); the return-optimising
+        // floored-g sweep is still owed (needs a parent-replay harness).
+        c.tight = {0.2, 0, 0.0, 0};       // single managed leg; arm/gb unused under the floor trail
+        c.reclip_pct = 0.05;              // re-enter on +5% new peak after a clip (D1 continuation)
         c.confirm_bp = 20.0;              // BE-ENTRY: open ONLY once fav >= BE (== RT cost)
-        c.cap        = 2;                 // 2 base tiers, NO self-funding ladder (BE book)
-        c.cost_gate_bp = 0.0; c.be_floor = false;   // LADDER honest-MTM (be_floor family retired)
+        c.cap        = 1;                 // mimic_floor = ONE managed leg per detected event
+        c.cost_gate_bp = 0.0; c.be_floor = false;
+        c.mimic_floor = true; c.mimic_giveback = 1.0;   // BE floor; g=1.0 rides parent flip, floored
         c.det_w = 0; c.det_thr = 0.0;     // observe the EXTERNAL parent, not self-detect
         c.tf_secs = 86400; c.round_trip_bp = 20.0;
-        c.loss_cut_bp = 60.0;
+        c.loss_cut_bp = 60.0;             // le-anchored pre-arm cut under mimic_floor (Phase-2 verdict)
         c.retire_bp = retire_bp;          // per-coin auto-retire on negative real bank
         c.retire_override = unretired(ctag);
         return c;
@@ -4199,15 +4209,14 @@ int main() {
     // harness — the drift that caused this session. This boot-time structural check makes a
     // floorless mimic impossible to ship silently). Every live companion must carry a floor
     // (jump_floor | be_floor | mimic_floor). A floorless one with no documented exception is a
-    // [MIMIC-FLOOR-VIOLATION] and is REFUSED (rank_out -> takes no new windows). The 5
-    // REGIME-BEMIMIC cells are a DOCUMENTED PENDING exception: parent-driven (det_w=0, external
-    // D1 REGIME_SWITCH) so their floored-g sweep needs a parent-replay harness not yet built —
-    // they run their current validated ladder exit with a loud [MIMIC-FLOOR-PENDING] warning
-    // until swept (backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md). Runs every boot.
+    // [MIMIC-FLOOR-VIOLATION] and is REFUSED (rank_out -> takes no new windows). NO pending
+    // exceptions remain: S-2026-07-16 (operator: "there should be NO more crypto with no floor")
+    // the 5 REGIME-BEMIMIC cells were migrated onto mimic_floor (g=1.0 == BE floor, rides the
+    // parent to flip) in make_be_mimic above — so every live companion is now floored. The
+    // return-optimising floored-g sweep for the regime cells remains owed (parent-replay harness,
+    // backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md) but the FLOOR ships now. Runs every boot.
     {
-        static const std::set<std::string> _floor_pending = {
-            "NEAR-REGIME-BEMIMIC","THETA-REGIME-BEMIMIC","SUSHI-REGIME-BEMIMIC",
-            "ADA-REGIME-BEMIMIC","DOT-REGIME-BEMIMIC"};
+        static const std::set<std::string> _floor_pending = {};   // empty: zero floorless-exception cells
         int _viol = 0, _pend = 0;
         for (auto* clip : _all_clips) {
             const auto& cc = clip->config();

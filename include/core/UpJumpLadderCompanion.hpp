@@ -264,6 +264,7 @@ public:
                 l.open = true; l.open_ts = now_ms; l.open_bar = bar; l.ext_bar = bar;
                 l.mfe = jf_mfe_ * 100.0;
                 legs_.push_back(l);
+                jf_restored_ = true;     // first live tick must honor the floor, not a downtime-gap px
             }
             std::printf("[CLIP-DETSEED] %s JUMPFLOOR in=%d entry=%.6f floored=%d stop=%.6f ring=%zu\n",
                 cfg_.tag.c_str(), jf_in_ ? 1 : 0, jf_E_, jf_floored_ ? 1 : 0, jf_stop_, h1c_.size());
@@ -571,6 +572,18 @@ private:
             return;
         }
         if (!jf_in_) return;
+        if (jf_restored_) {                                     // first tick after a RESTART restore
+            jf_restored_ = false;
+            // A restored leg whose stop is already breached on the FIRST observed tick means the
+            // market moved during downtime; the leg would have exited at the floor in continuous live
+            // trading. Book at the FLOOR (jf_stop_), never the post-outage px -> honors the >=BE floor
+            // invariant. NOT the retired be_floor tautology: this fires ONLY on the restart-gap first
+            // tick; every live intrabar stop below still books at the honest px.
+            if (jf_stop_ > 0.0 && px <= jf_stop_) {
+                jf_book_(jf_stop_, ts_ms, jf_floored_ ? "RESTORE_FLOOR" : "RESTORE_PREBE");
+                return;
+            }
+        }
         if (jf_pending_exit_) { jf_book_(px, ts_ms, "REVERSAL_EXIT"); return; }   // booked at next tick px
         if (jf_stop_ > 0.0 && px <= jf_stop_)                   // intrabar stop: pre-BE / floor / trail
             jf_book_(px, ts_ms, jf_floored_ ? "FLOOR_TRAIL_STOP" : "PREBE_STOP");
@@ -941,6 +954,9 @@ private:
     double  jf_E_    = 0.0;             // entry fill px
     double  jf_mfe_  = 0.0;             // close-based max favorable excursion (fraction)
     double  jf_stop_ = -1.0;            // resting stop px (preBE / floor / trail); <0 = none
+    bool    jf_restored_ = false;       // set on a RESTART restore; consumed on the first tick to
+                                        // enforce the >=BE floor invariant against a downtime gap
+                                        // (a resurrected leg must not book at the post-outage px)
     int64_t jf_open_ts_ = 0, jf_open_bar_ = 0, jf_ext_bar_ = 0;
 };
 

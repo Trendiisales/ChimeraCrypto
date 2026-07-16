@@ -3924,13 +3924,15 @@ int main() {
     // exit on reversal (mimic_giveback=g). reclip OFF (cascade guarantee), confirm 0 (all tiers), a
     // pre-BE hard cut (loss_cut_bp) caps every un-armed leg. Config is byte-identical to the validated
     // harness Crypto/backtest/eth_ujmimic_15_becascade_bt.cpp (run() L57-65) that reproduces the
-    // all-coin PASS table (BTC@2% +2117% PF5.20 worst-178bp ... all 22 PASS, worst -1.8%/leg uniform).
+    // all-coin PASS table (BTC@2% +2117% PF5.20 worst-178bp ... all 22 PASS, now NEVER-neg (BE-entry floored-on-open, S-2026-07-17)).
     // Locked config: det_w=4 · g0.5 · lc150 · cap8 (8 floored legs) · thr per-coin (BTC 2% / rest 1.5%)
     // · rt=28bp PROXY (ETH-calibrated; per-coin measured cost via DepthLiquidationModel owed before
     // live sizing — thin coins cost more at size). SHADOW (shadow_mode set on every _all_clips entry);
     // additive/independent (feedback-companion-independent-engine); NO 200DMA (feedback-no-200dma-crypto).
-    // ADVERSE-PROTECTION: backtested — mimic_floor BE lock-in (post-arm never-neg by construction) +
-    // lc150 pre-BE cut (worst clip tracks the cut exactly, -178bp = -1.8%/leg). Findings/vault:
+    // ADVERSE-PROTECTION: backtested — BE-ENTRY (confirm_bp=60, confirm_anchor_epx) floors every leg
+    // ON OPEN at window-entry BE => worst clip net>=0, NEVER negative (S-2026-07-17 fix; the old lc150
+    // immediate-entry BOOKED -178bp/PREBE_CUT on DOT/NEAR — feedback-no-prebe-loss-ever). Re-validated
+    // ALL 22 coins: nNeg=0, worst +0.0bp, standalone gate PASS at base AND 2x cost, omit-2022. Findings/vault:
     // [[EthUjMimic15BeCascade]] (all-coin extension owed into the entity this session).
     auto make_becascade_cell = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                             double det_thr, double retire_bp) {
@@ -3939,8 +3941,11 @@ int main() {
         c.det_w = 4; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 28.0;  // rt=28 PROXY (per-coin measured owed)
         c.mimic_floor = true; c.mimic_stagger = true; c.stagger_mode = 1; c.stagger_be_bp = 20.0;  // BE_CASCADE
         c.reclip_pct = 0.0;                  // OFF — cascade guarantee (validated harness parity)
-        c.loss_cut_bp = 150.0;               // pre-BE hard cut => worst -1.8%/leg (operator lc150)
-        c.confirm_bp = 0.0; c.be_floor = false;
+        c.loss_cut_bp = 0.0;                 // S-2026-07-17: pre-BE hard cut REMOVED (it BOOKED the loss:
+                                             // DOT/NEAR -178bp/PREBE_CUT). No pre-arm window => no cut needed.
+        c.confirm_bp = 60.0;                 // BE-ENTRY: leg stays FLAT (books nothing) until fav>=60bp (>2xRT)
+        c.confirm_anchor_epx = true;         // floored-ON-OPEN at window-entry BE => worst clip net>=0, NEVER neg
+        c.be_floor = false;                  // (feedback-no-prebe-loss-ever; validated ALL 22 coins nNeg=0, PASS)
         c.mimic_giveback = 0.5;              // reversal exit (operator g0.5)
         c.cost_gate_bp = 0.0; c.size_mult = 1.0;
         c.tight = {0.2, 0, 0.0, 0, 0.0};     // T1 (confirm 0 — cascade release governed by stagger_be_bp, not tiers)
@@ -4283,9 +4288,9 @@ int main() {
     }
     // ── S-2026-07-16 BE-CASCADE ALL-COIN MIMIC (operator: validated ALL-22 PASS -> "wire all coins") ──
     // 22 independent SHADOW BE-cascade companion books, one per coin, the operator EXACT spec
-    // (make_becascade_cell above; stagger_mode=1, det_w=4, g0.5, lc150, cap8). Reproduced at the
+    // (make_becascade_cell above; stagger_mode=1, det_w=4, g0.5, BE-ENTRY confirm60/anchor, cap8). Reproduced at the
     // locked config (eth_ujmimic_15_becascade_bt UM_COIN sweep): ALL 22 PASS the standalone gate
-    // (net>0 & PF>=1.3 & both WF halves>0 at base AND 2x cost, omit-2022), worst -1.8%/leg uniform
+    // (net>0 & PF>=1.3 & both WF halves>0 at base AND 2x cost, omit-2022), now NEVER-neg (BE-entry floored-on-open, S-2026-07-17)
     // (lc150 caps every coin). BTC@2% +2117% PF5.20; ETH +5711; SOL +12510; ... PF 4.7-7.3 across.
     // thr = BTC 2.0% (fat-tail spacing), all others 1.5%. ADDITIVE alongside the SWEET/PJ cells on the
     // 7 shared symbols (operator: independent/additive, not replace). All 22 symbols are in the live

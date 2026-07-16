@@ -73,6 +73,12 @@ public:
         double  confirm_bp    = 25.0;  // OPTION-B confirmed-entry: a leg stays FLAT (books nothing,
                                        // pays no cost) until fav>=confirm_bp; a never-confirmed leg
                                        // never opens (fixes the BTC -141.39bp never-positive flush).
+        bool    confirm_anchor_epx = false;  // S-2026-07-17 NEVER-PRE-BE-LOSS (feedback-no-prebe-loss-ever):
+                                       // when confirm_bp>0, DON'T reset le to the confirm price on open —
+                                       // keep le=epx (the window/jump entry). Then a leg that opens at
+                                       // epx*(1+confirm) with confirm>=RT is ALREADY floored on open
+                                       // (hwm=cur>=le*(1+RT)) so its worst clip = BE (net>=0). Removes the
+                                       // pre-arm window entirely => no PREBE_CUT loss. Requires confirm_bp>RT.
         int64_t tf_secs       = 3600;  // H1
         double  round_trip_bp = 20.0;  // 0.20% RT Binance spot taker
         // ── BE-FLOOR mode (S-2026-07-05 resume, operator restated spec) ──────────
@@ -822,7 +828,7 @@ private:
         if (!lg.open) {
             if (lg.confirm > 0.0 && fav * 100.0 < lg.confirm) return false;   // OPTION-B: not yet confirmed -> stay flat, book nothing
             lg.open = true; lg.open_ts = bar * cfg_.tf_secs * 1000; lg.open_bar = bar;
-            if (lg.confirm > 0.0 || lg.seeded_flat) lg.le = cur;               // le = confirm price / first live mark (rehydrate-FLAT: never backdated)
+            if ((lg.confirm > 0.0 && !cfg_.confirm_anchor_epx) || lg.seeded_flat) lg.le = cur;  // le = confirm price / first live mark (rehydrate-FLAT: never backdated). confirm_anchor_epx keeps le=epx so the leg is floored-on-open at window-entry BE (no pre-arm loss).
             lg.mfe = fav; lg.ext_bar = bar;
             if (cfg_.mimic_floor) { lg.hwm = lg.le; lg.floored = false; lg.stop_px = -1.0; }     // floor gauged from the fill (le)
         }

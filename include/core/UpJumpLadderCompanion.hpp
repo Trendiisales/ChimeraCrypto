@@ -49,7 +49,7 @@ namespace chimera {
 
 class UpJumpLadderCompanion {
 public:
-    struct Tier { double arm = 5.0; int stall = 0; double gb = 0.0; double trail_bp = 0.0; };  // 0 = that lever OFF; trail_bp used only in be_floor mode
+    struct Tier { double arm = 5.0; int stall = 0; double gb = 0.0; double trail_bp = 0.0; double confirm = 0.0; };  // 0 = that lever OFF; trail_bp used only in be_floor mode; confirm>0 = per-tier BE-entry stagger (bp fav from window entry), 0 = use cfg_.confirm_bp
 
     struct Config {
         std::string parent_tag;        // e.g. "BTC-UPJUMP-H1" (the leg we observe)
@@ -141,6 +141,17 @@ public:
         //     not epx, so the floor guarantees the LEG's own book, not the detector's.
         bool    mimic_floor    = false;
         double  mimic_giveback = 1.0;
+        // ── S-2026-07-16 STAGGERED FLOORED LADDER (operator: "once we get to BE ... open at
+        // least 4x mimics, stagger them ... all protections ... never go negative on a mimic") ──
+        // When mimic_floor && mimic_stagger: init builds T1 + T2 + extra_base as SEPARATE legs,
+        // each with its own per-tier `confirm` (escalating BE-entry: e.g. BE / +1% / +2% / +3%).
+        // Each leg floors at its OWN fill (le) => the legs are DISTINCT positions (different
+        // entries), NOT the redundant same-entry N-multiply the single-leg block guards against,
+        // so they are genuinely additive (07-07 concurrent-arms: staggered legs additive) AND
+        // each is post-arm BE-floored (never books negative). All legs eligible (confirm gates
+        // the opens, not advance_stagger_); set cap == #tiers so no self-funding ladder spawns
+        // beyond the staggered set. mimic_giveback stays uniform (g-sweep: tightening HURTS).
+        bool    mimic_stagger  = false;
         // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/upjump_weighting_bt.cpp) ──
         // size_mult: per-coin notional weight (x2 robust top performer / x1 baseline).
         //   Stamped on every ClipRecord; weighted bank = Σ net_bp_real * size_mult
@@ -748,8 +759,12 @@ private:
         // MIMIC-FLOOR = ONE managed position per event (operator: trail from peak, exit on
         // giveback, re-enter). Extra arm tiers are meaningless under a single-g floor trail
         // (arm level is unused once the floor governs exits) — they would just N-multiply an
-        // identical clip. So a mimic_floor cell runs a single T1 leg (== jump_floor's J1).
-        if (cfg_.mimic_floor) return;
+        // identical clip. So a plain mimic_floor cell runs a single T1 leg (== jump_floor's J1).
+        // EXCEPTION (S-2026-07-16 mimic_stagger): the extra tiers carry ESCALATING per-tier
+        // `confirm` (BE / +1% / +2% / ...), so each opens at a DIFFERENT price and floors at its
+        // OWN fill — distinct additive positions, not the redundant same-entry N-multiply. Fall
+        // through to build them; each still routes through the per-leg BE-floor trail.
+        if (cfg_.mimic_floor && !cfg_.mimic_stagger) return;
         legs_.push_back(make_leg_("T2", epx, cfg_.wide,  ts, bar, false));
         int i = 0;   // stacked base arms (item 5): one more base leg per extra tier
         for (const auto& t : cfg_.extra_base)
@@ -769,7 +784,8 @@ private:
     Leg make_leg_(std::string label, double epx, const Tier& t, int64_t /*ts*/, int64_t /*bar*/, bool /*seed*/) {
         Leg l; l.label = std::move(label);
         l.epx = epx; l.le = epx; l.arm = t.arm; l.stall = t.stall; l.gb = t.gb;
-        l.rc = cfg_.reclip_pct; l.cg = cfg_.cost_gate_bp; l.confirm = cfg_.confirm_bp;
+        l.rc = cfg_.reclip_pct; l.cg = cfg_.cost_gate_bp;
+        l.confirm = (t.confirm > 0.0 ? t.confirm : cfg_.confirm_bp);   // per-tier BE-entry stagger (S-2026-07-16)
         return l;   // open=false until first step (matches python: open set on first observation)
     }
 

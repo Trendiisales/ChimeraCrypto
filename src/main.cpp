@@ -3879,19 +3879,41 @@ int main() {
     // upjump_earlyarm_bt `mimicg`, real-engine parity). ADVERSE-PROTECTION: BE floor (backtested,
     // jump_floor parity neg=0) + retire_bp backstop (~3x the cell's worst BT clip).
     auto make_mimic_floor_cell = [&unretired](const char* ptag, const char* ctag, const char* sym,
-                                              int det_w, double det_thr, double g, double retire_bp) {
+                                              int det_w, double det_thr, double g, double retire_bp,
+                                              int stag_legs = 1) {
         chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
-        c.tight = {0.2, 0, 0.0, 0};          // single managed leg; arm/gb unused under the floor trail
         c.reclip_pct = 0.005;                // re-enter on +0.5% continuation past the prior peak (spec #4)
-        c.cap = 1;                           // ONE position per detected event (== jump_floor J1)
         c.cost_gate_bp = 0.0;
         c.confirm_bp = 20.0;                 // CONFIRMED entry — never opens underwater
         c.det_w = det_w; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 20.0;
         c.loss_cut_bp = 0.0;                 // NO pre-arm hard cut (destroys the edge; sweep verdict)
         c.mimic_floor = true; c.mimic_giveback = g;
-        c.size_mult = 1.0; c.retire_bp = retire_bp;
+        c.size_mult = 1.0;
         c.retire_override = unretired(ctag);
+        // ── S-2026-07-16 STAGGERED FLOORED LADDER (operator: "once we get to BE ... open at
+        // least 4x mimics, stagger them ... never go negative on a mimic"). stag_legs>1 opens
+        // N legs at ESCALATING per-tier BE-entry confirms 20/120/220/320bp (BE/+1/+2/+3%); each
+        // leg floors at its OWN fill => distinct additive positions, post-arm never-negative
+        // (floorMin=+0.0 every coin/run). Per-coin max-robust leg count is the all-6 + 2x-cost
+        // verdict from Crypto/backtest/upjump_earlyarm_bt `mimicstag` at live reclip=0.005
+        // (STAGGERED_FLOOR_FINDINGS_2026-07-16): DOGE/NEAR/BNB 4x, UNI 3x, TRX 1x (stacking
+        // degraded TRX). retire_bp scales x legs to preserve the "-2x worst per-leg maxDD" margin.
+        if (stag_legs > 1) {
+            const double confs[4] = {20.0, 120.0, 220.0, 320.0};
+            c.tight = {0.2, 0, 0.0, 0, confs[0]};
+            if (stag_legs >= 2) c.wide = {0.2, 0, 0.0, 0, confs[1]};
+            for (int k = 2; k < stag_legs && k < 4; ++k)
+                c.extra_base.push_back({0.2, 0, 0.0, 0, confs[k]});
+            c.mimic_stagger = true;
+            c.cap = stag_legs;               // == #tiers -> no self-funding ladder spawn
+            c.stagger_mode = 0;              // per-leg confirm gates the opens (escalating entry)
+            c.retire_bp = retire_bp * stag_legs;
+        } else {
+            c.tight = {0.2, 0, 0.0, 0};      // single managed leg; arm/gb unused under the floor trail
+            c.cap = 1;                       // ONE position per detected event (== jump_floor J1)
+            c.retire_bp = retire_bp;
+        }
         return c;
     };
     using LTier = chimera::UpJumpLadderCompanion::Tier;
@@ -4142,20 +4164,21 @@ int main() {
     chimera::EdgeEngine doge_sweet_feed(make_uj("dogeusdt", "DOGE-UJ55-SWEETFEED",   3600, 1, 0.055));
     {
         struct SweetCell { const char* pfx; const char* tagsfx; const char* sym;
-                           chimera::EdgeEngine* feed; int det_w; double thr; double g; double retire_bp; };
+                           chimera::EdgeEngine* feed; int det_w; double thr; double g; double retire_bp;
+                           int stag_legs; };   // stag_legs = max-robust staggered leg count (S-2026-07-16)
         const std::vector<SweetCell> _sweet_cells = {
-            {"BNB",  "UJ4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, 0.50,  -6000.0},
-            {"UNI",  "UJ35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, 1.00,  -7700.0},
-            {"NEAR", "UJ4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, 0.75,  -5200.0},
-            {"TRX",  "UJ35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, 0.40,  -5400.0},
-            {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, 0.20, -12000.0},
+            {"BNB",  "UJ4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, 0.50,  -6000.0, 4},
+            {"UNI",  "UJ35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, 1.00,  -7700.0, 3},
+            {"NEAR", "UJ4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, 0.75,  -5200.0, 4},
+            {"TRX",  "UJ35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, 0.40,  -5400.0, 1},  // stacking degrades TRX -> keep single
+            {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, 0.20, -12000.0, 4},
         };
         for (const auto& sc : _sweet_cells) {
             _grid_ptags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx + "FEED");
             _grid_ctags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx);
             _grid.emplace_back(make_mimic_floor_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), sc.sym,
-                sc.det_w, sc.thr, sc.g, sc.retire_bp));
+                sc.det_w, sc.thr, sc.g, sc.retire_bp, sc.stag_legs));
             _grid_feeds.push_back(sc.feed);
         }
     }

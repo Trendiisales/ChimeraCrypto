@@ -3916,6 +3916,41 @@ int main() {
         }
         return c;
     };
+    // ── S-2026-07-16 BE-CASCADE builder (operator EXACT spec, validated ALL-22 PASS) ──────────
+    // DISTINCT mechanism from make_mimic_floor_cell above: that runs stagger_mode=0 (escalating
+    // per-tier price confirms 20/120/220/320bp, reclip ON, no pre-arm cut). This runs stagger_mode=1
+    // BE_CASCADE: +det_thr self-trigger enters ONE leg floored at BE ("lock in"); the MOMENT that leg
+    // reaches BE (mfe>=stagger_be_bp) the NEXT leg releases (=> at most ONE un-BE'd leg at a time);
+    // exit on reversal (mimic_giveback=g). reclip OFF (cascade guarantee), confirm 0 (all tiers), a
+    // pre-BE hard cut (loss_cut_bp) caps every un-armed leg. Config is byte-identical to the validated
+    // harness Crypto/backtest/eth_ujmimic_15_becascade_bt.cpp (run() L57-65) that reproduces the
+    // all-coin PASS table (BTC@2% +2117% PF5.20 worst-178bp ... all 22 PASS, worst -1.8%/leg uniform).
+    // Locked config: det_w=4 · g0.5 · lc150 · cap8 (8 floored legs) · thr per-coin (BTC 2% / rest 1.5%)
+    // · rt=28bp PROXY (ETH-calibrated; per-coin measured cost via DepthLiquidationModel owed before
+    // live sizing — thin coins cost more at size). SHADOW (shadow_mode set on every _all_clips entry);
+    // additive/independent (feedback-companion-independent-engine); NO 200DMA (feedback-no-200dma-crypto).
+    // ADVERSE-PROTECTION: backtested — mimic_floor BE lock-in (post-arm never-neg by construction) +
+    // lc150 pre-BE cut (worst clip tracks the cut exactly, -178bp = -1.8%/leg). Findings/vault:
+    // [[EthUjMimic15BeCascade]] (all-coin extension owed into the entity this session).
+    auto make_becascade_cell = [&unretired](const char* ptag, const char* ctag, const char* sym,
+                                            double det_thr, double retire_bp) {
+        chimera::UpJumpLadderCompanion::Config c;
+        c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
+        c.det_w = 4; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 28.0;  // rt=28 PROXY (per-coin measured owed)
+        c.mimic_floor = true; c.mimic_stagger = true; c.stagger_mode = 1; c.stagger_be_bp = 20.0;  // BE_CASCADE
+        c.reclip_pct = 0.0;                  // OFF — cascade guarantee (validated harness parity)
+        c.loss_cut_bp = 150.0;               // pre-BE hard cut => worst -1.8%/leg (operator lc150)
+        c.confirm_bp = 0.0; c.be_floor = false;
+        c.mimic_giveback = 0.5;              // reversal exit (operator g0.5)
+        c.cost_gate_bp = 0.0; c.size_mult = 1.0;
+        c.tight = {0.2, 0, 0.0, 0, 0.0};     // T1 (confirm 0 — cascade release governed by stagger_be_bp, not tiers)
+        c.wide  = {0.2, 0, 0.0, 0, 0.0};     // T2
+        for (int k = 2; k < 8; ++k) c.extra_base.push_back({0.2, 0, 0.0, 0, 0.0});  // T3..T8 => 8 legs total
+        c.cap = 8;                           // cap8 (8 floored legs)
+        c.retire_bp = retire_bp;
+        c.retire_override = unretired(ctag);
+        return c;
+    };
     using LTier = chimera::UpJumpLadderCompanion::Tier;
     (void)sizeof(LTier);   // LTier retained for make_lad_companion callers; grid uses make_stagger_companion
     // ── THRESHOLD-COMPARISON GRID (S-2026-07-11, operator) ───────────────────────
@@ -4244,6 +4279,57 @@ int main() {
             c.retire_override = unretired(_grid_ctags.back().c_str());
             _grid.emplace_back(std::move(c));
             _grid_feeds.push_back(&_pj_feeds.back());
+        }
+    }
+    // ── S-2026-07-16 BE-CASCADE ALL-COIN MIMIC (operator: validated ALL-22 PASS -> "wire all coins") ──
+    // 22 independent SHADOW BE-cascade companion books, one per coin, the operator EXACT spec
+    // (make_becascade_cell above; stagger_mode=1, det_w=4, g0.5, lc150, cap8). Reproduced at the
+    // locked config (eth_ujmimic_15_becascade_bt UM_COIN sweep): ALL 22 PASS the standalone gate
+    // (net>0 & PF>=1.3 & both WF halves>0 at base AND 2x cost, omit-2022), worst -1.8%/leg uniform
+    // (lc150 caps every coin). BTC@2% +2117% PF5.20; ETH +5711; SOL +12510; ... PF 4.7-7.3 across.
+    // thr = BTC 2.0% (fat-tail spacing), all others 1.5%. ADDITIVE alongside the SWEET/PJ cells on the
+    // 7 shared symbols (operator: independent/additive, not replace). All 22 symbols are in the live
+    // SYM_FULL feed universe (SymbolIndex.hpp) => every cell self-triggers on its own live ticks.
+    // Feeds: symbol/tag holders ONLY (SWEET/PJ pattern) — never g_slots'd/wire_engine'd; the per-tick
+    // companion driver matches on feed symbol and the cell's OWN det_w/det_thr does the +move detection.
+    // retire_bp = -8000bp uniform CONSERVATIVE catastrophe backstop (retires a book only if banked REAL
+    // net <= -80%; won't false-trigger a +2000%+ PASS book). PLACEHOLDER pending per-coin -2x BT maxDD
+    // (same follow-up as the per-coin measured-cost re-run). Every cell mimic_floor=true -> clears the
+    // boot [MIMIC-FLOOR-GATE]. Vault [[EthUjMimic15BeCascade]] (all-coin extension owed this session).
+    {
+        struct BcCell { const char* pfx; const char* cell; const char* sym; double thr; double retire_bp; };
+        static const std::vector<BcCell> _bc_cells = {
+            {"BTC",  "UJ2-BECASC",  "btcusdt",  0.020, -8000.0},
+            {"ETH",  "UJ15-BECASC", "ethusdt",  0.015, -8000.0},
+            {"SOL",  "UJ15-BECASC", "solusdt",  0.015, -8000.0},
+            {"BNB",  "UJ15-BECASC", "bnbusdt",  0.015, -8000.0},
+            {"XRP",  "UJ15-BECASC", "xrpusdt",  0.015, -8000.0},
+            {"DOGE", "UJ15-BECASC", "dogeusdt", 0.015, -8000.0},
+            {"ADA",  "UJ15-BECASC", "adausdt",  0.015, -8000.0},
+            {"AVAX", "UJ15-BECASC", "avaxusdt", 0.015, -8000.0},
+            {"LINK", "UJ15-BECASC", "linkusdt", 0.015, -8000.0},
+            {"LTC",  "UJ15-BECASC", "ltcusdt",  0.015, -8000.0},
+            {"NEAR", "UJ15-BECASC", "nearusdt", 0.015, -8000.0},
+            {"UNI",  "UJ15-BECASC", "uniusdt",  0.015, -8000.0},
+            {"DOT",  "UJ15-BECASC", "dotusdt",  0.015, -8000.0},
+            {"ATOM", "UJ15-BECASC", "atomusdt", 0.015, -8000.0},
+            {"BCH",  "UJ15-BECASC", "bchusdt",  0.015, -8000.0},
+            {"TRX",  "UJ15-BECASC", "trxusdt",  0.015, -8000.0},
+            {"AAVE", "UJ15-BECASC", "aaveusdt", 0.015, -8000.0},
+            {"INJ",  "UJ15-BECASC", "injusdt",  0.015, -8000.0},
+            {"APT",  "UJ15-BECASC", "aptusdt",  0.015, -8000.0},
+            {"OP",   "UJ15-BECASC", "opusdt",   0.015, -8000.0},
+            {"SUI",  "UJ15-BECASC", "suiusdt",  0.015, -8000.0},
+            {"TIA",  "UJ15-BECASC", "tiausdt",  0.015, -8000.0},
+        };
+        static std::vector<chimera::EdgeEngine> _bc_feeds; _bc_feeds.reserve(_bc_cells.size());
+        for (const auto& bc : _bc_cells) {
+            _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
+            _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
+            _bc_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, 4, bc.thr));
+            _grid.emplace_back(make_becascade_cell(
+                _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp));
+            _grid_feeds.push_back(&_bc_feeds.back());
         }
     }
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;

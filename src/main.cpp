@@ -1180,6 +1180,7 @@ static constexpr const char* COMPANION_TRADES_FILE = "data/companion_trades.json
 static std::map<std::string, std::pair<chimera::EdgeEngine*, chimera::UpJumpLadderCompanion*>> g_companion_by_parent;
 static std::mutex g_companion_mtx;
 
+static void save_companion_det_state();   // fwd decl (defined below); called on jf-close for Fig-2 immediate persist
 static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRecord& r) {
     FILE* f = fopen(COMPANION_TRADES_FILE, "a");
     if (!f) { std::fprintf(stderr, "[CLIP_LOG] failed to open %s for append\n", COMPANION_TRADES_FILE); return; }
@@ -1202,6 +1203,16 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
     export_desk_trade(r.entry_ts_ms, r.exit_ts_ms, r.symbol, r.tag, "BUY",
                       r.entry_px, r.exit_px, r.net_bp_real * r.size_mult,
                       r.reason);
+    // Fig-2 (S-2026-07-16, RESTART-RESURRECTION defense-in-depth): a jump_floor leg
+    // (-J1) close clears the engine's det_in_ persistence mirror (jf_book_ L612).
+    // Persist the det-state file IMMEDIATELY so a restart in the window before the
+    // next H1 save (main.cpp save_companion_det_state at bar-close) can never
+    // resurrect the just-closed leg from a stale det_in:1. jf clips fire ONLY from
+    // UpJumpLadderCompanion::observe(), always under g_companion_mtx (both drive
+    // sites hold it), and save_companion_det_state takes no lock itself -> race-free.
+    // Gated to -J1 so be_/campaign/core clips (other on_clip_ users) don't trigger it.
+    if (r.tag.size() >= 3 && r.tag.compare(r.tag.size() - 3, 3, "-J1") == 0)
+        save_companion_det_state();
 }
 
 // Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from

@@ -99,6 +99,9 @@ public:
     const Config& config() const { return cfg_; }
     int  cell_count() const { return (int)cfg_.cells.size(); }
     bool campaign_open() const { return camp_cell_ >= 0; }
+    // read-only entry px of the OPEN campaign (0 if flat) — backtest parent-replay
+    // harness reads the REAL campaign window to drive an independent mimic leg.
+    double campaign_entry_px() const { return camp_cell_ >= 0 ? pe_ : 0.0; }
 
     // durable-counter rehydrate per cell (from the companion clip ledger)
     void rehydrate_cell(int ci, int clips, double net, double net_real, double net_real_w) {

@@ -4079,53 +4079,63 @@ int main() {
     // (companion_be_mimic_bt, certified data): improves PF on 4/5 basket coins
     // (DOT 1.70→2.43, ADA 21.2→36.9) and bounds the tail; per-coin auto-retire below.
     auto make_be_mimic = [&unretired](const char* ptag, const char* ctag, const char* sym,
-                                      double retire_bp) {
+                                      double retire_bp, double gv, double lc) {
         chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
         // S-2026-07-16 FLOOR-NOW (operator: "there should be NO more crypto with no floor").
         // Migrated off the floorless BE-cascade ladder (confirm-gate + H1-close giveback race —
         // the SAME class that booked the INJ −242: confirm ≠ floor, see [[MimicFloorUnification]])
-        // onto the honest mimic_floor. g=1.0 => the trail stop == the BE floor (le*(1+RT)): it
-        // never gives back below BE and rides the D1 REGIME_SWITCH parent to flip (ride_to_flip
-        // parity), so post-arm net_bp_real >= 0 (jump_floor guarantee). loss_cut=60 RETAINED
-        // (Phase-2 backtested protection) but now le-ANCHORED under the mimic_floor pre-arm
-        // branch — fixes the epx-anchor bug that produced the INJ T2 −125. This floors NOW
-        // (protection is unconditional; a BE floor can only cap downside); the return-optimising
-        // floored-g sweep is still owed (needs a parent-replay harness).
+        // onto the honest mimic_floor: BE floor le*(1+RT) can never close below BE post-arm.
+        // S-2026-07-16 REAL-PARENT RE-GATE (Crypto/backtest/REAL_PARENT_MIMIC_FINDINGS_2026-07-16.md,
+        // real_parent_mimic_bt.cpp — the owed parent-replay g-sweep): the carried-over
+        // loss_cut=60 (validated on the OLD cap=2 LADDER, never re-gated after the mimic_floor
+        // migration) CHURNS like an entry-stop on mimic_floor and made ALL 5 cells NET-NEGATIVE
+        // at measured cost. Fix = wide loss_cut=800 (bounds the pre-arm tail to −828bp without
+        // the lc=60 churn) + per-cell g (lower g banks regime-window continuation; g was
+        // hardcoded 1.0). Re-gated STANDALONE (net+, PF>=1.3, WF both halves, base 28bp AND
+        // 2x=56bp measured cost). ETH(jump_floor)/LDO(campaign) mimics NO-GO (WF-H1 neg);
+        // DOT/NEAR REGIME cells RETIRED (WF-H1 neg / fragile). Kept: ADA g1.0, SUSHI g0.30,
+        // THETA g0.50.
         c.tight = {0.2, 0, 0.0, 0};       // single managed leg; arm/gb unused under the floor trail
         c.reclip_pct = 0.05;              // re-enter on +5% new peak after a clip (D1 continuation)
         c.confirm_bp = 20.0;              // BE-ENTRY: open ONLY once fav >= BE (== RT cost)
         c.cap        = 1;                 // mimic_floor = ONE managed leg per detected event
         c.cost_gate_bp = 0.0; c.be_floor = false;
-        c.mimic_floor = true; c.mimic_giveback = 1.0;   // BE floor; g=1.0 rides parent flip, floored
+        c.mimic_floor = true; c.mimic_giveback = gv;    // BE floor; per-cell g (re-gated 07-16)
         c.det_w = 0; c.det_thr = 0.0;     // observe the EXTERNAL parent, not self-detect
         c.tf_secs = 86400; c.round_trip_bp = 20.0;
-        c.loss_cut_bp = 60.0;             // le-anchored pre-arm cut under mimic_floor (Phase-2 verdict)
+        c.loss_cut_bp = lc;               // wide le-anchored pre-arm cut (800; lc=60 churned net-neg)
         c.retire_bp = retire_bp;          // per-coin auto-retire on negative real bank
         c.retire_override = unretired(ctag);
         return c;
     };
-    // Core basket = coins whose standalone mimic book cleared the Phase-2 gate at
-    // confirm=20/losscut=60 (net+, PF>=1.3, 2x-cost robust; scratchpad/
-    // bemimic_regime_results.csv). AVAX (PF 0.62) + KSM (PF 0.39) FAILED — left out.
-    // XTZ (PF 1.48) + CRV (PF 1.82) pass net/PF but their FIRST WF half is negative
-    // (−2759 / −3794) — left out until a half-split passes (do not wire soft-WF coins).
-    // retire_bp ≈ −1.5–2x the coin's Phase-2 worst clip.
-    struct RegimeParent { const char* pfx; const char* sym; chimera::EdgeEngine* eng; double retire_bp; };
+    // Core basket = REAL-PARENT re-gate 2026-07-16 (real_parent_mimic_bt.cpp; faithful
+    // EdgeEngine REGIME_SWITCH D1 parent incl. 3-ATR stop + hold_bars, mimic_floor g-sweep
+    // at MEASURED cost 28bp base / 56bp 2x). The prior Phase-2 gate (cap=2 ladder, lc=60)
+    // was invalidated by the mimic_floor migration: lc=60 churns net-NEGATIVE on the floor.
+    // Fix = per-cell g + wide lc=800. KEPT (standalone net+, PF>=1.3, WF both halves, 2x):
+    //   ADA  g1.0  net+153 PF5.89 WF+3/+150  2x+151/5.56
+    //   SUSHI g0.30 net+93  PF2.87 WF+29/+64  2x+89/2.73
+    //   THETA g0.50 net+157 PF7.34 WF+140/+18 2x+154/6.98
+    // RETIRED: DOT (WF-H1 neg every g/lc), NEAR (passes only g0.05+lc0 knife-edge = fragile).
+    // NOT wired: ETH jump_floor mimic + LDO campaign mimic (both WF-H1 neg — NO-GO).
+    // retire_bp ≈ −1.5–2x re-gate worst clip (−828 under lc=800).
+    struct RegimeParent { const char* pfx; const char* sym; chimera::EdgeEngine* eng;
+                          double retire_bp; double g; double lc; };
     const std::vector<RegimeParent> _regime_basket = {
-        {"NEAR",  "nearusdt",  &near_regime_d1,  -2000.0},   // mimic PF 1.65, worst −978
-        {"THETA", "thetausdt", &theta_regime_d1, -1000.0},   // mimic PF 33.7, worst −421
-        {"SUSHI", "sushiusdt", &sushi_regime_d1, -2000.0},   // mimic PF 1.78, worst −1063
-        {"ADA",   "adausdt",   &ada_regime_d1,   -1000.0},   // mimic PF 36.9, worst −260
-        {"DOT",   "dotusdt",   &dot_regime_d1,   -1800.0},   // mimic PF 2.43, worst −878
+        {"THETA", "thetausdt", &theta_regime_d1, -1600.0, 0.50, 800.0},   // net+157 PF7.34
+        {"SUSHI", "sushiusdt", &sushi_regime_d1, -1600.0, 0.30, 800.0},   // net+93  PF2.87
+        {"ADA",   "adausdt",   &ada_regime_d1,   -1600.0, 1.00, 800.0},   // net+153 PF5.89
     };
     for (const auto& rp : _regime_basket) {
         _grid_ptags.push_back(std::string(rp.pfx) + "-REGIME_SWITCH");
         _grid_ctags.push_back(std::string(rp.pfx) + "-REGIME-BEMIMIC");
         _grid.emplace_back(make_be_mimic(_grid_ptags.back().c_str(), _grid_ctags.back().c_str(),
-                                         rp.sym, rp.retire_bp));
+                                         rp.sym, rp.retire_bp, rp.g, rp.lc));
         _grid_feeds.push_back(rp.eng);    // det_w=0 => driven off THIS parent's bar closes
     }
+    // NB: near_regime_d1 / dot_regime_d1 PARENTS still trade via g_slots below — only their
+    // additive MIMIC books are retired here (net-negative on the re-gate).
     // ── S-2026-07-13 SWEET-SPOT CONFIRMED-ENTRY MIMIC CELLS (operator: "wire all 3") ──
     // Full 18-coin × 0.5%-step threshold grid, evaluated on 2023-26 windows ONLY (2022 is
     // FULLY IRRELEVANT for long-only spot — operator final ruling, feedback-crypto-omit-

@@ -475,6 +475,12 @@ public:
         double size_mult = 1.0;           // per-coin weight (S-2026-07-08)
         bool   retired = false;           // auto-retirement latch (S-2026-07-08)
     };
+    // ── jump-floor parent-state readouts (read-only; backtest parent-replay
+    //    harness reads the REAL jf window to drive an independent mimic leg —
+    //    real_parent_mimic_bt.cpp / feedback-verify-kill-replicates-mechanism) ──
+    bool   jf_in_position() const { return jf_in_; }
+    double jf_entry_px()    const { return jf_E_;  }
+
     LiveSnap snapshot() const {           // book aggregate (back-compat)
         LiveSnap s; s.clips = clip_num_; s.bank_bp = banked_bp_; s.bank_bp_real = banked_bp_real_;
         s.bank_bp_real_w = banked_bp_real_w_; s.size_mult = cfg_.size_mult;

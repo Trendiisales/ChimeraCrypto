@@ -869,7 +869,14 @@ private:
     // Book the floored trail exit at the resting stop (>= le*(1+RT) => net_bp_real >= 0).
     void book_mimic_stop_(Leg& lg, int64_t ts, int64_t bar) {
         const double gross = (lg.stop_px / lg.le - 1.0) * 1e4;
-        emit_clip_(lg, lg.stop_px, ts, bar, gross, gross - cfg_.round_trip_bp, "FLOOR_TRAIL_CLIP");
+        // S-2026-07-17 (feedback-no-prebe-loss-ever): a floored stop sits at >= le*(1+RT) BY
+        // CONSTRUCTION, so net = gross - RT is mathematically >= 0. At g>=1 the stop == BE
+        // exactly and IEEE-754 rounding of (le*(1+rt)/le - 1)*1e4 yields ~-1e-7 bp, a spurious
+        // sub-bp "loss" that trips an nNeg>0 never-neg gate. Clamp ONLY that fp noise to 0 (never
+        // masks a real loss: real pre-BE exits go through flush_leg_/reversal_cut, not here).
+        double net = gross - cfg_.round_trip_bp;
+        if (net < 0.0 && net > -1e-6) net = 0.0;
+        emit_clip_(lg, lg.stop_px, ts, bar, gross, net, "FLOOR_TRAIL_CLIP");
         lg.pk = lg.mfe; lg.clipped = true;             // reclip-eligible from the exit peak (rc>0 cells)
         lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
     }

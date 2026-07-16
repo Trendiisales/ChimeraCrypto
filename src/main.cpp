@@ -3883,11 +3883,20 @@ int main() {
                                               int stag_legs = 1) {
         chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
-        c.reclip_pct = 0.005;                // re-enter on +0.5% continuation past the prior peak (spec #4)
+        // ── S-2026-07-17 NEVER-PRE-BE-LOSS (feedback-no-prebe-loss-ever) — floored-ON-OPEN ──
+        // confirm_anchor_epx=true + confirm_bp=60 (>2x measured cost) => le stays = window entry, so
+        // every leg opens ONLY at fav>=60bp and is ALREADY floored at BE on open => worst clip net>=0.
+        // reclip_pct=0: a reclip re-entry reset le=cur => a fresh pre-arm window the anchor does NOT
+        // cover; under anchor it STILL booked -1773bp (TRX BT). loss_cut stays 0 (no pre-arm window
+        // exists to bound). Re-validated ALL 5 cells (upjump_earlyarm_bt mimicstag/mimicg, self-detect
+        // 1h, Binance cost 20/40bp, omit-2022): nNeg=0, worst +0.0bp, net+ PF>=1.3 both-WF base AND 2x —
+        // UNI +454(was+269) NEAR +490(+455) BNB +123(+137) DOGE +182(+386) TRX +31(+53). [[MimicFloorUnification]]
+        c.reclip_pct = 0.0;                  // NEVER-PRE-BE: reclip OFF (re-entry pre-arm window leaks)
         c.cost_gate_bp = 0.0;
-        c.confirm_bp = 20.0;                 // CONFIRMED entry — never opens underwater
+        c.confirm_bp = 60.0;                 // BE-ENTRY, anchored: open ONLY once fav >= 60bp (> 2x cost)
+        c.confirm_anchor_epx = true;         // le=epx => leg FLOORED ON OPEN at BE, worst clip net>=0
         c.det_w = det_w; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 20.0;
-        c.loss_cut_bp = 0.0;                 // NO pre-arm hard cut (destroys the edge; sweep verdict)
+        c.loss_cut_bp = 0.0;                 // no pre-arm window under anchor+reclip0 => no cut needed
         c.mimic_floor = true; c.mimic_giveback = g;
         c.size_mult = 1.0;
         c.retire_override = unretired(ctag);
@@ -3900,7 +3909,9 @@ int main() {
         // (STAGGERED_FLOOR_FINDINGS_2026-07-16): DOGE/NEAR/BNB 4x, UNI 3x, TRX 1x (stacking
         // degraded TRX). retire_bp scales x legs to preserve the "-2x worst per-leg maxDD" margin.
         if (stag_legs > 1) {
-            const double confs[4] = {20.0, 120.0, 220.0, 320.0};
+            // S-2026-07-17: first tier 20->60 (>2x cost) so T1 is floored-ON-OPEN at BE like the rest;
+            // the escalating BE/+1/+2/+3% ladder is preserved (each leg still opens at a distinct fav).
+            const double confs[4] = {60.0, 120.0, 220.0, 320.0};
             c.tight = {0.2, 0, 0.0, 0, confs[0]};
             if (stag_legs >= 2) c.wide = {0.2, 0, 0.0, 0, confs[1]};
             for (int k = 2; k < stag_legs && k < 4; ++k)
@@ -4137,14 +4148,29 @@ int main() {
         // DOT/NEAR REGIME cells RETIRED (WF-H1 neg / fragile). Kept: ADA g1.0, SUSHI g0.30,
         // THETA g0.50.
         c.tight = {0.2, 0, 0.0, 0};       // single managed leg; arm/gb unused under the floor trail
-        c.reclip_pct = 0.05;              // re-enter on +5% new peak after a clip (D1 continuation)
-        c.confirm_bp = 20.0;              // BE-ENTRY: open ONLY once fav >= BE (== RT cost)
+        // ── S-2026-07-17 NEVER-PRE-BE-LOSS (feedback-no-prebe-loss-ever) ──────────────────
+        // Migrated to the make_becascade_cell floored-ON-OPEN template. Three structural changes,
+        // all mandatory for the never-negative guarantee (validated real_parent_mimic_bt, REGIME
+        // D1 parent, measured cost 28/56bp, omit-2022):
+        //   1. confirm_anchor_epx=true + confirm_bp=60 (>2x measured cost): le stays = window/parent
+        //      entry, so a leg opens ONLY at fav>=60bp and is therefore ALREADY floored at BE on open
+        //      (hwm>=le*(1+RT)) => worst clip net>=0.
+        //   2. reclip_pct=0: a reclip re-entry reset le=cur => a FRESH pre-arm window the anchor does
+        //      NOT cover; under anchor it STILL booked real pre-BE losses (ADA -527bp, TRX -1773bp in BT).
+        //      reclip is the ONLY residual pre-BE leak once anchored, so it is removed.
+        //   3. loss_cut_bp=0: with no pre-arm window there is nothing for a pre-arm cut to bound.
+        // Re-validated ALL 3 cells nNeg=0, worst +0.0bp, standalone net+ PF>=1.3 both-WF at base AND
+        // 2x cost: ADA +225 (was +153), SUSHI +79 (was +93), THETA +16 (was +157 — edge was reclip-
+        // driven; still net+/PASS but much thinner, operator review flagged). See [[EthUjMimic15BeCascade]].
+        c.reclip_pct = 0.0;               // NEVER-PRE-BE: reclip OFF (re-entry pre-arm window leaks; #2 above)
+        c.confirm_bp = 60.0;              // BE-ENTRY, anchored: open ONLY once fav >= 60bp (> 2x measured cost)
+        c.confirm_anchor_epx = true;      // le=epx => leg FLOORED ON OPEN at BE, worst clip net>=0 (#1 above)
         c.cap        = 1;                 // mimic_floor = ONE managed leg per detected event
         c.cost_gate_bp = 0.0; c.be_floor = false;
         c.mimic_floor = true; c.mimic_giveback = gv;    // BE floor; per-cell g (re-gated 07-16)
         c.det_w = 0; c.det_thr = 0.0;     // observe the EXTERNAL parent, not self-detect
         c.tf_secs = 86400; c.round_trip_bp = 20.0;
-        c.loss_cut_bp = lc;               // wide le-anchored pre-arm cut (800; lc=60 churned net-neg)
+        c.loss_cut_bp = 0.0; (void)lc;    // pre-arm cut REMOVED (anchor+reclip0 leaves NO pre-arm window; #3)
         c.retire_bp = retire_bp;          // per-coin auto-retire on negative real bank
         c.retire_override = unretired(ctag);
         return c;

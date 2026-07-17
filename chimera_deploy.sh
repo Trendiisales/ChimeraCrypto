@@ -24,7 +24,8 @@ sudo systemctl restart chimera
 sleep 16
 # POST-DEPLOY HASH-VERIFY (Omega DeployHygiene): running binary must == HEAD.
 want="$(git rev-parse --short HEAD)"
-run="$(journalctl -u chimera --since '2 min ago' 2>/dev/null | grep -oE 'build=[0-9a-f]+' | tail -1 | cut -d= -f2)"
+# S-2026-07-17s: build= line lives in logs/chimera.log (StandardOutput=append), not the journal.
+run="$(grep -oE 'build=[0-9a-f]+' ~/ChimeraCrypto/logs/chimera.log 2>/dev/null | tail -1 | cut -d= -f2)"
 echo "active=$(systemctl is-active chimera) running=build=$run want=$want"
 [ "$run" = "$want" ] || { echo "WARN: running binary build=$run != HEAD $want — investigate (DeployHygiene)."; exit 1; }
 echo "DEPLOY-OK: chimera active, build=$run == HEAD."

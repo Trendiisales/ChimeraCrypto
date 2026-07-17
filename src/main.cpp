@@ -4560,6 +4560,18 @@ int main() {
         static const std::vector<RescueCell> _rescue_cells = {
             {"AAVE", "aaveusdt", -750.0},   // 2x certified worst -366.5bp
             {"ETH",  "ethusdt",  -400.0},   // 2x certified worst -197.7bp
+            // S-2026-07-18j: 9 new live-pilot coins (allowlist 32->41), rescue tier certified
+            // NEWCOIN9_MIMIC_CERT_2026-07-18.md (Crypto/backtest, HEAD 6ad07f5 honest fills,
+            // 24/24 grid PASS per coin, W8/+2%/g0.20 pick, 28bp measured + 2x gate):
+            {"FIL",  "filusdt",  -939.0},   // n=465 +420% PF5.83 worst -469.7bp
+            {"ICP",  "icpusdt",  -781.0},   // n=480 +364% PF4.75 worst -390.4bp
+            {"SAND", "sandusdt", -531.0},   // n=429 +299% PF5.15 worst -265.4bp
+            {"MANA", "manausdt", -565.0},   // n=446 +325% PF5.21 worst -282.6bp
+            {"CRV",  "crvusdt",  -1005.0},  // n=527 +442% PF5.15 worst -502.3bp
+            {"COMP", "compusdt", -1678.0},  // n=477 +391% PF5.06 worst -838.8bp
+            {"ETC",  "etcusdt",  -426.0},   // n=359 +344% PF10.05 worst -213.0bp
+            {"VET",  "vetusdt",  -1278.0},  // n=432 +318% PF5.72 worst -638.8bp
+            {"RUNE", "runeusdt", -1262.0},  // n=487 +392% PF4.83 worst -631.2bp
         };
         static std::vector<chimera::EdgeEngine> _rescue_feeds; _rescue_feeds.reserve(_rescue_cells.size());
         for (const auto& rc : _rescue_cells) {
@@ -4624,6 +4636,18 @@ int main() {
             {"OP",   "UJ15-BECASC", "opusdt",   0.015, -8000.0},
             {"SUI",  "UJ15-BECASC", "suiusdt",  0.015, -8000.0},
             {"TIA",  "UJ15-BECASC", "tiausdt",  0.015, -8000.0},
+            // S-2026-07-18j: 9 new live-pilot coins, base W4/g0.5 certified 18/18 grid PASS per
+            // coin (NEWCOIN9_MIMIC_CERT_2026-07-18.md; regression reproduced ETH F/S to the digit).
+            // Same -8000 conservative catastrophe placeholder as the original 22.
+            {"FIL",  "UJ15-BECASC", "filusdt",  0.015, -8000.0},  // n=3799 +6032% PF8.88 worst -1281bp
+            {"ICP",  "UJ15-BECASC", "icpusdt",  0.015, -8000.0},  // n=4107 +6852% PF9.92 worst -811bp
+            {"SAND", "UJ15-BECASC", "sandusdt", 0.015, -8000.0},  // n=3854 +6280% PF10.19 worst -1672bp
+            {"MANA", "UJ15-BECASC", "manausdt", 0.015, -8000.0},  // n=3815 +5700% PF9.28 worst -962bp
+            {"CRV",  "UJ15-BECASC", "crvusdt",  0.015, -8000.0},  // n=4322 +7517% PF10.35 worst -958bp
+            {"COMP", "UJ15-BECASC", "compusdt", 0.015, -8000.0},  // n=3886 +5917% PF8.94 worst -854bp
+            {"ETC",  "UJ15-BECASC", "etcusdt",  0.015, -8000.0},  // n=2968 +3989% PF8.83 worst -629bp
+            {"VET",  "UJ15-BECASC", "vetusdt",  0.015, -8000.0},  // n=3670 +5322% PF8.14 worst -1164bp
+            {"RUNE", "UJ15-BECASC", "runeusdt", 0.015, -8000.0},  // n=3971 +7932% PF12.13 worst -794bp
         };
         static std::vector<chimera::EdgeEngine> _bc_feeds; _bc_feeds.reserve(_bc_cells.size());
         for (const auto& bc : _bc_cells) {
@@ -4676,6 +4700,17 @@ int main() {
             {"OP", "OP-UJ15-BECASC-F", "opusdt", 0.015, 2, 0.75, -1874.0},  // n=5033 net=+11011% PF7.18 worst=-937.1bp
             {"SUI", "SUI-UJ15-BECASC-F", "suiusdt", 0.015, 2, 0.75, -2519.0},  // n=3845 net=+8614% PF8.07 worst=-1259.5bp
             {"TIA", "TIA-UJ15-BECASC-F", "tiausdt", 0.015, 2, 0.75, -1336.0},  // n=3734 net=+7835% PF6.90 worst=-668.0bp
+            // S-2026-07-18j: 9 new live-pilot coins (NEWCOIN9_MIMIC_CERT_2026-07-18.md, same
+            // lane rules: W2, best 2x-cost net among certified g; retire = 2x own worst clip).
+            {"FIL", "FIL-UJ15-BECASC-F", "filusdt", 0.015, 2, 0.20, -2586.0},  // n=3462 net=+6138% PF16.64 worst=-1292.9bp
+            {"ICP", "ICP-UJ15-BECASC-F", "icpusdt", 0.015, 2, 0.20, -1623.0},  // n=3820 net=+6540% PF14.49 worst=-811.4bp
+            {"SAND", "SAND-UJ15-BECASC-F", "sandusdt", 0.015, 2, 0.20, -1492.0},  // n=3459 net=+6051% PF18.20 worst=-746.2bp
+            {"MANA", "MANA-UJ15-BECASC-F", "manausdt", 0.015, 2, 0.20, -1924.0},  // n=3388 net=+5568% PF17.65 worst=-962.1bp
+            {"CRV", "CRV-UJ15-BECASC-F", "crvusdt", 0.015, 2, 0.20, -1312.0},  // n=3991 net=+7525% PF16.30 worst=-655.8bp
+            {"COMP", "COMP-UJ15-BECASC-F", "compusdt", 0.015, 2, 0.75, -1971.0},  // n=3475 net=+5479% PF5.49 worst=-985.3bp
+            {"ETC", "ETC-UJ15-BECASC-F", "etcusdt", 0.015, 2, 0.20, -1177.0},  // n=2503 net=+3851% PF18.37 worst=-588.6bp
+            {"VET", "VET-UJ15-BECASC-F", "vetusdt", 0.015, 2, 0.75, -2341.0},  // n=3236 net=+5602% PF6.31 worst=-1170.5bp
+            {"RUNE", "RUNE-UJ15-BECASC-F", "runeusdt", 0.015, 2, 0.75, -3035.0},  // n=3754 net=+7731% PF6.94 worst=-1517.4bp
         };
         static const std::vector<BcCell2> _bc_slow_cells = {
             {"BTC", "BTC-UJ20-BECASC-S", "btcusdt", 0.020, 12, 0.20, -961.0},  // n=2537 net=+3365% PF22.47 worst=-480.5bp
@@ -4700,6 +4735,17 @@ int main() {
             {"OP", "OP-UJ15-BECASC-S", "opusdt", 0.015, 8, 0.75, -2370.0},  // n=4528 net=+8979% PF6.81 worst=-1185.2bp
             {"SUI", "SUI-UJ15-BECASC-S", "suiusdt", 0.015, 8, 0.75, -3459.0},  // n=3576 net=+7125% PF7.27 worst=-1729.5bp
             {"TIA", "TIA-UJ15-BECASC-S", "tiausdt", 0.015, 8, 0.20, -965.0},  // n=3276 net=+6253% PF14.61 worst=-482.5bp
+            // S-2026-07-18j: 9 new live-pilot coins (NEWCOIN9_MIMIC_CERT_2026-07-18.md, SLOW
+            // lane: W8 best 2x-cost net among certified g; retire = 2x own worst clip).
+            {"FIL", "FIL-UJ15-BECASC-S", "filusdt", 0.015, 8, 0.75, -1563.0},  // n=3548 net=+6432% PF5.98 worst=-781.7bp
+            {"ICP", "ICP-UJ15-BECASC-S", "icpusdt", 0.015, 8, 0.20, -1623.0},  // n=3597 net=+5877% PF13.84 worst=-811.4bp
+            {"SAND", "SAND-UJ15-BECASC-S", "sandusdt", 0.015, 8, 0.20, -1205.0},  // n=3483 net=+5892% PF19.98 worst=-602.3bp
+            {"MANA", "MANA-UJ15-BECASC-S", "manausdt", 0.015, 8, 0.20, -1847.0},  // n=3533 net=+5803% PF19.16 worst=-923.3bp
+            {"CRV", "CRV-UJ15-BECASC-S", "crvusdt", 0.015, 8, 0.20, -1893.0},  // n=3901 net=+6963% PF15.14 worst=-946.5bp
+            {"COMP", "COMP-UJ15-BECASC-S", "compusdt", 0.015, 8, 0.20, -2628.0},  // n=3611 net=+6038% PF15.55 worst=-1313.8bp
+            {"ETC", "ETC-UJ15-BECASC-S", "etcusdt", 0.015, 8, 0.20, -1177.0},  // n=2998 net=+4520% PF19.40 worst=-588.6bp
+            {"VET", "VET-UJ15-BECASC-S", "vetusdt", 0.015, 8, 0.20, -2423.0},  // n=3360 net=+5137% PF15.52 worst=-1211.3bp
+            {"RUNE", "RUNE-UJ15-BECASC-S", "runeusdt", 0.015, 8, 0.75, -3288.0},  // n=3556 net=+6818% PF7.18 worst=-1644.2bp
         };
         static std::vector<chimera::EdgeEngine> _bc_fs_feeds; _bc_fs_feeds.reserve(_bc_fast_cells.size() + _bc_slow_cells.size());
         for (const auto& bc : _bc_fast_cells) {

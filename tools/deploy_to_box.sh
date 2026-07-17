@@ -24,7 +24,14 @@ set -uo pipefail
 BOX="${CHIMERA_BOX:-chimera-direct}"
 BOX_REPO="${CHIMERA_BOX_REPO:-~/ChimeraCrypto}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
+# DEPLOY_FILES env (space-separated repo-relative paths) overrides the default
+# engine-file list — a deploy touching files outside the default set (e.g.
+# include/live/*, config/*) must name them explicitly (S-2026-07-18h).
+if [ -n "${DEPLOY_FILES:-}" ]; then
+  read -r -a FILES <<< "$DEPLOY_FILES"
+else
+  FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
+fi
 MSG="${DEPLOY_MSG:?set DEPLOY_MSG to the commit message}"
 
 echo "### 1/6 PRE-DEPLOY FRESHNESS GUARD ###"

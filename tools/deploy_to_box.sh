@@ -55,7 +55,13 @@ ssh "$BOX" "sudo systemctl restart chimera && sleep 16"
 
 echo "### 6/6 POST-DEPLOY VERIFY: active + hash == $want_hash ###"
 active="$(ssh "$BOX" "systemctl is-active chimera" 2>/dev/null)"
-run_hash="$(ssh "$BOX" "journalctl -u chimera --since '2 min ago' 2>/dev/null | grep -oE 'build=[0-9a-f]+' | tail -1 | cut -d= -f2")"
+# S-2026-07-17s FIX: the [STARTUP] build= line goes to logs/chimera.log (unit
+# StandardOutput=append:...), NEVER the journal — the old journalctl grep always
+# returned empty and ROLLED BACK GOOD DEPLOYS (false DEPLOY-FAILED, silent-fallback
+# class: the verify read a source that cannot contain the signal). Read the log
+# (last STARTUP in the file = current boot); journal kept as a fallback only.
+run_hash="$(ssh "$BOX" "grep -oE 'build=[0-9a-f]+' $BOX_REPO/logs/chimera.log 2>/dev/null | tail -1 | cut -d= -f2")"
+[ -n "$run_hash" ] || run_hash="$(ssh "$BOX" "journalctl -u chimera --since '2 min ago' 2>/dev/null | grep -oE 'build=[0-9a-f]+' | tail -1 | cut -d= -f2")"
 echo "active=$active  running build=$run_hash  want=$want_hash"
 if [ "$active" != "active" ] || [ "$run_hash" != "$want_hash" ]; then
   echo "### VERIFY FAILED -> reverting box commit + restoring prior binary ###"

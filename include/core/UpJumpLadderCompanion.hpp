@@ -79,6 +79,18 @@ public:
                                        // epx*(1+confirm) with confirm>=RT is ALREADY floored on open
                                        // (hwm=cur>=le*(1+RT)) so its worst clip = BE (net>=0). Removes the
                                        // pre-arm window entirely => no PREBE_CUT loss. Requires confirm_bp>RT.
+        bool    anchored_reclip = false;  // S-2026-07-17 ANCHORED RECLIP (feedback-befloor-on-open-foundation
+                                       // pillar 4: "reclip_pct=0 OR anchored-reclip"). With mimic_floor +
+                                       // confirm_anchor_epx + reclip_pct>0, route the reclip RE-ENTRY through the
+                                       // SAME confirm+anchor path as the initial open instead of the raw le=cur
+                                       // reclip: on a floored clip the leg is reset FLAT with a NEW anchor epx = the
+                                       // exit px, and the existing confirm gate re-opens it only once fav(from the new
+                                       // epx) >= confirm, with le=epx (confirm_anchor_epx) => floored ON OPEN =>
+                                       // net_bp_real >= 0 by construction (no pre-arm window). Recovers reclip-driven
+                                       // edge (THETA/DOGE/TRX lost it when reclip was forced to 0 for compliance)
+                                       // WITHOUT the raw-reclip pre-BE leak (ADA -527bp, TRX -1773bp). REQUIRES
+                                       // confirm_anchor_epx=true — otherwise the re-open sets le=cur and reopens the
+                                       // leak; enforced in book_mimic_stop_ (falls back to reclip-off behaviour if not).
         int64_t tf_secs       = 3600;  // H1
         double  round_trip_bp = 20.0;  // 0.20% RT Binance spot taker
         // ── BE-FLOOR mode (S-2026-07-05 resume, operator restated spec) ──────────
@@ -841,7 +853,7 @@ private:
         if (cfg_.mimic_floor) {
             mimic_ratchet_(lg, cur);
             if (lg.floored && lg.stop_px > 0.0 && cur <= lg.stop_px) {
-                book_mimic_stop_(lg, cur_ts_(bar), bar);   // book at the resting stop (>= BE)
+                book_mimic_stop_(lg, cur, cur_ts_(bar), bar);   // book at the ACTUAL trip fill (worse-of on gap)
             }
             return false;   // never routes through the gb/stall return path
         }
@@ -866,19 +878,42 @@ private:
             ns = std::max(ns, lg.le * (1.0 + (lg.hwm / lg.le - 1.0) * (1.0 - cfg_.mimic_giveback)));
         if (ns > lg.stop_px) lg.stop_px = ns;                                 // stop only ratchets up
     }
-    // Book the floored trail exit at the resting stop (>= le*(1+RT) => net_bp_real >= 0).
-    void book_mimic_stop_(Leg& lg, int64_t ts, int64_t bar) {
-        const double gross = (lg.stop_px / lg.le - 1.0) * 1e4;
-        // S-2026-07-17 (feedback-no-prebe-loss-ever): a floored stop sits at >= le*(1+RT) BY
-        // CONSTRUCTION, so net = gross - RT is mathematically >= 0. At g>=1 the stop == BE
-        // exactly and IEEE-754 rounding of (le*(1+rt)/le - 1)*1e4 yields ~-1e-7 bp, a spurious
-        // sub-bp "loss" that trips an nNeg>0 never-neg gate. Clamp ONLY that fp noise to 0 (never
-        // masks a real loss: real pre-BE exits go through flush_leg_/reversal_cut, not here).
+    // Book the floored trail exit at the ACTUAL fill that pierced the resting stop.
+    void book_mimic_stop_(Leg& lg, double fill_px, int64_t ts, int64_t bar) {
+        // S-2026-07-17f FOUNDATION-HONESTY (adversarial-verify finding; feedback-content-parity +
+        // feedback-no-prebe-loss-ever): book the ACTUAL fill that pierced the resting stop
+        // (worse-of on a gap: bar-low in BT / the trip tick live), NOT lg.stop_px. Booking at the
+        // stop LEVEL clamped every gap-through loss to +0 and made the shadow-ledger nNeg=0 a
+        // MODEL property, not execution truth — the whole 17c "floored-on-open => nNeg=0 by
+        // construction" claim held only in the model (PF=999/nNeg=0 was the mechanically-
+        // impossible tell). The DESIGN is still floored-on-open (the resting stop sits at >=BE);
+        // this books a real gap-through's sub-BE tail instead of hiding it. fill<=stop_px at the
+        // call site; clamp UP to stop_px defensively (a stop can't fill BETTER than its level).
+        const double exit_px = (fill_px > 0.0 && fill_px < lg.stop_px) ? fill_px : lg.stop_px;
+        const double gross = (exit_px / lg.le - 1.0) * 1e4;
+        // fp-noise clamp ONLY: when fill == stop == BE exactly (no gap), IEEE-754 rounding of
+        // (le*(1+rt)/le - 1)*1e4 yields ~-1e-7 bp — clamp that sub-bp noise to 0. A REAL gap-
+        // through (fill < stop) yields net << -1e-6 and is NOT clamped: it books its true sub-BE
+        // tail (the S-17f honesty fix — no longer masked to +0; nNeg>0 now means a real gap tail).
         double net = gross - cfg_.round_trip_bp;
         if (net < 0.0 && net > -1e-6) net = 0.0;
-        emit_clip_(lg, lg.stop_px, ts, bar, gross, net, "FLOOR_TRAIL_CLIP");
-        lg.pk = lg.mfe; lg.clipped = true;             // reclip-eligible from the exit peak (rc>0 cells)
-        lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
+        emit_clip_(lg, exit_px, ts, bar, gross, net, "FLOOR_TRAIL_CLIP");
+        if (cfg_.anchored_reclip && cfg_.confirm_anchor_epx && cfg_.reclip_pct > 0.0) {
+            // ── ANCHORED RECLIP (S-2026-07-17, feedback-befloor-on-open-foundation pillar 4) ──
+            // Re-arm through the confirm+anchor path instead of the raw le=cur reclip (which reopened
+            // a pre-arm window and leaked real pre-BE losses). Reset the leg FLAT with a NEW anchor
+            // epx = the exit px; step_leg_'s confirm gate re-opens it ONLY once fav(from the new epx)
+            // >= confirm, and confirm_anchor_epx keeps le=epx => hwm>=le*(1+RT) on open => floored
+            // ON OPEN => net_bp_real >= 0 by construction. epx=exit means the next open needs a fresh
+            // >=confirm continuation from where we exited (be_floor reclip parity: ref becomes exit px).
+            lg.epx = exit_px; lg.le = exit_px;
+            lg.open = false; lg.clipped = false;
+            lg.mfe = 0.0; lg.pk = 0.0; lg.ext_bar = bar; lg.open_bar = bar;
+            lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
+        } else {
+            lg.pk = lg.mfe; lg.clipped = true;             // reclip-eligible from the exit peak (raw le=cur path)
+            lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
+        }
     }
     int64_t cur_ts_(int64_t bar) const { return bar * cfg_.tf_secs * 1000; }
 
@@ -893,7 +928,7 @@ private:
             if (!lg.open || lg.clipped || !lg.eligible || lg.le <= 0.0) continue;
             if (lg.floored) {                                    // POST-arm: BE-floored trail stop
                 if (lg.stop_px <= 0.0 || cur > lg.stop_px) continue;
-                book_mimic_stop_(lg, ts, bar);                   // book at the stop (>= BE)
+                book_mimic_stop_(lg, cur, ts, bar);              // book at the ACTUAL trip fill (worse-of on gap)
             } else if (lc > 0.0) {                               // PRE-arm: hard cut anchored at the FILL (le), NOT epx
                 const double cut_px = lg.le * (1.0 - lc / 1e4);  // bounds every pre-arm loss to ~lc+RT from the fill
                 if (cur > cut_px) continue;                      // still above the pre-arm stop

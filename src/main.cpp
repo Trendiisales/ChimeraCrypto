@@ -3886,16 +3886,29 @@ int main() {
         // ── S-2026-07-17 NEVER-PRE-BE-LOSS (feedback-no-prebe-loss-ever) — floored-ON-OPEN ──
         // confirm_anchor_epx=true + confirm_bp=60 (>2x measured cost) => le stays = window entry, so
         // every leg opens ONLY at fav>=60bp and is ALREADY floored at BE on open => worst clip net>=0.
-        // reclip_pct=0: a reclip re-entry reset le=cur => a fresh pre-arm window the anchor does NOT
-        // cover; under anchor it STILL booked -1773bp (TRX BT). loss_cut stays 0 (no pre-arm window
-        // exists to bound). Re-validated ALL 5 cells (upjump_earlyarm_bt mimicstag/mimicg, self-detect
-        // 1h, Binance cost 20/40bp, omit-2022): nNeg=0, worst +0.0bp, net+ PF>=1.3 both-WF base AND 2x —
-        // UNI +454(was+269) NEAR +490(+455) BNB +123(+137) DOGE +182(+386) TRX +31(+53). [[MimicFloorUnification]]
-        c.reclip_pct = 0.0;                  // NEVER-PRE-BE: reclip OFF (re-entry pre-arm window leaks)
+        // ANCHORED RECLIP (S-2026-07-17d): the raw le=cur reclip reopened a pre-arm window (TRX -1773bp
+        // BT) so it was first disabled (reclip_pct=0) — but DOGE/TRX's edge was reclip-DRIVEN and went
+        // thin (DOGE +386->+182). anchored_reclip=true routes the reclip re-entry through the SAME
+        // confirm+anchor path (re-anchor epx=exit px, re-open FLAT via the confirm gate, le=epx =>
+        // floored ON OPEN so the NEXT leg opens at BE). RE-CERTIFIED S-17f at HONEST WORSE-OF FILL
+        // (book_mimic_stop_ now books the actual bar-low trip px, not the resting stop) + MEASURED
+        // 28/56bp cost + deployed g (upjump_earlyarm_bt mimicstag, self-detect, omit-2022): all 5 PASS
+        // net+/PF>=1.3/both-WF/2x — BNB +482(2x+359) UNI +825(+776) NEAR +1866(+1416) TRX +456(+273)
+        // DOGE +1257(+870). HONEST FRAMING (S-17f): NOT nNeg=0 — the floored stop is floored-on-open by
+        // DESIGN, but a gap through it books a real sub-BE tail (floorMin -369..-1674bp, nNeg 131..685).
+        // Net-positive AFTER real-fill slippage, WITH a booked pre-BE tail — the winners dominate the
+        // tail, they do not eliminate it. reclip_pct is now only an ENABLE toggle. [[MimicFloorUnification]]
+        c.reclip_pct = 0.005;                // RECLIP ON (enable-toggle); re-entry is confirm+anchor-gated
+        c.anchored_reclip = true;            // ANCHORED RECLIP: floored-ON-OPEN re-entry (recovers reclip edge, nNeg=0)
         c.cost_gate_bp = 0.0;
         c.confirm_bp = 60.0;                 // BE-ENTRY, anchored: open ONLY once fav >= 60bp (> 2x cost)
         c.confirm_anchor_epx = true;         // le=epx => leg FLOORED ON OPEN at BE, worst clip net>=0
-        c.det_w = det_w; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 20.0;
+        c.det_w = det_w; c.det_thr = det_thr; c.tf_secs = 3600;
+        // S-2026-07-17f: MEASURED per-coin cost (feedback-crypto-cost-authoritative-depth-model),
+        // NOT the hardcoded 20bp literal. safe_cost_bps = fee-decomposition (28bp base; picks up
+        // depth-adjusted p99 slip when the depth model feeds set_depth_slip live). The anchored
+        // reclip CHURNS (DOGE 604->1370 clips) so per-size cost matters; re-certified at this cost.
+        c.round_trip_bp = g_camp_cost_ledger.safe_cost_bps(sym);
         c.loss_cut_bp = 0.0;                 // no pre-arm window under anchor+reclip0 => no cut needed
         c.mimic_floor = true; c.mimic_giveback = g;
         c.size_mult = 1.0;
@@ -4130,7 +4143,7 @@ int main() {
     // (companion_be_mimic_bt, certified data): improves PF on 4/5 basket coins
     // (DOT 1.70→2.43, ADA 21.2→36.9) and bounds the tail; per-coin auto-retire below.
     auto make_be_mimic = [&unretired](const char* ptag, const char* ctag, const char* sym,
-                                      double retire_bp, double gv, double lc) {
+                                      double retire_bp, double gv, double lc, bool anchored) {
         chimera::UpJumpLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
         // S-2026-07-16 FLOOR-NOW (operator: "there should be NO more crypto with no floor").
@@ -4155,21 +4168,33 @@ int main() {
         //   1. confirm_anchor_epx=true + confirm_bp=60 (>2x measured cost): le stays = window/parent
         //      entry, so a leg opens ONLY at fav>=60bp and is therefore ALREADY floored at BE on open
         //      (hwm>=le*(1+RT)) => worst clip net>=0.
-        //   2. reclip_pct=0: a reclip re-entry reset le=cur => a FRESH pre-arm window the anchor does
-        //      NOT cover; under anchor it STILL booked real pre-BE losses (ADA -527bp, TRX -1773bp in BT).
-        //      reclip is the ONLY residual pre-BE leak once anchored, so it is removed.
+        //   2. ANCHORED RECLIP (S-2026-07-17d/f) — PER-CELL, survivors only. anchored_reclip routes
+        //      the reclip re-entry through the confirm+anchor path (re-anchor epx=exit px, re-open FLAT,
+        //      le=epx => next leg floored ON OPEN). RE-CERTIFIED S-17f at HONEST WORSE-OF FILL
+        //      (book_mimic_stop_ books the actual trip px, not the resting stop) + MEASURED 28/56bp:
+        //        ADA g1.0   -> PASS net+282 PF13.0 WF+62/+220 2x+273 — HONEST tail nNeg=15 worst -510bp
+        //        THETA g0.5 -> FAIL (H2 -37 negative second WF half; worst -1148bp) => DROPPED
+        //        SUSHI g0.3 -> thin (+99 PF1.82, worst -1470bp, sumNeg -120%) => DROPPED (not worth tail)
+        //      HONEST FRAMING (S-17f): the floored stop is floored-on-open by DESIGN, but a gap through
+        //      it books a real sub-BE tail — NOT nNeg=0. ADA is net-positive AFTER real-fill slippage
+        //      WITH a booked tail. THETA/SUSHI (anchored=false) stay at the deployed c771068 reclip-off
+        //      20bp state — unchanged from what ships today. Requires confirm_anchor_epx.
         //   3. loss_cut_bp=0: with no pre-arm window there is nothing for a pre-arm cut to bound.
-        // Re-validated ALL 3 cells nNeg=0, worst +0.0bp, standalone net+ PF>=1.3 both-WF at base AND
-        // 2x cost: ADA +225 (was +153), SUSHI +79 (was +93), THETA +16 (was +157 — edge was reclip-
-        // driven; still net+/PASS but much thinner, operator review flagged). See [[EthUjMimic15BeCascade]].
-        c.reclip_pct = 0.0;               // NEVER-PRE-BE: reclip OFF (re-entry pre-arm window leaks; #2 above)
+        // S-2026-07-17f PER-CELL anchored-reclip (verify verdict): only the re-certified survivor
+        // (ADA, anchored=true) gets anchored reclip + measured cost. THETA + SUSHI are DROPPED
+        // (THETA WF-H2 neg / 2025-26 neg; SUSHI thin +99 worst -1470bp under honest worse-of) and
+        // REVERT to the deployed c771068 state: reclip OFF, 20bp — NO change from what ships today.
+        c.reclip_pct      = anchored ? 0.05 : 0.0;   // ADA anchored reclip ON (enable-toggle); THETA/SUSHI reclip OFF
+        c.anchored_reclip = anchored;                 // per-cell: floored-ON-OPEN re-entry, survivors only
         c.confirm_bp = 60.0;              // BE-ENTRY, anchored: open ONLY once fav >= 60bp (> 2x measured cost)
         c.confirm_anchor_epx = true;      // le=epx => leg FLOORED ON OPEN at BE, worst clip net>=0 (#1 above)
         c.cap        = 1;                 // mimic_floor = ONE managed leg per detected event
         c.cost_gate_bp = 0.0; c.be_floor = false;
         c.mimic_floor = true; c.mimic_giveback = gv;    // BE floor; per-cell g (re-gated 07-16)
         c.det_w = 0; c.det_thr = 0.0;     // observe the EXTERNAL parent, not self-detect
-        c.tf_secs = 86400; c.round_trip_bp = 20.0;
+        c.tf_secs = 86400;
+        // ADA: MEASURED cost (feedback-crypto-cost-authoritative); THETA/SUSHI: unchanged 20bp c771068.
+        c.round_trip_bp = anchored ? g_camp_cost_ledger.safe_cost_bps(sym) : 20.0;
         c.loss_cut_bp = 0.0; (void)lc;    // pre-arm cut REMOVED (anchor+reclip0 leaves NO pre-arm window; #3)
         c.retire_bp = retire_bp;          // per-coin auto-retire on negative real bank
         c.retire_override = unretired(ctag);
@@ -4187,17 +4212,18 @@ int main() {
     // NOT wired: ETH jump_floor mimic + LDO campaign mimic (both WF-H1 neg — NO-GO).
     // retire_bp ≈ −1.5–2x re-gate worst clip (−828 under lc=800).
     struct RegimeParent { const char* pfx; const char* sym; chimera::EdgeEngine* eng;
-                          double retire_bp; double g; double lc; };
+                          double retire_bp; double g; double lc; bool anchored; };
     const std::vector<RegimeParent> _regime_basket = {
-        {"THETA", "thetausdt", &theta_regime_d1, -1600.0, 0.50, 800.0},   // net+157 PF7.34
-        {"SUSHI", "sushiusdt", &sushi_regime_d1, -1600.0, 0.30, 800.0},   // net+93  PF2.87
-        {"ADA",   "adausdt",   &ada_regime_d1,   -1600.0, 1.00, 800.0},   // net+153 PF5.89
+        // anchored=false => DROPPED from anchored-reclip (S-17f verify), reverts to c771068 reclip-off/20bp.
+        {"THETA", "thetausdt", &theta_regime_d1, -1600.0, 0.50, 800.0, false},   // DROPPED: WF-H2 neg, 2025/26 neg under worse-of
+        {"SUSHI", "sushiusdt", &sushi_regime_d1, -1600.0, 0.30, 800.0, false},   // DROPPED: thin +99, worst -1470bp under worse-of
+        {"ADA",   "adausdt",   &ada_regime_d1,   -1600.0, 1.00, 800.0, true},    // SURVIVOR: anchored reclip, re-certified worse-of+measured
     };
     for (const auto& rp : _regime_basket) {
         _grid_ptags.push_back(std::string(rp.pfx) + "-REGIME_SWITCH");
         _grid_ctags.push_back(std::string(rp.pfx) + "-REGIME-BEMIMIC");
         _grid.emplace_back(make_be_mimic(_grid_ptags.back().c_str(), _grid_ctags.back().c_str(),
-                                         rp.sym, rp.retire_bp, rp.g, rp.lc));
+                                         rp.sym, rp.retire_bp, rp.g, rp.lc, rp.anchored));
         _grid_feeds.push_back(rp.eng);    // det_w=0 => driven off THIS parent's bar closes
     }
     // NB: near_regime_d1 / dot_regime_d1 PARENTS still trade via g_slots below — only their

@@ -1224,6 +1224,127 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
         save_companion_det_state();
 }
 
+// ── S-2026-07-18 LIVE MIMIC MIRROR (operator go-live order: "ALL crypto live") ──
+// The 132-cell mimic/cascade grid keeps its OWN shadow book as the research/accounting
+// record (shadow_mode stays true — nothing about the certified books changes). This
+// mirror is the EXECUTION layer: on a leg's live FLAT->OPEN it routes ONE clamped BUY
+// through governed_submit -> the ONE ExecutionGateway (PILOT-SCOPE symbol allowlist +
+// $/order + gross caps + HARDCAP allocator + kill-switch all apply there); on the SAME
+// leg's ClipRecord close it SELLS the exact tracked fill qty (is_exit=true, never
+// blocked). Pairing key = ClipRecord tag (cfg tag + "-" + label). Holdings persist to
+// LIVE_MIRROR_FILE so a restart cannot strand real coins invisibly (StartupReconciler
+// sees them as balances regardless). Loss protection = the mimic books' own certified
+// floors: the mirror only ever exits when the floored book exits (engine-loss-protection
+// provision satisfied by inheritance; no separate stop needed on a $100 clamped leg).
+// A failed SELL is retried on every subsequent mirror event and screamed to stderr.
+static constexpr const char* LIVE_MIRROR_FILE = "data/live_mimic_positions.json";
+struct LiveMimicMirror {
+    struct Hold { double qty = 0.0; double px = 0.0; std::string symbol; bool pending_sell = false; double sell_px = 0.0; };
+    bool enabled = false;                   // armed only in RuntimeMode::LIVE
+    double order_usd = 0.0;                 // per-leg BUY notional (= live_pilot_max_order_usd)
+    std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
+    std::map<std::string, Hold> held;       // clip-tag -> live holding
+    std::mutex mu;
+
+    static std::string upsym(const std::string& s) {
+        std::string u = s; for (auto& c : u) c = (char)std::toupper((unsigned char)c); return u;
+    }
+    void persist_() {                        // atomic tmp+rename, same idiom as the state files
+        std::ostringstream js; js << std::fixed << std::setprecision(8) << "{\"positions\":[";
+        bool first = true;
+        for (const auto& kv : held) {
+            if (kv.second.qty <= 0.0) continue;
+            js << (first ? "" : ",") << "{\"tag\":\"" << kv.first << "\",\"symbol\":\"" << kv.second.symbol
+               << "\",\"qty\":" << kv.second.qty << ",\"px\":" << kv.second.px
+               << ",\"pending_sell\":" << (kv.second.pending_sell ? "true" : "false") << "}";
+            first = false;
+        }
+        js << "]}\n";
+        std::string tmp = std::string(LIVE_MIRROR_FILE) + ".tmp";
+        std::ofstream f(tmp); if (!f.is_open()) return; f << js.str(); f.close();
+        std::rename(tmp.c_str(), LIVE_MIRROR_FILE);
+    }
+    void load() {                            // crude ndjson-style scan (own file, no JSON dep)
+        std::ifstream f(LIVE_MIRROR_FILE); if (!f.is_open()) return;
+        std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        size_t p = 0;
+        while ((p = all.find("{\"tag\":\"", p)) != std::string::npos) {
+            size_t te = all.find('"', p + 8); if (te == std::string::npos) break;
+            std::string tag = all.substr(p + 8, te - (p + 8));
+            Hold h;
+            size_t sp = all.find("\"symbol\":\"", te); size_t se = (sp == std::string::npos) ? sp : all.find('"', sp + 10);
+            if (sp != std::string::npos && se != std::string::npos) h.symbol = all.substr(sp + 10, se - (sp + 10));
+            size_t qp = all.find("\"qty\":", te); if (qp != std::string::npos) h.qty = atof(all.c_str() + qp + 6);
+            size_t xp = all.find("\"px\":", te);  if (xp != std::string::npos) h.px  = atof(all.c_str() + xp + 5);
+            h.pending_sell = all.find("\"pending_sell\":true", te) != std::string::npos &&
+                             all.find("\"pending_sell\":true", te) < all.find('}', te);
+            if (!tag.empty() && h.qty > 0.0) held[tag] = h;
+            p = te;
+        }
+        if (!held.empty()) {
+            std::printf("[MIMIC-LIVE] restored %zu live holding(s) from %s\n", held.size(), LIVE_MIRROR_FILE);
+            std::fflush(stdout);
+        }
+    }
+    void retry_pending_() {                  // called under mu from both event paths
+        for (auto& kv : held) {
+            if (!kv.second.pending_sell || kv.second.qty <= 0.0) continue;
+            auto r = submit({ upsym(kv.second.symbol), false, kv.second.qty, kv.second.sell_px,
+                              /*is_exit*/ true, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
+            if (r.ok) {
+                std::printf("[MIMIC-LIVE] retry SELL OK %s qty=%.8f\n", kv.first.c_str(), kv.second.qty);
+                kv.second.qty = 0.0; kv.second.pending_sell = false;
+            }
+        }
+    }
+    void on_open(const chimera::UpJumpLadderCompanion::OpenRecord& r) {
+        if (!enabled || !submit || order_usd <= 0.0 || r.px <= 0.0) return;
+        std::lock_guard<std::mutex> lk(mu);
+        retry_pending_();
+        auto& h = held[r.tag];
+        if (h.qty > 0.0) return;             // already holding for this leg (restart re-open etc.) — never stack
+        auto res = submit({ upsym(r.symbol), true, order_usd / r.px, r.px,
+                            /*is_exit*/ false, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
+        if (res.ok && !res.shadow && res.executed_qty > 0.0) {
+            h.qty = res.executed_qty; h.px = res.avg_price > 0.0 ? res.avg_price : r.px;
+            h.symbol = r.symbol; h.pending_sell = false;
+            std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f)\n",
+                        r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px);
+            std::fflush(stdout);
+            persist_();
+        } else if (!res.ok) {
+            // rejected (pilot gross cap / hardcap / halt) — bounded pilot working as designed
+            std::printf("[MIMIC-LIVE] BUY skipped %s: %s\n", r.tag.c_str(),
+                        res.error.empty() ? "rejected" : res.error.c_str());
+            std::fflush(stdout);
+            held.erase(r.tag);
+        }
+    }
+    void on_clip(const chimera::UpJumpLadderCompanion::ClipRecord& r) {
+        if (!enabled || !submit) return;
+        std::lock_guard<std::mutex> lk(mu);
+        retry_pending_();
+        auto it = held.find(r.tag);
+        if (it == held.end() || it->second.qty <= 0.0) return;   // this leg's entry never filled live
+        auto res = submit({ upsym(r.symbol), false, it->second.qty, r.exit_px,
+                            /*is_exit*/ true, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
+        if (res.ok) {
+            std::printf("[MIMIC-LIVE] SELL %s %s qty=%.8f @%.6f (%s)\n",
+                        r.tag.c_str(), upsym(r.symbol).c_str(), it->second.qty,
+                        res.avg_price > 0.0 ? res.avg_price : r.exit_px, r.reason.c_str());
+            std::fflush(stdout);
+            held.erase(it);
+        } else {
+            it->second.pending_sell = true; it->second.sell_px = r.exit_px;
+            std::fprintf(stderr, "[MIMIC-LIVE] *** SELL FAILED %s qty=%.8f (%s) — holding flagged, "
+                         "will retry on next mirror event ***\n",
+                         r.tag.c_str(), it->second.qty, res.error.c_str());
+        }
+        persist_();
+    }
+};
+static LiveMimicMirror g_mimic_mirror;
+
 // Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from
 // the append-only durable clip log, so the desk panel clips/bank_bp survive a restart.
 // Crude line-scan parse (the file is our own one-object-per-line ndjson) -> no JSON dep.
@@ -2990,6 +3111,25 @@ int main() {
         return gateway.submit(in);   // in-limit: byte-identical to track-only
     };
     (void)governed_submit;   // referenced by the promoted-sleeve callbacks below
+
+    // ── S-2026-07-18 arm the LIVE MIMIC MIRROR (operator go-live order) ──────────
+    // Routes mimic-grid leg opens/closes through the SAME governed_submit path as the
+    // promoted sleeves: HARDCAP allocator + PILOT-SCOPE (41-sym allowlist, $/order,
+    // gross cap) + kill-switch + exchange filters + ledger all apply. Armed ONLY in
+    // RuntimeMode::LIVE; in SHADOW it is fully inert (submit unset -> observer no-ops),
+    // so the research record and every certified book are byte-identical to before.
+    g_mimic_mirror.enabled   = (g_runtime_mode == chimera::RuntimeMode::LIVE);
+    g_mimic_mirror.order_usd = runtime_cfg.live_pilot_max_order_usd;
+    if (g_mimic_mirror.enabled) {
+        g_mimic_mirror.submit = governed_submit;
+        g_mimic_mirror.load();
+        std::printf("[MIMIC-LIVE] mirror ARMED: grid leg opens route $%.2f BUYs via gateway "
+                    "(pilot caps enforce); clips SELL the tracked fill; holdings persist %s\n",
+                    g_mimic_mirror.order_usd, LIVE_MIRROR_FILE);
+    } else {
+        std::printf("[MIMIC-LIVE] mirror DISARMED (mode=SHADOW) — grid books unchanged, no real orders\n");
+    }
+    std::fflush(stdout);
 
     // ════════════════════════════════════════════════════════════════════
     // S-2026-06-18: CrossSectionalMomentumEngine — FIRST OOS-validated Chimera
@@ -4835,7 +4975,13 @@ int main() {
                 if (_ct != _clip_totals.end())
                     _all_clips[i]->rehydrate(_ct->second.n, _ct->second.net, _ct->second.net_real, _ct->second.net_real_w);
             }
-            _all_clips[i]->set_on_clip(persist_companion_clip);
+            _all_clips[i]->set_on_clip([](const chimera::UpJumpLadderCompanion::ClipRecord& r) {
+                g_mimic_mirror.on_clip(r);       // live mirror SELL first (no-op when disarmed/never-filled)
+                persist_companion_clip(r);       // then the unchanged shadow record path
+            });
+            _all_clips[i]->set_on_leg_open([](const chimera::UpJumpLadderCompanion::OpenRecord& r) {
+                g_mimic_mirror.on_open(r);       // live mirror BUY (no-op when disarmed)
+            });
             g_companion_by_parent[_all_clips[i]->config().parent_tag] =
                 std::make_pair(_all_clip_parents[i], _all_clips[i]);
             {

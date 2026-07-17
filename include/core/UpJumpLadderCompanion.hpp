@@ -235,6 +235,24 @@ public:
     };
     using ClipCallback = std::function<void(const ClipRecord&)>;
 
+    // ── S-2026-07-18 LIVE-MIRROR OPEN EVENT (operator go-live order: ALL crypto live) ──
+    // Fired when a leg transitions FLAT->OPEN on a LIVE tick/close path only — NOT on
+    // restart-restore / warm-seed / rehydrate (those re-attach to a notional that was
+    // already open; announcing them would double-buy). main.cpp's LiveMimicMirror
+    // subscribes and routes a clamped real order through the ONE ExecutionGateway
+    // (PILOT-SCOPE symbol/order/gross caps apply there). Pure observer: the companion
+    // book is UNTOUCHED and reads nothing back (independent-engine rule). tag mirrors
+    // emit_clip_ (cfg_.tag + "-" + label) so the eventual ClipRecord of the SAME leg
+    // carries the SAME tag — the mirror pairs its sell to the buy by that key.
+    // signal_only cells never announce (they book nothing and must not trade).
+    struct OpenRecord {
+        std::string tag, symbol, label;
+        int64_t ts_ms = 0;
+        double  px    = 0.0;   // the leg's own fill/anchor price (le)
+    };
+    using OpenCallback = std::function<void(const OpenRecord&)>;
+    void set_on_leg_open(OpenCallback cb) { on_leg_open_ = std::move(cb); }
+
     explicit UpJumpLadderCompanion(Config c) : cfg_(std::move(c)) {}
 
     void set_on_clip(ClipCallback cb) { on_clip_ = std::move(cb); }
@@ -622,6 +640,7 @@ private:
             Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
             l.open = true; l.open_ts = ts_ms; l.open_bar = jf_open_bar_; l.ext_bar = jf_open_bar_;
             legs_.push_back(l);
+            announce_open_(legs_.back(), ts_ms, jf_E_);     // live mirror (jump-floor immediate entry)
             std::printf("[CLIP-JF] %s OPEN px=%.6f stop=%s (det j>=+%.2f%%) shadow=%d\n",
                 cfg_.tag.c_str(), jf_E_,
                 jf_stop_ > 0 ? "preBE" : "none", cfg_.det_thr * 100.0, shadow_mode ? 1 : 0);
@@ -721,6 +740,7 @@ private:
             if ((cur / lg.ref_px - 1.0) * 1e4 < cfg_.be_bp) return;
             lg.open = true; lg.le = cur; lg.hwm = cur;
             lg.open_ts = ts; lg.open_bar = bar; lg.ext_bar = bar; lg.mfe = 0.0;
+            announce_open_(lg, ts, cur);                    // live mirror
             return;                                         // opened this bar; stop==le, cur==le -> no exit yet
         }
         if (cur > lg.hwm) { lg.hwm = cur; lg.ext_bar = bar; }
@@ -870,6 +890,7 @@ private:
             if (lg.rc > 0.0 && lg.pk > 0.0 && fav > lg.pk * (1.0 + lg.rc)) {
                 lg.clipped = false; lg.le = cur;      // RECLIP = re-enter at current price
                 if (cfg_.mimic_floor) { lg.hwm = cur; lg.floored = false; lg.stop_px = -1.0; }  // fresh floor on the new fill
+                announce_open_(lg, bar * cfg_.tf_secs * 1000, cur);   // reclip = a NEW live fill for the mirror
             } else return false;
         }
         if (!lg.open) {
@@ -878,6 +899,7 @@ private:
             if ((lg.confirm > 0.0 && !cfg_.confirm_anchor_epx) || lg.seeded_flat) lg.le = cur;  // le = confirm price / first live mark (rehydrate-FLAT: never backdated). confirm_anchor_epx keeps le=epx so the leg is floored-on-open at window-entry BE (no pre-arm loss).
             lg.mfe = fav; lg.ext_bar = bar;
             if (cfg_.mimic_floor) { lg.hwm = lg.le; lg.floored = false; lg.stop_px = -1.0; }     // floor gauged from the fill (le)
+            announce_open_(lg, lg.open_ts, cur);   // live mirror buys at the CURRENT mark (cur), not the anchored le
         }
         if (fav > lg.mfe + 1e-9) { lg.mfe = fav; lg.ext_bar = bar; }
         // ── MIMIC-FLOOR: BE-floored HWM-trail replaces the floorless gb/stall exits ──
@@ -1032,8 +1054,15 @@ private:
         std::fflush(stdout);
     }
 
+    // live-mirror announce (S-2026-07-18): live FLAT->OPEN transitions only.
+    void announce_open_(const Leg& lg, int64_t ts_ms, double px) {
+        if (!on_leg_open_ || cfg_.signal_only) return;
+        on_leg_open_({cfg_.tag + "-" + lg.label, cfg_.symbol, lg.label, ts_ms, px});
+    }
+
     Config        cfg_;
     ClipCallback  on_clip_;
+    OpenCallback  on_leg_open_;
     std::vector<Leg> legs_;
     double  entry_ref_ = 0.0;
     int     clip_num_  = 0;

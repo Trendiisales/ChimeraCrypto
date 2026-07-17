@@ -4469,6 +4469,51 @@ int main() {
         _grid.emplace_back(std::move(c));
         _grid_feeds.push_back(nullptr);      // parent is a companion, not an EdgeEngine
     }
+    // ── S-2026-07-17s AAVE/ETH RESCUE MIMICS (operator: "no more upjump … work out how we
+    // do this on those no-go backtested crypto, find a solution that's viable"). The PJ
+    // parent-driven mimics stay NO-GO (AAVE_GRT_PJ_MIMIC_FINDINGS_2026-07-17.md); these are
+    // SELF-TRIGGERING mimic_floor cells at a DIFFERENT trigger (8h/+2.0% vs PJ 1h/+4% /
+    // 24h/+7%), certified AAVE_ETH_MIMIC_RESCUE_FINDINGS_2026-07-17.md (Crypto af80386,
+    // honest 17f fills, measured 28bp cost, >=2023 omit-2022, REAL companion class):
+    //   AAVE 8h/+2%/g0.20: n=478 net +415% PF 5.52 worst -367bp WF +193/+223, 2x +283 PF 2.95
+    //   ETH  8h/+2%/g0.20: n=265 net +196% PF 8.77 worst -198bp WF  +92/+104, 2x +122 PF 3.59
+    // Deep plateau (AAVE 419/480, ETH 364/480 grid PASS; all years positive), g=0.20 =
+    // tightest-certified (profit-lock g<1.0, neighbors g0.3/0.4 also pass). CERTIFIED AT
+    // reclip=0 — do NOT enable anchored_reclip without re-certifying. retire ~= -2x certified
+    // worst clip on RAW bank (GRT-MIM convention). ADDITIVE to the UJ15-BECASC cells
+    // (different trigger family, ~10x lower turnover). SHADOW.
+    // ADVERSE-PROTECTION: backtested — BE-ENTRY floored-on-open (confirm 60bp >= 2x measured
+    // cost, anchor le=epx), g=0.20 giveback trail, retire latch; honest gap tail AAVE -367bp /
+    // ETH -198bp class (nNeg 155/51 — REAL booked tails, not nNeg=0).
+    {
+        struct RescueCell { const char* pfx; const char* sym; double retire_bp; };
+        static const std::vector<RescueCell> _rescue_cells = {
+            {"AAVE", "aaveusdt", -750.0},   // 2x certified worst -366.5bp
+            {"ETH",  "ethusdt",  -400.0},   // 2x certified worst -197.7bp
+        };
+        static std::vector<chimera::EdgeEngine> _rescue_feeds; _rescue_feeds.reserve(_rescue_cells.size());
+        for (const auto& rc : _rescue_cells) {
+            _grid_ptags.push_back(std::string(rc.pfx) + "-UJ2W8-MIMFEED");
+            _grid_ctags.push_back(std::string(rc.pfx) + "-UJ2W8-MIM");
+            _rescue_feeds.emplace_back(make_uj(rc.sym, _grid_ptags.back().c_str(), 3600, 8, 0.020));
+            chimera::UpJumpLadderCompanion::Config c;
+            c.parent_tag = _grid_ptags.back(); c.tag = _grid_ctags.back(); c.symbol = rc.sym;
+            c.reclip_pct = 0.0; c.anchored_reclip = false;   // certified config: reclip OFF
+            c.confirm_bp = 60.0;                 // BE-ENTRY: books nothing until fav >= 60bp (>2x cost)
+            c.confirm_anchor_epx = true;         // le=epx -> floored at BE ON OPEN
+            c.cost_gate_bp = 0.0;
+            c.det_w = 8; c.det_thr = 0.020;      // SELF-triggering 8h/+2.0% (SWEET pattern)
+            c.tf_secs = 3600;
+            c.round_trip_bp = g_camp_cost_ledger.safe_cost_bps(rc.sym);   // measured floor (28bp class)
+            c.loss_cut_bp = 0.0;                 // no pre-arm window under anchor+reclip0
+            c.mimic_floor = true; c.mimic_giveback = 0.20;   // tightest-certified, deep plateau
+            c.size_mult = 1.0;
+            c.retire_bp = rc.retire_bp;
+            c.retire_override = unretired(_grid_ctags.back().c_str());
+            _grid.emplace_back(std::move(c));
+            _grid_feeds.push_back(&_rescue_feeds.back());
+        }
+    }
     // ── S-2026-07-16 BE-CASCADE ALL-COIN MIMIC (operator: validated ALL-22 PASS -> "wire all coins") ──
     // 22 independent SHADOW BE-cascade companion books, one per coin, the operator EXACT spec
     // (make_becascade_cell above; stagger_mode=1, det_w=4, g0.5, BE-ENTRY confirm60/anchor, cap8). Reproduced at the

@@ -254,12 +254,20 @@ public:
         std::ostringstream js; js << std::fixed << std::setprecision(8);
         js << "{\"tag\":\"" << cfg_.tag << "\",\"det_in\":" << (det_in_ ? 1 : 0)
            << ",\"det_entry\":" << det_entry_ << ",\"det_bar\":" << det_bar_
-           << ",\"det_close\":" << det_close_ << ",\"h1c\":[";
+           << ",\"det_close\":" << det_close_
+           // S-2026-07-17 FLOOR-RATCHET PERSISTENCE (ETH-PJ7W24 zombie incident): the floor
+           // state itself is persisted so a restart can NEVER disarm an armed floor. The old
+           // restore recomputed floored from the last persisted close alone — a close that had
+           // dipped below entry*(1+rt) resurrected an ARMED leg as UN-floored with the raw
+           // pre-BE stop (-400bp exposure on a leg whose floor had already armed).
+           << ",\"det_floored\":" << (jf_floored_ ? 1 : 0)
+           << ",\"det_mfe\":" << jf_mfe_ << ",\"h1c\":[";
         for (size_t i = 0; i < h1c_.size(); ++i) { if (i) js << ","; js << h1c_[i]; }
         js << "]}";
         return js.str();
     }
     void restore_det_state(bool in, double entry, int64_t bar, double close,
+                           bool floored_p, double mfe_p,
                            const std::vector<double>& h1c, int64_t now_ms) {
         if (cfg_.det_w <= 0) return;
         h1c_ = h1c;
@@ -269,17 +277,20 @@ public:
         det_in_ = in; det_entry_ = entry;
         if (cfg_.jump_floor) {
             // JUMP-FLOOR restore: rebuild jf state from the mirrored det fields.
-            // mfe restored from the last persisted close (understates an intra-gap
-            // peak slightly -> trail marginally looser until the next new high;
-            // floor level is exact). Flat books restore UN-armed: a j<thr close
-            // must print before the next entry (conservative fresh-jump rule).
+            // S-2026-07-17 FLOOR RATCHET HONORED (ETH-PJ7W24 zombie incident): floored/mfe are
+            // now persisted and restored verbatim — once a floor has armed it can NEVER disarm
+            // across a restart. The old path recomputed floored from the last close alone; a
+            // close below entry*(1+rt) restored an armed leg UN-floored with the raw pre-BE
+            // stop. mfe = max(persisted hwm, last close) so the trail never loosens either.
+            // Flat books restore UN-armed: a j<thr close must print before the next entry
+            // (conservative fresh-jump rule).
             jf_in_ = det_in_ && det_entry_ > 0.0;
             jf_armed_ = false;
             if (jf_in_) {
                 const double rt = cfg_.round_trip_bp * 1e-4;
                 jf_E_ = det_entry_;
-                jf_mfe_ = std::max(0.0, (close > 0.0 ? close / jf_E_ - 1.0 : 0.0));
-                jf_floored_ = jf_mfe_ >= rt;
+                jf_mfe_ = std::max({0.0, mfe_p, (close > 0.0 ? close / jf_E_ - 1.0 : 0.0)});
+                jf_floored_ = floored_p || jf_mfe_ >= rt;
                 jf_stop_ = (cfg_.jf_prebe_stop_bp > 0.0) ? jf_E_ * (1.0 - cfg_.jf_prebe_stop_bp / 1e4) : -1.0;
                 if (jf_floored_) {
                     double ns = jf_E_ * (1.0 + rt);
@@ -498,6 +509,7 @@ public:
     //    real_parent_mimic_bt.cpp / feedback-verify-kill-replicates-mechanism) ──
     bool   jf_in_position() const { return jf_in_; }
     double jf_entry_px()    const { return jf_E_;  }
+    bool   jf_is_floored()  const { return jf_floored_; }   // S-2026-07-17: restore-gate tripwire reads this
 
     LiveSnap snapshot() const {           // book aggregate (back-compat)
         LiveSnap s; s.clips = clip_num_; s.bank_bp = banked_bp_; s.bank_bp_real = banked_bp_real_;
@@ -637,16 +649,24 @@ private:
         r.clip_num = ++clip_num_;
         r.shadow = shadow_mode;
         banked_bp_ += net; banked_bp_real_ += net; banked_bp_real_w_ += net * cfg_.size_mult;
-        if (on_clip_) on_clip_(r);
-        check_retire_();
-        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d JUMPFLOOR\n",
-            r.tag.c_str(), reason, net, gross, jf_mfe_ * 100.0, r.bars_held, jf_E_, px, shadow_mode ? 1 : 0);
-        std::fflush(stdout);
+        const double bE = jf_E_; const double bmfe = jf_mfe_;   // for the log line below
+        // S-2026-07-17 ORDER FIX (ETH-PJ7W24 zombie root-root cause): position state must be
+        // CLEARED BEFORE on_clip_ fires. Fig-2's immediate det-state persist runs INSIDE the
+        // on_clip_ handler (main.cpp persist_companion_clip -> save_companion_det_state); with
+        // the old order (clear AFTER on_clip_) every "immediate persist" serialized det_in:1 —
+        // the pre-close state — so the file NEVER recorded the close and the leg resurrected on
+        // every restart despite Fig-2 being deployed. Clear first; the ClipRecord r already
+        // carries everything the handler needs.
         jf_in_ = false; jf_pending_exit_ = false; jf_pending_open_ = false;
         jf_E_ = 0.0; jf_mfe_ = 0.0; jf_floored_ = false; jf_stop_ = -1.0;
         det_in_ = false; det_entry_ = 0.0;                      // persistence mirror
         legs_.clear();                                          // drop the display leg
         // jf_armed_ stays false: the next entry needs a close with j < det_thr first (fresh jump)
+        if (on_clip_) on_clip_(r);
+        check_retire_();
+        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d JUMPFLOOR\n",
+            r.tag.c_str(), reason, net, gross, bmfe * 100.0, r.bars_held, bE, px, shadow_mode ? 1 : 0);
+        std::fflush(stdout);
     }
 
     // ── BE-FLOOR mode (faithful port of be_bptrail.py leg_book) ──────────────

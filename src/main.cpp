@@ -1276,6 +1276,27 @@ static void save_companion_det_state() {
     fclose(f);
     std::rename(tmp.c_str(), COMPANION_DET_STATE_FILE);
 }
+// S-2026-07-17 RESURRECTION DEDUP (ETH-PJ7W24 zombie incident): a jump_floor leg that
+// closed under a binary without the Fig-2 immediate persist (or in a crash window
+// between the clip-ledger append and the det-state save) leaves det_in:1 in a stale
+// state file. The old restore rebirthed it VERBATIM on every boot — the ETH-PJ7W24
+// leg (entry 1882.035000) was resurrected + re-closed on 3 consecutive boots, booking
+// 3 duplicate net-negative clips, then came back a 4th time UN-floored. The clip
+// ledger (COMPANION_TRADES_FILE, append-only durable) is the truth: if a -J1 close
+// with this exact entry px already exists there, the in-flight state is STALE — drop
+// it instead of restoring. A legit new jump re-fills at a fresh tick px, so an exact
+// 6dp entry-px match on the same tag is a closed leg, not a coincidence.
+static bool jf_leg_already_closed(const std::string& tag, double entry_px) {
+    std::ifstream f(COMPANION_TRADES_FILE);
+    if (!f) return false;
+    char epx[48]; std::snprintf(epx, sizeof(epx), "\"entry_px\":%.6f", entry_px);
+    const std::string tagkey = "\"tag\":\"" + tag + "-J1\"";
+    std::string line;
+    while (std::getline(f, line))
+        if (line.find(tagkey) != std::string::npos && line.find(epx) != std::string::npos)
+            return true;
+    return false;
+}
 // crude ndjson line-scan restore (same style as load_companion_clip_totals).
 static void restore_companion_det_state() {
     std::ifstream f(COMPANION_DET_STATE_FILE);
@@ -1283,6 +1304,7 @@ static void restore_companion_det_state() {
                           COMPANION_DET_STATE_FILE); return; }
     int64_t now_ms = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
+    int jf_restored = 0, jf_deduped = 0, jf_floor_regress = 0;
     std::string line;
     while (std::getline(f, line)) {
         auto tp = line.find("\"tag\":\"");
@@ -1302,6 +1324,16 @@ static void restore_companion_det_state() {
         double det_entry = num("\"det_entry\":", 0.0);
         int64_t det_bar  = (int64_t)num("\"det_bar\":", -1);
         double det_close = num("\"det_close\":", 0.0);
+        // Missing in old-format files -> 0/0.0: restore behaves exactly as before this fix.
+        bool   det_floored = num("\"det_floored\":", 0) > 0.5;
+        double det_mfe     = num("\"det_mfe\":", 0.0);
+        if (det_in && det_entry > 0.0 && comp->config().jump_floor &&
+            jf_leg_already_closed(tag, det_entry)) {
+            det_in = false; det_entry = 0.0; det_floored = false; det_mfe = 0.0;
+            ++jf_deduped;
+            std::printf("[CLIP-RESTORE-DEDUP] %s stale in-flight leg DELETED (entry %.6f already "
+                        "closed in the clip ledger — resurrection blocked)\n", tag.c_str(), num("\"det_entry\":", 0.0));
+        }
         std::vector<double> ring;
         auto hp = line.find("\"h1c\":[");
         if (hp != std::string::npos) {
@@ -1310,8 +1342,21 @@ static void restore_companion_det_state() {
             std::stringstream ss(arr); std::string tok;
             while (std::getline(ss, tok, ',')) { if (!tok.empty()) { try { ring.push_back(std::stod(tok)); } catch (...) {} } }
         }
-        comp->restore_det_state(det_in, det_entry, det_bar, det_close, ring, now_ms);
+        comp->restore_det_state(det_in, det_entry, det_bar, det_close, det_floored, det_mfe, ring, now_ms);
+        if (comp->config().jump_floor && det_in) {
+            ++jf_restored;
+            // Tripwire: with the floor ratchet persisted+honored this is structurally
+            // impossible; a hit means the restore path regressed — treat as P1.
+            if (det_floored && !comp->jf_is_floored()) {
+                ++jf_floor_regress;
+                std::printf("[MIMIC-FLOOR-VIOLATION] %s restored with floor REGRESSED "
+                            "(persisted floored=1, live floored=0) — restore path broken\n", tag.c_str());
+            }
+        }
     }
+    std::printf("[CLIP-RESTORE-GATE] jf in-flight legs: %d restored (floor-honored), %d stale DELETED (dedup), %d floor-regression\n",
+        jf_restored, jf_deduped, jf_floor_regress);
+    std::fflush(stdout);
 }
 
 // ── S-2026-07-13 CAMPAIGN ARCHITECTURE (13j §2.11 task 3) ───────────────────

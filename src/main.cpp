@@ -1356,6 +1356,15 @@ static void restore_companion_det_state() {
     }
     std::printf("[CLIP-RESTORE-GATE] jf in-flight legs: %d restored (floor-honored), %d stale DELETED (dedup), %d floor-regression\n",
         jf_restored, jf_deduped, jf_floor_regress);
+    // S-2026-07-17o: the dedup above only cleaned the leg IN MEMORY; the stale line
+    // stayed in the file until the next clip event, so the gate re-fired "1 stale
+    // DELETED" on every boot (ETH-PJ7W24). Rewrite the file from the now-clean live
+    // state so a purged leg is purged ON DISK too. Caller holds g_companion_mtx
+    // (both this fn and save_companion_det_state require it).
+    if (jf_deduped > 0) {
+        save_companion_det_state();
+        std::printf("[CLIP-RESTORE-GATE] det-state file rewritten (%d stale leg(s) purged from disk)\n", jf_deduped);
+    }
     std::fflush(stdout);
 }
 
@@ -4559,9 +4568,10 @@ int main() {
     // net (+78/+161 vs +74/+156%); TRX 0.6 (-6% net, cliff at 0.5 -> +1%); LDO 0.4
     // (+38 vs +68% — the cost of the lock, operator-ordered). A uniform 0.3-0.5 kills
     // TRX (fat-tail amputation) — do NOT tighten past these without a fresh gsweep.
-    // LDO also carries flatten_before_ms=1784269800000 (2026-07-17 06:30 UTC): the open
-    // Jul-15 campaign (pe=0.35815, phwm +5.42%) books at current mark on first tick
-    // (CAMP_FLATTEN) — the operator NOW-close order. One-shot; later entries unaffected.
+    // LDO 2026-07-17: the open Jul-15 campaign (pe=0.35815, phwm +5.42%) was flattened
+    // via a one-shot flatten_before_ms=1784269800000 (06:30 UTC) — booked CAMP_FLATTEN
+    // +260.6bp at 0.36820. Flag spent + removed same day; the path stays in
+    // CryptoCampaignManager for future NOW-close orders.
     chimera::CryptoCampaignManager uni_campaign(
         {"uniusdt", "UNI", 3600, /*mimic*/ false, {
             {"UNI-CAMP-W1", "CW1-3.5", 1, 0.035, 20.0, 135.0, 270.0, 38.0, 1.0,  -550.0, 40.0, 0.5},
@@ -4573,7 +4583,7 @@ int main() {
         }}, &g_camp_cost_ledger, &g_camp_gate);
     chimera::CryptoCampaignManager ldo_campaign(
         {"ldousdt", "LDO", 3600, /*mimic*/ false, {
-            {"LDO-CAMP-W8", "CW8-7.0", 8, 0.070, 20.0, 411.0, 342.0, 48.0, 0.25, -1400.0, 40.0, 0.4, 1784269800000LL},
+            {"LDO-CAMP-W8", "CW8-7.0", 8, 0.070, 20.0, 411.0, 342.0, 48.0, 0.25, -1400.0, 40.0, 0.4},
         }}, &g_camp_cost_ledger, &g_camp_gate);
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);

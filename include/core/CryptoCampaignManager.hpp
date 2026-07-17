@@ -78,6 +78,20 @@ public:
         double      size_mult  = 1.0;    // size tier (placeholder notional weighting)
         double      retire_bp  = 0.0;    // <0: auto-retire when banked REAL <= this
         double      max_validated_rt_bp = 40.0;  // highest RT the cell's BT re-sim passed
+        // S-2026-07-17 PROFIT LOCK (operator: 17f out-of-class ruling REVERSED — every
+        // live book must lock profit, no ride-back-to-BE). Once the fee-BE point is
+        // reached (pmfe >= 0.9*S, same arm as the fee-BE floor), the stop ratchets to
+        // pe*(1 + pmfe*(1-pgiveback)) — locks (1-g) of MFE, mimic-way. 1.0 = inert
+        // (FORBIDDEN live: [PROFIT-LOCK-GATE] boot violation). Tightest certified g per
+        // cell: backtest/PROFIT_LOCK_GSWEEP_FINDINGS_2026-07-17.md (Crypto repo) — a
+        // uniform 0.3-0.5 flips TRX ~zero (fat-tail amputation), arm-at-cost-covered is
+        // uniformly worse than arm-at-fee-BE.
+        double      pgiveback  = 1.0;
+        // One-shot honest flatten (operator NOW-close order, e.g. LDO 2026-07-17): a
+        // campaign whose entry_ts_ms <= this closes at the CURRENT MARK through the
+        // normal close_campaign_ book path (reason CAMP_FLATTEN) on the next tick.
+        // Entries after this ts are untouched. 0 = off.
+        int64_t     flatten_before_ms = 0;
     };
 
     struct Config {
@@ -126,6 +140,14 @@ public:
                 if (s.epx_pending) { s.epx = px; s.epx_pending = false; }
         }
         close_ = px;
+        // S-2026-07-17 FLATTEN path (operator NOW-close order): books at the current
+        // mark through the normal book path. One-shot by construction — any future
+        // entry carries a later entry_ts_ms than the wired cutoff.
+        if (camp_cell_ >= 0 && cfg_.cells[camp_cell_].flatten_before_ms > 0 &&
+            entry_ts_ms_ > 0 && entry_ts_ms_ <= cfg_.cells[camp_cell_].flatten_before_ms) {
+            close_campaign_(px, px, ts_ms, bar, "CAMP_FLATTEN");
+            return;
+        }
         // intra-tick structural stop (backtest: bar LOW). Model fill at the
         // stop px (BT convention); REAL column at the worse-of trip px.
         if (camp_cell_ >= 0 && px <= pstop_px_)
@@ -240,6 +262,10 @@ public:
             entry_bar_   = (int64_t)num("\"ebar\":", bar_);
             phwm_bar_    = (int64_t)num("\"hbar\":", bar_);
             if (pe_ <= 0.0 || pstop_px_ <= 0.0) camp_cell_ = -1;   // corrupt -> no campaign
+            // S-2026-07-17: re-arm the full ladder (incl. profit lock) immediately on
+            // restore — the saved pstop may predate the pgiveback wire or the restart
+            // gap; the lock must hold from the first tick, not the next H1 close.
+            ratchet_parent_stop_();
         }
         std::printf("[CAMP-SEED] %s restored: ring=%zu camp_cell=%d%s\n",
                     cfg_.pfx.c_str(), ring_.size(), camp_cell_,
@@ -283,17 +309,8 @@ private:
 
         // 2) parent ladder on the close (HWM/MFE are close-driven, BT-faithful)
         if (camp_cell_ >= 0) {
-            const auto& cc = cfg_.cells[camp_cell_];
-            const double rt = ledger_->net_rt_bp(cfg_.symbol);
             if (close > phwm_) { phwm_ = close; phwm_bar_ = closed_bar; }
-            const double pmfe = (phwm_ / pe_ - 1.0) * 1e4;
-            const double S = cc.pstop_bp;
-            if (pmfe >= 0.9 * S)
-                pstop_px_ = std::max(pstop_px_, pe_ * (1.0 + (rt + 3.0) / 1e4));
-            if (pmfe >= 1.8 * S)
-                pstop_px_ = std::max(pstop_px_, pe_ * (1.0 + (rt + 0.4 * S) / 1e4));
-            if (cc.ptrail_bp > 0 && pmfe >= 2.0 * S)
-                pstop_px_ = std::max(pstop_px_, phwm_ * (1.0 - cc.ptrail_bp / 1e4));
+            ratchet_parent_stop_();
         }
 
         // 3) confirmed entry — only while NO campaign is open on this symbol
@@ -326,6 +343,27 @@ private:
         }
         // MIMIC lots: cfg_.mimic_enabled is false in v1 and there is no code
         // path that opens one — see header verdict (revisit at tick scale).
+    }
+
+    // parent protective-stop ladder from current pe_/phwm_ (ratchet-only, never down).
+    // Called on every finalized close AND at restore (a restart must not reopen a
+    // giveback window until the next H1 close — S-2026-07-17).
+    void ratchet_parent_stop_() {
+        if (camp_cell_ < 0 || pe_ <= 0.0) return;
+        const auto& cc = cfg_.cells[camp_cell_];
+        const double rt = ledger_->net_rt_bp(cfg_.symbol);
+        const double pmfe = (phwm_ / pe_ - 1.0) * 1e4;
+        const double S = cc.pstop_bp;
+        if (pmfe >= 0.9 * S)
+            pstop_px_ = std::max(pstop_px_, pe_ * (1.0 + (rt + 3.0) / 1e4));
+        if (pmfe >= 1.8 * S)
+            pstop_px_ = std::max(pstop_px_, pe_ * (1.0 + (rt + 0.4 * S) / 1e4));
+        if (cc.ptrail_bp > 0 && pmfe >= 2.0 * S)
+            pstop_px_ = std::max(pstop_px_, phwm_ * (1.0 - cc.ptrail_bp / 1e4));
+        // S-2026-07-17 PROFIT LOCK (17f ruling reversed): mimic-way giveback from the
+        // fee-BE point — locks (1-pgiveback) of MFE. See CellCfg::pgiveback.
+        if (cc.pgiveback < 1.0 && pmfe >= 0.9 * S)
+            pstop_px_ = std::max(pstop_px_, pe_ * (1.0 + pmfe * (1.0 - cc.pgiveback) / 1e4));
     }
 
     void close_campaign_(double trip_px, double model_px, int64_t ts_ms,

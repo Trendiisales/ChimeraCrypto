@@ -4353,13 +4353,22 @@ int main() {
     {
         struct PJCell { const char* pfx; const char* cell; const char* sym; int W;
                         double thr; double s_bp; double g; double retire_bp; };
+        // S-2026-07-17 PROFIT LOCK (operator 17f reversal): g=1.0 (ride-to-reversal, NO
+        // giveback trail — why ETH-PJ7W24 rode +5%+ back to ~BE) is FORBIDDEN live.
+        // Wired to the tightest g that KEEPS the full standalone gate at 20bp wired AND
+        // 28bp measured-class cost (PROFIT_LOCK_GSWEEP_FINDINGS_2026-07-17.md):
+        //   AAVE 0.85 (+11063 PF1.48 2x+10775 @28bp; g0.8 fails WF-H2)
+        //   ETH  0.85 (+18297 ~= g1.0 +17424 — the lock is ~free; g<=0.8 fails 2x)
+        //   GRT  0.70 (+13193 PF1.54 2x+7817; g0.6 fails)
+        // A uniform tight 0.3-0.5 flips AAVE/GRT NEGATIVE (fat-tail amputation — same
+        // mechanism as the 07-16 ETH exit-overlay FAIL). Do not tighten past these.
         static const std::vector<PJCell> _pj_cells = {
-            {"AAVE", "PJ4W1",   "aaveusdt", 1,  0.040, 100.0, 1.0, -10300.0},
+            {"AAVE", "PJ4W1",   "aaveusdt", 1,  0.040, 100.0, 0.85, -10300.0},
             // DOGE PJ3W12 CULLED S-2026-07-14 (operator): edge 2021-concentrated
             // (2021 +91,271bp; 2022 -15,358; 2023-26 -1,979bp) — see
             // Crypto/backtest/UPJUMP_LOWTHR_STOPRESCUE_FINDINGS.md side-finding.
-            {"ETH",  "PJ7W24",  "ethusdt",  24, 0.070, 400.0, 1.0,  -6700.0},
-            {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050, 500.0, 1.0,  -9900.0},
+            {"ETH",  "PJ7W24",  "ethusdt",  24, 0.070, 400.0, 0.85,  -6700.0},
+            {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050, 500.0, 0.70,  -9900.0},
         };
         // feed objects: symbol/tag holders ONLY (SWEET pattern) — never g_slots'd,
         // never wire_engine'd; the per-tick companion driver matches on feed symbol.
@@ -4543,18 +4552,28 @@ int main() {
     // MIMIC LOTS OFF (no standalone H1 edge — tick-granularity revisit).
     // ADVERSE-PROTECTION: backtested structural stops + fee-BE floor +
     // net-lock + HWM trail per cell (see CryptoCampaignManager.hpp header).
+    // S-2026-07-17 PROFIT LOCK (operator: 17f out-of-class ruling REVERSED after LDO rode
+    // +5.42% peak back to +2.28%): every campaign cell now carries pgiveback<1.0 — the
+    // tightest g the data certifies (net>0, both WF halves, 30/40bp stress re-sims;
+    // Crypto/backtest/PROFIT_LOCK_GSWEEP_FINDINGS_2026-07-17.md). UNI 0.5/0.5 IMPROVES
+    // net (+78/+161 vs +74/+156%); TRX 0.6 (-6% net, cliff at 0.5 -> +1%); LDO 0.4
+    // (+38 vs +68% — the cost of the lock, operator-ordered). A uniform 0.3-0.5 kills
+    // TRX (fat-tail amputation) — do NOT tighten past these without a fresh gsweep.
+    // LDO also carries flatten_before_ms=1784269800000 (2026-07-17 06:30 UTC): the open
+    // Jul-15 campaign (pe=0.35815, phwm +5.42%) books at current mark on first tick
+    // (CAMP_FLATTEN) — the operator NOW-close order. One-shot; later entries unaffected.
     chimera::CryptoCampaignManager uni_campaign(
         {"uniusdt", "UNI", 3600, /*mimic*/ false, {
-            {"UNI-CAMP-W1", "CW1-3.5", 1, 0.035, 20.0, 135.0, 270.0, 38.0, 1.0,  -550.0, 40.0},
-            {"UNI-CAMP-W2", "CW2-4.0", 2, 0.040, 20.0, 216.0, 270.0, 38.0, 1.0,  -800.0, 40.0},
+            {"UNI-CAMP-W1", "CW1-3.5", 1, 0.035, 20.0, 135.0, 270.0, 38.0, 1.0,  -550.0, 40.0, 0.5},
+            {"UNI-CAMP-W2", "CW2-4.0", 2, 0.040, 20.0, 216.0, 270.0, 38.0, 1.0,  -800.0, 40.0, 0.5},
         }}, &g_camp_cost_ledger, &g_camp_gate);
     chimera::CryptoCampaignManager trx_campaign(
         {"trxusdt", "TRX", 3600, /*mimic*/ false, {
-            {"TRX-CAMP-W8", "CW8-3.5", 8, 0.035, 20.0, 111.0, 0.0,   13.0, 0.5,  -450.0, 40.0},
+            {"TRX-CAMP-W8", "CW8-3.5", 8, 0.035, 20.0, 111.0, 0.0,   13.0, 0.5,  -450.0, 40.0, 0.6},
         }}, &g_camp_cost_ledger, &g_camp_gate);
     chimera::CryptoCampaignManager ldo_campaign(
         {"ldousdt", "LDO", 3600, /*mimic*/ false, {
-            {"LDO-CAMP-W8", "CW8-7.0", 8, 0.070, 20.0, 411.0, 342.0, 48.0, 0.25, -1400.0, 40.0},
+            {"LDO-CAMP-W8", "CW8-7.0", 8, 0.070, 20.0, 411.0, 342.0, 48.0, 0.25, -1400.0, 40.0, 0.4, 1784269800000LL},
         }}, &g_camp_cost_ledger, &g_camp_gate);
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
@@ -4574,13 +4593,50 @@ int main() {
             m->set_on_clip(persist_companion_clip);
             for (const auto& cc : m->config().cells)
                 std::printf("[CAMP-INIT] %s W=%d thr=%+.1f%% conf=%.0fbp stop=%.0fbp trail=%s "
-                            "mult=x%.2f retire@%.0fbp maxRT=%.0fbp SHADOW mimic=OFF\n",
+                            "plock-g=%.2f%s mult=x%.2f retire@%.0fbp maxRT=%.0fbp SHADOW mimic=OFF\n",
                             cc.tag.c_str(), cc.W, cc.thr * 100, cc.confirm_bp, cc.pstop_bp,
                             cc.ptrail_bp > 0 ? std::to_string((int)cc.ptrail_bp).c_str() : "RIDE",
+                            cc.pgiveback, cc.flatten_before_ms > 0 ? " FLATTEN-ARMED" : "",
                             cc.size_mult, cc.retire_bp, cc.max_validated_rt_bp);
         }
         restore_campaign_state();   // verbatim window/campaign restore (stale >24 bars discarded)
         emit_companion_state();     // include campaign legs in the startup emit
+    }
+    // ── S-2026-07-17 PROFIT-LOCK-GATE (operator: 17f out-of-class ruling REVERSED —
+    // structural, MIMIC-FLOOR-GATE style, runs every boot). NO live book may ride
+    // profit back down: every campaign cell needs pgiveback<1.0 and every jump_floor
+    // cell needs jf_giveback<1.0 — g>=1.0 means the only lock is the BE floor (the
+    // LDO +5.42%->+2.28% / ETH-PJ7W24 ride-back class). mimic_floor cells with
+    // g>=1.0 print as documented exceptions (ADA-REGIME re-gated at g1.0 07-16:
+    // tighter g fails WF; its exit driver is the parent D1 flip, not a reversal
+    // window) — not violations, but visible every boot.
+    {
+        int _locked = 0, _viol = 0, _exc = 0;
+        for (const auto* m : g_campaigns)
+            for (const auto& cc : m->config().cells) {
+                if (cc.pgiveback < 1.0) { ++_locked; continue; }
+                ++_viol;
+                std::printf("[PROFIT-LOCK-VIOLATION] %s campaign cell pgiveback=%.2f (>=1.0 — no profit lock). Wire the tightest certified g (PROFIT_LOCK_GSWEEP findings) before shipping.\n",
+                            cc.tag.c_str(), cc.pgiveback);
+            }
+        for (auto* clip : _all_clips) {
+            const auto& cc = clip->config();
+            if (cc.jump_floor) {
+                if (cc.jf_giveback < 1.0) { ++_locked; continue; }
+                ++_viol;
+                std::printf("[PROFIT-LOCK-VIOLATION] %s jump_floor cell jf_giveback=%.2f (>=1.0 — floor-only, rides profit back to BE). Wire the tightest certified g before shipping.\n",
+                            cc.tag.c_str(), cc.jf_giveback);
+            } else if (cc.mimic_floor) {
+                if (cc.mimic_giveback < 1.0) { ++_locked; continue; }
+                ++_exc;
+                std::printf("[PROFIT-LOCK-EXCEPTION] %s mimic_floor g=%.2f — parent-flip exit, tighter g failed its 07-16 re-gate (documented, not a violation).\n",
+                            cc.tag.c_str(), cc.mimic_giveback);
+            } else {
+                ++_locked;   // tight/wide gb arms + be_floor trail cells carry their own certified locks
+            }
+        }
+        std::printf("[PROFIT-LOCK-GATE] %d locked, %d documented exception(s), %d VIOLATION.\n",
+                    _locked, _exc, _viol);
     }
     std::fflush(stdout);
 

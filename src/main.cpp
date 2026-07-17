@@ -4572,6 +4572,28 @@ int main() {
             {"ETC",  "etcusdt",  -426.0},   // n=359 +344% PF10.05 worst -213.0bp
             {"VET",  "vetusdt",  -1278.0},  // n=432 +318% PF5.72 worst -638.8bp
             {"RUNE", "runeusdt", -1262.0},  // n=487 +392% PF4.83 worst -631.2bp
+            // S-2026-07-18k: FLEET-WIDE rescue tier (operator: "do this fleet wide") — the 18
+            // remaining coins without a UJ2W8-MIM cell, certified FLEETWIDE_RESCUE_TIER_CERT_
+            // 2026-07-18.md (same harness/recipe/gate; 17/18 full-grid 24/24 PASS, BTC 23/24
+            // with pick-neighborhood 9/9 — plateau intact). Every coin PASSES the W8/+2%/g0.20 pick.
+            {"APT",   "aptusdt",   -1067.0},  // n=504 +369% PF4.71 worst -533.3bp
+            {"ATOM",  "atomusdt",  -1218.0},  // n=389 +241% PF5.69 worst -608.8bp
+            {"AVAX",  "avaxusdt",  -862.0},   // n=437 +375% PF6.42 worst -431.2bp
+            {"BCH",   "bchusdt",   -601.0},   // n=350 +317% PF9.22 worst -300.3bp
+            {"BTC",   "btcusdt",   -413.0},   // n=188 +115% PF8.45 worst -206.5bp
+            {"DOT",   "dotusdt",   -707.0},   // n=391 +311% PF6.57 worst -353.7bp
+            {"INJ",   "injusdt",   -938.0},   // n=597 +462% PF4.30 worst -469.0bp
+            {"LINK",  "linkusdt",  -668.0},   // n=407 +338% PF8.00 worst -333.8bp
+            {"LTC",   "ltcusdt",   -478.0},   // n=331 +239% PF5.21 worst -238.8bp
+            {"OP",    "opusdt",    -901.0},   // n=524 +432% PF5.55 worst -450.7bp
+            {"SOL",   "solusdt",   -634.0},   // n=428 +333% PF6.31 worst -316.9bp
+            {"SUI",   "suiusdt",   -1074.0},  // n=496 +426% PF4.62 worst -537.0bp
+            {"TIA",   "tiausdt",   -941.0},   // n=471 +407% PF4.54 worst -470.4bp
+            {"XRP",   "xrpusdt",   -496.0},   // n=313 +242% PF6.35 worst -248.1bp
+            {"GRT",   "grtusdt",   -855.0},   // n=491 +404% PF5.39 worst -427.7bp
+            {"LDO",   "ldousdt",   -833.0},   // n=557 +423% PF4.11 worst -416.7bp
+            {"SUSHI", "sushiusdt", -1534.0},  // n=514 +407% PF4.93 worst -767.1bp
+            {"THETA", "thetausdt", -1011.0},  // n=505 +409% PF5.64 worst -505.6bp
         };
         static std::vector<chimera::EdgeEngine> _rescue_feeds; _rescue_feeds.reserve(_rescue_cells.size());
         for (const auto& rc : _rescue_cells) {

@@ -1182,6 +1182,15 @@ static std::mutex g_companion_mtx;
 
 static void save_companion_det_state();   // fwd decl (defined below); called on jf-close for Fig-2 immediate persist
 static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRecord& r) {
+    // S-17s SIGNAL-ONLY cells (GRT-PJ5W1 driver): NOTHING books — no ledger row, no desk
+    // export — but the Fig-2 immediate det-state persist MUST still run or a restart in
+    // the post-close window resurrects the leg (and the ledger-dedup can't catch it,
+    // since a signal-only close has no ledger row to match). Same -J1 gate as below.
+    if (r.signal_only) {
+        if (r.tag.size() >= 3 && r.tag.compare(r.tag.size() - 3, 3, "-J1") == 0)
+            save_companion_det_state();
+        return;
+    }
     FILE* f = fopen(COMPANION_TRADES_FILE, "a");
     if (!f) { std::fprintf(stderr, "[CLIP_LOG] failed to open %s for append\n", COMPANION_TRADES_FILE); return; }
     std::ostringstream js; js << std::fixed;
@@ -4348,11 +4357,26 @@ int main() {
             _grid_feeds.push_back(sc.feed);
         }
     }
-    // ── S-2026-07-14 PER-COIN JUMP-FLOOR CELLS (operator: "revisit… pull every lever…
-    // where it becomes viable for each coin" -> then "add these to our trades as you
-    // have them here"). EXPLICIT operator override of the immediate-entry ban for
-    // THESE cells only (feedback-no-immediate-entry-upjump-mimic-only stands for
-    // everything else; KILL_UPJUMP_CLIPS above stays true — that grid remains dead).
+    // ── S-2026-07-14 PER-COIN JUMP-FLOOR CELLS — S-2026-07-17s OVERRIDE REVOKED ──
+    // (operator 2026-07-17: "change this to a mimic engine, i want no more upjump").
+    // The S-07-14 immediate-entry override is DEAD. What remains of the family:
+    //   AAVE-PJ4W1  REMOVED — floored BE-mimic conversion certified NO-GO
+    //                (AAVE_GRT_PJ_MIMIC_FINDINGS_2026-07-17.md: WF-H1 negative at
+    //                EVERY g 0.05-1.0 under the 17c foundation recipe; net-neg every
+    //                g x lc x cost under the legacy method). Coin keeps floored
+    //                coverage via AAVE-UJ15-BECASC (all-22 PASS).
+    //   ETH-PJ7W24  REMOVED — mimic NO-GO (07-16, reproduced 07-17: WF-H1 neg all
+    //                cells). Coin keeps floored coverage via ETH-UJ15-BECASC.
+    //   GRT-PJ5W1   RETAINED as SIGNAL-ONLY (signal_only=true): books NOTHING (no
+    //                bank/ledger/desk row), full jf state machine still runs purely
+    //                to drive the certified GRT-PJ5W1-MIM floored mimic below
+    //                (companion-on-companion hook reads jf_in_position()/jf_entry_px();
+    //                certified basis = mimic on THIS parent's settled jf state —
+    //                keeping the driver verbatim preserves the certification).
+    // Original S-07-14 context (historical): EXPLICIT operator override of the
+    // immediate-entry ban for these cells only (feedback-no-immediate-entry-upjump-
+    // mimic-only stood for everything else; KILL_UPJUMP_CLIPS above stays true —
+    // that grid remains dead).
     // NOT the retired be_floor family: jump_floor enters ON the jump (pays cost, can
     // lose pre-BE — the exposure IS in the BT verdict), floors at BE once a close
     // covers cost, exits on reversal. Harness: Crypto/backtest/upjump2pct_be_bt.cpp
@@ -4382,12 +4406,10 @@ int main() {
         // A uniform tight 0.3-0.5 flips AAVE/GRT NEGATIVE (fat-tail amputation — same
         // mechanism as the 07-16 ETH exit-overlay FAIL). Do not tighten past these.
         static const std::vector<PJCell> _pj_cells = {
-            {"AAVE", "PJ4W1",   "aaveusdt", 1,  0.040, 100.0, 0.85, -10300.0},
-            // DOGE PJ3W12 CULLED S-2026-07-14 (operator): edge 2021-concentrated
-            // (2021 +91,271bp; 2022 -15,358; 2023-26 -1,979bp) — see
-            // Crypto/backtest/UPJUMP_LOWTHR_STOPRESCUE_FINDINGS.md side-finding.
-            {"ETH",  "PJ7W24",  "ethusdt",  24, 0.070, 400.0, 0.85,  -6700.0},
-            {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050, 500.0, 0.70,  -9900.0},
+            // AAVE-PJ4W1 + ETH-PJ7W24 REMOVED S-17s (imm-entry ban re-imposed; mimic
+            // conversions certified NO-GO — see block comment above). DOGE PJ3W12
+            // culled S-07-14 (2021-concentrated edge, UPJUMP_LOWTHR_STOPRESCUE_FINDINGS).
+            {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050, 500.0, 0.70,  -9900.0},   // SIGNAL-ONLY driver for GRT-PJ5W1-MIM
         };
         // feed objects: symbol/tag holders ONLY (SWEET pattern) — never g_slots'd,
         // never wire_engine'd; the per-tick companion driver matches on feed symbol.
@@ -4400,6 +4422,7 @@ int main() {
             c.parent_tag = _grid_ptags.back(); c.tag = _grid_ctags.back(); c.symbol = pc.sym;
             c.det_w = pc.W; c.det_thr = pc.thr;
             c.jump_floor = true; c.jf_giveback = pc.g; c.jf_prebe_stop_bp = pc.s_bp;
+            c.signal_only = true; // S-17s: books NOTHING — pure signal driver for the -MIM cell
             c.tf_secs = 3600; c.round_trip_bp = 20.0;
             c.confirm_bp = 0.0;   // IMMEDIATE entry — the backtested lever (jf path never reads it)
             c.loss_cut_bp = 0.0;  // pre-BE stop handled by jf_prebe_stop_bp, not the leg cut
@@ -4549,8 +4572,9 @@ int main() {
             {
                 const auto& cc = _all_clips[i]->config();
                 if (cc.jump_floor)
-                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  JUMP-FLOOR imm-entry preBEstop=%.0fbp gb=%.2f rt=%.0fbp mult=x%.1f retire@%.0fbp%s shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  JUMP-FLOOR %s preBEstop=%.0fbp gb=%.2f rt=%.0fbp mult=x%.1f retire@%.0fbp%s shadow=1\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
+                        cc.signal_only ? "SIGNAL-ONLY(books nothing, drives mimic)" : "imm-entry",
                         cc.jf_prebe_stop_bp, cc.jf_giveback, cc.round_trip_bp,
                         cc.size_mult, cc.retire_bp,
                         _all_clips[i]->is_retired() ? " [RETIRED]" : (cc.rank_out ? " [RANK-OUT]" : ""));

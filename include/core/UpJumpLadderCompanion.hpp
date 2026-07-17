@@ -140,6 +140,15 @@ public:
         bool    jump_floor       = false;
         double  jf_giveback      = 1.0;   // g: fraction of MFE given back before trail exit; 1.0 = reversal-only
         double  jf_prebe_stop_bp = 0.0;   // s: pre-BE hard stop bp below entry; 0 = none
+        // ── S-2026-07-17s SIGNAL-ONLY (operator: "i want no more upjump") ────────
+        // The full jf state machine still runs (detector + entry + floor + trail) so a
+        // companion-on-companion mimic can observe jf_in_position()/jf_entry_px(), but
+        // the cell BOOKS NOTHING: no bank, no retire check; the ClipRecord is stamped
+        // signal_only=true so the on_clip_ handler skips the ledger/desk (it still runs
+        // for the Fig-2 immediate det-state persist — resurrection defense unchanged).
+        // Used by GRT-PJ5W1: the imm-entry upjump BOOK is dead, only its signal drives
+        // the certified GRT-PJ5W1-MIM floored mimic.
+        bool    signal_only      = false;
         // ── MIMIC-FLOOR mode (S-2026-07-15, operator: unify EVERY mimic/companion cell
         // to ONE exit = BE-floored tight-giveback trail — the honest jump_floor floor+HWM
         // trail math ported onto the CONFIRMED-ENTRY ladder path so all SWEET/REGIME cells
@@ -222,6 +231,7 @@ public:
         double  size_mult = 1.0;           // per-coin weight this clip was booked under (S-2026-07-08)
         int     bars_held = 0, clip_num = 0;
         bool    shadow = true;
+        bool    signal_only = false;       // S-17s: handler must NOT ledger/desk this record
     };
     using ClipCallback = std::function<void(const ClipRecord&)>;
 
@@ -648,7 +658,11 @@ private:
         r.bars_held = (int)(ts_ms / (cfg_.tf_secs * 1000) - jf_open_bar_);
         r.clip_num = ++clip_num_;
         r.shadow = shadow_mode;
-        banked_bp_ += net; banked_bp_real_ += net; banked_bp_real_w_ += net * cfg_.size_mult;
+        r.signal_only = cfg_.signal_only;
+        // S-17s SIGNAL-ONLY: no bank — the cell trades nothing, it only drives its mimic.
+        if (!cfg_.signal_only) {
+            banked_bp_ += net; banked_bp_real_ += net; banked_bp_real_w_ += net * cfg_.size_mult;
+        }
         const double bE = jf_E_; const double bmfe = jf_mfe_;   // for the log line below
         // S-2026-07-17 ORDER FIX (ETH-PJ7W24 zombie root-root cause): position state must be
         // CLEARED BEFORE on_clip_ fires. Fig-2's immediate det-state persist runs INSIDE the
@@ -662,10 +676,11 @@ private:
         det_in_ = false; det_entry_ = 0.0;                      // persistence mirror
         legs_.clear();                                          // drop the display leg
         // jf_armed_ stays false: the next entry needs a close with j < det_thr first (fresh jump)
-        if (on_clip_) on_clip_(r);
-        check_retire_();
-        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d JUMPFLOOR\n",
-            r.tag.c_str(), reason, net, gross, bmfe * 100.0, r.bars_held, bE, px, shadow_mode ? 1 : 0);
+        if (on_clip_) on_clip_(r);                       // signal_only: handler persists det-state ONLY
+        if (!cfg_.signal_only) check_retire_();          // a bookless cell never retires (signal must persist)
+        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d %s\n",
+            r.tag.c_str(), reason, net, gross, bmfe * 100.0, r.bars_held, bE, px, shadow_mode ? 1 : 0,
+            cfg_.signal_only ? "JUMPFLOOR-SIGNAL-ONLY(not booked)" : "JUMPFLOOR");
         std::fflush(stdout);
     }
 

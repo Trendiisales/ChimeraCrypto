@@ -2146,6 +2146,16 @@ struct LiveRuntimeConfig {
     // entries auto-halt until a clean reconcile (exits always pass). Inert in
     // shadow (no live stream to lapse). Default 45s.
     double      user_stream_halt_ms = 45000.0;
+    // LIVE PILOT SCOPE (2026-07-18, Binance go-live pilot). In LIVE mode the
+    // gateway restricts entries to live_pilot_symbols, clamps per-order
+    // notional, and caps aggregate live gross. Inert in shadow. STRUCTURAL
+    // GUARD: mode=LIVE with an EMPTY pilot list is a HARD startup abort unless
+    // live_full=true is set explicitly — the first live window must be scoped
+    // by construction, not by promise.
+    std::vector<std::string> live_pilot_symbols;          // e.g. ["BTCUSDT","ETHUSDT"]
+    double      live_pilot_max_order_usd = 12.0;
+    double      live_pilot_max_gross_usd = 50.0;
+    bool        live_full = false;
 };
 
 static std::string lrc_extract_string(const std::string& s, const char* key) {
@@ -2177,6 +2187,26 @@ static bool lrc_extract_bool(const std::string& s, const char* key, bool fallbac
     if (s.compare(vstart, 4, "true")  == 0) return true;
     if (s.compare(vstart, 5, "false") == 0) return false;
     return fallback;
+}
+
+// Extract a flat string array key: "key": ["A","B"]. Returns empty on absence.
+static std::vector<std::string> lrc_extract_string_array(const std::string& s, const char* key) {
+    std::vector<std::string> out;
+    std::string needle = std::string("\"") + key + "\":";
+    auto pos = s.find(needle);
+    if (pos == std::string::npos) return out;
+    auto open = s.find('[', pos + needle.size());
+    if (open == std::string::npos) return out;
+    auto close = s.find(']', open);
+    if (close == std::string::npos) return out;
+    size_t p = open;
+    while ((p = s.find('"', p)) != std::string::npos && p < close) {
+        auto e = s.find('"', p + 1);
+        if (e == std::string::npos || e > close) break;
+        out.push_back(s.substr(p + 1, e - p - 1));
+        p = e + 1;
+    }
+    return out;
 }
 
 static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "config/live_config.json") {
@@ -2237,6 +2267,13 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     }
     // Phase-8G: user-data-stream heartbeat-lapse auto-halt threshold (ms).
     cfg.user_stream_halt_ms = lrc_extract_double(content, "user_stream_halt_ms", 45000.0);
+    // LIVE PILOT SCOPE keys (uppercased; inert unless mode=LIVE).
+    cfg.live_pilot_symbols = lrc_extract_string_array(content, "live_pilot_symbols");
+    for (auto& sy : cfg.live_pilot_symbols)
+        for (auto& ch : sy) ch = (char)std::toupper((unsigned char)ch);
+    cfg.live_pilot_max_order_usd = lrc_extract_double(content, "live_pilot_max_order_usd", 12.0);
+    cfg.live_pilot_max_gross_usd = lrc_extract_double(content, "live_pilot_max_gross_usd", 50.0);
+    cfg.live_full = lrc_extract_bool(content, "live_full", false);
     std::printf("[STARTUP] live_config loaded from %s: creds=%s shadow=%d max_pos=%.2f min_edge=%.2fbp protection_disabled=%d\n",
                 opened.c_str(), cfg.credentials_file.c_str(),
                 cfg.shadow_mode ? 1 : 0, cfg.max_position_usd, cfg.min_edge_bps,
@@ -2706,6 +2743,38 @@ int main() {
     // The gateway applies mode + kill-switch (daily-loss / emergency halt) +
     // exchange filters; risk-reducing EXITS are never blocked.
     chimera::ExecutionGatewayT<chimera::SpotExecutor> gateway(executor, g_runtime_mode);
+
+    // ── LIVE PILOT SCOPE (2026-07-18). Structural guard: LIVE requires either
+    // a non-empty pilot allowlist or an EXPLICIT live_full=true opt-out. The
+    // first real-money window is bounded by construction (symbols + per-order
+    // + aggregate gross), not by operator promise. Inert in SHADOW.
+    if (g_runtime_mode == chimera::RuntimeMode::LIVE &&
+        runtime_cfg.live_pilot_symbols.empty() && !runtime_cfg.live_full) {
+        std::fprintf(stderr,
+            "\n[STARTUP] FATAL: mode=LIVE but live_pilot_symbols is empty and "
+            "live_full!=true.\n"
+            "The first live window must be pilot-scoped: set e.g.\n"
+            "  \"live_pilot_symbols\": [\"BTCUSDT\",\"ETHUSDT\"],\n"
+            "  \"live_pilot_max_order_usd\": 12,\n"
+            "  \"live_pilot_max_gross_usd\": 50\n"
+            "in config/live_config.json (or live_full=true to deliberately "
+            "run unscoped).\nRefusing to start.\n\n");
+        std::exit(1);
+    }
+    if (!runtime_cfg.live_pilot_symbols.empty() && !runtime_cfg.live_full) {
+        gateway.pilot_enabled       = true;   // enforcement only bites in LIVE mode
+        gateway.pilot_symbols       = runtime_cfg.live_pilot_symbols;
+        gateway.pilot_max_order_usd = runtime_cfg.live_pilot_max_order_usd;
+        gateway.pilot_max_gross_usd = runtime_cfg.live_pilot_max_gross_usd;
+        std::string syms;
+        for (auto& sy : gateway.pilot_symbols) { if (!syms.empty()) syms += ","; syms += sy; }
+        std::printf("[PILOT-SCOPE] %s: %d symbol(s) [%s] max_order=$%.2f max_gross=$%.2f\n",
+                    g_runtime_mode == chimera::RuntimeMode::LIVE
+                        ? "LIVE pilot ACTIVE" : "configured (inert until mode=LIVE)",
+                    (int)gateway.pilot_symbols.size(), syms.c_str(),
+                    gateway.pilot_max_order_usd, gateway.pilot_max_gross_usd);
+        std::fflush(stdout);
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // Phase-2 review (2026-07-11) — EXCHANGE TRUTH. Attach the authoritative

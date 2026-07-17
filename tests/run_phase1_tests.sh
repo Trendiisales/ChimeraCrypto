@@ -36,6 +36,7 @@ run_pos riprider_parity        riprider_parity_test.cpp
 run_pos runtime_mode           runtime_mode_test.cpp
 run_pos http_control_auth      http_control_auth_test.cpp
 run_pos execution_gateway      execution_gateway_test.cpp "$BREW_INC"
+run_pos pilot_scope            pilot_scope_test.cpp "$BREW_INC"
 
 # NEGATIVE compile test: raw execute() from strategy code MUST NOT compile.
 printf '── %-28s ' "spotexecutor_private"

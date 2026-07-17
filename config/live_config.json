@@ -6,5 +6,9 @@
     "cost_bps_note": "FIXED 2026-03-17: was 6.5 (wrong). Actual taker cost = 8bp fees + 1bp spread + 1bp slip = ~10bp round trip. See TradingConfig.hpp header.",
     "min_edge_bps": 10.0,
     "max_position_usd": 10000,
+    "live_pilot_symbols": ["BTCUSDT", "ETHUSDT"],
+    "live_pilot_max_order_usd": 12,
+    "live_pilot_max_gross_usd": 50,
+    "live_pilot_note": "LIVE PILOT SCOPE (inert in shadow): in mode=live, entries restricted to these symbols, per-order notional clamped, aggregate live gross capped. mode=live with empty list + live_full!=true = startup abort.",
     "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "SUIUSDT", "XRPUSDT", "LINKUSDT"]
 }

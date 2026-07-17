@@ -29,6 +29,9 @@
 #include <cstdio>
 #include <chrono>
 #include <cstdint>
+#include <vector>
+#include <algorithm>
+#include <cctype>
 #include "live/BinanceREST.hpp"   // OrderResult
 #include "live/RuntimeMode.hpp"
 #include "live/ExchangeLedger.hpp"
@@ -75,6 +78,24 @@ public:
     RuntimeMode mode() const { return mode_; }
     double min_notional_usd = 5.0;   // Binance spot MIN_NOTIONAL floor
 
+    // ------------------------------------------------------------------------
+    // LIVE PILOT SCOPE (2026-07-18, Binance go-live pilot). Bounds the FIRST
+    // real-money window: in LIVE mode only, entries are restricted to an
+    // explicit symbol allowlist, per-order notional is clamped, and aggregate
+    // live gross exposure is capped. INERT in SHADOW/PAPER/DISABLED — shadow
+    // research behaviour stays byte-identical. Exits are NEVER blocked (risk-
+    // reducing; a non-pilot-symbol exit still passes so emergency flatten and
+    // reconcile-driven closes always work). Configured from live_config.json
+    // (live_pilot_symbols / live_pilot_max_order_usd / live_pilot_max_gross_usd)
+    // in main.cpp; pilot_enabled=false + mode=LIVE means the caller opted into
+    // FULL live (requires explicit live_full=true there — enforced at startup).
+    // ------------------------------------------------------------------------
+    bool                     pilot_enabled       = false;
+    std::vector<std::string> pilot_symbols;               // UPPERCASE
+    double                   pilot_max_order_usd = 0.0;   // per-entry clamp
+    double                   pilot_max_gross_usd = 0.0;   // aggregate open cap
+    double                   pilot_gross_usd     = 0.0;   // running (gateway thread)
+
     OrderResult submit(const OrderIntent& in) {
         OrderResult r;
         // 1. MODE
@@ -99,6 +120,30 @@ public:
                 log_reject(in, why.c_str()); r.error = why; return r;
             }
             qty = n.qty;
+        }
+        // 4b. LIVE PILOT SCOPE — entries only; inert outside LIVE mode.
+        //     Symbol must be allowlisted; per-order notional clamped; aggregate
+        //     live gross capped. Exits never touch this block.
+        if (pilot_enabled && mode_ == RuntimeMode::LIVE && !in.is_exit) {
+            std::string su = in.symbol;
+            for (auto& c : su) c = (char)std::toupper((unsigned char)c);
+            if (std::find(pilot_symbols.begin(), pilot_symbols.end(), su)
+                    == pilot_symbols.end()) {
+                log_reject(in, "pilot-scope: symbol not in live pilot allowlist");
+                r.error = "pilot-scope symbol"; return r;
+            }
+            if (pilot_max_order_usd > 0.0 && qty * in.ref_px > pilot_max_order_usd) {
+                double nq = pilot_max_order_usd / in.ref_px;
+                std::fprintf(stderr,
+                    "[GATEWAY] PILOT RESIZE src=%s %s qty %.8f -> %.8f (order cap $%.2f)\n",
+                    in.source ? in.source : "?", su.c_str(), qty, nq, pilot_max_order_usd);
+                qty = nq;
+            }
+            if (pilot_max_gross_usd > 0.0 &&
+                pilot_gross_usd + qty * in.ref_px > pilot_max_gross_usd + 1e-9) {
+                log_reject(in, "pilot-scope: aggregate live gross cap");
+                r.error = "pilot-scope gross cap"; return r;
+            }
         }
         // 5. min-notional (entries)
         if (!in.is_exit && (qty * in.ref_px) < min_notional_usd) {
@@ -154,6 +199,14 @@ public:
             return r;
         }
         if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, true);
+        // Pilot gross tracking — fills only, LIVE only. BUY adds, SELL reduces
+        // (floored at 0). Runs on the gateway/WS thread like the rest of submit().
+        if (pilot_enabled && mode_ == RuntimeMode::LIVE) {
+            double fq  = r.executed_qty > 0.0 ? r.executed_qty : qty;
+            double fpx = r.avg_price    > 0.0 ? r.avg_price    : in.ref_px;
+            if (in.is_buy) pilot_gross_usd += fq * fpx;
+            else { pilot_gross_usd -= fq * fpx; if (pilot_gross_usd < 0.0) pilot_gross_usd = 0.0; }
+        }
         if (ledger_ || stream_) {
             ExecReport rep = build_report(r, in, qty, cid);
             if (stream_) stream_->feed_report(rep);      // stream drives the ledger (item 8 path)

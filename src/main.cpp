@@ -1379,6 +1379,12 @@ static void restore_companion_det_state() {
 static chimera::CryptoCostLedger      g_camp_cost_ledger;
 static chimera::CryptoOpportunityGate g_camp_gate;
 static std::vector<chimera::CryptoCampaignManager*> g_campaigns;  // guarded by g_companion_mtx
+// S-2026-07-17p companion-on-companion mimic drive (GRT-PJ5W1-MIM): the mimic's parent is
+// the GRT-PJ5W1 jump_floor COMPANION, not an EdgeEngine, so the generic per-tick loop
+// (nullptr feed) skips it; a dedicated hook drives observe() off the parent's settled
+// jf_in_position()/jf_entry_px(). Read-only on the parent. Guarded by g_companion_mtx.
+static chimera::UpJumpLadderCompanion* g_grt_pj_parent = nullptr;   // GRT-PJ5W1 (jump_floor)
+static chimera::UpJumpLadderCompanion* g_grt_pj_mimic  = nullptr;   // GRT-PJ5W1-MIM
 static int g_campaign_cell_count = 0;
 // S-2026-07-15 CORE-TRIGGER (ETH+XRP): streaming validated CORE, SHADOW, taker 28bp, parity-gated.
 static chimera::CoreTriggerEngine* g_core_eng = nullptr;          // guarded by g_companion_mtx
@@ -1436,7 +1442,11 @@ static void emit_companion_state() {
     for (const auto& kv : g_companion_by_parent) {
         const auto snap = kv.second.second->snapshot();
         const auto& ccfg = kv.second.second->config();
-        const auto& pcfg = kv.second.first->cfg();
+        // S-2026-07-17p: companion-on-companion mimics (GRT-PJ5W1-MIM) register with a
+        // nullptr feed (their parent is another companion, driven by a dedicated hook);
+        // fall back to the cell's own det config for the parent fields.
+        static const chimera::EdgeEngine::Config _null_pcfg{};
+        const auto& pcfg = kv.second.first ? kv.second.first->cfg() : _null_pcfg;
         std::string sym  = kv.first.substr(0, kv.first.find('-'));  // "BTC-UJ4" -> "BTC"
         std::string cell = kv.first.find('-') == std::string::npos
                              ? "" : kv.first.substr(kv.first.find('-') + 1);  // "BTC-UJ4" -> "UJ4"
@@ -4401,6 +4411,41 @@ int main() {
             _grid_feeds.push_back(&_pj_feeds.back());
         }
     }
+    // ── S-2026-07-17p GRT-PJ5W1-MIM: floored-on-open mimic on the GRT-PJ5W1 jump_floor
+    // parent (operator wire order). Certified real_parent_mimic_bt (AAVE_GRT_PJ_MIMIC_
+    // FINDINGS_2026-07-17.md): the ONLY PJ mimic that passes the full standalone gate,
+    // and only as a 17c floored-on-open cell (confirm 60bp >= 2x measured cost, anchored
+    // le=epx, reclip=0): g=0.60 net +81% PF 6.48 worst -333bp WF +71/+10, 2x-cost +70%
+    // PF 4.41. Robust g band 0.20-1.0 (not a NEAR-style knife-edge); g=0.60 = tightest-
+    // certified with both WF halves clearly positive (profit-lock mandatory, g<1.0).
+    // AAVE-PJ4W1 mimic = NO-GO (net-neg every gxlcxcost); ETH-PJ7W24 NO-GO (07-16).
+    // 38 clips 2023-26 (sample caution noted in findings). SHADOW. size_mult=6.0
+    // (operator sizing order 2026-07-17); retire_bp on RAW unweighted bank = -700
+    // (~2x certified worst clip -333bp). Parent is a COMPANION (jump_floor cell), not
+    // an EdgeEngine -> feed slot is nullptr (generic per-tick loop skips !par); a
+    // dedicated hook drives observe() off the parent's settled jf state per tick.
+    // ADVERSE-PROTECTION: backtested — BE-ENTRY floored-on-open (no pre-BE window,
+    // loss_cut n/a) + giveback trail g=0.60 + retire latch; honest gap tail -333bp class.
+    {
+        chimera::UpJumpLadderCompanion::Config c;
+        c.parent_tag = "GRT-PJ5W1-MIM-DRV"; c.tag = "GRT-PJ5W1-MIM"; c.symbol = "grtusdt";
+        c.tight = {0.2, 0, 0.0, 0};          // single managed leg; floor trail governs
+        c.reclip_pct = 0.0; c.anchored_reclip = false;   // reclip OFF (certified config)
+        c.confirm_bp = 60.0;                 // BE-ENTRY: books nothing until fav >= 60bp (>2x cost)
+        c.confirm_anchor_epx = true;         // le=epx -> floored at BE ON OPEN
+        c.cap = 1; c.cost_gate_bp = 0.0; c.be_floor = false;
+        c.mimic_floor = true; c.mimic_giveback = 0.60;   // certified tightest g, both WF halves +
+        c.det_w = 0; c.det_thr = 0.0;        // observe EXTERNAL parent (dedicated jf-state hook)
+        c.tf_secs = 3600;                    // parent PJ cell cadence = 1h
+        c.round_trip_bp = g_camp_cost_ledger.safe_cost_bps("grtusdt");   // measured floor (28bp class)
+        c.loss_cut_bp = 0.0;                 // no pre-arm window under anchor+reclip0
+        c.size_mult = 6.0;                   // operator order: 6x notional weight
+        c.retire_bp = -700.0;                // RAW-bank latch ~2x certified worst -333bp
+        c.retire_override = unretired("GRT-PJ5W1-MIM");
+        _grid_ptags.push_back(c.parent_tag); _grid_ctags.push_back(c.tag);
+        _grid.emplace_back(std::move(c));
+        _grid_feeds.push_back(nullptr);      // parent is a companion, not an EdgeEngine
+    }
     // ── S-2026-07-16 BE-CASCADE ALL-COIN MIMIC (operator: validated ALL-22 PASS -> "wire all coins") ──
     // 22 independent SHADOW BE-cascade companion books, one per coin, the operator EXACT spec
     // (make_becascade_cell above; stagger_mode=1, det_w=4, g0.5, BE-ENTRY confirm60/anchor, cap8). Reproduced at the
@@ -4545,6 +4590,18 @@ int main() {
                         "(basis: BT 2021-2026 honest all-6 + random-entry control, "
                         "outputs/CRYPTO_WEIGHTING_RETIREMENT_2026-07-08.md)\n",
                         x2.c_str(), x1.c_str(), ro.c_str(), rt.c_str());
+        }
+        // S-2026-07-17p GRT-PJ5W1-MIM drive hook: resolve the parent companion + mimic
+        // pointers once (both live in g_companion_by_parent; the mimic's feed is nullptr
+        // so only the dedicated per-tick hook drives it).
+        {
+            auto pit = g_companion_by_parent.find("GRT-PJ5W1-FEED");
+            auto mit = g_companion_by_parent.find("GRT-PJ5W1-MIM-DRV");
+            g_grt_pj_parent = pit != g_companion_by_parent.end() ? pit->second.second : nullptr;
+            g_grt_pj_mimic  = mit != g_companion_by_parent.end() ? mit->second.second : nullptr;
+            std::printf("[CLIP-MIMHOOK] GRT-PJ5W1-MIM companion-on-companion drive %s (parent=%s mimic=%s)\n",
+                        (g_grt_pj_parent && g_grt_pj_mimic) ? "WIRED" : "MISSING",
+                        g_grt_pj_parent ? "ok" : "null", g_grt_pj_mimic ? "ok" : "null");
         }
         emit_companion_state();   // one-shot startup emit so the Omega desk panel lights up immediately (not after 1st H1 close)
     }
@@ -9859,6 +9916,17 @@ int main() {
                     clips_before += comp->clips();
                     comp->observe(par->in_position(), par->entry_px(), mid, now_ms);
                     clips_after  += comp->clips();
+                }
+                // S-2026-07-17p GRT-PJ5W1-MIM: companion-on-companion drive. The mimic's
+                // parent is the GRT-PJ5W1 jump_floor CELL (not an EdgeEngine — its feed is
+                // nullptr, skipped by the loop above). Drive it off the parent's settled
+                // jf state per tick. Read-only on the parent; lock already held.
+                if (g_grt_pj_parent && g_grt_pj_mimic &&
+                    chimera::symbol_to_id("grtusdt") == id) {
+                    clips_before += g_grt_pj_mimic->clips();
+                    g_grt_pj_mimic->observe(g_grt_pj_parent->jf_in_position(),
+                                            g_grt_pj_parent->jf_entry_px(), mid, now_ms);
+                    clips_after  += g_grt_pj_mimic->clips();
                 }
                 // S-2026-07-13 campaign books: same per-tick drive (H1 closes roll
                 // internally; structural stops fire per tick like the BT's bar-low).

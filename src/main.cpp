@@ -1450,6 +1450,22 @@ static std::map<std::string, ClipTotals> load_companion_clip_totals() {
         // sums clips/bank across every sub-leg of the book.
         auto cp = tag.find("-CLIP");
         if (cp != std::string::npos) tag = tag.substr(0, cp + 5);
+        // BE-cascade/mimic ladders stamp sub-leg labels on every ClipRecord:
+        // cfg_.tag + "-T1/-T2/-S<n>/-L<n>/-J1" (make_leg_/emit paths in
+        // UpJumpLadderCompanion). Rehydrate keys on the BASE cfg tag, so strip a
+        // trailing -<T|S|L|J><digits> label — without this the totals never match
+        // and panel clips/bank reset to 0 on every restart (2026-07-18 incident:
+        // LTC-LTC-UJ15-BECASC-S-T1 +52.9bp clip vanished from the desk after the
+        // 03:30Z restart; auto-retire also ran on a zeroed restored bank).
+        // Config tags themselves never end letter+digits (-F/-S/-MIM/-BECASC safe).
+        auto dp = tag.rfind('-');
+        if (dp != std::string::npos && dp + 2 < tag.size()) {
+            char k = tag[dp + 1];
+            bool digits = true;
+            for (size_t i = dp + 2; i < tag.size(); ++i)
+                if (tag[i] < '0' || tag[i] > '9') { digits = false; break; }
+            if ((k=='T'||k=='S'||k=='L'||k=='J') && digits) tag = tag.substr(0, dp);
+        }
         double net = 0.0, net_real = 0.0, mult = 1.0;
         auto np = line.find("\"net_bp\":");
         if (np != std::string::npos) { try { net = std::stod(line.substr(np + 9)); } catch (...) {} }

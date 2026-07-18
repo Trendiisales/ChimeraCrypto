@@ -5108,11 +5108,24 @@ int main() {
         // thr=0.5% (W2/W12 g0.20 also beat their g0.75 siblings on PF/tail); retire_bp = 2x
         // own backtested worst clip. ADDITIVE alongside the four 2.0% BTC cells (independent
         // books, cap8 each). BTC_LOWTHR_MIMIC_FINDINGS_2026-07-18.md.
+        // S-2026-07-18ac (operator: "all 3 of these" — the 1.5% + 1.0% quads from the same
+        // ALL-108-PASS sweep ship too, additive alongside 2.0% + 0.5%): +8 cells below.
+        // Same cert run, same gate, per-lane picks = best 2x-cost net (figures = exact
+        // harness reruns 2026-07-18, reproduce the operator's transcript tables).
+        // BTC total: 4 (2.0%) + 4 (UJ15) + 4 (UJ10) + 4 (UJ05) = 16 books.
         static const std::vector<BcCell2> _bc_btc_lowthr_cells = {
             {"BTC", "BTC-UJ05-BECASC-W1",  "btcusdt", 0.005,  1, 0.20, -1134.0},  // n=6215 net=+6963% PF16.57 worst=-566.9bp 2xnet=+5122%
             {"BTC", "BTC-UJ05-BECASC-W2",  "btcusdt", 0.005,  2, 0.20,  -850.0},  // n=6639 net=+7782% PF19.31 worst=-424.9bp 2xnet=+5815%
             {"BTC", "BTC-UJ05-BECASC-W4",  "btcusdt", 0.005,  4, 0.75, -1567.0},  // n=6512 net=+8297% PF8.17  worst=-783.7bp 2xnet=+6539%
             {"BTC", "BTC-UJ05-BECASC-W12", "btcusdt", 0.005, 12, 0.20,  -969.0},  // n=5181 net=+6164% PF23.41 worst=-484.7bp 2xnet=+4630%
+            {"BTC", "BTC-UJ10-BECASC-W1",  "btcusdt", 0.010,  1, 0.20, -1134.0},  // n=3581 net=+4632% PF19.43 worst=-566.9bp 2xnet=+3570%
+            {"BTC", "BTC-UJ10-BECASC-W2",  "btcusdt", 0.010,  2, 0.20,  -967.0},  // n=4397 net=+5621% PF19.35 worst=-483.5bp 2xnet=+4315%
+            {"BTC", "BTC-UJ10-BECASC-W4",  "btcusdt", 0.010,  4, 0.20,  -965.0},  // n=4783 net=+6112% PF20.03 worst=-482.5bp 2xnet=+4692%
+            {"BTC", "BTC-UJ10-BECASC-W12", "btcusdt", 0.010, 12, 0.75, -1567.0},  // n=3997 net=+5129% PF6.45  worst=-783.7bp 2xnet=+4064%
+            {"BTC", "BTC-UJ15-BECASC-W1",  "btcusdt", 0.015,  1, 0.75, -1567.0},  // n=1999 net=+2748% PF6.50  worst=-783.7bp 2xnet=+2293%
+            {"BTC", "BTC-UJ15-BECASC-W2",  "btcusdt", 0.015,  2, 0.20, -1405.0},  // n=2800 net=+3650% PF17.72 worst=-702.4bp 2xnet=+2824%
+            {"BTC", "BTC-UJ15-BECASC-W4",  "btcusdt", 0.015,  4, 0.20,  -965.0},  // n=3293 net=+4180% PF19.67 worst=-482.5bp 2xnet=+3203%
+            {"BTC", "BTC-UJ15-BECASC-W12", "btcusdt", 0.015, 12, 0.75,  -965.0},  // n=3136 net=+3922% PF6.28  worst=-482.5bp 2xnet=+3065%
         };
         static std::vector<chimera::EdgeEngine> _bc_btc_lt_feeds; _bc_btc_lt_feeds.reserve(_bc_btc_lowthr_cells.size());
         for (const auto& bc : _bc_btc_lowthr_cells) {

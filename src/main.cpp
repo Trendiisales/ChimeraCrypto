@@ -5095,6 +5095,35 @@ int main() {
                 bc.det_w, bc.giveback));
             _grid_feeds.push_back(&_bc_fs_feeds.back());
         }
+        // ── S-2026-07-18ab: BTC LOW-THRESHOLD +4 mimic cells (operator: "we simply have to
+        // trade more on BTC ... find a lower entry point; min cost 30bp factored into the
+        // start of the mimic"). BTC was the ONLY coin still detecting at 2.0% (fleet=1.5%).
+        // Cert: same harness (eth_ujmimic_15_becascade_bt vs HEAD engine, honest 17f fills),
+        // confirm60 anchored = exactly 2x the operator's 30bp min cost, RT=30/60bp (stricter
+        // than the fleet's 28), thr {0.5,0.75,1.0,1.25,1.5,2.0}% x W{1,2,4,8,12,24} x
+        // g{0.2,0.5,0.75}: ALL 108 cells PASS the standalone gate (net>0 & PF>=1.3 & both
+        // WF halves>0 at base AND 2x cost, omit-2022) — deep plateau, zero fails. n saturates
+        // below thr=0.5% (confirm 60bp becomes the binding entry filter), so 0.5% is the
+        // practical floor, not a marginal scrape. Picks = best 2x-cost net per W lane at
+        // thr=0.5% (W2/W12 g0.20 also beat their g0.75 siblings on PF/tail); retire_bp = 2x
+        // own backtested worst clip. ADDITIVE alongside the four 2.0% BTC cells (independent
+        // books, cap8 each). BTC_LOWTHR_MIMIC_FINDINGS_2026-07-18.md.
+        static const std::vector<BcCell2> _bc_btc_lowthr_cells = {
+            {"BTC", "BTC-UJ05-BECASC-W1",  "btcusdt", 0.005,  1, 0.20, -1134.0},  // n=6215 net=+6963% PF16.57 worst=-566.9bp 2xnet=+5122%
+            {"BTC", "BTC-UJ05-BECASC-W2",  "btcusdt", 0.005,  2, 0.20,  -850.0},  // n=6639 net=+7782% PF19.31 worst=-424.9bp 2xnet=+5815%
+            {"BTC", "BTC-UJ05-BECASC-W4",  "btcusdt", 0.005,  4, 0.75, -1567.0},  // n=6512 net=+8297% PF8.17  worst=-783.7bp 2xnet=+6539%
+            {"BTC", "BTC-UJ05-BECASC-W12", "btcusdt", 0.005, 12, 0.20,  -969.0},  // n=5181 net=+6164% PF23.41 worst=-484.7bp 2xnet=+4630%
+        };
+        static std::vector<chimera::EdgeEngine> _bc_btc_lt_feeds; _bc_btc_lt_feeds.reserve(_bc_btc_lowthr_cells.size());
+        for (const auto& bc : _bc_btc_lowthr_cells) {
+            _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
+            _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
+            _bc_btc_lt_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _grid.emplace_back(make_becascade_cell(
+                _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
+                bc.det_w, bc.giveback));
+            _grid_feeds.push_back(&_bc_btc_lt_feeds.back());
+        }
     }
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;

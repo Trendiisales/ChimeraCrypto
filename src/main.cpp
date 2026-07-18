@@ -1239,9 +1239,24 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
 // A failed SELL is retried on every subsequent mirror event and screamed to stderr.
 static constexpr const char* LIVE_MIRROR_FILE = "data/live_mimic_positions.json";
 struct LiveMimicMirror {
-    struct Hold { double qty = 0.0; double px = 0.0; std::string symbol; bool pending_sell = false; double sell_px = 0.0; };
+    // S-2026-07-18s OWN-PROTECTION (LiveMirrorIncident20260718 fixes 2+3): the mirror
+    // formerly had NO protection of its own — its only exit was the shadow book's clip
+    // event, and the shadow floor anchors at the SHADOW leg's le, not the mirror's real
+    // fill (UNI: shadow floor 3.563, live fill 3.640 → real coins -2.2% under a floor
+    // that could never fire; a restore also RESETS the shadow leg's floor state, so the
+    // live book can sit in pre-floor limbo with zero stop). Now every holding carries
+    // its OWN fill-anchored floor + hard stop, driven per tick, independent of shadow:
+    //   • hwm/floored: floor arms once px covers fill*(1+2×cost) — then SELL at
+    //     max(own BE incl cost, shadow clip) — the handoff fix-2 spec.
+    //   • own_stop_bp: pre-floor HARD CUT below the mirror's own fill — bounds the
+    //     UNI class (basis-gapped fill whose floor never arms). Engine-loss-protection
+    //     provision for the live layer itself, not inherited.
+    struct Hold { double qty = 0.0; double px = 0.0; std::string symbol; bool pending_sell = false; double sell_px = 0.0;
+                  double hwm = 0.0; bool floored = false; };
     bool enabled = false;                   // armed only in RuntimeMode::LIVE
     double order_usd = 0.0;                 // per-leg BUY notional (= live_pilot_max_order_usd)
+    double cost_bound_bp = 56.0;            // acquire gate + floor-arm bound (2× worst measured RT cost)
+    double own_stop_bp   = 150.0;           // pre-floor hard cut below OWN fill (0 = off)
     std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
     std::map<std::string, Hold> held;       // clip-tag -> live holding
     std::mutex mu;
@@ -1278,6 +1293,7 @@ struct LiveMimicMirror {
             size_t xp = all.find("\"px\":", te);  if (xp != std::string::npos) h.px  = atof(all.c_str() + xp + 5);
             h.pending_sell = all.find("\"pending_sell\":true", te) != std::string::npos &&
                              all.find("\"pending_sell\":true", te) < all.find('}', te);
+            h.hwm = h.px; h.floored = false;   // own floor re-arms from live ticks; pre-floor own-stop protects meanwhile
             if (!tag.empty() && h.qty > 0.0) held[tag] = h;
             p = te;
         }
@@ -1301,6 +1317,16 @@ struct LiveMimicMirror {
         if (!enabled || !submit || order_usd <= 0.0 || r.px <= 0.0) return;
         std::lock_guard<std::mutex> lk(mu);
         retry_pending_();
+        // ── ACQUIRE GATE (S-2026-07-18s fix 3): refuse a BUY whose mark sits above the
+        // leg's floor anchor by more than the cost bound. A restored/late/chasing leg
+        // would fill at a price the shadow floor can NEVER protect (the UNI -2.2% class).
+        // No restore-chase, ever: the missed clip is forgone profit, not a naked position.
+        if (r.floor_anchor > 0.0 && r.px > r.floor_anchor * (1.0 + cost_bound_bp / 1e4)) {
+            std::printf("[MIMIC-LIVE] BUY refused %s: px %.6f > anchor %.6f +%.0fbp (basis gap — shadow floor can't protect this fill)\n",
+                        r.tag.c_str(), r.px, r.floor_anchor, cost_bound_bp);
+            std::fflush(stdout);
+            return;
+        }
         auto& h = held[r.tag];
         if (h.qty > 0.0) return;             // already holding for this leg (restart re-open etc.) — never stack
         auto res = submit({ upsym(r.symbol), true, order_usd / r.px, r.px,
@@ -1308,6 +1334,7 @@ struct LiveMimicMirror {
         if (res.ok && !res.shadow && res.executed_qty > 0.0) {
             h.qty = res.executed_qty; h.px = res.avg_price > 0.0 ? res.avg_price : r.px;
             h.symbol = r.symbol; h.pending_sell = false;
+            h.hwm = h.px; h.floored = false;     // OWN floor state anchors at the REAL fill
             std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f)\n",
                         r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px);
             std::fflush(stdout);
@@ -1341,6 +1368,63 @@ struct LiveMimicMirror {
                          r.tag.c_str(), it->second.qty, res.error.c_str());
         }
         persist_();
+    }
+    // ── OWN-FLOOR tick driver (S-2026-07-18s fix 2): runs on EVERY tick of a held
+    // symbol, INDEPENDENT of shadow clip events. Sells at max(own BE incl cost,
+    // pre-floor hard stop). The shadow book is never touched (independent-engine rule);
+    // a holding the shadow later clips is simply already gone (on_clip no-ops on erased).
+    void on_price(const std::string& sym_lower, double px, int64_t /*now_ms*/) {
+        if (!enabled || !submit || px <= 0.0 || held.empty()) return;
+        std::lock_guard<std::mutex> lk(mu);
+        bool changed = false;
+        for (auto it = held.begin(); it != held.end(); ) {
+            Hold& h = it->second;
+            if (h.qty <= 0.0 || h.pending_sell || h.symbol != sym_lower) { ++it; continue; }
+            if (px > h.hwm) h.hwm = px;
+            const double cb = cost_bound_bp / 1e4;
+            if (!h.floored && h.hwm >= h.px * (1.0 + cb)) h.floored = true;   // own fill covered 2×cost → floor armed
+            const char* why = nullptr;
+            if (h.floored && px <= h.px * (1.0 + cb / 2.0)) why = "LIVE-OWNFLOOR";          // BE incl ~1×cost
+            else if (!h.floored && own_stop_bp > 0.0 && px <= h.px * (1.0 - own_stop_bp / 1e4)) why = "LIVE-OWNSTOP";
+            if (!why) { ++it; continue; }
+            auto res = submit({ upsym(h.symbol), false, h.qty, px, /*is_exit*/ true, "MIMIC-LIVE" },
+                              chimera::Factor::MOMENTUM);
+            if (res.ok) {
+                std::printf("[MIMIC-LIVE] %s SELL %s qty=%.8f @%.6f (own fill %.6f — independent of shadow book)\n",
+                            why, it->first.c_str(), h.qty,
+                            res.avg_price > 0.0 ? res.avg_price : px, h.px);
+                std::fflush(stdout);
+                it = held.erase(it); changed = true; continue;
+            }
+            h.pending_sell = true; h.sell_px = px; changed = true;
+            std::fprintf(stderr, "[MIMIC-LIVE] *** %s SELL FAILED %s (%s) — flagged for retry ***\n",
+                         why, it->first.c_str(), res.error.c_str());
+            ++it;
+        }
+        if (changed) persist_();
+    }
+    // ── KILL flatten (S-2026-07-18s fix 4): market-sell EVERY holding, report each. ──
+    int flatten_all(const char* why) {
+        if (!submit) return 0;
+        std::lock_guard<std::mutex> lk(mu);
+        int sold = 0;
+        for (auto it = held.begin(); it != held.end(); ) {
+            Hold& h = it->second;
+            if (h.qty <= 0.0) { it = held.erase(it); continue; }
+            auto res = submit({ upsym(h.symbol), false, h.qty, h.sell_px > 0.0 ? h.sell_px : h.px,
+                                /*is_exit*/ true, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
+            if (res.ok) {
+                std::printf("[MIMIC-LIVE] KILL(%s) SELL %s qty=%.8f — closed\n", why, it->first.c_str(), h.qty);
+                it = held.erase(it); ++sold; continue;
+            }
+            h.pending_sell = true;
+            std::fprintf(stderr, "[MIMIC-LIVE] *** KILL(%s) SELL FAILED %s (%s) — flagged, retry on next event ***\n",
+                         why, it->first.c_str(), res.error.c_str());
+            ++it;
+        }
+        persist_();
+        std::fflush(stdout);
+        return sold;
     }
 };
 static LiveMimicMirror g_mimic_mirror;
@@ -2064,15 +2148,47 @@ static void http_server_thread(int port) {
         } else if (strstr(req, "GET /api/trades")) {
             body = build_trades_json();
         } else if (strstr(req, "POST /api/kill")) {
-            std::lock_guard<std::mutex> lk(g_engine_mtx);
+            // S-2026-07-18s FULL COVERAGE (LiveMirrorIncident20260718 fix 4): the old kill
+            // covered sleeve engines ONLY — companion legs, det windows and REAL LiveMimicMirror
+            // holdings were untouched (operator hit KILL ALL live and nothing closed the real
+            // coins; 3 state files then had to be cleared by hand). Now: sleeves + every
+            // companion leg flushed + det windows closed + persisted disarmed + mirror
+            // market-sells every live holding, and the response reports what it closed.
             int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
-            for (auto& s : g_slots) {
-                if (!s.engine) continue;
-                double px = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
-                s.engine->kill_all(px, now_ms);
+            int sleeves = 0, legs_flushed = 0, comps = 0, mirror_sold = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_engine_mtx);
+                for (auto& s : g_slots) {
+                    if (!s.engine) continue;
+                    double px = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
+                    s.engine->kill_all(px, now_ms);
+                    ++sleeves;
+                }
             }
-            body = "{\"ok\":true}";
+            {
+                std::lock_guard<std::mutex> lk(g_companion_mtx);
+                for (auto& kv : g_companion_by_parent) {
+                    chimera::UpJumpLadderCompanion* comp = kv.second.second;
+                    if (!comp) continue;
+                    double px = 0.0;
+                    int id = chimera::symbol_to_id(comp->config().symbol);
+                    if (id >= 0) px = load_dbl_atomic(g_last_spot_px_bits[id]);
+                    legs_flushed += comp->kill_disarm(px, now_ms);
+                    ++comps;
+                }
+                emit_companion_state();          // desk panel shows the disarmed truth immediately
+                save_companion_det_state();      // ...and a restart restores DISARMED, not re-armed
+            }
+            mirror_sold = g_mimic_mirror.flatten_all("api");
+            std::printf("[KILL-ALL] sleeves=%d companions=%d legs_flushed=%d mirror_sold=%d\n",
+                        sleeves, comps, legs_flushed, mirror_sold);
+            std::fflush(stdout);
+            std::ostringstream kj;
+            kj << "{\"ok\":true,\"sleeves\":" << sleeves << ",\"companions\":" << comps
+               << ",\"companion_legs_flushed\":" << legs_flushed
+               << ",\"mirror_holdings_sold\":" << mirror_sold << "}";
+            body = kj.str();
         } else if (strstr(req, "POST /api/ratchet_reset")) {
             // S34: manual peak reset. Sets all_time_peak = all_time_cum,
             // unlocks ratchet, clears daily_kill. Use after absorbing a DD
@@ -2277,6 +2393,13 @@ struct LiveRuntimeConfig {
     double      live_pilot_max_order_usd = 12.0;
     double      live_pilot_max_gross_usd = 50.0;
     bool        live_full = false;
+    // S-2026-07-18s mirror own-protection (LiveMirrorIncident20260718 fixes 2+3):
+    //   cost_bound: acquire-gate slack over the leg's floor anchor AND the own-floor
+    //     arm threshold (2× worst measured RT cost — CryptoCostLedger class, ~28bp).
+    //   own_stop: pre-floor hard cut below the mirror's OWN fill (bounds the
+    //     basis-gap class where the shadow floor never arms). 0 disables.
+    double      live_pilot_cost_bound_bp = 56.0;
+    double      live_pilot_own_stop_bp   = 150.0;
 };
 
 static std::string lrc_extract_string(const std::string& s, const char* key) {
@@ -2393,6 +2516,8 @@ static LiveRuntimeConfig load_live_runtime_config(const std::string& path = "con
     for (auto& sy : cfg.live_pilot_symbols)
         for (auto& ch : sy) ch = (char)std::toupper((unsigned char)ch);
     cfg.live_pilot_max_order_usd = lrc_extract_double(content, "live_pilot_max_order_usd", 12.0);
+    cfg.live_pilot_cost_bound_bp = lrc_extract_double(content, "live_pilot_cost_bound_bp", 56.0);
+    cfg.live_pilot_own_stop_bp   = lrc_extract_double(content, "live_pilot_own_stop_bp",   150.0);
     cfg.live_pilot_max_gross_usd = lrc_extract_double(content, "live_pilot_max_gross_usd", 50.0);
     cfg.live_full = lrc_extract_bool(content, "live_full", false);
     std::printf("[STARTUP] live_config loaded from %s: creds=%s shadow=%d max_pos=%.2f min_edge=%.2fbp protection_disabled=%d\n",
@@ -3120,12 +3245,27 @@ int main() {
     // so the research record and every certified book are byte-identical to before.
     g_mimic_mirror.enabled   = (g_runtime_mode == chimera::RuntimeMode::LIVE);
     g_mimic_mirror.order_usd = runtime_cfg.live_pilot_max_order_usd;
+    g_mimic_mirror.cost_bound_bp = runtime_cfg.live_pilot_cost_bound_bp;
+    g_mimic_mirror.own_stop_bp   = runtime_cfg.live_pilot_own_stop_bp;
     if (g_mimic_mirror.enabled) {
         g_mimic_mirror.submit = governed_submit;
         g_mimic_mirror.load();
         std::printf("[MIMIC-LIVE] mirror ARMED: grid leg opens route $%.2f BUYs via gateway "
                     "(pilot caps enforce); clips SELL the tracked fill; holdings persist %s\n",
                     g_mimic_mirror.order_usd, LIVE_MIRROR_FILE);
+        // S-2026-07-18s OWN-PROTECTION effect line (fix 5, greppable by watchdogs): the
+        // mirror's own floor/stop layer is structural config — print it armed with the
+        // per-holding state so 'protection exists' is a logged runtime fact, not prose.
+        std::printf("[MIMIC-LIVE-GATE] own-protection ACTIVE: acquire gate anchor+%.0fbp, "
+                    "floor arms at fill+%.0fbp sells at fill+%.0fbp, pre-floor own-stop %.0fbp; %zu restored holding(s)\n",
+                    g_mimic_mirror.cost_bound_bp, g_mimic_mirror.cost_bound_bp,
+                    g_mimic_mirror.cost_bound_bp / 2.0, g_mimic_mirror.own_stop_bp,
+                    g_mimic_mirror.held.size());
+        for (const auto& kv : g_mimic_mirror.held)
+            std::printf("[MIMIC-LIVE-FLOOR] %s %s qty=%.8f fill=%.6f own_stop=%.6f floor_arm=%.6f\n",
+                        kv.first.c_str(), kv.second.symbol.c_str(), kv.second.qty, kv.second.px,
+                        kv.second.px * (1.0 - g_mimic_mirror.own_stop_bp / 1e4),
+                        kv.second.px * (1.0 + g_mimic_mirror.cost_bound_bp / 1e4));
     } else {
         std::printf("[MIMIC-LIVE] mirror DISARMED (mode=SHADOW) — grid books unchanged, no real orders\n");
     }
@@ -10394,9 +10534,23 @@ int main() {
                     last_cc_emit_ms = now_ms;
                     emit_companion_state();
                     save_campaign_state();   // durable window/campaign state (tiny file, throttled)
+                    // S-2026-07-18s det-state persist CADENCE FIX (freeze root-cause finding):
+                    // save_companion_det_state previously ran only in on_bar_callback — and the
+                    // only parents still driving that callback are the 5 DAILY REGIME_SWITCH
+                    // engines, so det windows persisted ~once per DAY (+ on -J1 clips). Any
+                    // intraday restart restored up-to-24h-stale detector state (armed floors
+                    // reset, windows lost — the incident-night class). Persist on the same 5s
+                    // throttle as the state emit: tiny file, atomic rename, lock already held.
+                    save_companion_det_state();
                 }
             }
         }
+
+        // S-2026-07-18s MIRROR OWN-PROTECTION drive (fix 2): the mirror's own floor/stop
+        // runs per tick of the held symbol, independent of the shadow books' clip events
+        // (their floors anchor at SHADOW fills, not the mirror's real ones). No-op when
+        // disarmed or flat.
+        g_mimic_mirror.on_price(tick.symbol, mid, now_ms);
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;

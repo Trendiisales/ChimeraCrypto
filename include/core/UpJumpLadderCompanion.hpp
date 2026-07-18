@@ -269,7 +269,13 @@ public:
     struct OpenRecord {
         std::string tag, symbol, label;
         int64_t ts_ms = 0;
-        double  px    = 0.0;   // the leg's own fill/anchor price (le)
+        double  px    = 0.0;   // the CURRENT mark the live mirror would buy at
+        // S-2026-07-18s MIRROR ACQUIRE GATE (LiveMirrorIncident20260718 fix 3): the leg's
+        // anchored BE reference (le — for confirm_anchor_epx legs the window-entry anchor).
+        // The mirror REFUSES a BUY whose px sits above floor_anchor*(1+cost_bound): a
+        // restored/late leg must never chase a fill the shadow floor can't protect
+        // (UNI: shadow floor 3.563, live fill 3.640 = -2.2% naked under the floor).
+        double  floor_anchor = 0.0;
     };
     using OpenCallback = std::function<void(const OpenRecord&)>;
     void set_on_leg_open(OpenCallback cb) { on_leg_open_ = std::move(cb); }
@@ -1123,8 +1129,34 @@ private:
     // live-mirror announce (S-2026-07-18): live FLAT->OPEN transitions only.
     void announce_open_(const Leg& lg, int64_t ts_ms, double px) {
         if (!on_leg_open_ || cfg_.signal_only) return;
-        on_leg_open_({cfg_.tag + "-" + lg.label, cfg_.symbol, lg.label, ts_ms, px});
+        on_leg_open_({cfg_.tag + "-" + lg.label, cfg_.symbol, lg.label, ts_ms, px,
+                      /*floor_anchor*/ lg.le > 0.0 ? lg.le : lg.epx});
     }
+
+public:
+    // ── S-2026-07-18s KILL-ALL coverage (LiveMirrorIncident20260718 fix 4) ────
+    // /api/kill covered sleeve engines ONLY; companion legs + det windows had to be
+    // cleared by hand across 3 files while the GUI kept re-arming them from the det
+    // ring. This flushes every open leg MTM (ENGINE_EXIT, honest fill at px), clears
+    // the leg book AND closes the detector window (det + jump-floor state) so a
+    // subsequent persist writes the disarmed truth and a restart cannot re-arm.
+    // Returns the number of legs flushed. Caller drives persist afterwards.
+    int kill_disarm(double px, int64_t now_ms) {
+        int flushed = 0;
+        const int64_t bar = (cfg_.tf_secs > 0) ? now_ms / (cfg_.tf_secs * 1000) : 0;
+        const double  fpx = (px > 0.0) ? px : (det_close_ > 0.0 ? det_close_ : entry_ref_);
+        for (auto& lg : legs_) {
+            if (lg.open && !lg.clipped) { flush_leg_(lg, fpx, now_ms, bar); ++flushed; }
+        }
+        reset_session_();
+        det_in_ = false; det_entry_ = 0.0;                       // close the window
+        jf_in_ = false; jf_E_ = 0.0; jf_mfe_ = 0.0; jf_floored_ = false;
+        jf_stop_ = -1.0; jf_pending_open_ = false; jf_pending_exit_ = false;
+        jf_armed_ = false;                                       // fresh-jump rule: needs a j<thr close to re-arm
+        return flushed;
+    }
+
+private:
 
     Config        cfg_;
     ClipCallback  on_clip_;

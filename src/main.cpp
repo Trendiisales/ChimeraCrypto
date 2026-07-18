@@ -138,6 +138,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <deque>
 #include <unordered_map>
 #include <algorithm>
 #include <fstream>
@@ -1261,6 +1262,22 @@ struct LiveMimicMirror {
     std::map<std::string, Hold> held;       // clip-tag -> live holding
     std::mutex mu;
 
+    // ── S-2026-07-18al LIVE-ROUTING TRUTH FEED (operator: "NO paper — why are these
+    // not live trades"): the COMP ×5 refusal lived only in this log while the desk lit
+    // the signal book neon-TRADING — a trade that never happened. Every live-routing
+    // outcome (FILLED/SOLD/REFUSED/SKIPPED/SELL-FAIL) now lands in a bounded event
+    // ring that emit_companion_state publishes to the desk, which renders TRADING from
+    // REAL holds only and rings on refusals/skips. Call note_() only under mu.
+    struct LiveEvt { long long ts = 0; std::string tag, coin, kind, detail; };
+    std::deque<LiveEvt> events;             // newest last, bounded
+    void note_(const std::string& tag, const char* kind, const std::string& detail) {
+        LiveEvt e; e.ts = (long long)std::time(nullptr); e.tag = tag;
+        e.coin = tag.substr(0, tag.find('-')); e.kind = kind;
+        e.detail = detail;                   // JSON-escaped at emit time
+        events.push_back(std::move(e));
+        if (events.size() > 64) events.pop_front();
+    }
+
     static std::string upsym(const std::string& s) {
         std::string u = s; for (auto& c : u) c = (char)std::toupper((unsigned char)c); return u;
     }
@@ -1317,16 +1334,29 @@ struct LiveMimicMirror {
         if (!enabled || !submit || order_usd <= 0.0 || r.px <= 0.0) return;
         std::lock_guard<std::mutex> lk(mu);
         retry_pending_();
-        // ── ACQUIRE GATE (S-2026-07-18s fix 3): refuse a BUY whose mark sits above the
-        // leg's floor anchor by more than the cost bound. A restored/late/chasing leg
-        // would fill at a price the shadow floor can NEVER protect (the UNI -2.2% class).
-        // No restore-chase, ever: the missed clip is forgone profit, not a naked position.
-        if (r.floor_anchor > 0.0 && r.px > r.floor_anchor * (1.0 + cost_bound_bp / 1e4)) {
-            std::printf("[MIMIC-LIVE] BUY refused %s: px %.6f > anchor %.6f +%.0fbp (basis gap — shadow floor can't protect this fill)\n",
-                        r.tag.c_str(), r.px, r.floor_anchor, cost_bound_bp);
+        // ── ACQUIRE PATH (S-2026-07-18al, operator order "NO paper — why are these not
+        // live trades"): the former 56bp basis-gap REFUSAL (S-18s fix 3) made COMP's 5
+        // legs paper-only while the desk showed TRADING. Since S-18s fix 2 every holding
+        // carries its OWN fill-anchored floor + pre-floor hard stop (own_stop_bp), so a
+        // late fill is no longer the unprotected UNI class — the shadow anchor no longer
+        // gates the entry. We FILL the basis-gapped leg and protect it at the REAL fill;
+        // worst case per leg is bounded by own_stop_bp. Only a wide sanity bound remains:
+        // a mark >SANITY_GAP_BP above the anchor is a stale/glitched feed, not a late
+        // entry — refuse those, loudly, into the desk event feed.
+        static constexpr double SANITY_GAP_BP = 300.0;
+        const double gap_bp = (r.floor_anchor > 0.0) ? (r.px / r.floor_anchor - 1.0) * 1e4 : 0.0;
+        if (gap_bp > SANITY_GAP_BP) {
+            std::printf("[MIMIC-LIVE] BUY refused %s: px %.6f > anchor %.6f +%.0fbp > sanity %.0fbp (stale/glitch guard)\n",
+                        r.tag.c_str(), r.px, r.floor_anchor, gap_bp, SANITY_GAP_BP);
             std::fflush(stdout);
+            char d[160]; std::snprintf(d, sizeof(d), "px %.6f anchor %.6f gap %.0fbp > sanity %.0fbp",
+                                       r.px, r.floor_anchor, gap_bp, SANITY_GAP_BP);
+            note_(r.tag, "REFUSED", d);
             return;
         }
+        if (gap_bp > cost_bound_bp)
+            std::printf("[MIMIC-LIVE] BUY basis-gap %s: px %.6f > anchor %.6f +%.0fbp — FILLING anyway, own floor/stop anchors at real fill (S-18al no-paper order)\n",
+                        r.tag.c_str(), r.px, r.floor_anchor, gap_bp);
         auto& h = held[r.tag];
         if (h.qty > 0.0) return;             // already holding for this leg (restart re-open etc.) — never stack
         auto res = submit({ upsym(r.symbol), true, order_usd / r.px, r.px,
@@ -1338,12 +1368,18 @@ struct LiveMimicMirror {
             std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f)\n",
                         r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px);
             std::fflush(stdout);
+            {
+                char d[128]; std::snprintf(d, sizeof(d), "qty %.8f @ %.6f (~$%.2f)", h.qty, h.px, h.qty * h.px);
+                note_(r.tag, "FILLED", d);
+            }
             persist_();
         } else if (!res.ok) {
-            // rejected (pilot gross cap / hardcap / halt) — bounded pilot working as designed
+            // rejected (pilot gross cap / hardcap / halt / insufficient balance) — every
+            // skip is a signal the live book did NOT take: surface it, never silent.
             std::printf("[MIMIC-LIVE] BUY skipped %s: %s\n", r.tag.c_str(),
                         res.error.empty() ? "rejected" : res.error.c_str());
             std::fflush(stdout);
+            note_(r.tag, "SKIPPED", res.error.empty() ? "rejected" : res.error);
             held.erase(r.tag);
         }
     }
@@ -1360,12 +1396,18 @@ struct LiveMimicMirror {
                         r.tag.c_str(), upsym(r.symbol).c_str(), it->second.qty,
                         res.avg_price > 0.0 ? res.avg_price : r.exit_px, r.reason.c_str());
             std::fflush(stdout);
+            {
+                char d[160]; std::snprintf(d, sizeof(d), "qty %.8f @ %.6f (%s)", it->second.qty,
+                                           res.avg_price > 0.0 ? res.avg_price : r.exit_px, r.reason.c_str());
+                note_(r.tag, "SOLD", d);
+            }
             held.erase(it);
         } else {
             it->second.pending_sell = true; it->second.sell_px = r.exit_px;
             std::fprintf(stderr, "[MIMIC-LIVE] *** SELL FAILED %s qty=%.8f (%s) — holding flagged, "
                          "will retry on next mirror event ***\n",
                          r.tag.c_str(), it->second.qty, res.error.c_str());
+            note_(r.tag, "SELL-FAIL", res.error.empty() ? "rejected" : res.error);
         }
         persist_();
     }
@@ -1394,11 +1436,17 @@ struct LiveMimicMirror {
                             why, it->first.c_str(), h.qty,
                             res.avg_price > 0.0 ? res.avg_price : px, h.px);
                 std::fflush(stdout);
+                {
+                    char d[160]; std::snprintf(d, sizeof(d), "%s qty %.8f @ %.6f (own fill %.6f)", why, h.qty,
+                                               res.avg_price > 0.0 ? res.avg_price : px, h.px);
+                    note_(it->first, "SOLD", d);
+                }
                 it = held.erase(it); changed = true; continue;
             }
             h.pending_sell = true; h.sell_px = px; changed = true;
             std::fprintf(stderr, "[MIMIC-LIVE] *** %s SELL FAILED %s (%s) — flagged for retry ***\n",
                          why, it->first.c_str(), res.error.c_str());
+            note_(it->first, "SELL-FAIL", res.error.empty() ? "rejected" : res.error);
             ++it;
         }
         if (changed) persist_();
@@ -1757,7 +1805,48 @@ static void emit_companion_state() {
             js << "]}";
         }
     }
-    js << "]}";
+    js << "]";
+    // ── S-2026-07-18al LIVE-MIRROR TRUTH FEED: the desk renders TRADING from REAL
+    // holds only and rings on REFUSED/SKIPPED events (COMP ×5 silent-refusal incident:
+    // signal book lit neon-TRADING + banked $131 while zero real orders existed).
+    // Lock order companion_mtx → mirror.mu matches the on_open/on_clip event path.
+    {
+        auto esc = [](const std::string& in) {           // minimal JSON string escape
+            std::string o; o.reserve(in.size());
+            for (char c : in) {
+                if (c == '"') o += '\'';
+                else if (c == '\\') o += '/';
+                else if ((unsigned char)c >= 0x20) o += c;
+            }
+            return o;
+        };
+        std::lock_guard<std::mutex> mlk(g_mimic_mirror.mu);
+        js << ",\"live_mirror\":{\"enabled\":" << (g_mimic_mirror.enabled ? "true" : "false")
+           << ",\"order_usd\":" << std::setprecision(2) << g_mimic_mirror.order_usd
+           << ",\"holds\":[";
+        bool hfirst = true;
+        for (const auto& kv : g_mimic_mirror.held) {
+            if (kv.second.qty <= 0.0) continue;
+            js << (hfirst ? "" : ",")
+               << "{\"tag\":\"" << esc(kv.first) << "\",\"coin\":\"" << esc(kv.first.substr(0, kv.first.find('-')))
+               << "\",\"sym\":\"" << esc(kv.second.symbol) << "\""
+               << std::setprecision(8) << ",\"qty\":" << kv.second.qty
+               << ",\"px\":" << kv.second.px << ",\"hwm\":" << kv.second.hwm
+               << ",\"floored\":" << (kv.second.floored ? "true" : "false")
+               << ",\"pending_sell\":" << (kv.second.pending_sell ? "true" : "false") << "}";
+            hfirst = false;
+        }
+        js << "],\"events\":[";
+        bool efirst = true;
+        for (const auto& e : g_mimic_mirror.events) {
+            js << (efirst ? "" : ",")
+               << "{\"ts\":" << e.ts << ",\"tag\":\"" << esc(e.tag) << "\",\"coin\":\"" << esc(e.coin)
+               << "\",\"kind\":\"" << esc(e.kind) << "\",\"detail\":\"" << esc(e.detail) << "\"}";
+            efirst = false;
+        }
+        js << "]}";
+    }
+    js << "}";
     const std::string tmp = std::string(COMPANION_STATE_FILE) + ".tmp";
     FILE* f = fopen(tmp.c_str(), "w");
     if (!f) { std::fprintf(stderr, "[CC_STATE] failed to open %s\n", tmp.c_str()); return; }
@@ -3284,11 +3373,11 @@ int main() {
         // S-2026-07-18s OWN-PROTECTION effect line (fix 5, greppable by watchdogs): the
         // mirror's own floor/stop layer is structural config — print it armed with the
         // per-holding state so 'protection exists' is a logged runtime fact, not prose.
-        std::printf("[MIMIC-LIVE-GATE] own-protection ACTIVE: acquire gate anchor+%.0fbp, "
-                    "floor arms at fill+%.0fbp sells at fill+%.0fbp, pre-floor own-stop %.0fbp; %zu restored holding(s)\n",
-                    g_mimic_mirror.cost_bound_bp, g_mimic_mirror.cost_bound_bp,
-                    g_mimic_mirror.cost_bound_bp / 2.0, g_mimic_mirror.own_stop_bp,
-                    g_mimic_mirror.held.size());
+        std::printf("[MIMIC-LIVE-GATE] own-protection ACTIVE: acquire fills at market (S-18al no-paper order, "
+                    "sanity refuse >300bp stale-gap only), floor arms at fill+%.0fbp sells at fill+%.0fbp, "
+                    "pre-floor own-stop %.0fbp; %zu restored holding(s)\n",
+                    g_mimic_mirror.cost_bound_bp, g_mimic_mirror.cost_bound_bp / 2.0,
+                    g_mimic_mirror.own_stop_bp, g_mimic_mirror.held.size());
         for (const auto& kv : g_mimic_mirror.held)
             std::printf("[MIMIC-LIVE-FLOOR] %s %s qty=%.8f fill=%.6f own_stop=%.6f floor_arm=%.6f\n",
                         kv.first.c_str(), kv.second.symbol.c_str(), kv.second.qty, kv.second.px,

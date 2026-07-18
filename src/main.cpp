@@ -4220,6 +4220,8 @@ int main() {
             c.cap = 1;                       // ONE position per detected event (== jump_floor J1)
             c.retire_bp = retire_bp;
         }
+        c.catchup_max_age_bars = 24;         // S-2026-07-18 bounded catch-up (CATCHUP_OUTAGE_CERT_2026-07-18,
+                                             // SWET cells certified alongside the BECASC/rescue families)
         return c;
     };
     // ── S-2026-07-16 BE-CASCADE builder (operator EXACT spec, validated ALL-22 PASS) ──────────
@@ -4261,6 +4263,14 @@ int main() {
         c.cap = 8;                           // cap8 (8 floored legs)
         c.retire_bp = retire_bp;
         c.retire_override = unretired(ctag);
+        c.catchup_max_age_bars = 24;         // S-2026-07-18 BOUNDED CATCH-UP (operator "do the bounded
+                                             // thing"; INJ lost-window class): warm-seed re-opens a
+                                             // <=24h-old jump window iff confirm never crossed (always-on
+                                             // book would still be flat-in-window); entries only via the
+                                             // live confirm path (floored-on-open). Certified
+                                             // Crypto/backtest/CATCHUP_OUTAGE_CERT_2026-07-18.md:
+                                             // surgical 3500 windows 16410 recovered clips 0 mismatch
+                                             // vs always-on; grid additive avg +11%/cell at 28bp+2x.
         return c;
     };
     using LTier = chimera::UpJumpLadderCompanion::Tier;
@@ -4754,6 +4764,7 @@ int main() {
             c.size_mult = 1.0;
             c.retire_bp = rc.retire_bp;
             c.retire_override = unretired(_grid_ctags.back().c_str());
+            c.catchup_max_age_bars = 24;     // S-2026-07-18 bounded catch-up (same cert as BECASC cells)
             _grid.emplace_back(std::move(c));
             _grid_feeds.push_back(&_rescue_feeds.back());
         }
@@ -9901,7 +9912,9 @@ int main() {
                         cc.tag.c_str(), (long long)cc.tf_secs);
                     continue;
                 }
-                jobs.push_back({comp, cc.symbol, cc.det_w});
+                // S-2026-07-18 bounded catch-up: fetch depth must cover the catch-up replay
+                // (det_w ring + catchup_max_age_bars of look-back), not just the ring.
+                jobs.push_back({comp, cc.symbol, cc.det_w + cc.catchup_max_age_bars});
             }
         }
         if (!jobs.empty()) {

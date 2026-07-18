@@ -118,6 +118,27 @@ public:
         // on restart (no warm-seed; per-trade legs are ephemeral).
         int     det_w         = 0;
         double  det_thr       = 0.0;
+        // ── S-2026-07-18 BOUNDED CATCH-UP (operator: "do the bounded thing") ─────
+        // A restart/outage over a qualifying jump used to lose the window forever:
+        // seed_det_ring_hist() refills the ring but leaves the detector FLAT, so a
+        // book that was down when the jump printed never arms (INJ 2026-07-18: +1.76%
+        // 06:00Z jump predated the 22:57Z zeroing restart -> no window, no trades).
+        // >0 = at warm-seed, RE-OPEN the detector window from a historical jump iff
+        // ALL of (certified catchup_outage_bt.cpp; equivalence-to-always-on class):
+        //   • the replayed detector would still be IN the window (no j<=-thr since);
+        //   • the jump is at most catchup_max_age_bars finalized bars old (the BOUND);
+        //   • NO close since the jump reached epx*(1+min tier confirm) — i.e. an
+        //     always-on book would still be FLAT waiting for confirm. If confirm was
+        //     crossed during the outage the window is SKIPPED (back-filling that open
+        //     = the forbidden late-chase / backdated-entry class, S-2026-07-08);
+        //   • confirmed-entry mimic family only (mimic_floor, min confirm > 0; never
+        //     jump_floor — its immediate entry at NOW price would chase — never the
+        //     retired be_floor family) and arming_allowed_() (retire/rank_out hold).
+        // Catch-up sets det_in_/det_entry_ ONLY. Legs init + open via the untouched
+        // live confirm path (BE-ENTRY, le=epx anchor, floored-on-open) — the entry a
+        // catch-up window books is the SAME confirm-cross an always-on book would
+        // have booked. 0 = OFF.
+        int     catchup_max_age_bars = 0;
         // ── JUMP-FLOOR mode (S-2026-07-14, operator: "add these to our trades") ──
         // Third mode, faithful to Crypto/backtest/upjump2pct_be_bt.cpp `percoin`
         // winning cells (17/19 plateau-validated per-coin lever map). EXPLICIT
@@ -365,6 +386,17 @@ public:
     //   • ladder/be_floor books get the ring only, detector stays flat: first
     //     LIVE close evaluates with a full window instead of waiting W bars.
     int det_ring_size() const { return (int)h1c_.size(); }
+    // min per-tier confirm (bp) across the base tiers; 0 => some tier opens unconfirmed.
+    double min_confirm_bp_() const {
+        double m = (cfg_.tight.confirm > 0.0 ? cfg_.tight.confirm : cfg_.confirm_bp);
+        const double w = (cfg_.wide.confirm > 0.0 ? cfg_.wide.confirm : cfg_.confirm_bp);
+        if (w < m) m = w;
+        for (const auto& t : cfg_.extra_base) {
+            const double e = (t.confirm > 0.0 ? t.confirm : cfg_.confirm_bp);
+            if (e < m) m = e;
+        }
+        return m;
+    }
     void seed_det_ring_hist(const std::vector<double>& closes, int64_t last_closed_bar) {
         if (cfg_.det_w <= 0 || closes.size() < 2) return;
         const bool warm = (int)h1c_.size() >= cfg_.det_w + 1;
@@ -372,21 +404,55 @@ public:
         const bool in_flight = det_in_ || jf_in_;
         h1c_.clear();
         bool armed = false;
+        // BOUNDED CATCH-UP replay state (see Config::catchup_max_age_bars): walk the same
+        // finalized closes with the LIVE detector rule (enter j>=thr, exit j<=-thr) so we
+        // know whether an always-on book would still be in a window right now.
+        const double minconf = min_confirm_bp_();
+        const bool catchup_eligible = cfg_.catchup_max_age_bars > 0 && !in_flight
+            && cfg_.mimic_floor && !cfg_.jump_floor && !cfg_.be_floor
+            && minconf > 0.0 && arming_allowed_();
+        bool   cu_in = false; double cu_entry = 0.0, cu_maxafter = 0.0;
+        long   cu_entry_i = -1, fin_i = -1;                       // finalized-close indices
         for (size_t i = 0; i + 1 < closes.size(); ++i) {          // all but last -> finalized ring
             if (closes[i] <= 0.0) continue;
             h1c_.push_back(closes[i]);
             if ((int)h1c_.size() > cfg_.det_w + 1) h1c_.erase(h1c_.begin());
-            if (!in_flight && cfg_.jump_floor && (int)h1c_.size() >= cfg_.det_w + 1) {
+            ++fin_i;
+            if ((int)h1c_.size() >= cfg_.det_w + 1) {
                 const double j = h1c_.back() / h1c_.front() - 1.0;
-                if (!armed) { if (j < cfg_.det_thr) armed = true; }
-                else if (j >= cfg_.det_thr) armed = false;        // would-enter historically: arm consumed, need fresh re-arm
+                if (!in_flight && cfg_.jump_floor) {
+                    if (!armed) { if (j < cfg_.det_thr) armed = true; }
+                    else if (j >= cfg_.det_thr) armed = false;    // would-enter historically: arm consumed, need fresh re-arm
+                }
+                if (catchup_eligible) {
+                    if (!cu_in && j >= cfg_.det_thr) { cu_in = true; cu_entry = closes[i]; cu_entry_i = fin_i; cu_maxafter = closes[i]; }
+                    else if (cu_in && j <= -cfg_.det_thr) { cu_in = false; cu_entry = 0.0; cu_entry_i = -1; }
+                }
             }
+            if (cu_in && closes[i] > cu_maxafter) cu_maxafter = closes[i];
         }
         det_bar_ = last_closed_bar; det_close_ = closes.back();   // pending bar: live path finalizes it (entry only on a live tick)
         if (!in_flight && cfg_.jump_floor) jf_armed_ = armed;
-        std::printf("[CLIP-SEED] %s det ring warm-seeded from history: %zu closes ring=%zu W=%d armed=%d in_flight=%d\n",
+        // BOUNDED CATCH-UP verdict: re-open the window ONLY if the always-on book would
+        // still be flat-in-window (confirm never crossed, pending close included) and the
+        // jump is inside the bound. det_in_/det_entry_ only — legs init + open through the
+        // normal live confirm path (floored-on-open), never a backdated fill.
+        bool cu_armed = false;
+        if (catchup_eligible && cu_in && cu_entry > 0.0) {
+            const long   age = fin_i - cu_entry_i;
+            const double conf_px = cu_entry * (1.0 + minconf / 1e4);
+            const double pend = closes.back();
+            if (age <= (long)cfg_.catchup_max_age_bars && cu_maxafter < conf_px
+                && (pend <= 0.0 || pend < conf_px)) {
+                det_in_ = true; det_entry_ = cu_entry; cu_armed = true;
+                std::printf("[CLIP-CATCHUP] %s window re-opened from history: entry=%.6f age=%ldb (bound %d) "
+                    "maxafter=%.6f < confirm_px=%.6f (minconf=%.0fbp) — legs open only via live confirm path\n",
+                    cfg_.tag.c_str(), cu_entry, age, cfg_.catchup_max_age_bars, cu_maxafter, conf_px, minconf);
+            }
+        }
+        std::printf("[CLIP-SEED] %s det ring warm-seeded from history: %zu closes ring=%zu W=%d armed=%d in_flight=%d catchup=%d\n",
             cfg_.tag.c_str(), closes.size(), h1c_.size(), cfg_.det_w,
-            (cfg_.jump_floor && jf_armed_) ? 1 : 0, in_flight ? 1 : 0);
+            (cfg_.jump_floor && jf_armed_) ? 1 : 0, in_flight ? 1 : 0, cu_armed ? 1 : 0);
     }
 
     // ── one independent clip leg (faithful python Leg) ─────────────────────

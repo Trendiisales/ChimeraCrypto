@@ -5137,6 +5137,46 @@ int main() {
                 bc.det_w, bc.giveback));
             _grid_feeds.push_back(&_bc_btc_lt_feeds.back());
         }
+        // ── S-2026-07-18: ETH LOW-THRESHOLD +11 mimic cells (operator: "roll the same
+        // setting out for eth now" — the S-18ab/ac BTC low-thr rollout applied to ETH).
+        // Cert: same harness (eth_ujmimic_15_becascade_bt vs HEAD 01a30d2, honest 17f
+        // fills), UM_COIN=ETH, confirm60 BE-ENTRY anchored, RT=30/60bp (stricter than the
+        // fleet's 28 / ETH's measured ~28), data ETHUSDT_1h 2021-01→2026-07-18 integrity
+        // PASS, thr {0.5,0.75,1.0,1.25,1.5,2.0}% x W{1,2,4,8,12,24} x g{0.2,0.5,0.75}:
+        // ALL 108 cells PASS the standalone gate (net>0 & PF>=1.3 & both WF halves>0 at
+        // base AND 2x cost, omit-2022) — same deep plateau as BTC, zero fails. Baseline
+        // reproduction first: at cert params the harness reproduces the wired ETH F/S
+        // figures (worst -997.5/-1086.1 exact; n/net drift = fresh 6-day tail only).
+        // Picks = best 2x-cost net per W lane; g0.20 preferred when within 5% of lane max
+        // (PF 2-3x higher, sumNeg half — the BTC "g0.20 beat g0.75 on PF/tail at
+        // near-equal net" precedent); retire_bp = 2x own backtested worst clip.
+        // UJ15 W2/W8 lanes NOT duplicated: live ETH-UJ15-BECASC-F (W2 g0.20) and -S
+        // (W8 g0.75) already cover them. ADDITIVE independent books, cap8 each.
+        // ETH total: UJ2 parent-cascade + F/S + these 11 = 14 books.
+        // ETH_LOWTHR_MIMIC_FINDINGS_2026-07-18.md (Crypto repo).
+        static const std::vector<BcCell2> _bc_eth_lowthr_cells = {
+            {"ETH", "ETH-UJ05-BECASC-W1",  "ethusdt", 0.005,  1, 0.20, -1932.0},  // n=7671 net=+10097% PF14.75 worst=-966.2bp 2xnet=+7816%
+            {"ETH", "ETH-UJ05-BECASC-W2",  "ethusdt", 0.005,  2, 0.20, -1999.0},  // n=7828 net=+10974% PF17.14 worst=-999.5bp 2xnet=+8647%
+            {"ETH", "ETH-UJ05-BECASC-W4",  "ethusdt", 0.005,  4, 0.20, -1768.0},  // n=7937 net=+11577% PF18.14 worst=-883.8bp 2xnet=+9214%
+            {"ETH", "ETH-UJ05-BECASC-W12", "ethusdt", 0.005, 12, 0.75, -2154.0},  // n=5895 net=+9030%  PF7.35  worst=-1077.0bp 2xnet=+7341%
+            {"ETH", "ETH-UJ10-BECASC-W1",  "ethusdt", 0.010,  1, 0.20, -1932.0},  // n=5142 net=+7479%  PF16.49 worst=-966.2bp 2xnet=+5950%
+            {"ETH", "ETH-UJ10-BECASC-W2",  "ethusdt", 0.010,  2, 0.20, -1999.0},  // n=6115 net=+9266%  PF17.32 worst=-999.5bp 2xnet=+7449%
+            {"ETH", "ETH-UJ10-BECASC-W4",  "ethusdt", 0.010,  4, 0.20, -1768.0},  // n=6352 net=+9467%  PF17.07 worst=-883.8bp 2xnet=+7560%
+            {"ETH", "ETH-UJ10-BECASC-W12", "ethusdt", 0.010, 12, 0.75, -2154.0},  // n=4782 net=+8153%  PF7.80  worst=-1077.0bp 2xnet=+6511%
+            {"ETH", "ETH-UJ15-BECASC-W1",  "ethusdt", 0.015,  1, 0.20, -1932.0},  // n=3042 net=+4849%  PF15.83 worst=-966.2bp 2xnet=+3942%
+            {"ETH", "ETH-UJ15-BECASC-W4",  "ethusdt", 0.015,  4, 0.20, -1628.0},  // n=4779 net=+7190%  PF17.58 worst=-813.9bp 2xnet=+5771%
+            {"ETH", "ETH-UJ15-BECASC-W12", "ethusdt", 0.015, 12, 0.20, -1768.0},  // n=4022 net=+5931%  PF19.14 worst=-883.8bp 2xnet=+4719%
+        };
+        static std::vector<chimera::EdgeEngine> _bc_eth_lt_feeds; _bc_eth_lt_feeds.reserve(_bc_eth_lowthr_cells.size());
+        for (const auto& bc : _bc_eth_lowthr_cells) {
+            _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
+            _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
+            _bc_eth_lt_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _grid.emplace_back(make_becascade_cell(
+                _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
+                bc.det_w, bc.giveback));
+            _grid_feeds.push_back(&_bc_eth_lt_feeds.back());
+        }
     }
     std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;

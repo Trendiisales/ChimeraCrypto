@@ -1699,6 +1699,18 @@ static void emit_companion_state() {
            << ",\"bank_bp_real_w\":" << snap.bank_bp_real_w
            << ",\"mult\":" << snap.size_mult
            << ",\"retired\":" << (snap.retired ? "true" : "false");
+        // S-2026-07-18ah trigger-PROXIMITY (operator ask: "see when a symbol is moving
+        // towards a trigger, not a 24h percentage"): the cell's CURRENT window move vs
+        // its own det threshold (running close — intra-bar fresh on the 5s emit throttle)
+        // + window-open state + bp still needed to cross confirm (first real entry).
+        // prox_valid=false for parent-driven (det_w=0) cells — desk must not infer.
+        {
+            const auto prox = kv.second.second->det_proximity();
+            js << ",\"prox_valid\":" << (prox.valid ? "true" : "false")
+               << ",\"win_open\":" << (prox.win_open ? "true" : "false")
+               << std::setprecision(3) << ",\"win_move_pct\":" << prox.j_pct
+               << std::setprecision(1) << ",\"confirm_dist_bp\":" << prox.confirm_dist_bp;
+        }
         // Per-leg breakdown (S-2026-07-05b tiered ladder): T1/T2 base + L1..Ln ladder
         // legs currently OPEN, each with its own armed/peak/stall for the Omega desk
         // CRYPTO COMPANIONS multi-leg render. sym-level fields above remain the book

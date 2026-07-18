@@ -635,6 +635,45 @@ public:
         return v;
     }
 
+    // ── S-2026-07-18ah trigger-PROXIMITY readout (operator ask: "see when a symbol is
+    //    moving towards a trigger, not a 24h percentage that means nothing") ──────────
+    // Read-only view of the self-detector's CURRENT window move vs its own threshold:
+    //   j_pct  = det_close_/ring.front - 1 — the RUNNING close (updates every tick via
+    //            feed_selfdetect_), so the desk sees intra-bar drift toward the trigger,
+    //            not just the last H1 close. At bar close this exact j is what enters.
+    //   win_open      = detector window open (det_in_ / jf_in_).
+    //   confirm_dist_bp = window OPEN + book still flat: bp of upward move still needed
+    //            to cross the lowest per-tier confirm (the first REAL booked entry).
+    //            <=0 means confirm crossed / legs live. 0 when window closed.
+    // det_w==0 (parent-driven) cells report valid=false — their trigger belongs to the
+    // parent's UNIFORM 4h window family, never conflate (feedback-test-operator-spec).
+    struct DetProximity {
+        bool   valid = false;          // self-detect cell with a FULL ring (W+1 closes)
+        bool   win_open = false;
+        double j_pct = 0.0;            // current window move, %
+        double thr_pct = 0.0;          // det_thr, %
+        double confirm_dist_bp = 0.0;
+    };
+    DetProximity det_proximity() const {
+        DetProximity p;
+        p.thr_pct  = cfg_.det_thr * 100.0;
+        p.win_open = det_in_ || jf_in_;
+        if (cfg_.det_w > 0 && (int)h1c_.size() >= cfg_.det_w + 1
+            && h1c_.front() > 0.0 && det_close_ > 0.0) {
+            p.valid = true;
+            p.j_pct = (det_close_ / h1c_.front() - 1.0) * 100.0;
+        }
+        if (p.win_open && det_entry_ > 0.0 && det_close_ > 0.0) {
+            bool flat = true;
+            for (const auto& lg : legs_) if (lg.open) { flat = false; break; }
+            if (flat) {
+                const double conf_px = det_entry_ * (1.0 + min_confirm_bp_() / 1e4);
+                p.confirm_dist_bp = (conf_px / det_close_ - 1.0) * 1e4;
+            }
+        }
+        return p;
+    }
+
 private:
     // ── internal up-jump detector (be_floor self-detect; parent never read) ──
     // Aggregates H1 closes from the mark stream; a bar "closes" when the next bar's

@@ -183,6 +183,23 @@ public:
         return bal;
     }
 
+    // get_free_asset — GET /api/v3/account (signed), free qty for ANY base asset
+    // (uppercase, e.g. "LTC"). Returns -1.0 on fetch failure so the caller can
+    // distinguish "query failed" (do not clamp) from "genuinely 0 held".
+    // (S-2026-07-19q: used by the mimic live-mirror stuck-close qty clamp.)
+    double get_free_asset(const std::string& asset) {
+        if (!ready_ || asset.empty()) return -1.0;
+        std::string params = "recvWindow=5000&timestamp=" + timestamp_ms();
+        params += "&signature=" + sign(params);
+        std::string body;
+        long http_code = 0;
+        if (!get("/api/v3/account", params, body, http_code) || http_code != 200) {
+            std::fprintf(stderr, "[REST] get_free_asset(%s) failed: http=%ld\n", asset.c_str(), http_code);
+            return -1.0;
+        }
+        return parse_balance(body, asset);
+    }
+
     // -----------------------------------------------------------------------
     // fetch_klines — GET /api/v3/klines (public endpoint, no auth).
     //

@@ -1253,7 +1253,7 @@ struct LiveMimicMirror {
     //     UNI class (basis-gapped fill whose floor never arms). Engine-loss-protection
     //     provision for the live layer itself, not inherited.
     struct Hold { double qty = 0.0; double px = 0.0; std::string symbol; bool pending_sell = false; double sell_px = 0.0;
-                  double hwm = 0.0; bool floored = false; };
+                  double hwm = 0.0; bool floored = false; double last_retry_ms = 0.0; };
     bool enabled = false;                   // armed only in RuntimeMode::LIVE
     double order_usd = 0.0;                 // per-leg BUY notional (= live_pilot_max_order_usd)
     double cost_bound_bp = 56.0;            // acquire gate + floor-arm bound (2× worst measured RT cost)
@@ -1261,6 +1261,51 @@ struct LiveMimicMirror {
     std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
     std::map<std::string, Hold> held;       // clip-tag -> live holding
     std::mutex mu;
+
+    // ── S-2026-07-19q STUCK-CLOSE ROBUSTNESS (LTC live-money incident, this
+    // session). Two live bugs made a pending mimic SELL retry forever without
+    // ever closing (real coins stranded, PnL never booked):
+    //   1) retry_pending_() submitted h.sell_px, but load() never restores sell_px
+    //      (nor does persist_() write it) -> after ANY restart sell_px=0 -> the
+    //      gateway L112 sanity (ref_px<=0) REJECTs "invalid qty/price" forever.
+    //      on_price() skips pending_sell holds, so the live-price tick driver never
+    //      re-fires them either. FIX: retry uses the latest LIVE tick px (never 0),
+    //      and on_price re-drives pending sells every tick (throttled).
+    //   2) the recorded hold qty exceeds the REAL exchange free balance (BUY taker
+    //      fee is taken in the base asset), so a MARKET SELL of the recorded qty is
+    //      REJECTed insufficient-balance. FIX: clamp every live SELL to the actual
+    //      free balance (free_base callback, wired to the live BinanceREST; null =>
+    //      no clamp in shadow/tests, byte-identical research behaviour).
+    // The order itself is ALREADY a MARKET order (SpotExecutor::execute -> place_order
+    // type=MARKET); ref_px only feeds the gateway sanity/notional/filter checks.
+    std::map<std::string, double> last_px_;          // sym_lower -> latest live tick px
+    std::function<double(const std::string&)> free_base;  // base asset (UPPER) -> exchange free qty; null in shadow
+
+    // base asset (UPPER) from a "<base>usdt" symbol; empty if not a *usdt pair.
+    static std::string base_of_(const std::string& sym_lower) {
+        auto p = sym_lower.rfind("usdt");
+        if (p == std::string::npos || p == 0) return {};
+        return upsym(sym_lower.substr(0, p));
+    }
+    // Pick a SAFE {qty, px} for a live SELL of h. px = latest live tick (fallback to
+    // sell_px/px) so it is NEVER 0 for the MARKET order's gateway sanity; qty is
+    // clamped to the real exchange free balance (fee/rounding-safe). Returns qty<=0
+    // or px<=0 when the caller must NOT submit yet (no live px / no free coins).
+    std::pair<double,double> sell_params_(const Hold& h) {
+        double px = 0.0;
+        auto it = last_px_.find(h.symbol);
+        if (it != last_px_.end()) px = it->second;
+        if (px <= 0.0) px = h.sell_px > 0.0 ? h.sell_px : h.px;   // never 0 for a MARKET order
+        double qty = h.qty;
+        if (free_base) {
+            std::string base = base_of_(h.symbol);
+            if (!base.empty()) {
+                double f = free_base(base);
+                if (f > 0.0) qty = std::min(qty, f * (1.0 - 1e-4));  // never exceed real free
+            }
+        }
+        return { qty, px };
+    }
 
     // ── S-2026-07-18al LIVE-ROUTING TRUTH FEED (operator: "NO paper — why are these
     // not live trades"): the COMP ×5 refusal lived only in this log while the desk lit
@@ -1319,14 +1364,26 @@ struct LiveMimicMirror {
             std::fflush(stdout);
         }
     }
-    void retry_pending_() {                  // called under mu from both event paths
+    void retry_pending_() {                  // called under mu from event paths + on_price
+        // S-2026-07-19q: retry with a LIVE px (never sell_px=0) + qty clamped to the
+        // real free balance; throttle per-hold so a persistent reject can't spam the
+        // gateway on every tick. Skip (do NOT submit) until a live px is known.
+        double now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
         for (auto& kv : held) {
-            if (!kv.second.pending_sell || kv.second.qty <= 0.0) continue;
-            auto r = submit({ upsym(kv.second.symbol), false, kv.second.qty, kv.second.sell_px,
+            Hold& h = kv.second;
+            if (!h.pending_sell || h.qty <= 0.0) continue;
+            if (now_ms - h.last_retry_ms < 3000.0) continue;     // >=3s between retries
+            auto pr = sell_params_(h);
+            if (pr.first <= 0.0 || pr.second <= 0.0) continue;   // no live px / no free coins yet -> wait
+            h.last_retry_ms = now_ms;
+            auto r = submit({ upsym(h.symbol), false, pr.first, pr.second,
                               /*is_exit*/ true, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
             if (r.ok) {
-                std::printf("[MIMIC-LIVE] retry SELL OK %s qty=%.8f\n", kv.first.c_str(), kv.second.qty);
-                kv.second.qty = 0.0; kv.second.pending_sell = false;
+                std::printf("[MIMIC-LIVE] retry SELL OK %s qty=%.8f @%.6f\n", kv.first.c_str(), pr.first, pr.second);
+                std::fflush(stdout);
+                note_(kv.first, "SOLD", "retry close");
+                h.qty = 0.0; h.pending_sell = false;
             }
         }
     }
@@ -1418,6 +1475,8 @@ struct LiveMimicMirror {
     void on_price(const std::string& sym_lower, double px, int64_t /*now_ms*/) {
         if (!enabled || !submit || px <= 0.0 || held.empty()) return;
         std::lock_guard<std::mutex> lk(mu);
+        last_px_[sym_lower] = px;            // S-2026-07-19q: freshest live px for the retry path
+        retry_pending_();                    // re-drive any pending_sell hold with a live px (throttled)
         bool changed = false;
         for (auto it = held.begin(); it != held.end(); ) {
             Hold& h = it->second;
@@ -3412,6 +3471,11 @@ int main() {
     g_mimic_mirror.own_stop_bp   = runtime_cfg.live_pilot_own_stop_bp;
     if (g_mimic_mirror.enabled) {
         g_mimic_mirror.submit = governed_submit;
+        // S-2026-07-19q: live free-balance clamp for the stuck-close path — sell only
+        // coins actually held (BUY taker fee shrinks the base below the recorded qty).
+        g_mimic_mirror.free_base = [&executor](const std::string& asset) -> double {
+            return executor.free_balance(asset);
+        };
         g_mimic_mirror.load();
         std::printf("[MIMIC-LIVE] mirror ARMED: grid leg opens route $%.2f BUYs via gateway "
                     "(pilot caps enforce); clips SELL the tracked fill; holdings persist %s\n",

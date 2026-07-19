@@ -89,6 +89,15 @@ public:
         return true;
     }
 
+    // free_balance — live free qty for a base asset (UPPER, e.g. "LTC"); -1.0 on
+    // fetch failure. PUBLIC (read-only account query, not the befriended order
+    // path). Used by the mimic live-mirror to clamp a stuck SELL to real coins
+    // held (S-2026-07-19q). Safe no-op-ish when not ready (returns -1.0).
+    double free_balance(const std::string& asset) {
+        if (!rest_.is_ready()) return -1.0;
+        return rest_.get_free_asset(asset);
+    }
+
 private:
     // -----------------------------------------------------------------------
     // execute — PRIVATE. Reachable ONLY via ExecutionGatewayT::submit(), which

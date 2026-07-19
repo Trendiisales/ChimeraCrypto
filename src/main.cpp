@@ -878,30 +878,17 @@ static void persist_trade(const chimera::EdgeEngine::TradeRecord& t) {
 // (the position resumes from open_positions.json on restart), not real exits.
 static constexpr const char* DESK_INBOUND_FILE = "data/chimera_inbound.csv";
 static std::mutex g_desk_export_mtx;
-static void export_desk_trade(int64_t entry_ts_ms, int64_t exit_ts_ms,
-                              std::string sym, const std::string& strat,
-                              const char* side, double entry_px, double exit_px,
-                              double net_bp, const std::string& reason) {
-    if (reason == "SHUTDOWN") return;   // bookkeeping close, position resumes
-    // "suiusdt" -> "SUI"
-    for (auto& c : sym) if (c >= 'a' && c <= 'z') c -= 32;
-    if (sym.size() > 4 && sym.compare(sym.size() - 4, 4, "USDT") == 0)
-        sym.resize(sym.size() - 4);
-    const double POOL_USD = 10000.0;                 // desk pool convention
-    double net_usd = net_bp * POOL_USD / 10000.0;    // 1 bp = $1 at $10k pool
-    std::lock_guard<std::mutex> lk(g_desk_export_mtx);
-    bool fresh = false;
-    { FILE* t = fopen(DESK_INBOUND_FILE, "r"); if (!t) fresh = true; else fclose(t); }
-    FILE* f = fopen(DESK_INBOUND_FILE, "a");
-    if (!f) { std::fprintf(stderr, "[DESK_EXPORT] failed to open %s\n", DESK_INBOUND_FILE); return; }
-    if (fresh) std::fprintf(f, "id,entry_ts,exit_ts,sym,strat,side,entry,exit,net_usd,reason\n");
-    std::fprintf(f, "%lld,%lld,%lld,%s,%s,%s,%.6f,%.6f,%.2f,%s\n",
-        (long long)exit_ts_ms, (long long)(entry_ts_ms / 1000), (long long)(exit_ts_ms / 1000),
-        sym.c_str(), strat.c_str(), side, entry_px, exit_px, net_usd, reason.c_str());
-    fclose(f);
-    std::printf("[DESK_EXPORT] %s %s %s net=$%.2f (%s)\n",
-        strat.c_str(), sym.c_str(), side, net_usd, reason.c_str());
-    std::fflush(stdout);
+static void export_desk_trade(int64_t /*entry_ts_ms*/, int64_t /*exit_ts_ms*/,
+                              std::string /*sym*/, const std::string& /*strat*/,
+                              const char* /*side*/, double /*entry_px*/, double /*exit_px*/,
+                              double /*net_bp*/, const std::string& /*reason*/) {
+    // S-2026-07-20 CRYPTO LIVE-ONLY REBUILD (operator mandate): the shadow desk feed is
+    // REMOVED AT SOURCE. This function no longer writes data/chimera_inbound.csv — the
+    // Omega desk's LAST-15 crypto rows came from here (shadow clips + XSec/XSec2/slot
+    // legs). The only book that reaches the desk now is the real Binance mirror
+    // (live_mirror block of crypto_companion_state.json + live_realized.json). Body is a
+    // no-op; remaining callers are removed with their shadow engines in the same rebuild.
+    (void)DESK_INBOUND_FILE; (void)g_desk_export_mtx;
 }
 
 // ── S34: Multi-tier protection state persistence ───────────────────────────
@@ -1183,10 +1170,16 @@ static std::mutex g_companion_mtx;
 
 static void save_companion_det_state();   // fwd decl (defined below); called on jf-close for Fig-2 immediate persist
 static void persist_companion_clip(const chimera::MimicLadderCompanion::ClipRecord& r) {
-    // S-17s SIGNAL-ONLY cells (GRT-PJ5W1 driver): NOTHING books — no ledger row, no desk
-    // export — but the Fig-2 immediate det-state persist MUST still run or a restart in
-    // the post-close window resurrects the leg (and the ledger-dedup can't catch it,
-    // since a signal-only close has no ledger row to match). Same -J1 gate as below.
+    // S-2026-07-20 CRYPTO LIVE-ONLY REBUILD (operator mandate): the DESK export of clips
+    // is REMOVED — no chimera_inbound.csv row reaches the Omega desk. companion_trades.json
+    // is RETAINED: it is NOT a desk feed but load-bearing local state on the box — the
+    // -J1 resurrection dedup (jf_leg_already_closed, below) reads it to prevent a stale
+    // det-state from resurrecting a closed jump_floor leg into a PHANTOM REAL BUY on the
+    // live mirror (the ETH-PJ7W24 zombie incident). The live system's only DESK book is
+    // the real Binance mirror (LiveMimicMirror).
+    // S-17s SIGNAL-ONLY cells (GRT-PJ5W1 driver): NOTHING books — but the Fig-2 immediate
+    // det-state persist MUST still run or a restart in the post-close window resurrects
+    // the leg (ledger-dedup can't catch it: a signal-only close has no ledger row). Same -J1 gate.
     if (r.signal_only) {
         if (r.tag.size() >= 3 && r.tag.compare(r.tag.size() - 3, 3, "-J1") == 0)
             save_companion_det_state();
@@ -1206,21 +1199,9 @@ static void persist_companion_clip(const chimera::MimicLadderCompanion::ClipReco
     std::string line = js.str();
     fwrite(line.c_str(), 1, line.size(), f);
     fclose(f);
-    // CHIMERA→OMEGA DESK export (S-2026-07-12): companion clips ride to the
-    // desk trades list too. net = REAL column × per-coin weight (the honest
-    // worse-of fill minus RT cost, S-2026-07-07f) — same figure the desk
-    // companion panel folds. STANDALONE additive book, never vs-WIDE.
-    export_desk_trade(r.entry_ts_ms, r.exit_ts_ms, r.symbol, r.tag, "BUY",
-                      r.entry_px, r.exit_px, r.net_bp_real * r.size_mult,
-                      r.reason);
-    // Fig-2 (S-2026-07-16, RESTART-RESURRECTION defense-in-depth): a jump_floor leg
-    // (-J1) close clears the engine's det_in_ persistence mirror (jf_book_ L612).
-    // Persist the det-state file IMMEDIATELY so a restart in the window before the
-    // next H1 save (main.cpp save_companion_det_state at bar-close) can never
-    // resurrect the just-closed leg from a stale det_in:1. jf clips fire ONLY from
-    // MimicLadderCompanion::observe(), always under g_companion_mtx (both drive
-    // sites hold it), and save_companion_det_state takes no lock itself -> race-free.
-    // Gated to -J1 so be_/campaign/core clips (other on_clip_ users) don't trigger it.
+    // S-2026-07-20: chimera_inbound.csv desk export REMOVED here (was export_desk_trade).
+    // Fig-2 (RESTART-RESURRECTION defense): a -J1 jump_floor close persists det-state
+    // IMMEDIATELY so a restart before the next H1 save cannot resurrect the leg.
     if (r.tag.size() >= 3 && r.tag.compare(r.tag.size() - 3, 3, "-J1") == 0)
         save_companion_det_state();
 }
@@ -1868,38 +1849,12 @@ static void emit_companion_state() {
         }
         js << "]}";
     }
-    // S-2026-07-13 campaign books (13j §2.11): same leg field contract as the
-    // companions so the desk panel renders them with zero GUI changes.
-    // parent_tag=CAMPAIGN-SELF marks the class; armed = parent stop protected
-    // at-or-above entry; sublegs carries the ONE open parent lot (if any).
-    for (const auto* mgr : g_campaigns) {
-        for (const auto& s : mgr->snapshots()) {
-            if (desk_shadow_skip(s.sym)) continue;   // ZERO-SHADOW: non-pilot campaign leg not published to desk
-            if (!first) js << ",";
-            first = false;
-            js << "{\"sym\":\"" << s.sym << "\",\"tag\":\"" << s.tag << "\",\"cell\":\"" << s.cell << "\""
-               << ",\"det_w\":" << s.det_w
-               << std::setprecision(1) << ",\"det_thr_pct\":" << s.det_thr * 100.0
-               << ",\"parent_tag\":\"CAMPAIGN-SELF\",\"parent_w\":" << s.det_w
-               << ",\"parent_thr_pct\":" << s.det_thr * 100.0
-               << ",\"canonical\":true"
-               << ",\"armed\":" << (s.armed ? "true" : "false")
-               << std::setprecision(4) << ",\"peak_mfe_pct\":" << s.peak_mfe_pct
-               << ",\"bars_since_high\":" << s.bars_since_high
-               << ",\"clips\":" << s.clips
-               << std::setprecision(2) << ",\"bank_bp\":" << s.bank_bp
-               << ",\"bank_bp_real\":" << s.bank_bp_real
-               << ",\"bank_bp_real_w\":" << s.bank_bp_real_w
-               << ",\"mult\":" << s.size_mult
-               << ",\"retired\":" << (s.retired ? "true" : "false")
-               << ",\"sublegs\":[";
-            if (s.open)
-                js << "{\"id\":\"P\",\"armed\":" << (s.armed ? "true" : "false")
-                   << std::setprecision(4) << ",\"peak_mfe_pct\":" << s.peak_mfe_pct
-                   << ",\"bars_since_high\":" << s.bars_since_high << "}";
-            js << "]}";
-        }
-    }
+    // S-2026-07-20 CRYPTO LIVE-ONLY REBUILD: the shadow CAMPAIGN legs (g_campaigns:
+    // XSEC-style virtual-lot research books) are REMOVED from the desk emit — those
+    // engines are deleted in this rebuild. The companion detection legs above are the
+    // LIVE pre-trade detector that drives the real Binance mirror (armed/proximity coin
+    // tiles), NOT a shadow book, and are retained. The live_mirror block below is the
+    // real Binance holds/events the desk renders as TRADING.
     js << "]";
     // ── S-2026-07-18al LIVE-MIRROR TRUTH FEED: the desk renders TRADING from REAL
     // holds only and rings on REFUSED/SKIPPED events (COMP ×5 silent-refusal incident:
@@ -5762,24 +5717,24 @@ int main() {
             {
                 const auto& cc = _all_clips[i]->config();
                 if (cc.jump_floor)
-                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  JUMP-FLOOR %s preBEstop=%.0fbp gb=%.2f rt=%.0fbp mult=x%.1f retire@%.0fbp%s shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  JUMP-FLOOR %s preBEstop=%.0fbp gb=%.2f rt=%.0fbp mult=x%.1f retire@%.0fbp%s [LIVE-MIMIC-CELL drives real Binance mirror]\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
                         cc.signal_only ? "SIGNAL-ONLY(books nothing, drives mimic)" : "imm-entry",
                         cc.jf_prebe_stop_bp, cc.jf_giveback, cc.round_trip_bp,
                         cc.size_mult, cc.retire_bp,
                         _all_clips[i]->is_retired() ? " [RETIRED]" : (cc.rank_out ? " [RANK-OUT]" : ""));
                 else if (cc.be_floor)
-                    std::printf("[CLIP-INIT] %s -> price %s  BE-FLOOR be=%.0fbp trail(T%.0f/W%.0f)bp det=%dh/%+.2f%% cap=%d shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> price %s  BE-FLOOR be=%.0fbp trail(T%.0f/W%.0f)bp det=%dh/%+.2f%% cap=%d [LIVE-MIMIC-CELL drives real Binance mirror]\n",
                         cc.tag.c_str(), cc.parent_tag.c_str(), cc.be_bp,
                         cc.tight.trail_bp, cc.wide.trail_bp, cc.det_w, cc.det_thr * 100, cc.cap);
                 else if (cc.mimic_floor)
-                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  MIMIC-FLOOR confirm=%.0fbp g=%.2f reclip=%.3f rt=%.0fbp cut=%.0fbp retire@%.0fbp%s BE-FLOORED shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  MIMIC-FLOOR confirm=%.0fbp g=%.2f reclip=%.3f rt=%.0fbp cut=%.0fbp retire@%.0fbp%s BE-FLOORED [LIVE-MIMIC-CELL drives real Binance mirror]\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
                         cc.confirm_bp, cc.mimic_giveback, cc.reclip_pct, cc.round_trip_bp,
                         cc.loss_cut_bp, cc.retire_bp,
                         _all_clips[i]->is_retired() ? " [RETIRED]" : (cc.rank_out ? " [RANK-OUT]" : ""));
                 else
-                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp mult=x%.1f retire@%.0fbp%s NO-FLOOR shadow=1\n",
+                    std::printf("[CLIP-INIT] %s -> det=%dh/%+.2f%% (self)  TIGHT(a%.0f/s%d/g%.2f) WIDE(a%.0f/s%d/g%.2f) +%d stacked-arm(s) reclip=%.2f cap=%d cg=%.0f confirm=%.0fbp mult=x%.1f retire@%.0fbp%s NO-FLOOR [LIVE-MIMIC-CELL drives real Binance mirror]\n",
                         cc.tag.c_str(), cc.det_w, cc.det_thr * 100,
                         cc.tight.arm, cc.tight.stall, cc.tight.gb,
                         cc.wide.arm, cc.wide.stall, cc.wide.gb,

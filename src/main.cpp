@@ -1281,30 +1281,13 @@ struct LiveMimicMirror {
     std::map<std::string, double> last_px_;          // sym_lower -> latest live tick px
     std::function<double(const std::string&)> free_base;  // base asset (UPPER) -> exchange free qty; null in shadow
 
+    double min_sell_usd_ = 5.0;             // notional below this = dust => position is effectively flat
+
     // base asset (UPPER) from a "<base>usdt" symbol; empty if not a *usdt pair.
     static std::string base_of_(const std::string& sym_lower) {
         auto p = sym_lower.rfind("usdt");
         if (p == std::string::npos || p == 0) return {};
         return upsym(sym_lower.substr(0, p));
-    }
-    // Pick a SAFE {qty, px} for a live SELL of h. px = latest live tick (fallback to
-    // sell_px/px) so it is NEVER 0 for the MARKET order's gateway sanity; qty is
-    // clamped to the real exchange free balance (fee/rounding-safe). Returns qty<=0
-    // or px<=0 when the caller must NOT submit yet (no live px / no free coins).
-    std::pair<double,double> sell_params_(const Hold& h) {
-        double px = 0.0;
-        auto it = last_px_.find(h.symbol);
-        if (it != last_px_.end()) px = it->second;
-        if (px <= 0.0) px = h.sell_px > 0.0 ? h.sell_px : h.px;   // never 0 for a MARKET order
-        double qty = h.qty;
-        if (free_base) {
-            std::string base = base_of_(h.symbol);
-            if (!base.empty()) {
-                double f = free_base(base);
-                if (f > 0.0) qty = std::min(qty, f * (1.0 - 1e-4));  // never exceed real free
-            }
-        }
-        return { qty, px };
     }
 
     // ── S-2026-07-18al LIVE-ROUTING TRUTH FEED (operator: "NO paper — why are these
@@ -1365,27 +1348,53 @@ struct LiveMimicMirror {
         }
     }
     void retry_pending_() {                  // called under mu from event paths + on_price
-        // S-2026-07-19q: retry with a LIVE px (never sell_px=0) + qty clamped to the
-        // real free balance; throttle per-hold so a persistent reject can't spam the
-        // gateway on every tick. Skip (do NOT submit) until a live px is known.
+        // S-2026-07-19q: retry a stuck pending SELL with a LIVE px (never sell_px=0)
+        // + qty clamped to the REAL free balance; throttle per-hold so a persistent
+        // reject can't spam the gateway. Three balance cases:
+        //   free query OK & notional >= min : sell min(recorded, free) at market.
+        //   free query OK & notional  < min : DUST -> position already flat on the
+        //                                     exchange; clear the hold (no endless
+        //                                     dust-loop) and persist.
+        //   free query FAILED (-1)          : do NOT blind-sell (over-sell risk);
+        //                                     wait and retry next tick.
+        // Persist on any state change so a restart cannot resurrect a closed hold.
         double now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
+        bool changed = false;
         for (auto& kv : held) {
             Hold& h = kv.second;
             if (!h.pending_sell || h.qty <= 0.0) continue;
             if (now_ms - h.last_retry_ms < 3000.0) continue;     // >=3s between retries
-            auto pr = sell_params_(h);
-            if (pr.first <= 0.0 || pr.second <= 0.0) continue;   // no live px / no free coins yet -> wait
+            double px = 0.0;
+            auto it = last_px_.find(h.symbol);
+            if (it != last_px_.end()) px = it->second;
+            if (px <= 0.0) px = h.sell_px > 0.0 ? h.sell_px : h.px;   // never 0 for a MARKET order
+            if (px <= 0.0) continue;                              // no price yet -> wait
+            double qty = h.qty, free = -1.0;
+            if (free_base) { std::string b = base_of_(h.symbol); if (!b.empty()) free = free_base(b); }
+            if (free >= 0.0) {                                    // query succeeded
+                if (free * px < min_sell_usd_) {                 // dust -> already flat on exchange
+                    std::printf("[MIMIC-LIVE] retry DUST-CLEAR %s free=%.8f (~$%.2f < $%.2f) — treating as closed\n",
+                                kv.first.c_str(), free, free * px, min_sell_usd_);
+                    std::fflush(stdout);
+                    note_(kv.first, "SOLD", "dust-clear (already flat on exchange)");
+                    h.qty = 0.0; h.pending_sell = false; changed = true;
+                    continue;
+                }
+                qty = std::min(qty, free * (1.0 - 1e-4));         // never exceed real free
+            }
+            // free < 0 => balance query failed: fall back to recorded qty (best effort).
             h.last_retry_ms = now_ms;
-            auto r = submit({ upsym(h.symbol), false, pr.first, pr.second,
+            auto r = submit({ upsym(h.symbol), false, qty, px,
                               /*is_exit*/ true, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
             if (r.ok) {
-                std::printf("[MIMIC-LIVE] retry SELL OK %s qty=%.8f @%.6f\n", kv.first.c_str(), pr.first, pr.second);
+                std::printf("[MIMIC-LIVE] retry SELL OK %s qty=%.8f @%.6f\n", kv.first.c_str(), qty, px);
                 std::fflush(stdout);
                 note_(kv.first, "SOLD", "retry close");
-                h.qty = 0.0; h.pending_sell = false;
+                h.qty = 0.0; h.pending_sell = false; changed = true;
             }
         }
+        if (changed) persist_();
     }
     void on_open(const chimera::MimicLadderCompanion::OpenRecord& r) {
         if (!enabled || !submit || order_usd <= 0.0 || r.px <= 0.0) return;

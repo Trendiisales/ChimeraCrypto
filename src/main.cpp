@@ -1657,6 +1657,18 @@ static void restore_companion_det_state() {
 static chimera::CryptoCostLedger      g_camp_cost_ledger;
 static chimera::CryptoOpportunityGate g_camp_gate;
 static std::vector<chimera::CryptoCampaignManager*> g_campaigns;  // guarded by g_companion_mtx
+
+// CRYPTO-DESK ZERO-SHADOW pilot-sym gate (S-2026-07-19, operator hard rule): the companion
+// SHADOW book clips ALL whitelisted coins, but only the live pilot sym(s) belong on the desk
+// (project-crypto-shadow-ledger-isolation: "operator wants zero shadow 2026-07-19"). When
+// non-empty, this base-sym set (e.g. {"LTC"}, derived from live_pilot_symbols at startup) makes
+// emit_companion_state publish ONLY pilot-sym legs to crypto_companion_state.json -> the Omega
+// desk. Empty = no filter (back-compat / pure-shadow research boxes). The internal research book
+// (g_companion_by_parent) is UNTOUCHED — cells still detect/clip for promotion; only the
+// DESK-facing emit is scoped. Twin of the Omega relay guards (filter_chimera_inbound.py /
+// filter_companion_state.py) which gate the same desk to the same pilot set; this closes the leak
+// at the box source too, so the pushed file is clean even if the relay dies.
+static std::set<std::string> g_desk_pilot_syms;  // base syms (no USDT); empty = emit all
 // S-2026-07-17p companion-on-companion mimic drive (GRT-PJ5W1-MIM): the mimic's parent is
 // the GRT-PJ5W1 jump_floor COMPANION, not an EdgeEngine, so the generic per-tick loop
 // (nullptr feed) skips it; a dedicated hook drives observe() off the parent's settled
@@ -2928,6 +2940,25 @@ int main() {
 
     // Runtime config — drives credentials path + shadow_mode + position sizing.
     LiveRuntimeConfig runtime_cfg = load_live_runtime_config();
+
+    // ZERO-SHADOW desk gate (S-2026-07-19): scope the desk companion emit to the live pilot
+    // sym(s) only. Strip the USDT quote to the base sym the companion tags use (LTCUSDT -> LTC).
+    // Only when a live pilot is actually configured (non-empty + not live_full) — otherwise leave
+    // g_desk_pilot_syms empty so a pure-shadow/research box still emits every coin.
+    if (!runtime_cfg.live_pilot_symbols.empty() && !runtime_cfg.live_full) {
+        for (const auto& psym : runtime_cfg.live_pilot_symbols) {
+            std::string base = psym;
+            const std::string qu = "USDT";
+            if (base.size() > qu.size() &&
+                base.compare(base.size() - qu.size(), qu.size(), qu) == 0)
+                base = base.substr(0, base.size() - qu.size());
+            g_desk_pilot_syms.insert(base);
+        }
+        std::printf("[DESK-SHADOW-GATE] desk companion emit scoped to pilot syms:");
+        for (const auto& s : g_desk_pilot_syms) std::printf(" %s", s.c_str());
+        std::printf(" (%zu) — non-pilot shadow legs NOT published to the desk\n",
+                    g_desk_pilot_syms.size());
+    }
 
     // Executor — engines mirror entry/exit intents into this via on_order_intent.
     chimera::SpotExecutor executor;

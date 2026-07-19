@@ -3472,6 +3472,14 @@ int main() {
     }
     std::fflush(stdout);
 
+#if 0  // S-2026-07-20 CRYPTO LIVE-ONLY REBUILD (operator: mimic-only). The XSEC/
+       // XSEC2/P6/P7/RIP sleeves below are shadow-LABELED but 4 carry REAL Binance
+       // order paths (governed_submit/gateway.submit, exec_ok-gated) — directional
+       // momentum/rebalance books, NOT the companion mimic. Operator decision
+       // 2026-07-20: remove all. Compiled OUT (reversible). Shared infra
+       // (g_allocator/gateway/governed_submit/g_dq_gate) untouched — g_dq_gate is
+       // used ONLY inside this span; the live mirror binds governed_submit directly
+       // and is independent. See SESSION_HANDOFF_2026-07-20c.
     // ════════════════════════════════════════════════════════════════════
     // S-2026-06-18: CrossSectionalMomentumEngine — FIRST OOS-validated Chimera
     // edge, installed as a STANDALONE allocator (not a sizing tilt). Curated
@@ -3989,6 +3997,7 @@ int main() {
             }
         });
     }
+#endif  // S-2026-07-20 LIVE-ONLY: XSEC/XSEC2/P6/P7/RIP shadow sleeves removed
 
     // wire_engine — single helper applied to every engine. Sets shadow_mode
     // from runtime config, on_trade for dashboard history, on_bar for
@@ -10871,6 +10880,7 @@ int main() {
 
         // S-2026-06-18: feed BOTH validated XSec sleeves (roll daily close,
         // rebalance on the 14d clock -> [XSEC-BTC]/[XSEC-BR] log + shadow mirror).
+#if 0  // S-2026-07-20 LIVE-ONLY: XSEC/XSEC2/RIP/P6 per-tick drive removed (engines gone)
         { auto xnow = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
           const char* xss = chimera::sym_short(id);
@@ -10881,6 +10891,7 @@ int main() {
           p6_tpr.on_tick(xss, mid, xnow);         // Phase-6 observation-only books
           p6_cbd.on_tick(xss, mid, xnow);
           p6_bmr.on_tick(xss, mid, xnow); }
+#endif
 
         // S34: log BTC ticks into rolling chart buffer (~last 1000 ticks)
         if (id == chimera::SYM_BTC) {
@@ -11210,9 +11221,7 @@ int main() {
                            "REGIME_SWITCH D1 parents (g_slots) — TSMOM/ICHI book culled Phase-3 2026-07-13");
         g_registry.declare("LEGACY-EDGE", chimera::Lifecycle::DISABLED,
                            "285 per-symbol EdgeEngines — CULLED unless CHIMERA_WIRE_LEGACY");
-        g_registry.declare("XSEC-BTC",   chimera::Lifecycle::SHADOW, "cross-sectional momentum, BTC-gated sleeve");
-        g_registry.declare("XSEC-BR",    chimera::Lifecycle::SHADOW, "cross-sectional momentum, breadth-gated sleeve");
-        g_registry.declare("RIPRIDER",   chimera::Lifecycle::SHADOW, "RipRider next-open sleeve");
+        // S-2026-07-20 LIVE-ONLY: XSEC-BTC/XSEC-BR/RIPRIDER engines removed (mimic-only) — decls dropped.
         // KILL_IMMEDIATE_CLIPS (2026-07-13): the immediate-entry clip grid is disabled (g_grid_clip_count==0),
         // so declare it DISABLED to keep the honest registry consistent (an ACTIVE decl with no wired
         // callback aborts startup). Re-enabling the grid restores g_grid_clip_count>0 -> SHADOW again.
@@ -11254,9 +11263,7 @@ int main() {
         // real container sizes.
         g_registry.mark_wired("EDGE-SLOTS",  !g_slots.empty(),                    (int)g_slots.size());
         g_registry.mark_wired("LEGACY-EDGE", wire_legacy && !g_all_wired.empty(), (int)g_all_wired.size());
-        g_registry.mark_wired("XSEC-BTC",    true, 1);
-        g_registry.mark_wired("XSEC-BR",     true, 1);
-        g_registry.mark_wired("RIPRIDER",    true, 1);
+        // S-2026-07-20 LIVE-ONLY: XSEC-BTC/XSEC-BR/RIPRIDER removed — mark_wired dropped.
         g_registry.mark_wired("MIMIC-GRID", g_grid_clip_count > 0, g_grid_clip_count);
         g_registry.mark_wired("CAMPAIGN-MGR", g_campaign_cell_count > 0, g_campaign_cell_count);
         g_registry.mark_wired("EXECUTOR",    exec_ok, 1);

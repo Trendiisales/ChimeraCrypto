@@ -1725,6 +1725,19 @@ static void restore_campaign_state() {
 // /api/crypto_companion serves it. Caller MUST hold g_companion_mtx. Atomic write
 // (tmp+rename). Read-only view of settled companion state — never touches a parent.
 static constexpr const char* COMPANION_STATE_FILE = "data/crypto_companion_state.json";
+// ZERO-SHADOW desk gate (S-2026-07-19): a leg is skipped from the desk emit when a live
+// pilot is configured and the leg's coin is NOT in it. Normalise (uppercase + strip USDT)
+// so it matches whether the caller passes a companion tag-derived base ("LTC") or a
+// campaign snapshot sym ("ltcusdt"). Empty g_desk_pilot_syms (research box) => emit all.
+static inline bool desk_shadow_skip(const std::string& raw_sym) {
+    if (g_desk_pilot_syms.empty()) return false;
+    std::string s = raw_sym;
+    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+    const std::string qu = "USDT";
+    if (s.size() > qu.size() && s.compare(s.size() - qu.size(), qu.size(), qu) == 0)
+        s = s.substr(0, s.size() - qu.size());
+    return g_desk_pilot_syms.count(s) == 0;
+}
 static void emit_companion_state() {
     std::ostringstream js; js << std::fixed;
     js << "{\"ts\":" << (long long)std::time(nullptr) << ",\"legs\":[";
@@ -1738,6 +1751,7 @@ static void emit_companion_state() {
         static const chimera::EdgeEngine::Config _null_pcfg{};
         const auto& pcfg = kv.second.first ? kv.second.first->cfg() : _null_pcfg;
         std::string sym  = kv.first.substr(0, kv.first.find('-'));  // "BTC-MIM4" -> "BTC"
+        if (desk_shadow_skip(sym)) continue;   // ZERO-SHADOW: non-pilot leg not published to desk
         std::string cell = kv.first.find('-') == std::string::npos
                              ? "" : kv.first.substr(kv.first.find('-') + 1);  // "BTC-MIM4" -> "MIM4"
         // canonical = this cell's detector threshold IS the coin's tuned parent threshold
@@ -1792,6 +1806,7 @@ static void emit_companion_state() {
     // at-or-above entry; sublegs carries the ONE open parent lot (if any).
     for (const auto* mgr : g_campaigns) {
         for (const auto& s : mgr->snapshots()) {
+            if (desk_shadow_skip(s.sym)) continue;   // ZERO-SHADOW: non-pilot campaign leg not published to desk
             if (!first) js << ",";
             first = false;
             js << "{\"sym\":\"" << s.sym << "\",\"tag\":\"" << s.tag << "\",\"cell\":\"" << s.cell << "\""

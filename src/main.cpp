@@ -5807,6 +5807,11 @@ int main() {
     // via a one-shot flatten_before_ms=1784269800000 (06:30 UTC) — booked CAMP_FLATTEN
     // +260.6bp at 0.36820. Flag spent + removed same day; the path stays in
     // CryptoCampaignManager for future NOW-close orders.
+#if 0  // S-2026-07-20 LIVE-ONLY rebuild #2b: CAMPAIGN books removed (operator: mimic-only).
+       // The 3 virtual-lot parent campaigns were SHADOW/mimic-OFF (they never routed a live
+       // order). Guarding the constructions + emptying g_campaigns leaves g_campaign_cell_count==0
+       // so the CAMPAIGN-MGR registry decl self-degrades to DISABLED (validate passes). KEEP
+       // g_camp_cost_ledger.configure() below — the LIVE companion cells use safe_cost_bps.
     chimera::CryptoCampaignManager uni_campaign(
         {"uniusdt", "UNI", 3600, /*mimic*/ false, {
             {"UNI-CAMP-W1", "CW1-3.5", 1, 0.035, 20.0, 135.0, 270.0, 38.0, 1.0,  -550.0, 40.0, 0.5},
@@ -5820,12 +5825,13 @@ int main() {
         {"ldousdt", "LDO", 3600, /*mimic*/ false, {
             {"LDO-CAMP-W8", "CW8-7.0", 8, 0.070, 20.0, 411.0, 342.0, 48.0, 0.25, -1400.0, 40.0, 0.4},
         }}, &g_camp_cost_ledger, &g_camp_gate);
+#endif  // S-2026-07-20 LIVE-ONLY #2b: campaign constructions removed
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         g_camp_cost_ledger.configure("uniusdt", 20.0, 3.0, 2.0);
         g_camp_cost_ledger.configure("trxusdt", 20.0, 3.0, 2.0);
         g_camp_cost_ledger.configure("ldousdt", 20.0, 3.0, 2.0);
-        g_campaigns = { &uni_campaign, &trx_campaign, &ldo_campaign };
+        g_campaigns = {};   // S-2026-07-20 LIVE-ONLY #2b: was {&uni_campaign,&trx_campaign,&ldo_campaign}
         auto _camp_totals = load_companion_clip_totals();
         for (auto* m : g_campaigns) {
             g_campaign_cell_count += m->cell_count();
@@ -10474,8 +10480,13 @@ int main() {
 
         // S54: seed the BTC 200d-MA macro gate (bull/bear master switch).
         init_macro_ma(seed_rest);
-        init_grids();                         // S55: maker grid sleeve (shadow)
-        init_macro_base();                    // S55: macro-bull base / bull-beta core (shadow)
+        // S-2026-07-20 LIVE-ONLY rebuild #2b: GRID + MACRO-BASE sleeves removed (operator: mimic-only).
+        // Not calling init_grids()/init_macro_base() leaves g_grids EMPTY + g_macro_base nullptr, so
+        // their per-tick drives (`if(!g_grids.empty())`, `if(g_macro_base && …)`) + /status JSON self-
+        // handle. KEEP `#include engines_grid.cpp` (defines the now-empty vectors). init_macro_ma above
+        // (the BTC 200d-MA regime gate) is a SEPARATE master switch — out of scope, left intact.
+        // init_grids();                      // S55: maker grid sleeve (shadow) — REMOVED #2b
+        // init_macro_base();                 // S55: macro-bull base / bull-beta core (shadow) — REMOVED #2b
     }
 
     // ── Position resume: restore open positions after restart ────────────
@@ -10811,6 +10822,9 @@ int main() {
     // Streaming mirror of run_core (Crypto/backtest/core_trigger_p2_bt.cpp), parity-gated
     // (backtest/parity_core_trigger.cpp == identical trades). MIMIC OFF. Cost 28bp taker RT
     // (maker-only re-BT confirmed taker basis, CORE_MAKER_ONLY_FINDINGS_2026-07-15).
+#if 0  // S-2026-07-20 LIVE-ONLY rebuild #2b: CORE-TRIGGER book removed (operator: mimic-only).
+       // Was SHADOW/mimic-OFF (never routed a live order). g_core_eng stays nullptr so the
+       // per-tick drive (`if (g_core_eng && …)` below) self-guards. NOT in the registry/JSON.
     chimera::CoreTriggerEngine core_eng({
         "btcusdt", 900, {
             { "ethusdt", "CORE-ETH" },   // Cell defaults = validated cell: short0.64/med0.56/
@@ -10836,6 +10850,7 @@ int main() {
                         c.stopbuf, c.qusd, c.cost_rt_bp);
         std::fflush(stdout);
     }
+#endif  // S-2026-07-20 LIVE-ONLY #2b: CORE-TRIGGER removed
 
     feed.set_callback([&](const chimera::MarketTick& tick) {
         int id = chimera::sym_id(tick.symbol);

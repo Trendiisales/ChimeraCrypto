@@ -1234,7 +1234,7 @@ struct LiveMimicMirror {
     //     UNI class (basis-gapped fill whose floor never arms). Engine-loss-protection
     //     provision for the live layer itself, not inherited.
     struct Hold { double qty = 0.0; double px = 0.0; std::string symbol; bool pending_sell = false; double sell_px = 0.0;
-                  double hwm = 0.0; bool floored = false; double last_retry_ms = 0.0; };
+                  double hwm = 0.0; bool floored = false; double last_retry_ms = 0.0; long long entry_ts_ms = 0; };
     bool enabled = false;                   // armed only in RuntimeMode::LIVE
     double order_usd = 0.0;                 // per-leg BUY notional (= live_pilot_max_order_usd)
     double cost_bound_bp = 56.0;            // acquire gate + floor-arm bound (2× worst measured RT cost)
@@ -1263,6 +1263,107 @@ struct LiveMimicMirror {
     std::function<double(const std::string&)> free_base;  // base asset (UPPER) -> exchange free qty; null in shadow
 
     double min_sell_usd_ = 5.0;             // notional below this = dust => position is effectively flat
+
+    // ── S-2026-07-20f LIVE REALIZED LEDGER (zero-trade-history root fix). Every
+    // successful live SELL previously erased the hold and booked NOTHING durable —
+    // the 64-deep events ring rotates and data/live_realized.json had NO writer in
+    // code (it was hand-authored at the 07-19 flatten), so the desk's _clivetot +
+    // LAST-15 live rows froze while real Binance closes (RUNE/SUI/LTC clips) vanished.
+    // Ledger of record = append-only data/live_trades.csv (ms timestamps); on every
+    // booking the desk-facing data/live_realized.json (HOP-3 /api/crypto_live_pnl,
+    // schema unchanged: seconds ts, sym/strat/entry/exit/realized_usd/reason) is
+    // regenerated atomically from the in-memory list. Fees approx via px delta —
+    // same cash convention the hand-written file declared. Call book_close_ under mu.
+    struct LiveTrade { long long entry_ts_s = 0, exit_ts_s = 0; std::string coin, tag, reason;
+                       double entry = 0.0, exit_px = 0.0, qty = 0.0, usd = 0.0; };
+    static constexpr const char* LIVE_TRADES_CSV   = "data/live_trades.csv";
+    static constexpr const char* LIVE_REALIZED_FILE = "data/live_realized.json";
+    std::vector<LiveTrade> realized_;
+    double realized_total_ = 0.0;
+
+    void load_realized_() {                 // seed from the CSV ledger of record at boot
+        std::ifstream f(LIVE_TRADES_CSV); if (!f.is_open()) {
+            std::printf("[LIVE-LEDGER] no %s yet — realized ledger starts empty\n", LIVE_TRADES_CSV);
+            std::fflush(stdout); return;
+        }
+        std::string line; bool hdr = true;
+        while (std::getline(f, line)) {
+            if (hdr) { hdr = false; continue; }
+            if (line.empty()) continue;
+            LiveTrade t; std::stringstream ss(line); std::string fld; int i = 0;
+            while (std::getline(ss, fld, ',')) {
+                switch (i++) {
+                    case 0: t.exit_ts_s  = atoll(fld.c_str()) / 1000; break;
+                    case 1: t.entry_ts_s = atoll(fld.c_str()) / 1000; break;
+                    case 2: t.coin = fld; break;
+                    case 3: t.tag  = fld; break;
+                    case 4: t.qty      = atof(fld.c_str()); break;
+                    case 5: t.entry    = atof(fld.c_str()); break;
+                    case 6: t.exit_px  = atof(fld.c_str()); break;
+                    case 7: t.usd      = atof(fld.c_str()); break;
+                    case 8: t.reason   = fld; break;
+                }
+            }
+            if (t.coin.empty()) continue;
+            realized_total_ += t.usd; realized_.push_back(std::move(t));
+        }
+        std::printf("[LIVE-LEDGER] realized ledger loaded: %zu trade(s), total $%.2f (%s)\n",
+                    realized_.size(), realized_total_, LIVE_TRADES_CSV);
+        std::fflush(stdout);
+        if (!realized_.empty()) write_realized_json_();   // regenerate desk HOP-3 file at boot (stale hand-written file otherwise persists)
+    }
+    void write_realized_json_() {           // atomic regenerate of the desk HOP-3 file
+        std::ostringstream js; js << std::fixed;
+        js << "{\n  \"ts\": " << (long long)std::time(nullptr) << ",\n"
+           << "  \"note\": \"REAL Binance fills cash truth (fees approx via px delta). "
+              "Auto-booked by LiveMimicMirror (S-2026-07-20f); ledger of record data/live_trades.csv\",\n"
+           << std::setprecision(4) << "  \"total_usd\": " << realized_total_ << ",\n  \"trades\": [";
+        // bound the desk payload: last 200 rows (total_usd stays the full sum)
+        size_t start = realized_.size() > 200 ? realized_.size() - 200 : 0;
+        for (size_t i = start; i < realized_.size(); ++i) {
+            const auto& t = realized_[i];
+            js << (i == start ? "" : ",") << "\n    {\"entry_ts\":" << t.entry_ts_s
+               << ",\"exit_ts\":" << t.exit_ts_s << ",\"sym\":\"" << t.coin
+               << "\",\"strat\":\"MIMIC-LIVE\"" << std::setprecision(6)
+               << ",\"entry\":" << t.entry << ",\"exit\":" << t.exit_px
+               << std::setprecision(4) << ",\"realized_usd\":" << t.usd
+               << ",\"reason\":\"" << t.reason << "\"}";
+        }
+        js << "\n  ]\n}\n";
+        std::string tmp = std::string(LIVE_REALIZED_FILE) + ".tmp";
+        std::ofstream f(tmp); if (!f.is_open()) return; f << js.str(); f.close();
+        std::rename(tmp.c_str(), LIVE_REALIZED_FILE);
+    }
+    void book_close_(const std::string& tag, const Hold& h, double exit_px, double qty,
+                     const std::string& reason) {   // call under mu, BEFORE erasing the hold
+        if (qty <= 0.0 || exit_px <= 0.0) return;
+        long long now_s = (long long)std::time(nullptr);
+        LiveTrade t; t.exit_ts_s = now_s;
+        t.entry_ts_s = h.entry_ts_ms > 0 ? h.entry_ts_ms / 1000 : now_s;
+        t.tag = tag; t.coin = tag.substr(0, tag.find('-'));
+        t.entry = h.px; t.exit_px = exit_px; t.qty = qty; t.reason = reason;
+        t.usd = (exit_px - h.px) * qty;
+        {   // append-only CSV ledger of record
+            bool fresh = false; { std::ifstream chk(LIVE_TRADES_CSV); fresh = !chk.is_open(); }
+            FILE* f = fopen(LIVE_TRADES_CSV, "a");
+            if (f) {
+                if (fresh) std::fprintf(f, "exit_ts_ms,entry_ts_ms,coin,tag,qty,entry_px,exit_px,realized_usd,reason\n");
+                std::fprintf(f, "%lld,%lld,%s,%s,%.8f,%.6f,%.6f,%.4f,%s\n",
+                             t.exit_ts_s * 1000LL, t.entry_ts_s * 1000LL, t.coin.c_str(), t.tag.c_str(),
+                             qty, t.entry, t.exit_px, t.usd, reason.c_str());
+                fclose(f);
+            } else {
+                std::fprintf(stderr, "[LIVE-LEDGER] *** failed to append %s (%s $%.2f) ***\n",
+                             LIVE_TRADES_CSV, tag.c_str(), t.usd);
+            }
+        }
+        realized_total_ += t.usd; realized_.push_back(std::move(t));
+        write_realized_json_();
+        std::printf("[LIVE-LEDGER] booked %s %s qty=%.8f %.6f->%.6f realized $%.4f (%s) — total $%.2f\n",
+                    tag.c_str(), upsym(h.symbol).c_str(), qty, h.px, exit_px,
+                    (exit_px - h.px) * qty, reason.c_str(), realized_total_);
+        std::fflush(stdout);
+    }
 
     // base asset (UPPER) from a "<base>usdt" symbol; empty if not a *usdt pair.
     static std::string base_of_(const std::string& sym_lower) {
@@ -1297,6 +1398,7 @@ struct LiveMimicMirror {
             if (kv.second.qty <= 0.0) continue;
             js << (first ? "" : ",") << "{\"tag\":\"" << kv.first << "\",\"symbol\":\"" << kv.second.symbol
                << "\",\"qty\":" << kv.second.qty << ",\"px\":" << kv.second.px
+               << ",\"entry_ts\":" << kv.second.entry_ts_ms
                << ",\"pending_sell\":" << (kv.second.pending_sell ? "true" : "false") << "}";
             first = false;
         }
@@ -1306,6 +1408,7 @@ struct LiveMimicMirror {
         std::rename(tmp.c_str(), LIVE_MIRROR_FILE);
     }
     void load() {                            // crude ndjson-style scan (own file, no JSON dep)
+        load_realized_();                    // S-2026-07-20f: seed the realized ledger regardless of open holds
         std::ifstream f(LIVE_MIRROR_FILE); if (!f.is_open()) return;
         std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         size_t p = 0;
@@ -1317,6 +1420,8 @@ struct LiveMimicMirror {
             if (sp != std::string::npos && se != std::string::npos) h.symbol = all.substr(sp + 10, se - (sp + 10));
             size_t qp = all.find("\"qty\":", te); if (qp != std::string::npos) h.qty = atof(all.c_str() + qp + 6);
             size_t xp = all.find("\"px\":", te);  if (xp != std::string::npos) h.px  = atof(all.c_str() + xp + 5);
+            size_t ep = all.find("\"entry_ts\":", te);
+            if (ep != std::string::npos && ep < all.find('}', te)) h.entry_ts_ms = atoll(all.c_str() + ep + 11);
             h.pending_sell = all.find("\"pending_sell\":true", te) != std::string::npos &&
                              all.find("\"pending_sell\":true", te) < all.find('}', te);
             h.hwm = h.px; h.floored = false;   // own floor re-arms from live ticks; pre-floor own-stop protects meanwhile
@@ -1359,6 +1464,7 @@ struct LiveMimicMirror {
                                 kv.first.c_str(), free, free * px, min_sell_usd_);
                     std::fflush(stdout);
                     note_(kv.first, "SOLD", "dust-clear (already flat on exchange)");
+                    book_close_(kv.first, h, px, h.qty, "DUST-CLEAR");   // S-20f: best-effort at live px
                     h.qty = 0.0; h.pending_sell = false; changed = true;
                     continue;
                 }
@@ -1372,6 +1478,7 @@ struct LiveMimicMirror {
                 std::printf("[MIMIC-LIVE] retry SELL OK %s qty=%.8f @%.6f\n", kv.first.c_str(), qty, px);
                 std::fflush(stdout);
                 note_(kv.first, "SOLD", "retry close");
+                book_close_(kv.first, h, r.avg_price > 0.0 ? r.avg_price : px, qty, "RETRY-CLOSE");
                 h.qty = 0.0; h.pending_sell = false; changed = true;
             }
         }
@@ -1411,6 +1518,7 @@ struct LiveMimicMirror {
         if (res.ok && !res.shadow && res.executed_qty > 0.0) {
             h.qty = res.executed_qty; h.px = res.avg_price > 0.0 ? res.avg_price : r.px;
             h.symbol = r.symbol; h.pending_sell = false;
+            h.entry_ts_ms = (long long)std::time(nullptr) * 1000LL;   // S-20f: realized-ledger entry stamp
             h.hwm = h.px; h.floored = false;     // OWN floor state anchors at the REAL fill
             std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f)\n",
                         r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px);
@@ -1448,6 +1556,8 @@ struct LiveMimicMirror {
                                            res.avg_price > 0.0 ? res.avg_price : r.exit_px, r.reason.c_str());
                 note_(r.tag, "SOLD", d);
             }
+            book_close_(r.tag, it->second, res.avg_price > 0.0 ? res.avg_price : r.exit_px,
+                        it->second.qty, r.reason);
             held.erase(it);
         } else {
             it->second.pending_sell = true; it->second.sell_px = r.exit_px;
@@ -1490,6 +1600,7 @@ struct LiveMimicMirror {
                                                res.avg_price > 0.0 ? res.avg_price : px, h.px);
                     note_(it->first, "SOLD", d);
                 }
+                book_close_(it->first, h, res.avg_price > 0.0 ? res.avg_price : px, h.qty, why);
                 it = held.erase(it); changed = true; continue;
             }
             h.pending_sell = true; h.sell_px = px; changed = true;
@@ -1512,6 +1623,12 @@ struct LiveMimicMirror {
                                 /*is_exit*/ true, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
             if (res.ok) {
                 std::printf("[MIMIC-LIVE] KILL(%s) SELL %s qty=%.8f — closed\n", why, it->first.c_str(), h.qty);
+                {   // S-20f: best-effort exit px (fill avg > last live tick > recorded)
+                    double xp = res.avg_price;
+                    if (xp <= 0.0) { auto lp = last_px_.find(h.symbol); xp = lp != last_px_.end() ? lp->second : 0.0; }
+                    if (xp <= 0.0) xp = h.sell_px > 0.0 ? h.sell_px : h.px;
+                    book_close_(it->first, h, xp, h.qty, std::string("KILL-") + why);
+                }
                 it = held.erase(it); ++sold; continue;
             }
             h.pending_sell = true;

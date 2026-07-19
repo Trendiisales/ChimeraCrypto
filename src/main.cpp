@@ -3252,6 +3252,13 @@ int main() {
                     gateway.pilot_max_order_usd, gateway.pilot_max_gross_usd);
         std::fflush(stdout);
     }
+    if (runtime_cfg.live_full && g_runtime_mode == chimera::RuntimeMode::LIVE) {
+        std::printf("[LIVE-FULL] pilot coin restriction LIFTED (live_full=true): mimics fire LIVE on the "
+                    "FULL universe, NO pilot symbol/per-order/gross cap; per-order clip $%.2f; "
+                    "gross bounded by portfolio hardcap $%.2f\n",
+                    runtime_cfg.live_pilot_max_order_usd, runtime_cfg.portfolio_cash_usd);
+        std::fflush(stdout);
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // Phase-2 review (2026-07-11) — EXCHANGE TRUTH. Attach the authoritative
@@ -3487,8 +3494,11 @@ int main() {
         };
         g_mimic_mirror.load();
         std::printf("[MIMIC-LIVE] mirror ARMED: grid leg opens route $%.2f BUYs via gateway "
-                    "(pilot caps enforce); clips SELL the tracked fill; holdings persist %s\n",
-                    g_mimic_mirror.order_usd, LIVE_MIRROR_FILE);
+                    "(%s); clips SELL the tracked fill; holdings persist %s\n",
+                    g_mimic_mirror.order_usd,
+                    runtime_cfg.live_full ? "live_full: NO pilot cap, gross bounded by portfolio hardcap"
+                                          : "pilot caps enforce",
+                    LIVE_MIRROR_FILE);
         // S-2026-07-18s OWN-PROTECTION effect line (fix 5, greppable by watchdogs): the
         // mirror's own floor/stop layer is structural config — print it armed with the
         // per-holding state so 'protection exists' is a logged runtime fact, not prose.

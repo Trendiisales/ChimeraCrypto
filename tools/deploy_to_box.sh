@@ -37,6 +37,28 @@ MSG="${DEPLOY_MSG:?set DEPLOY_MSG to the commit message}"
 echo "### 1/6 PRE-DEPLOY FRESHNESS GUARD ###"
 "$HERE/tools/check_box_sync.sh" || { echo "GUARD BLOCKED — re-sync then retry. NOT deployed."; exit 1; }
 
+echo "### 1b/6 SYNC BOX TO ORIGIN BEFORE COMMIT (fork-prevention, S-2026-07-20) ###"
+# ROOT FIX for the recurring lineage fork: step 4 commits ON THE BOX, so the box's
+# HEAD MUST equal origin/main first — else the new commit parents on a stale HEAD and
+# forks (exactly what happened when Mac-side commits — the 2a JSON hotfix + heartbeat —
+# were pushed to origin but the box never pulled them). The old flow only DETECTED the
+# fork at step 7 (push rejected -> "reconcile manually"). This ENFORCES the invariant up
+# front: fast-forward the box to origin (mixed reset preserves the intentional uncommitted
+# working tree — NEVER --hard), or ABORT if the box has diverged. Runs before any box
+# mutation, so an abort leaves the box untouched.
+SYNC=$(ssh "$BOX" "cd $BOX_REPO && git fetch origin -q 2>/dev/null; BH=\$(git rev-parse HEAD); OH=\$(git rev-parse origin/main);
+  if [ \"\$BH\" = \"\$OH\" ]; then echo OK-EQUAL;
+  elif git merge-base --is-ancestor \"\$BH\" \"\$OH\"; then git reset --mixed origin/main >/dev/null 2>&1 && echo \"OK-FASTFWD \$(git rev-parse --short HEAD)\";
+  elif git merge-base --is-ancestor \"\$OH\" \"\$BH\"; then echo \"ABORT-AHEAD \$(git rev-parse --short HEAD) vs origin \$(git rev-parse --short origin/main)\";
+  else echo \"ABORT-DIVERGED \$(git rev-parse --short HEAD) vs origin \$(git rev-parse --short origin/main)\"; fi")
+echo "box sync: $SYNC"
+case "$SYNC" in
+  OK-EQUAL|OK-FASTFWD*) : ;;
+  ABORT-AHEAD*)    echo "ABORT: box HEAD is AHEAD of origin/main (unpushed box commits — a prior deploy didn't push). Run: ssh $BOX 'cd $BOX_REPO && git push origin main' then retry. NOT deployed."; exit 1 ;;
+  ABORT-DIVERGED*) echo "ABORT: box and origin/main have DIVERGED (both hold commits the other lacks). Reconcile the box lineage manually (NO --hard on josgp1). NOT deployed."; exit 1 ;;
+  *)               echo "ABORT: box sync check returned unexpected '$SYNC' — refusing to commit on an unverified base. NOT deployed."; exit 1 ;;
+esac
+
 echo "### 2/6 back up box engine files ###"
 for f in "${FILES[@]}"; do ssh "$BOX" "cp -v $BOX_REPO/$f $BOX_REPO/$f.predeploy-bak"; done
 

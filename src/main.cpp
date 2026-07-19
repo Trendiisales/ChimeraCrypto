@@ -9876,11 +9876,19 @@ int main() {
 // Verdict CSV: /tmp/cull_holdout_verdict.csv
 // #include "engines_s41_consolidated.cpp"  // CULLED
 // #include "engines_s42_consolidated.cpp"  // CULLED
-#include "engines_s43_repromote.cpp"        // 137 strict-WF-validated engines
-#include "engines_s43b_holdout.cpp"         // 142 fresh-discover holdout-validated
-#include "engines_gems.cpp"                  // S52: 13 strict-validated salvaged gems (s41/s42)
-#include "engines_mr.cpp"                    // S53: 34 mean-reversion dip-buyers (spot-long, profit in chop)
-#include "engines_lowturn.cpp"               // S54m: 8 low-turnover trend engines (wide stop/no ratchet, macro-gated, shadow)
+// ── S-2026-07-20 LIVE-ONLY REBUILD: the 344 EdgeEngines below were reachable ONLY
+// via wire_engine(), which no-ops without CHIMERA_WIRE_LEGACY (main.cpp ~L4001,
+// culled 2026-06-18). They constructed at boot (printing [TAG] ARMED ... shadow=1
+// banners) then received ZERO callbacks/order-intent/ledger — pure inert dead code.
+// Operator mandate 2026-07-20: live-only, no shadow. Removed structurally (was a
+// runtime no-op switch, not a code deletion). The live Binance mirror is driven by
+// the companion mimic cells (g_mimic_mirror), independent of every engine here.
+// Reversible: uncomment + set CHIMERA_WIRE_LEGACY=1. Files retained in repo.
+// #include "engines_s43_repromote.cpp"        // 137 strict-WF-validated engines (INERT — removed S-2026-07-20)
+// #include "engines_s43b_holdout.cpp"         // 142 fresh-discover holdout-validated (INERT — removed S-2026-07-20)
+// #include "engines_gems.cpp"                  // S52: 13 strict-validated salvaged gems (INERT — removed S-2026-07-20)
+// #include "engines_mr.cpp"                    // S53: 34 mean-reversion dip-buyers (INERT — removed S-2026-07-20)
+// #include "engines_lowturn.cpp"               // S54m: 18 low-turnover trend engines (INERT — removed S-2026-07-20)
 
     // ── S42b: SYMBOL WHITELIST FILTER (Binance 50-sym cap) ────────────────
     // Reads config/symbol_whitelist.json, drops g_slots entries for non-

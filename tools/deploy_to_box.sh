@@ -30,7 +30,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -n "${DEPLOY_FILES:-}" ]; then
   read -r -a FILES <<< "$DEPLOY_FILES"
 else
-  FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
+  FILES=("src/main.cpp" "include/core/MimicLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
 fi
 MSG="${DEPLOY_MSG:?set DEPLOY_MSG to the commit message}"
 

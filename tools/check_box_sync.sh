@@ -13,7 +13,7 @@
 #   • HEAD comparison (local deploy-source HEAD  vs  live box HEAD) — the fast
 #     signal the incident tripped (edcc252 != 3e74d00).
 #   • AUTHORITATIVE GATE — the LIVE engine files you are about to overwrite
-#     (src/main.cpp + include/core/UpJumpLadderCompanion.hpp) are byte-compared
+#     (src/main.cpp + include/core/MimicLadderCompanion.hpp) are byte-compared
 #     (sha256) Mac vs box. The box runs INTENTIONAL uncommitted mods, so HEAD
 #     alone is not enough — a diff in the actual deploy surface is what corrupts a
 #     patch. Files differ => BLOCK. (HEAD-differs-but-files-match, e.g. an
@@ -28,7 +28,7 @@ set -uo pipefail
 BOX="${CHIMERA_BOX:-chimera-direct}"
 BOX_REPO="${CHIMERA_BOX_REPO:-~/ChimeraCrypto}"
 LOCAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
-FILES=("src/main.cpp" "include/core/UpJumpLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
+FILES=("src/main.cpp" "include/core/MimicLadderCompanion.hpp" "include/core/EdgeEngine.hpp" "include/core/CoreTriggerEngine.hpp")
 
 local_head="$(git -C "$LOCAL_REPO" rev-parse --short HEAD 2>/dev/null || echo LOCAL_UNKNOWN)"
 box_head="$(ssh -o ConnectTimeout=15 "$BOX" "git -C $BOX_REPO rev-parse --short HEAD" 2>/dev/null || echo BOX_UNREACHABLE)"
@@ -67,7 +67,7 @@ if [ "$drift" = "1" ]; then
  The box carries commits/uncommitted mods your checkout does NOT have. A
  stale-base edit/'git apply' CORRUPTS main.cpp. RE-SYNC FIRST:
    scp $BOX:$BOX_REPO/src/main.cpp                           src/main.cpp
-   scp $BOX:$BOX_REPO/include/core/UpJumpLadderCompanion.hpp include/core/UpJumpLadderCompanion.hpp
+   scp $BOX:$BOX_REPO/include/core/MimicLadderCompanion.hpp include/core/MimicLadderCompanion.hpp
  Re-apply your changes onto THOSE live files, then re-run the deploy.
 ==========================================================================
 MSG

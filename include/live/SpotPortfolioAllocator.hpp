@@ -4,7 +4,7 @@
 //
 // "Strategies produce TARGETS, not orders."  BEFORE, every sleeve sized off the
 // same max_position_usd and fired a raw order straight at the gateway: XSec, the
-// UpJump parents, RipRider and the EdgeEngines could each independently target the
+// Mimic parents, RipRider and the EdgeEngines could each independently target the
 // SAME coin, so the book took 3-4x the intended exposure to one name, momentum
 // sleeves that are really ONE factor were double-counted as diversification, and
 // nothing reconciled the desired target against what the exchange actually holds.
@@ -14,7 +14,7 @@
 // symbol:
 //   1. MERGES overlapping per-symbol targets across all strategies,           [15]
 //   2. applies the FAMILY regime exposure + global drawdown scale,            [18,19]
-//   3. caps AGGREGATE momentum-factor exposure (XSec/TSMOM/UpJump/RipRider are
+//   3. caps AGGREGATE momentum-factor exposure (XSec/TSMOM/Mimic/RipRider are
 //      ONE factor — not independent diversification),                          [16]
 //   4. applies the portfolio vol-target / cluster / crypto-beta risk scale,   [17]
 //   5. applies ONE symbol-level cap AFTER the merge,                          [15]
@@ -23,7 +23,7 @@
 //
 // TRACK-ONLY (default, SHADOW): plan() COMPUTES + LOGS the full merged / capped /
 // netted vector so the entire layer is exercised and tested, but does NOT emit —
-// the existing per-sleeve shadow books and the 32-cell UpJump threshold GRID keep
+// the existing per-sleeve shadow books and the 32-cell Mimic threshold GRID keep
 // their own records untouched (the grid cells never register a target, so they are
 // preserved by construction). ENFORCE (go-live flag) actually emits the netted
 // deltas and suppresses the raw per-sleeve orders.

@@ -4,11 +4,11 @@
 //
 // Today's shadow fills execute at the SIGNAL price (SpotExecutor.hpp:152,
 // `r.avg_price = price`) — optimistic: zero spread, zero slippage, always a
-// full instant fill. This UNDERSTATES cost, especially for the fast UpJump
+// full instant fill. This UNDERSTATES cost, especially for the fast Mimic
 // legs that cross a wide book.
 //
 // *** CRITICAL — ADDITIVE ONLY. *** This module NEVER touches the running
-// signal-price shadow book or the 32-cell UpJump threshold GRID. It maintains
+// signal-price shadow book or the 32-cell Mimic threshold GRID. It maintains
 // a PARALLEL "realistic-fill" metric alongside them so the operator can COMPARE
 // the two books. The signal-price book stays the default of record for
 // continuity; the realistic book models spread + slippage + taker fee + queue

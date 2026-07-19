@@ -12,7 +12,7 @@
 // so it does not oscillate at a band boundary, with a hard defensive override
 // (severe data / liquidity / drawdown alarm => 0%). The multiplier is then made
 // FAMILY-SPECIFIC (R2 table): XSec reads breadth+dispersion; RipRider keeps a
-// STRONG regime requirement (goes flat below a firm breadth floor); UpJump permits
+// STRONG regime requirement (goes flat below a firm breadth floor); Mimic permits
 // a WEAKER macro but reduces size.
 //
 // NO 200DMA anywhere (standing crypto rule). Breadth + dispersion are the inputs.
@@ -23,13 +23,13 @@
 
 namespace chimera {
 
-enum class Family { XSEC, RIPRIDER, UPJUMP, EDGE, OTHER };
+enum class Family { XSEC, RIPRIDER, MIMIC, EDGE, OTHER };
 
 inline const char* family_str(Family f) {
     switch (f) {
         case Family::XSEC:     return "XSEC";
         case Family::RIPRIDER: return "RIPRIDER";
-        case Family::UPJUMP:   return "UPJUMP";
+        case Family::MIMIC:   return "MIMIC";
         case Family::EDGE:     return "EDGE";
         case Family::OTHER:    return "OTHER";
     }
@@ -85,7 +85,7 @@ public:
     //   XSEC     : breadth * dispersion-scaled (needs both breadth AND dispersion).
     //   RIPRIDER : STRONG regime requirement — flat below a firm breadth floor,
     //              full curve above it (keeps the tail; no half-measures).
-    //   UPJUMP   : permits a WEAKER macro (fires at lower breadth) but REDUCES
+    //   MIMIC   : permits a WEAKER macro (fires at lower breadth) but REDUCES
     //              size (0.6x) so a weak-macro entry rides small.
     //   EDGE/OTHER: the plain continuous curve.
     double family_exposure(Family fam, double breadth, double dispersion,
@@ -101,9 +101,9 @@ public:
             case Family::RIPRIDER:
                 // strong requirement: nothing below the floor, full curve above.
                 return (held_breadth_ >= rip_breadth_floor_) ? g : 0.0;
-            case Family::UPJUMP:
+            case Family::MIMIC:
                 // weaker macro tolerated, smaller size.
-                return g * upjump_size_ + upjump_floor_bonus(breadth);
+                return g * mimic_size_ + mimic_floor_bonus(breadth);
             case Family::EDGE:
             case Family::OTHER:
             default:
@@ -113,13 +113,13 @@ public:
 
     // tunables (research starting points; NOT signal logic)
     double rip_breadth_floor_ = 0.45;   // RipRider stays flat below this breadth
-    double upjump_size_       = 0.60;   // UpJump reduced size under weak macro
+    double mimic_size_       = 0.60;   // Mimic reduced size under weak macro
     double xsec_disp_ref_     = 0.50;   // dispersion that fully satisfies XSec
 
 private:
-    // UpJump keeps a small floor of exposure even at low breadth (weaker macro
+    // Mimic keeps a small floor of exposure even at low breadth (weaker macro
     // permitted) but capped so it can never exceed its reduced size envelope.
-    double upjump_floor_bonus(double breadth) const {
+    double mimic_floor_bonus(double breadth) const {
         if (breadth >= 0.25) return 0.0;
         return 0.05 * (breadth / 0.25);   // up to +5% at the 25% edge
     }

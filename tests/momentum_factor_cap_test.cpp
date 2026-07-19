@@ -1,5 +1,5 @@
 // momentum_factor_cap_test.cpp — Phase-3 item 16.
-// XSec / TSMOM / UpJump / RipRider are ONE long-momentum factor. When their
+// XSec / TSMOM / Mimic / RipRider are ONE long-momentum factor. When their
 // COMBINED momentum request exceeds the factor cap, every momentum symbol is
 // scaled down proportionally (not treated as independent diversification), while
 // a non-momentum (mean-reversion) sleeve is left untouched. Also proves the
@@ -25,7 +25,7 @@ int main() {
     // 4 momentum sleeves, distinct coins, $3000 each = $12000 aggregate momentum.
     A.set_target("XSEC",    "BTCUSDT", 3000.0, Factor::MOMENTUM, Family::XSEC);
     A.set_target("TSMOM",   "ETHUSDT", 3000.0, Factor::MOMENTUM, Family::EDGE);
-    A.set_target("UPJUMP",  "SOLUSDT", 3000.0, Factor::MOMENTUM, Family::UPJUMP);
+    A.set_target("MIMIC",  "SOLUSDT", 3000.0, Factor::MOMENTUM, Family::MIMIC);
     A.set_target("RIP",     "BNBUSDT", 3000.0, Factor::MOMENTUM, Family::RIPRIDER);
     // one mean-reversion sleeve — a DIFFERENT factor, must NOT be capped.
     A.set_target("MREV",    "XRPUSDT", 3000.0, Factor::MEANREV,  Family::EDGE);
@@ -50,12 +50,12 @@ int main() {
     for (int i = 0; i < 10; ++i) {
         double m = (i % 2 == 0) ? 0.02 : -0.01;
         sc.observe("XSEC", m);
-        sc.observe("UPJUMP", m);          // identical -> corr ~ +1
+        sc.observe("MIMIC", m);          // identical -> corr ~ +1
         sc.observe("MREV", -m);           // opposite  -> corr ~ -1
     }
-    double c_pos = sc.correlation("XSEC","UPJUMP");
+    double c_pos = sc.correlation("XSEC","MIMIC");
     double c_neg = sc.correlation("XSEC","MREV");
-    std::printf("[info] corr(XSEC,UPJUMP)=%.3f corr(XSEC,MREV)=%.3f\n", c_pos, c_neg);
+    std::printf("[info] corr(XSEC,MIMIC)=%.3f corr(XSEC,MREV)=%.3f\n", c_pos, c_neg);
     CHECK(c_pos > 0.95);                    // redundant momentum sleeves move together
     CHECK(c_neg < -0.95);
 

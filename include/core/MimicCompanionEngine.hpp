@@ -1,12 +1,12 @@
 #pragma once
 // ─────────────────────────────────────────────────────────────────────────────
-// UpJumpCompanionEngine — STANDALONE ADDITIVE clip book (S-2026-07-03, Slice 4b).
+// MimicCompanionEngine — STANDALONE ADDITIVE clip book (S-2026-07-03, Slice 4b).
 //
-// Observes ONE UPJUMP parent leg (EdgeEngine, StrategyKind::UPJUMP, ride-to-flip)
+// Observes ONE MIMIC parent leg (EdgeEngine, StrategyKind::MIMIC, ride-to-flip)
 // per completed H1 bar and runs its OWN independent clip contract alongside it.
 //
 // HARD OPERATOR RULE — the companion is a SEPARATE, INDEPENDENT engine. It does
-// NOT modify / close / move / shrink the parent UpJump position. The parent rides
+// NOT modify / close / move / shrink the parent Mimic position. The parent rides
 // to symmetric down-jump flip (WIDE) regardless; the companion runs its own book.
 // Judge STANDALONE (net-positive after cost, WF both halves, both regimes),
 // NEVER vs-WIDE (Memory-Omega/wiki/entities/CompanionDominanceError.md,
@@ -15,7 +15,7 @@
 // Faithful native port of stall_accountant.py clip decisions (the %-gauge path):
 //   arm at peak  -> clip on STALL (N bars no new fav high) OR REVERSAL (giveback
 //   fraction of peak) -> RECLIP (re-arm after each clip on a new fav high past the
-//   prior peak). Long-only (UPJUMP is always long). No cold-loss cut — the clip
+//   prior peak). Long-only (MIMIC is always long). No cold-loss cut — the clip
 //   itself (arm/stall/reversal/reclip) IS the protection (COLD_LOSS OFF in cron).
 //
 // Cost 0.20% RT = 20bp (Binance spot taker 0.10%/side, no BNB discount), deducted
@@ -32,11 +32,11 @@
 
 namespace chimera {
 
-class UpJumpCompanionEngine {
+class MimicCompanionEngine {
 public:
     struct Config {
-        std::string parent_tag;        // e.g. "BTC-UPJUMP-H1" (the leg we observe)
-        std::string tag;               // e.g. "BTC-UPJUMP-CLIP" (our own ledger tag)
+        std::string parent_tag;        // e.g. "BTC-MIMIC-H1" (the leg we observe)
+        std::string tag;               // e.g. "BTC-MIMIC-CLIP" (our own ledger tag)
         std::string symbol;            // e.g. "btcusdt"
         double  arm_pct       = 5.0;   // profit-gate: arm triggers once mfe% >= this
         int     stall_bars    = 6;     // clip after N bars with no new fav high (0 = stall OFF)
@@ -57,7 +57,7 @@ public:
     };
     using ClipCallback = std::function<void(const ClipRecord&)>;
 
-    explicit UpJumpCompanionEngine(Config c) : cfg_(std::move(c)) {}
+    explicit MimicCompanionEngine(Config c) : cfg_(std::move(c)) {}
 
     void set_on_clip(ClipCallback cb) { on_clip_ = std::move(cb); }
     const Config& config() const { return cfg_; }
@@ -118,7 +118,7 @@ public:
     }
 
     // Drive ONCE per completed parent H1 bar. Reads the parent's settled position
-    // state only (never writes to it). long-only: UPJUMP is always a long.
+    // state only (never writes to it). long-only: MIMIC is always a long.
     //   parent_in_pos   — engine.in_position() after the bar settled
     //   parent_entry_px — engine.entry_px()   (the parent's entry for THIS trade)
     //   cur_px          — the completed bar close

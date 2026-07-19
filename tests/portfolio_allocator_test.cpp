@@ -1,5 +1,5 @@
 // portfolio_allocator_test.cpp — Phase-3 item 15 (SpotPortfolioAllocator).
-// Proves the R2 worked example EXACTLY: XSec SOL $4000 + UpJump $2000 + pullback
+// Proves the R2 worked example EXACTLY: XSec SOL $4000 + Mimic $2000 + pullback
 // $1500, cap $5000, existing $1200, pending $500 -> final BUY $3300. Plus a
 // portfolio-collision test (3 strategies -> ONE merged, capped order) and that
 // the 32-cell GRID (strategies that never register a target) is untouched.
@@ -38,7 +38,7 @@ int main() {
     A.set_momentum_overlay(false); A.set_risk_overlay(false);
 
     A.set_target("XSEC",     "SOLUSDT", 4000.0, Factor::MOMENTUM, Family::XSEC);
-    A.set_target("UPJUMP",   "SOLUSDT", 2000.0, Factor::MOMENTUM, Family::UPJUMP);
+    A.set_target("MIMIC",   "SOLUSDT", 2000.0, Factor::MOMENTUM, Family::MIMIC);
     A.set_target("PULLBACK", "SOLUSDT", 1500.0, Factor::OTHER,    Family::EDGE);
 
     auto deltas = A.plan(&L);
@@ -60,7 +60,7 @@ int main() {
     B.set_regime_overlay(false); B.set_drawdown_overlay(false);
     B.set_momentum_overlay(false); B.set_risk_overlay(false);
     B.set_target("A","LINKUSDT", 3000.0, Factor::MOMENTUM, Family::XSEC);
-    B.set_target("B","LINKUSDT", 3000.0, Factor::MOMENTUM, Family::UPJUMP);
+    B.set_target("B","LINKUSDT", 3000.0, Factor::MOMENTUM, Family::MIMIC);
     B.set_target("C","LINKUSDT", 3000.0, Factor::MOMENTUM, Family::EDGE);
     ExchangeLedger L2; L2.configure(0.0,false,0.0);
     auto d2 = B.plan(&L2);
@@ -70,7 +70,7 @@ int main() {
     CHECK(NEAR(d2[0].usd, 5000.0));         // nothing held -> buy the whole capped target
 
     // ── GRID preservation: cells that never register a target produce NO delta ──
-    // (the 32-cell UpJump threshold grid keeps its own book; it never calls
+    // (the 32-cell Mimic threshold grid keeps its own book; it never calls
     //  set_target, so the allocator emits nothing for those symbols.)
     CHECK(B.num_targets() == 3);          // 3 strategy targets, all on LINKUSDT
     bool any_non_link = false;            // no delta for any coin nobody targeted

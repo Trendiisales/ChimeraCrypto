@@ -5,7 +5,7 @@
 //  THESIS: in an established daily uptrend, price pulls back to a RISING fast EMA
 //  (the trend's dynamic support), then RECLAIMS it with a bullish close — a
 //  lower-risk continuation entry than chasing the breakout.  Distinct from
-//  UpJump (buys the impulse) and TSMOM/XSec (rank/hold): this buys the DIP inside
+//  Mimic (buys the impulse) and TSMOM/XSec (rank/hold): this buys the DIP inside
 //  an uptrend, on the reclaim.
 //
 //  ENTRY (all at close i, coin eligible):

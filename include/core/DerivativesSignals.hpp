@@ -3,7 +3,7 @@
 // DerivativesSignals — Phase-7 review layer (item 29: DERIVATIVES-DATA-AS-SIGNAL).
 //
 // Derivatives + microstructure data used ONLY as a QUALITY annotation / SIZE
-// modifier on the EXISTING spot-long entries (UpJump / XSec / RipRider). The
+// modifier on the EXISTING spot-long entries (Mimic / XSec / RipRider). The
 // data is NEVER an instrument — every executed trade stays SPOT-LONG. This
 // module changes entry QUALITY, not the strategies, and per the Phase-7
 // backtest verdict it is wired OBSERVATION-ONLY (it does NOT veto or resize any
@@ -12,7 +12,7 @@
 // there is more than the 1-year derivatives history the backtest had).
 //
 // *** ADDITIVE ONLY / NO 200DMA. *** This module never touches the signal-price
-// shadow book, the 32-cell UpJump grid, the allocator, or any execution path.
+// shadow book, the 32-cell Mimic grid, the allocator, or any execution path.
 // It is a measurement layer. Long-only spot; derivatives data is a SIGNAL only.
 //
 // DATA SUPPORTED (backtested on data/{funding,klines_spot,klines_perp}, 8 sym,

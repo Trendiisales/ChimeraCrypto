@@ -59,13 +59,13 @@ int main() {
         reg.declare("XSEC-BTC",  Lifecycle::SHADOW);
         reg.declare("XSEC-BR",   Lifecycle::SHADOW);
         reg.declare("RIPRIDER",  Lifecycle::SHADOW);
-        reg.declare("UPJUMP-GRID", Lifecycle::SHADOW);
+        reg.declare("MIMIC-GRID", Lifecycle::SHADOW);
         reg.declare("LEGACY-EDGE", Lifecycle::DISABLED);   // off, and not wired
         reg.declare("FUTURES-LIQ", Lifecycle::HALTED);     // operational, no assert
         reg.mark_wired("XSEC-BTC", true, 1);
         reg.mark_wired("XSEC-BR",  true, 1);
         reg.mark_wired("RIPRIDER", true, 1);
-        reg.mark_wired("UPJUMP-GRID", true, 32);           // 32 grid cells
+        reg.mark_wired("MIMIC-GRID", true, 32);           // 32 grid cells
         std::string err;
         bool ok = reg.validate(err);
         check(ok, "healthy declaration must pass validate()");

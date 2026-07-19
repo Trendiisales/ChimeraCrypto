@@ -165,7 +165,7 @@
 #include "live/DataQuality.hpp"        // Phase-4 item 23: seed/feed schema+checksum+gap+stale validation
 #include "live/HttpControlAuth.hpp"    // Phase-1: control-API auth/method helpers
 #include "core/EdgeEngine.hpp"
-#include "core/UpJumpLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for UPJUMP legs (shadow)
+#include "core/MimicLadderCompanion.hpp" // S-2026-07-05b: tiered-2 + self-funding ladder clip book for MIMIC legs (shadow)
 #include "core/CryptoCostLedger.hpp"       // S-2026-07-13 campaign architecture (13j §2.11): measured per-symbol effective cost
 #include "core/CryptoOpportunityGate.hpp"  // S-2026-07-13 campaign architecture: cost-viability entry gate
 #include "core/CryptoCampaignManager.hpp"  // S-2026-07-13 campaign architecture: virtual-lot parent campaigns (SHADOW, mimic OFF)
@@ -258,7 +258,7 @@ static int64_t                  g_startup_ts_ms = 0;   // epoch ms at startup
 //   connected_count() (not a hardcoded banner). Populated just before the READY
 //   banner; /api/state2 reads its state_json.
 static chimera::EngineRegistry   g_registry;
-static int                       g_grid_clip_count = 0;   // real UpJump grid-cell count (set at grid init)
+static int                       g_grid_clip_count = 0;   // real Mimic grid-cell count (set at grid init)
 // item 21: gate-attribution sink (per-gate suppression reason + counterfactual,
 //   correlation-ID threaded). Observational only — never alters signal/exit logic.
 static chimera::GateAttribution  g_gate_attr;
@@ -856,8 +856,8 @@ static void persist_trade(const chimera::EdgeEngine::TradeRecord& t) {
 }
 
 // ── CHIMERA→OMEGA DESK trade export (S-2026-07-12) ──────────────────────────
-// Appends every CLOSED shadow trade (slot engines TSMOM/ICHI/BOLL + UPJUMP
-// parents via set_on_trade in the g_slots wiring loop, UpJump companion clips
+// Appends every CLOSED shadow trade (slot engines TSMOM/ICHI/BOLL + MIMIC
+// parents via set_on_trade in the g_slots wiring loop, Mimic companion clips
 // via persist_companion_clip, XSec/XSec2 rebalance legs) to
 // data/chimera_inbound.csv in the Omega desk's crypto_inbound schema plus a
 // trailing reason column:
@@ -1171,18 +1171,18 @@ static void persist_bar(const chimera::EdgeEngine::BarRecord& b) {
     fclose(f);
 }
 
-// ── UPJUMP companion clip book (S-2026-07-03, Slice 4b) ─────────────────────
-// STANDALONE ADDITIVE paper book: each UPJUMP leg gets an independent clip
+// ── MIMIC companion clip book (S-2026-07-03, Slice 4b) ─────────────────────
+// STANDALONE ADDITIVE paper book: each MIMIC leg gets an independent clip
 // companion that OBSERVES (never touches / closes / moves) the parent. Registered
 // by parent tag; driven from on_bar_callback on every completed bar. Judged
 // STANDALONE, never vs-WIDE (feedback-companion-independent-engine). Emits its
 // own ledger only — no order, no callback into the parent.
 static constexpr const char* COMPANION_TRADES_FILE = "data/companion_trades.json";
-static std::map<std::string, std::pair<chimera::EdgeEngine*, chimera::UpJumpLadderCompanion*>> g_companion_by_parent;
+static std::map<std::string, std::pair<chimera::EdgeEngine*, chimera::MimicLadderCompanion*>> g_companion_by_parent;
 static std::mutex g_companion_mtx;
 
 static void save_companion_det_state();   // fwd decl (defined below); called on jf-close for Fig-2 immediate persist
-static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRecord& r) {
+static void persist_companion_clip(const chimera::MimicLadderCompanion::ClipRecord& r) {
     // S-17s SIGNAL-ONLY cells (GRT-PJ5W1 driver): NOTHING books — no ledger row, no desk
     // export — but the Fig-2 immediate det-state persist MUST still run or a restart in
     // the post-close window resurrects the leg (and the ledger-dedup can't catch it,
@@ -1218,7 +1218,7 @@ static void persist_companion_clip(const chimera::UpJumpLadderCompanion::ClipRec
     // Persist the det-state file IMMEDIATELY so a restart in the window before the
     // next H1 save (main.cpp save_companion_det_state at bar-close) can never
     // resurrect the just-closed leg from a stale det_in:1. jf clips fire ONLY from
-    // UpJumpLadderCompanion::observe(), always under g_companion_mtx (both drive
+    // MimicLadderCompanion::observe(), always under g_companion_mtx (both drive
     // sites hold it), and save_companion_det_state takes no lock itself -> race-free.
     // Gated to -J1 so be_/campaign/core clips (other on_clip_ users) don't trigger it.
     if (r.tag.size() >= 3 && r.tag.compare(r.tag.size() - 3, 3, "-J1") == 0)
@@ -1330,7 +1330,7 @@ struct LiveMimicMirror {
             }
         }
     }
-    void on_open(const chimera::UpJumpLadderCompanion::OpenRecord& r) {
+    void on_open(const chimera::MimicLadderCompanion::OpenRecord& r) {
         if (!enabled || !submit || order_usd <= 0.0 || r.px <= 0.0) return;
         std::lock_guard<std::mutex> lk(mu);
         retry_pending_();
@@ -1383,7 +1383,7 @@ struct LiveMimicMirror {
             held.erase(r.tag);
         }
     }
-    void on_clip(const chimera::UpJumpLadderCompanion::ClipRecord& r) {
+    void on_clip(const chimera::MimicLadderCompanion::ClipRecord& r) {
         if (!enabled || !submit) return;
         std::lock_guard<std::mutex> lk(mu);
         retry_pending_();
@@ -1493,17 +1493,17 @@ static std::map<std::string, ClipTotals> load_companion_clip_totals() {
         auto te = line.find("\"", tp);
         if (te == std::string::npos) continue;
         std::string tag = line.substr(tp, te - tp);
-        // Multi-leg ladder tags are "<COIN>-UPJUMP-CLIP-T1/-T2/-L1..". Collapse to the
-        // book base tag ("<COIN>-UPJUMP-CLIP") so rehydrate (keyed on config().tag)
+        // Multi-leg ladder tags are "<COIN>-MIMIC-CLIP-T1/-T2/-L1..". Collapse to the
+        // book base tag ("<COIN>-MIMIC-CLIP") so rehydrate (keyed on config().tag)
         // sums clips/bank across every sub-leg of the book.
         auto cp = tag.find("-CLIP");
         if (cp != std::string::npos) tag = tag.substr(0, cp + 5);
         // BE-cascade/mimic ladders stamp sub-leg labels on every ClipRecord:
         // cfg_.tag + "-T1/-T2/-S<n>/-L<n>/-J1" (make_leg_/emit paths in
-        // UpJumpLadderCompanion). Rehydrate keys on the BASE cfg tag, so strip a
+        // MimicLadderCompanion). Rehydrate keys on the BASE cfg tag, so strip a
         // trailing -<T|S|L|J><digits> label — without this the totals never match
         // and panel clips/bank reset to 0 on every restart (2026-07-18 incident:
-        // LTC-LTC-UJ15-BECASC-S-T1 +52.9bp clip vanished from the desk after the
+        // LTC-LTC-MIM15-BECASC-S-T1 +52.9bp clip vanished from the desk after the
         // 03:30Z restart; auto-retire also ran on a zeroed restored bank).
         // Config tags themselves never end letter+digits (-F/-S/-MIM/-BECASC safe).
         auto dp = tag.rfind('-');
@@ -1590,7 +1590,7 @@ static void restore_companion_det_state() {
         tp += 7; auto te = line.find("\"", tp);
         if (te == std::string::npos) continue;
         std::string tag = line.substr(tp, te - tp);
-        chimera::UpJumpLadderCompanion* comp = nullptr;
+        chimera::MimicLadderCompanion* comp = nullptr;
         for (auto& kv : g_companion_by_parent)
             if (kv.second.second->config().tag == tag) { comp = kv.second.second; break; }
         if (!comp) continue;
@@ -1661,8 +1661,8 @@ static std::vector<chimera::CryptoCampaignManager*> g_campaigns;  // guarded by 
 // the GRT-PJ5W1 jump_floor COMPANION, not an EdgeEngine, so the generic per-tick loop
 // (nullptr feed) skips it; a dedicated hook drives observe() off the parent's settled
 // jf_in_position()/jf_entry_px(). Read-only on the parent. Guarded by g_companion_mtx.
-static chimera::UpJumpLadderCompanion* g_grt_pj_parent = nullptr;   // GRT-PJ5W1 (jump_floor)
-static chimera::UpJumpLadderCompanion* g_grt_pj_mimic  = nullptr;   // GRT-PJ5W1-MIM
+static chimera::MimicLadderCompanion* g_grt_pj_parent = nullptr;   // GRT-PJ5W1 (jump_floor)
+static chimera::MimicLadderCompanion* g_grt_pj_mimic  = nullptr;   // GRT-PJ5W1-MIM
 static int g_campaign_cell_count = 0;
 // S-2026-07-15 CORE-TRIGGER (ETH+XRP): streaming validated CORE, SHADOW, taker 28bp, parity-gated.
 static chimera::CoreTriggerEngine* g_core_eng = nullptr;          // guarded by g_companion_mtx
@@ -1701,13 +1701,13 @@ static void restore_campaign_state() {
 // Schema (S-2026-07-12 grid identity fix): {"ts":<unix>,"legs":[{sym,tag,cell,det_w,
 // det_thr_pct,parent_tag,parent_w,parent_thr_pct,canonical,armed,peak_mfe_pct,
 // bars_since_high,clips,bank_bp,bank_bp_real,bank_bp_real_w,mult,retired,sublegs}]}.
-// Pre-fix the legs carried ONLY the truncated coin sym ("ADA-UJ2" -> "ADA"), so the 4
+// Pre-fix the legs carried ONLY the truncated coin sym ("ADA-MIM2" -> "ADA"), so the 4
 // grid cells per coin were indistinguishable downstream and the desk panel fell back to
 // a hardcoded pre-finalize roster (stale windows, no XRP). Now each leg carries its full
 // cell identity + detector window/threshold + the tuned parent's window/threshold, and
 // `canonical` marks the ONE promoted cell per coin (CRYPTO_SPOTLONG_PLAN.md): the cell
-// whose det_thr equals its tuned parent's upjump_thr (ETH-UJ2/BTC-UJ4/BNB-UJ3/SOL-UJ5/
-// DOGE-UJ4/ADA-UJ5/XRP-UJ4/TRX-UJ5) — data-driven, no second hand-kept list to rot.
+// whose det_thr equals its tuned parent's mimic_thr (ETH-MIM2/BTC-MIM4/BNB-MIM3/SOL-MIM5/
+// DOGE-MIM4/ADA-MIM5/XRP-MIM4/TRX-MIM5) — data-driven, no second hand-kept list to rot.
 // bank_bp_real stays per-leg (the desk _cctot fold sums it over ALL legs — shape kept).
 // Cross-box pushed to C:\Omega\crypto_companion_state.json (Mac launchd scp) where
 // /api/crypto_companion serves it. Caller MUST hold g_companion_mtx. Atomic write
@@ -1725,18 +1725,18 @@ static void emit_companion_state() {
         // fall back to the cell's own det config for the parent fields.
         static const chimera::EdgeEngine::Config _null_pcfg{};
         const auto& pcfg = kv.second.first ? kv.second.first->cfg() : _null_pcfg;
-        std::string sym  = kv.first.substr(0, kv.first.find('-'));  // "BTC-UJ4" -> "BTC"
+        std::string sym  = kv.first.substr(0, kv.first.find('-'));  // "BTC-MIM4" -> "BTC"
         std::string cell = kv.first.find('-') == std::string::npos
-                             ? "" : kv.first.substr(kv.first.find('-') + 1);  // "BTC-UJ4" -> "UJ4"
+                             ? "" : kv.first.substr(kv.first.find('-') + 1);  // "BTC-MIM4" -> "MIM4"
         // canonical = this cell's detector threshold IS the coin's tuned parent threshold
-        const bool canonical = std::fabs(ccfg.det_thr - pcfg.upjump_thr) < 1e-9;
+        const bool canonical = std::fabs(ccfg.det_thr - pcfg.mimic_thr) < 1e-9;
         if (!first) js << ",";
         first = false;
         js << "{\"sym\":\"" << sym << "\",\"tag\":\"" << ccfg.tag << "\",\"cell\":\"" << cell << "\""
            << ",\"det_w\":" << ccfg.det_w
            << std::setprecision(1) << ",\"det_thr_pct\":" << ccfg.det_thr * 100.0
-           << ",\"parent_tag\":\"" << pcfg.tag << "\",\"parent_w\":" << pcfg.upjump_w
-           << ",\"parent_thr_pct\":" << pcfg.upjump_thr * 100.0
+           << ",\"parent_tag\":\"" << pcfg.tag << "\",\"parent_w\":" << pcfg.mimic_w
+           << ",\"parent_thr_pct\":" << pcfg.mimic_thr * 100.0
            << ",\"canonical\":" << (canonical ? "true" : "false")
            << ",\"armed\":" << (snap.armed ? "true" : "false")
            << std::setprecision(4) << ",\"peak_mfe_pct\":" << snap.peak_mfe_pct
@@ -1864,7 +1864,7 @@ static void on_bar_callback(const chimera::EdgeEngine::BarRecord& rec) {
         std::lock_guard<std::mutex> lk(g_momentum_mtx);
         g_last_momentum_pct[rec.tag] = rec.momentum_pct;
     }
-    // Drive the UPJUMP clip companion for this leg (if registered). Reads the
+    // Drive the MIMIC clip companion for this leg (if registered). Reads the
     // parent's settled position only — never modifies it. Additive standalone book.
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
@@ -2286,7 +2286,7 @@ static void http_server_thread(int port) {
             {
                 std::lock_guard<std::mutex> lk(g_companion_mtx);
                 for (auto& kv : g_companion_by_parent) {
-                    chimera::UpJumpLadderCompanion* comp = kv.second.second;
+                    chimera::MimicLadderCompanion* comp = kv.second.second;
                     if (!comp) continue;
                     double px = 0.0;
                     int id = chimera::symbol_to_id(comp->config().symbol);
@@ -2469,7 +2469,7 @@ struct LiveRuntimeConfig {
     // (default) => TRACK-ONLY: the allocator merges/caps/nets every sleeve's
     // target and LOGS the unified vector ([ALLOC-TRACK]) so the whole layer is
     // exercised, but does NOT emit — the per-sleeve shadow books + the 32-cell
-    // UpJump threshold GRID keep their own records. true => ENFORCE: the allocator
+    // Mimic threshold GRID keep their own records. true => ENFORCE: the allocator
     // emits the netted deltas and the raw per-sleeve orders defer to it.
     // (Back-compat only — superseded by portfolio_alloc_mode below.)
     bool        portfolio_alloc_enforce = false;
@@ -3209,7 +3209,7 @@ int main() {
         gateway.set_stream(&g_userstream);
 
         // Phase-4 item 22: attach the ADDITIVE realistic-fill observer. Every
-        // gateway-routed fill (XSec / RipRider / UpJump-parent — NOT the grid
+        // gateway-routed fill (XSec / RipRider / Mimic-parent — NOT the grid
         // companions, which never route here) is mirrored into a PARALLEL book:
         // one leg at signal price (= current record), one leg at a realistic
         // price (spread+slippage+fee+queue). The signal-price shadow ledger and
@@ -3270,7 +3270,7 @@ int main() {
     // TRACK-ONLY by default (portfolio_alloc_enforce=false): the allocator COMPUTES
     // + LOGS the unified vector ([ALLOC-TRACK]) so the whole layer is exercised on
     // live targets, but does NOT emit — the per-sleeve shadow books and the 32-cell
-    // UpJump threshold GRID keep their own records untouched (the grid cells never
+    // Mimic threshold GRID keep their own records untouched (the grid cells never
     // register a target, so they are preserved by construction). Set enforce=true
     // (go-live) to make the netted deltas the real orders. The allocator NEVER
     // edits a validated sleeve's signal/exit logic.
@@ -3281,7 +3281,7 @@ int main() {
         double nav = runtime_cfg.max_position_usd > 0.0 ? runtime_cfg.max_position_usd : 10000.0;
         // Research starting caps (track-only; operator tunes before enforce). One
         // symbol cap = 1 NAV unit; aggregate momentum cap = 4 NAV units (XSec +
-        // UpJump + RipRider are ONE factor); vol/beta OFF until the rolling
+        // Mimic + RipRider are ONE factor); vol/beta OFF until the rolling
         // covariance warms (apply_risk returns 1.0 cold); cluster cap 50%.
         chimera::EnforceMode emode =
             runtime_cfg.portfolio_alloc_mode == AllocMode::FULL    ? chimera::EnforceMode::FULL :
@@ -3321,7 +3321,7 @@ int main() {
 
     // ── Phase-8A Stage-2: governed submit for the PROMOTED sleeves only ──────────
     // The books that feed the allocator (XSec v1 BTC/BR, XSec2, RipRider, the
-    // EdgeEngine/UpJump intent path) route their BUY entries through here. In
+    // EdgeEngine/Mimic intent path) route their BUY entries through here. In
     // OFF/FULL mode, or for any exit/sell, this is a straight passthrough —
     // byte-identical to the pre-8A gateway.submit — so track-only behaviour is
     // preserved. In HARDCAP it asks the allocator whether the proposed BUY breaches
@@ -3537,7 +3537,7 @@ int main() {
     // [XSEC2] REBALANCE, mirrors a SHADOW order per target (tag XSEC2 -> its own
     // shadow ledger, for the v1-vs-v2 forward comparison) AND declares targets to
     // the portfolio allocator TRACK-ONLY (one MOMENTUM/XSEC factor with v1). The
-    // 32-cell UpJump grid + the existing shadow record are untouched (new tag).
+    // 32-cell Mimic grid + the existing shadow record are untouched (new tag).
     xsec2.set_universe({
         "BTC","ETH","SOL","BNB","AVAX","LINK","XRP","DOGE","NEAR","HBAR",
         "INJ","ADA","TRX","ATOM","FIL","AAVE","UNI","DOT","ICP","GRT",
@@ -3650,7 +3650,7 @@ int main() {
     // correlated (~0.4 → they LOAD the momentum factor the backlog says to CAP,
     // not diversify). NONE is a promotion candidate. Wired OBSERVATION-ONLY: own
     // shadow tag + forward record, NOT fed to the SpotPortfolioAllocator, NOT in
-    // the promoted-sleeve track. The 32-cell UpJump grid + shadow record untouched.
+    // the promoted-sleeve track. The 32-cell Mimic grid + shadow record untouched.
     // See [[ChimeraReviewPhase6]]. (Phase-6b: the other 6 families + two-stage
     // ignition — NOT built, noted for a future session.)
     chimera::TrendPullbackReclaimEngine     p6_tpr;
@@ -3727,7 +3727,7 @@ int main() {
     // Derivatives + microstructure data as a QUALITY FILTER / SIZE modifier on the
     // EXISTING spot-long entries — the data is NEVER traded; every executed trade
     // stays SPOT-LONG. Long-only, NO shorts, NO 200DMA.
-    // BACKTEST VERDICT (backtest/phase7_derivsignals_bt.cpp; faithful live UpJump
+    // BACKTEST VERDICT (backtest/phase7_derivsignals_bt.cpp; faithful live Mimic
     // per-coin H1 W/thr, ride-to-flip, 20bp RT; 8 sym × 2025-05..2026-05 = the ENTIRE
     // derivatives history available; gate-attribution + quartile monotonicity;
     // cost-invariant to 2×): ALL THREE data-supported filters REJECTED —
@@ -3745,7 +3745,7 @@ int main() {
     // funding-pct / spot-vs-perp CVD / basis context at boot and stamps it, so a
     // forward derivative dataset accrues to RE-JUDGE Phase 7 with more history. It
     // changes NOTHING — no order, no size, no veto, no allocator, no feed plumbing.
-    // The 32-cell UpJump grid + every shadow book are untouched. See [[ChimeraReviewPhase7]].
+    // The 32-cell Mimic grid + every shadow book are untouched. See [[ChimeraReviewPhase7]].
     static chimera::DerivativesSignalBook g_deriv_book;
     {
         const std::vector<std::string> dsyms = {
@@ -3819,7 +3819,7 @@ int main() {
     // strictly worse. Parent EXIT logic unchanged. NONE promoted, NONE wired — no
     // engine instance, no on_tick, no allocator target. Engine headers + both
     // backtests + tests/run_phase6b_tests.sh are the documented salvage record.
-    // See [[ChimeraReviewPhase6b]]. The 32-cell UpJump grid + every shadow book
+    // See [[ChimeraReviewPhase6b]]. The 32-cell Mimic grid + every shadow book
     // are untouched; MODE=SHADOW.
     std::printf("[P6b] SALVAGE CHECK — 6 remaining families + young-coin + item-28 two-stage: "
                 "ALL REJECTED (fail exposure-matched pick-edge control = breadth timing not selection; "
@@ -3877,7 +3877,7 @@ int main() {
             if (exec_ok && px > 0)
                 governed_submit({ sym + "USDT", true, (rip_nav/8.0)/px, px, /*is_exit*/false, "RIP" }, chimera::Factor::MOMENTUM);
             // Phase-3 TRACK-ONLY: declare the RipRider target (one factor with XSec/
-            // UpJump); the allocator caps aggregate momentum. Shadow book unchanged.
+            // Mimic); the allocator caps aggregate momentum. Shadow book unchanged.
             if (px > 0) {
                 std::lock_guard<std::mutex> lk(g_alloc_mtx);
                 g_allocator.set_target("RIP", sym + "USDT", rip_nav/8.0,
@@ -4088,10 +4088,10 @@ int main() {
                     qty * intent.ref_px);
                 std::fflush(stdout);
                 // Phase-1: route through the single gateway (EdgeEngine SELLs are exits).
-                // Phase-8A: UPJUMP/TSMOM tags are the MOMENTUM factor -> governed by the
+                // Phase-8A: MIMIC/TSMOM tags are the MOMENTUM factor -> governed by the
                 // aggregate momentum cap; other EdgeEngines are per-symbol EDGE (OTHER,
                 // symbol-cap only). SELLs pass through. (This intent path is legacy-gated.)
-                bool _im = intent.tag.find("UPJUMP") != std::string::npos
+                bool _im = intent.tag.find("MIMIC") != std::string::npos
                         || intent.tag.find("TSMOM")  != std::string::npos;
                 auto result = governed_submit({ intent.symbol, intent.is_buy, qty, intent.ref_px,
                                                /*is_exit*/ !intent.is_buy, intent.tag.c_str() },
@@ -4101,21 +4101,21 @@ int main() {
                         "[ORDER-INTENT] execute failed tag=%s symbol=%s err=%s\n",
                         intent.tag.c_str(), intent.symbol.c_str(), result.error.c_str());
                 }
-                // Phase-3 TRACK-ONLY: declare the EdgeEngine/UpJump-parent target to
+                // Phase-3 TRACK-ONLY: declare the EdgeEngine/Mimic-parent target to
                 // the allocator (a BUY sets the target notional; a SELL/exit clears
-                // it). UPJUMP tags are the momentum factor + UPJUMP family (weaker
+                // it). MIMIC tags are the momentum factor + MIMIC family (weaker
                 // macro, reduced size); other EdgeEngines are per-symbol EDGE books.
                 // Grid CLIP companions never reach here (own book) — preserved.
                 {
                     std::string usym = intent.symbol;
                     for (auto& ch : usym) if (ch>='a'&&ch<='z') ch -= 32;
-                    bool is_uj = intent.tag.find("UPJUMP") != std::string::npos;
-                    bool is_mom = is_uj || intent.tag.find("TSMOM") != std::string::npos;
+                    bool is_mim = intent.tag.find("MIMIC") != std::string::npos;
+                    bool is_mom = is_mim || intent.tag.find("TSMOM") != std::string::npos;
                     std::lock_guard<std::mutex> lk(g_alloc_mtx);
                     if (intent.is_buy)
                         g_allocator.set_target(intent.tag, usym, qty * intent.ref_px,
                             is_mom ? chimera::Factor::MOMENTUM : chimera::Factor::OTHER,
-                            is_uj  ? chimera::Family::UPJUMP   : chimera::Family::EDGE);
+                            is_mim  ? chimera::Family::MIMIC   : chimera::Family::EDGE);
                     else
                         g_allocator.clear_target(intent.tag, usym);
                     g_allocator.plan(&g_ledger);
@@ -4215,121 +4215,121 @@ int main() {
     chimera::EdgeEngine btc_tsmom_d1(btc_d1_cfg);
     wire_engine(btc_tsmom_d1);
 
-    // ── UPJUMP-H1 (S-2026-07-05b): INTRADAY per-coin window + tiered ladder ──
-    // PER-COIN INTRADAY WINDOW W (4-8h), symmetric up-jump, long-only, ride-to-flip:
+    // ── MIMIC-H1 (S-2026-07-05b): INTRADAY per-coin window + tiered ladder ──
+    // PER-COIN INTRADAY WINDOW W (4-8h), symmetric mimic, long-only, ride-to-flip:
     // NO trade-level price stops (vault UpMoveTrailLossMitigation — stops destroy the
     // up-move edge; protection = the separate companion ladder book only). Exit only
     // on symmetric down-jump flip. The 24h wide window was too slow to catch the
-    // intraday movers; per-coin W/thr from crypto_upjump_tiered_ladder_sweep.py (best
-    // net W<=8 passing standalone all-6). RT cost 20bp. make_upjump now takes W.
-    auto make_upjump = [](const char* sym, const char* tag, int w, double thr) {
+    // intraday movers; per-coin W/thr from crypto_mimic_tiered_ladder_sweep.py (best
+    // net W<=8 passing standalone all-6). RT cost 20bp. make_mimic now takes W.
+    auto make_mimic = [](const char* sym, const char* tag, int w, double thr) {
         return chimera::EdgeEngine::Config{
             .symbol         = sym,
             .tag            = tag,
-            .kind           = chimera::StrategyKind::UPJUMP,
+            .kind           = chimera::StrategyKind::MIMIC,
             .tf_secs        = 3600,
             .atr_period     = 14,
-            .upjump_w       = w,
-            .upjump_thr     = thr,
+            .mimic_w       = w,
+            .mimic_thr     = thr,
             .ride_to_flip   = true,
             .round_trip_bp  = 20.0,
-            .max_history    = 720,   // ~30d of 1h klines so the up-jump event is visible on restart
+            .max_history    = 720,   // ~30d of 1h klines so the mimic event is visible on restart
         };
     };
-    // ── KILL_UPJUMP_PARENTS (operator 2026-07-13, both systems) ──────────────────
-    // NO up-jump on ANY engine. Every StrategyKind::UPJUMP parent is taken OFF the live
+    // ── KILL_IMMEDIATE_PARENTS (operator 2026-07-13, both systems) ──────────────────
+    // NO mimic on ANY engine. Every StrategyKind::MIMIC parent is taken OFF the live
     // path: the g_slots push (the tick-loop driver — the ONLY thing that actually trades,
     // since wire_engine no-ops without CHIMERA_WIRE_LEGACY) is skipped, and the wire_engine
-    // calls are guarded too (future-proof: a CHIMERA_WIRE_LEGACY run can't resurrect up-jump).
+    // calls are guarded too (future-proof: a CHIMERA_WIRE_LEGACY run can't resurrect mimic).
     // The EdgeEngine OBJECTS remain constructed (GridCoin feed refs need them; the grid is
-    // already dead via KILL_UPJUMP_CLIPS) — an un-slotted/un-wired engine never ticks, never
+    // already dead via KILL_IMMEDIATE_CLIPS) — an un-slotted/un-wired engine never ticks, never
     // trades (its boot "[..] ARMED" line is just a constructor log, not a live signal). Parents
     // are tracked only by the aggregate EDGE-SLOTS registry bucket, which stays wired via the
     // 24 remaining TSMOM/ICHI slots (incl. BTC-TSMOM-D1) -> no per-engine registry abort.
-    // Re-enable = flip false + rebuild. KEEP btc_tsmom_d1 (TSMOM) — NOT an up-jump engine.
-    const bool KILL_UPJUMP_PARENTS = true;
-    // per-coin intraday W(h)/thr — crypto_upjump_tiered_ladder_sweep.py roster (05-07b)
-    chimera::EdgeEngine::Config btc_upjump_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP-H1",  4, 0.02);
-    chimera::EdgeEngine::Config eth_upjump_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP-H1",  4, 0.02);
-    chimera::EdgeEngine::Config sol_upjump_cfg  = make_upjump("solusdt",  "SOL-UPJUMP-H1",  4, 0.02);
-    chimera::EdgeEngine::Config doge_upjump_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP-H1", 4, 0.02);
-    chimera::EdgeEngine::Config bnb_upjump_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP-H1",  4, 0.02);
-    chimera::EdgeEngine btc_upjump_h1(btc_upjump_cfg);
-    chimera::EdgeEngine eth_upjump_h1(eth_upjump_cfg);
-    chimera::EdgeEngine sol_upjump_h1(sol_upjump_cfg);
-    chimera::EdgeEngine doge_upjump_h1(doge_upjump_cfg);
-    chimera::EdgeEngine bnb_upjump_h1(bnb_upjump_cfg);
-    if (!KILL_UPJUMP_PARENTS) {   // no up-jump on any engine (2026-07-13)
-    wire_engine(btc_upjump_h1);
-    wire_engine(eth_upjump_h1);
-    wire_engine(sol_upjump_h1);
-    wire_engine(doge_upjump_h1);
-    wire_engine(bnb_upjump_h1);
+    // Re-enable = flip false + rebuild. KEEP btc_tsmom_d1 (TSMOM) — NOT an mimic engine.
+    const bool KILL_IMMEDIATE_PARENTS = true;
+    // per-coin intraday W(h)/thr — crypto_mimic_tiered_ladder_sweep.py roster (05-07b)
+    chimera::EdgeEngine::Config btc_mimic_cfg  = make_mimic("btcusdt",  "BTC-MIMIC-H1",  4, 0.02);
+    chimera::EdgeEngine::Config eth_mimic_cfg  = make_mimic("ethusdt",  "ETH-MIMIC-H1",  4, 0.02);
+    chimera::EdgeEngine::Config sol_mimic_cfg  = make_mimic("solusdt",  "SOL-MIMIC-H1",  4, 0.02);
+    chimera::EdgeEngine::Config doge_mimic_cfg = make_mimic("dogeusdt", "DOGE-MIMIC-H1", 4, 0.02);
+    chimera::EdgeEngine::Config bnb_mimic_cfg  = make_mimic("bnbusdt",  "BNB-MIMIC-H1",  4, 0.02);
+    chimera::EdgeEngine btc_mimic_h1(btc_mimic_cfg);
+    chimera::EdgeEngine eth_mimic_h1(eth_mimic_cfg);
+    chimera::EdgeEngine sol_mimic_h1(sol_mimic_cfg);
+    chimera::EdgeEngine doge_mimic_h1(doge_mimic_cfg);
+    chimera::EdgeEngine bnb_mimic_h1(bnb_mimic_cfg);
+    if (!KILL_IMMEDIATE_PARENTS) {   // no mimic on any engine (2026-07-13)
+    wire_engine(btc_mimic_h1);
+    wire_engine(eth_mimic_h1);
+    wire_engine(sol_mimic_h1);
+    wire_engine(doge_mimic_h1);
+    wire_engine(bnb_mimic_h1);
     }
-    // UPJUMP-H1 remaining 5 legs — S-2026-07-03b: feeds already subscribed (all 62
+    // MIMIC-H1 remaining 5 legs — S-2026-07-03b: feeds already subscribed (all 62
     // SYM_FULL). Per-coin thr from Crypto 437337c. OP = parent-only (no companion).
-    chimera::EdgeEngine::Config ada_upjump_cfg  = make_upjump("adausdt",  "ADA-UPJUMP-H1",  4, 0.02);
-    chimera::EdgeEngine::Config near_upjump_cfg = make_upjump("nearusdt", "NEAR-UPJUMP-H1", 4, 0.02);
-    chimera::EdgeEngine::Config xrp_upjump_cfg  = make_upjump("xrpusdt",  "XRP-UPJUMP-H1",  4, 0.02);
-    chimera::EdgeEngine ada_upjump_h1(ada_upjump_cfg);
-    chimera::EdgeEngine near_upjump_h1(near_upjump_cfg);
-    chimera::EdgeEngine xrp_upjump_h1(xrp_upjump_cfg);
-    if (!KILL_UPJUMP_PARENTS) {   // no up-jump on any engine (2026-07-13)
-    wire_engine(ada_upjump_h1);
-    wire_engine(near_upjump_h1);
-    wire_engine(xrp_upjump_h1);
+    chimera::EdgeEngine::Config ada_mimic_cfg  = make_mimic("adausdt",  "ADA-MIMIC-H1",  4, 0.02);
+    chimera::EdgeEngine::Config near_mimic_cfg = make_mimic("nearusdt", "NEAR-MIMIC-H1", 4, 0.02);
+    chimera::EdgeEngine::Config xrp_mimic_cfg  = make_mimic("xrpusdt",  "XRP-MIMIC-H1",  4, 0.02);
+    chimera::EdgeEngine ada_mimic_h1(ada_mimic_cfg);
+    chimera::EdgeEngine near_mimic_h1(near_mimic_cfg);
+    chimera::EdgeEngine xrp_mimic_h1(xrp_mimic_cfg);
+    if (!KILL_IMMEDIATE_PARENTS) {   // no mimic on any engine (2026-07-13)
+    wire_engine(ada_mimic_h1);
+    wire_engine(near_mimic_h1);
+    wire_engine(xrp_mimic_h1);
     }
 
-    // ── FULL BULL ROSTER (operator-approved 2026-07-10/11) — 8 ADDITIVE up-jump cells, SHADOW ──
+    // ── FULL BULL ROSTER (operator-approved 2026-07-10/11) — 8 ADDITIVE mimic cells, SHADOW ──
     // On TOP of the fat-tail roster above (never replace it). Validated STANDALONE
     // ([[CompanionDominanceError]] — never vs-WIDE) under the corrected long-only gate (net>0,
     // PF>=1.3, both WF halves>0, 2x-cost>0; 2022-bear NOT gated — long-only spot can't short a
-    // crash). Parity via Crypto/backtest/upjump_earlyarm_bt (single: `live`; cascade: `stagger`,
+    // crash). Parity via Crypto/backtest/mimic_earlyarm_bt (single: `live`; cascade: `stagger`,
     // driving THIS header). NO 200DMA anywhere; parent ENTRY thr DISTINCT from mimic ARM.
-    //   ETH-UPJUMP2  1h/+2% BE-CASCADE{BE,+2,+3,+4,+6,+8}    : +3337% PF2.95 WF+1832/+1504 2x+3000 DD15731
-    //   BTC-UPJUMP4  2h/+4% BE-CASCADE{3,4,6,8,10,12}        : +658%  PF1.93 WF+228/+430  2x+605  DD15117
-    //   BNB-UPJUMP3  1h/+3% BE-CASCADE{3..16 N8}             : +3759% PF3.41 WF+2494/+1265 2x+3614 DD19322
-    //   SOL-UPJUMP5  1h/+5% BE-CASCADE{BE..+12 N8}           : +3721% PF4.24 WF+2846/+875 2x+3602 DD23545
-    //   DOGE-UPJUMP4 4h/+4% single : +3098/1.42 · ADA-UPJUMP5 1h/+5% single : +1471/1.52 (1h beats 6h)
-    //   XRP-UPJUMP4  1h/+4% single : +1483/1.46 · TRX-UPJUMP5 1h/+5% single x0.5 (thin ~23 win) : +1964/2.72
+    //   ETH-MIMIC2  1h/+2% BE-CASCADE{BE,+2,+3,+4,+6,+8}    : +3337% PF2.95 WF+1832/+1504 2x+3000 DD15731
+    //   BTC-MIMIC4  2h/+4% BE-CASCADE{3,4,6,8,10,12}        : +658%  PF1.93 WF+228/+430  2x+605  DD15117
+    //   BNB-MIMIC3  1h/+3% BE-CASCADE{3..16 N8}             : +3759% PF3.41 WF+2494/+1265 2x+3614 DD19322
+    //   SOL-MIMIC5  1h/+5% BE-CASCADE{BE..+12 N8}           : +3721% PF4.24 WF+2846/+875 2x+3602 DD23545
+    //   DOGE-MIMIC4 4h/+4% single : +3098/1.42 · ADA-MIMIC5 1h/+5% single : +1471/1.52 (1h beats 6h)
+    //   XRP-MIMIC4  1h/+4% single : +1483/1.46 · TRX-MIMIC5 1h/+5% single x0.5 (thin ~23 win) : +1964/2.72
     // (all 4 cascades hold the ≤1-un-BE'd guarantee; smoke-tested N6+N8, both arm shapes.)
-    chimera::EdgeEngine::Config eth_upjump2_cfg  = make_upjump("ethusdt",  "ETH-UPJUMP2-H1",  1, 0.02);
-    // NOTE (external audit CH-M02, 2026-07-14): the -H2/-H4 tag suffix on UPJUMP tags is the
-    // JUMP-DETECTION WINDOW in hours (3rd make_upjump arg), NOT the bar timeframe (all these
+    chimera::EdgeEngine::Config eth_mimic2_cfg  = make_mimic("ethusdt",  "ETH-MIMIC2-H1",  1, 0.02);
+    // NOTE (external audit CH-M02, 2026-07-14): the -H2/-H4 tag suffix on MIMIC tags is the
+    // JUMP-DETECTION WINDOW in hours (3rd make_mimic arg), NOT the bar timeframe (all these
     // engines run 3600s bars). Audit flagged it as a tf mismatch — it is not. Dead path anyway
-    // while KILL_UPJUMP_PARENTS=true (operator 2026-07-13).
-    chimera::EdgeEngine::Config btc_upjump4_cfg  = make_upjump("btcusdt",  "BTC-UPJUMP4-H2",  2, 0.04);
-    chimera::EdgeEngine::Config bnb_upjump3_cfg  = make_upjump("bnbusdt",  "BNB-UPJUMP3-H1",  1, 0.03);
-    chimera::EdgeEngine::Config sol_upjump5_cfg  = make_upjump("solusdt",  "SOL-UPJUMP5-H1",  1, 0.05);
-    chimera::EdgeEngine::Config doge_upjump4_cfg = make_upjump("dogeusdt", "DOGE-UPJUMP4-H4", 4, 0.04);
-    chimera::EdgeEngine::Config ada_upjump5_cfg  = make_upjump("adausdt",  "ADA-UPJUMP5-H1",  1, 0.05);
-    chimera::EdgeEngine::Config xrp_upjump4_cfg  = make_upjump("xrpusdt",  "XRP-UPJUMP4-H1",  1, 0.04);
-    chimera::EdgeEngine::Config trx_upjump5_cfg  = make_upjump("trxusdt",  "TRX-UPJUMP5-H1",  1, 0.05);
-    chimera::EdgeEngine eth_upjump2_h1(eth_upjump2_cfg);
-    chimera::EdgeEngine btc_upjump4_h1(btc_upjump4_cfg);
-    chimera::EdgeEngine bnb_upjump3_h1(bnb_upjump3_cfg);
-    chimera::EdgeEngine sol_upjump5_h1(sol_upjump5_cfg);
-    chimera::EdgeEngine doge_upjump4_h4(doge_upjump4_cfg);
-    chimera::EdgeEngine ada_upjump5_h1(ada_upjump5_cfg);
-    chimera::EdgeEngine xrp_upjump4_h1(xrp_upjump4_cfg);
-    chimera::EdgeEngine trx_upjump5_h1(trx_upjump5_cfg);
-    if (!KILL_UPJUMP_PARENTS) {   // no up-jump on any engine (2026-07-13)
-    wire_engine(eth_upjump2_h1);
-    wire_engine(btc_upjump4_h1);
-    wire_engine(bnb_upjump3_h1);
-    wire_engine(sol_upjump5_h1);
-    wire_engine(doge_upjump4_h4);
-    wire_engine(ada_upjump5_h1);
-    wire_engine(xrp_upjump4_h1);
-    wire_engine(trx_upjump5_h1);
+    // while KILL_IMMEDIATE_PARENTS=true (operator 2026-07-13).
+    chimera::EdgeEngine::Config btc_mimic4_cfg  = make_mimic("btcusdt",  "BTC-MIMIC4-H2",  2, 0.04);
+    chimera::EdgeEngine::Config bnb_mimic3_cfg  = make_mimic("bnbusdt",  "BNB-MIMIC3-H1",  1, 0.03);
+    chimera::EdgeEngine::Config sol_mimic5_cfg  = make_mimic("solusdt",  "SOL-MIMIC5-H1",  1, 0.05);
+    chimera::EdgeEngine::Config doge_mimic4_cfg = make_mimic("dogeusdt", "DOGE-MIMIC4-H4", 4, 0.04);
+    chimera::EdgeEngine::Config ada_mimic5_cfg  = make_mimic("adausdt",  "ADA-MIMIC5-H1",  1, 0.05);
+    chimera::EdgeEngine::Config xrp_mimic4_cfg  = make_mimic("xrpusdt",  "XRP-MIMIC4-H1",  1, 0.04);
+    chimera::EdgeEngine::Config trx_mimic5_cfg  = make_mimic("trxusdt",  "TRX-MIMIC5-H1",  1, 0.05);
+    chimera::EdgeEngine eth_mimic2_h1(eth_mimic2_cfg);
+    chimera::EdgeEngine btc_mimic4_h1(btc_mimic4_cfg);
+    chimera::EdgeEngine bnb_mimic3_h1(bnb_mimic3_cfg);
+    chimera::EdgeEngine sol_mimic5_h1(sol_mimic5_cfg);
+    chimera::EdgeEngine doge_mimic4_h4(doge_mimic4_cfg);
+    chimera::EdgeEngine ada_mimic5_h1(ada_mimic5_cfg);
+    chimera::EdgeEngine xrp_mimic4_h1(xrp_mimic4_cfg);
+    chimera::EdgeEngine trx_mimic5_h1(trx_mimic5_cfg);
+    if (!KILL_IMMEDIATE_PARENTS) {   // no mimic on any engine (2026-07-13)
+    wire_engine(eth_mimic2_h1);
+    wire_engine(btc_mimic4_h1);
+    wire_engine(bnb_mimic3_h1);
+    wire_engine(sol_mimic5_h1);
+    wire_engine(doge_mimic4_h4);
+    wire_engine(ada_mimic5_h1);
+    wire_engine(xrp_mimic4_h1);
+    wire_engine(trx_mimic5_h1);
     }
 
-    // ── UPJUMP clip companions — NO-FLOOR TIERED LADDER + STACKED ARMS + cap8 ──
+    // ── MIMIC clip companions — NO-FLOOR TIERED LADDER + STACKED ARMS + cap8 ──
     // (S-2026-07-07w, operator item 5 — REVERT from BE-floor mode.) The BE-floor book
     // is real-fill DEAD both ways: close-eval = slip bleed (-1.13Mbp real, 07-07f audit),
     // per-tick stops = churn bleed (-2.57M, PF 0.04) — Crypto/backtest/latearm/. The only
     // trail family surviving real fills is this NO-FLOOR giveback ladder. WINNER
-    // (backtest/upjump_concurrent_arms_2026-07-07.txt): roster_cfg.csv per-coin tiers
+    // (backtest/mimic_concurrent_arms_2026-07-07.txt): roster_cfg.csv per-coin tiers
     // + STACKED BASE ARMS +2/+4/+6% (g50 rev-only) + self-funding ladder cap 8 =
     // +18,360% vs +10,283% roster cap5, 8/8 coins all-6, 2x-cost robust (BTC bear -12
     // marginal). Pure cap raises on 2 tiers BREAK ADA H1 — stacked arms scale better
@@ -4340,7 +4340,7 @@ int main() {
     // panel key only. Dual-column stays (ladder books model==real, cost debited).
     // Shadow: own ledger, observe-only, never touches the parent
     // (feedback-companion-independent-engine). Cost 20bp RT (0.20% Binance spot taker).
-    // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/upjump_weighting_bt.cpp,
+    // ── S-2026-07-08 WEIGHTING + AUTO-RETIREMENT (Crypto backtest/mimic_weighting_bt.cpp,
     // outputs/CRYPTO_WEIGHTING_RETIREMENT_2026-07-08.md) ─────────────────────────
     // size mult: x2 = robust top performer (honest all-6 PASS + >=2σ over the 20-seed
     // random-entry control). Only SOL clears both bars (net +5980% PF 5.78, z=2.3).
@@ -4361,10 +4361,10 @@ int main() {
     };
     auto make_lad_companion = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                  int det_w, double det_thr,
-                                 chimera::UpJumpLadderCompanion::Tier tight,
-                                 chimera::UpJumpLadderCompanion::Tier wide,
+                                 chimera::MimicLadderCompanion::Tier tight,
+                                 chimera::MimicLadderCompanion::Tier wide,
                                  double size_mult, double retire_bp) {
-        chimera::UpJumpLadderCompanion::Config c;
+        chimera::MimicLadderCompanion::Config c;
         c.parent_tag = ptag;  // price feed + desk panel key only; parent position never read
         c.tag = ctag; c.symbol = sym;
         c.tight = tight; c.wide = wide;   // Tier{arm%, stall_bars, gb_frac, trail_bp(unused)}
@@ -4384,11 +4384,11 @@ int main() {
     // stagger_be_bp=20bp) => at most ONE un-BE'd leg at a time. reclip OFF + cap==#tiers (no
     // self-funding ladder) preserve the guarantee. gb 0.50 + MTM window-exit flush = the
     // DRAWDOWN-CANCEL protection (200DMA banned). Parity-verified on THIS header via
-    // Crypto/backtest/upjump_earlyarm_bt `stagger` mode; ≤1-un-BE smoke-tested N6+N8.
+    // Crypto/backtest/mimic_earlyarm_bt `stagger` mode; ≤1-un-BE smoke-tested N6+N8.
     auto make_stagger_companion = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                      int det_w, double det_thr, const std::vector<double>& arms,
                                      int stagger_mode, int stagger_k, double size_mult, double retire_bp) {
-        chimera::UpJumpLadderCompanion::Config c;
+        chimera::MimicLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
         c.tight = {arms[0], 0, 0.50, 0};
         c.wide  = {arms[1], 0, 0.50, 0};
@@ -4401,7 +4401,7 @@ int main() {
         c.retire_override = unretired(ctag);
         c.stagger_mode = stagger_mode; c.stagger_k = stagger_k; c.stagger_be_bp = 20.0;
         // S-2026-07-13 operator HARD REVERSAL STOP: cut ANY leg (parent + every mimic) at 50bp
-        // below entry, per-tick on the reversal signal. Backtest (upjump_earlyarm_bt coldcut,
+        // below entry, per-tick on the reversal signal. Backtest (mimic_earlyarm_bt coldcut,
         // REAL column): worst clip -900..-1800bp -> -70bp on ALL coins, net preserved within
         // ~10% (some higher), PF 2.5 -> ~4.5. Long-only spot: cutting below entry is edge-neutral.
         c.loss_cut_bp = 50.0;
@@ -4415,12 +4415,12 @@ int main() {
     // (loss_cut=0 — the epx-anchored cut churns the edge away; the detector reversal bounds the
     // pre-arm tail). Per-cell g = SMALLEST that keeps the cell's OWN book net+/PF>=1.3/both WF
     // halves/2x-cost (backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md, harness
-    // upjump_earlyarm_bt `mimicg`, real-engine parity). ADVERSE-PROTECTION: BE floor (backtested,
+    // mimic_earlyarm_bt `mimicg`, real-engine parity). ADVERSE-PROTECTION: BE floor (backtested,
     // jump_floor parity neg=0) + retire_bp backstop (~3x the cell's worst BT clip).
     auto make_mimic_floor_cell = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                               int det_w, double det_thr, double g, double retire_bp,
                                               int stag_legs = 1) {
-        chimera::UpJumpLadderCompanion::Config c;
+        chimera::MimicLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
         // ── S-2026-07-17 NEVER-PRE-BE-LOSS (feedback-no-prebe-loss-ever) — floored-ON-OPEN ──
         // confirm_anchor_epx=true + confirm_bp=60 (>2x measured cost) => le stays = window entry, so
@@ -4431,7 +4431,7 @@ int main() {
         // confirm+anchor path (re-anchor epx=exit px, re-open FLAT via the confirm gate, le=epx =>
         // floored ON OPEN so the NEXT leg opens at BE). RE-CERTIFIED S-17f at HONEST WORSE-OF FILL
         // (book_mimic_stop_ now books the actual bar-low trip px, not the resting stop) + MEASURED
-        // 28/56bp cost + deployed g (upjump_earlyarm_bt mimicstag, self-detect, omit-2022): all 5 PASS
+        // 28/56bp cost + deployed g (mimic_earlyarm_bt mimicstag, self-detect, omit-2022): all 5 PASS
         // net+/PF>=1.3/both-WF/2x — BNB +482(2x+359) UNI +825(+776) NEAR +1866(+1416) TRX +456(+273)
         // DOGE +1257(+870). HONEST FRAMING (S-17f): NOT nNeg=0 — the floored stop is floored-on-open by
         // DESIGN, but a gap through it books a real sub-BE tail (floorMin -369..-1674bp, nNeg 131..685).
@@ -4457,7 +4457,7 @@ int main() {
         // N legs at ESCALATING per-tier BE-entry confirms 20/120/220/320bp (BE/+1/+2/+3%); each
         // leg floors at its OWN fill => distinct additive positions, post-arm never-negative
         // (floorMin=+0.0 every coin/run). Per-coin max-robust leg count is the all-6 + 2x-cost
-        // verdict from Crypto/backtest/upjump_earlyarm_bt `mimicstag` at live reclip=0.005
+        // verdict from Crypto/backtest/mimic_earlyarm_bt `mimicstag` at live reclip=0.005
         // (STAGGERED_FLOOR_FINDINGS_2026-07-16): DOGE/NEAR/BNB 4x, UNI 3x, TRX 1x (stacking
         // degraded TRX). retire_bp scales x legs to preserve the "-2x worst per-leg maxDD" margin.
         if (stag_legs > 1) {
@@ -4488,7 +4488,7 @@ int main() {
     // reaches BE (mfe>=stagger_be_bp) the NEXT leg releases (=> at most ONE un-BE'd leg at a time);
     // exit on reversal (mimic_giveback=g). reclip OFF (cascade guarantee), confirm 0 (all tiers), a
     // pre-BE hard cut (loss_cut_bp) caps every un-armed leg. Config is byte-identical to the validated
-    // harness Crypto/backtest/eth_ujmimic_15_becascade_bt.cpp (run() L57-65) that reproduces the
+    // harness Crypto/backtest/eth_mimic_15_becascade_bt.cpp (run() L57-65) that reproduces the
     // all-coin PASS table (BTC@2% +2117% PF5.20 worst-178bp ... all 22 PASS, now NEVER-neg (BE-entry floored-on-open, S-2026-07-17)).
     // Locked config: det_w=4 · g0.5 · lc150 · cap8 (8 floored legs) · thr per-coin (BTC 2% / rest 1.5%)
     // · rt=28bp PROXY (ETH-calibrated; per-coin measured cost via DepthLiquidationModel owed before
@@ -4498,11 +4498,11 @@ int main() {
     // ON OPEN at window-entry BE => worst clip net>=0, NEVER negative (S-2026-07-17 fix; the old lc150
     // immediate-entry BOOKED -178bp/PREBE_CUT on DOT/NEAR — feedback-no-prebe-loss-ever). Re-validated
     // ALL 22 coins: nNeg=0, worst +0.0bp, standalone gate PASS at base AND 2x cost, omit-2022. Findings/vault:
-    // [[EthUjMimic15BeCascade]] (all-coin extension owed into the entity this session).
+    // [[EthMimic15BeCascade]] (all-coin extension owed into the entity this session).
     auto make_becascade_cell = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                             double det_thr, double retire_bp,
                                             int det_w = 4, double giveback = 0.5) {
-        chimera::UpJumpLadderCompanion::Config c;
+        chimera::MimicLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
         c.det_w = det_w; c.det_thr = det_thr; c.tf_secs = 3600; c.round_trip_bp = 28.0;  // rt=28 PROXY (per-coin measured owed)
         c.mimic_floor = true; c.mimic_stagger = true; c.stagger_mode = 1; c.stagger_be_bp = 20.0;  // BE_CASCADE
@@ -4530,96 +4530,96 @@ int main() {
                                              // vs always-on; grid additive avg +11%/cell at 28bp+2x.
         return c;
     };
-    using LTier = chimera::UpJumpLadderCompanion::Tier;
+    using LTier = chimera::MimicLadderCompanion::Tier;
     (void)sizeof(LTier);   // LTier retained for make_lad_companion callers; grid uses make_stagger_companion
     // ── THRESHOLD-COMPARISON GRID (S-2026-07-11, operator) ───────────────────────
     // ONE canonical set: per coin, 4 SEPARATE shadow companion books at thr {2,3,4,5%},
     // SAME BE-cascade mimic + detect window, so the operator watches the real-time forward
     // difference per threshold and lets live real-fills pick the winner (extra bp cost accepted).
-    // RETIRES the older fat-tail *-UPJUMP-CLIP + single *-UPJUMP{2..5}-CLIP companions (no
+    // RETIRES the older fat-tail *-MIMIC-CLIP + single *-MIMIC{2..5}-CLIP companions (no
     // 3-overlapping-sets). 8 coins x 4 thr = 32 BE-cascade cells (NEAR excluded — stays cut).
     // ALL shadow, long-only, NO 200DMA; each cell's cascade mimic carries the ≤1-un-BE'd DD-cut
-    // (reclip OFF, cap=#tiers). Parity (Crypto/backtest/upjump_earlyarm_bt `grid`): tuned-thr
+    // (reclip OFF, cap=#tiers). Parity (Crypto/backtest/mimic_earlyarm_bt `grid`): tuned-thr
     // cells reproduce the deployed singles EXACTLY (ETH@2%+3336, BTC@4%+658, BNB@3%+3759,
     // SOL@5%+3721); 31/32 clear the corrected long-only gate (BTC@5% soft WF-H1, kept for the
     // forward comparison). Feeds = the 8 tuned parents (already g_slots'd/ARMED/SEEDED, right
-    // window per coin: ETH/rest 1h, BTC 2h, DOGE 4h); the fat-tail *-UPJUMP-H1 parent legs are
+    // window per coin: ETH/rest 1h, BTC 2h, DOGE 4h); the fat-tail *-MIMIC-H1 parent legs are
     // retired (g_slots below). retire_bp = −2× the coin's worst-thr BT maxDD.
-    // ── S-2026-07-12 DAILY UP-JUMP WINNERS (universe scan) — PARENT engines, declared here so
+    // ── S-2026-07-12 DAILY MIMIC WINNERS (universe scan) — PARENT engines, declared here so
     // the grid below can feed them the BE-cascade MIMIC overlay. Each backtested long-only spot,
     // 2x-cost robust, 2022 omitted; the daily BE-cascade MIMIC dominates the parent ride
-    // (upjump_earlyarm_bt UJW_TF=1d grid): NEAR PF7.4-8.0 · AVAX 13.9-16.9 · LINK 5.4-10.6 ·
+    // (mimic_earlyarm_bt UJW_TF=1d grid): NEAR PF7.4-8.0 · AVAX 13.9-16.9 · LINK 5.4-10.6 ·
     // BCH 2.6-3.5 · UNI 11.3-15.2 · LDO 4.5-5.9 (parent ride PF was 1.6-3.7). Parent rides WIDE,
     // mimic clips safe — BOTH run, additive (operator: not one or the other).
-    auto make_uj = [](const char* sym, const char* tag, int64_t tf, int w, double thr) {
+    auto make_mim = [](const char* sym, const char* tag, int64_t tf, int w, double thr) {
         return chimera::EdgeEngine::Config{
-            .symbol=sym, .tag=tag, .kind=chimera::StrategyKind::UPJUMP, .tf_secs=tf,
-            .atr_period=14, .upjump_w=w, .upjump_thr=thr, .ride_to_flip=true,
+            .symbol=sym, .tag=tag, .kind=chimera::StrategyKind::MIMIC, .tf_secs=tf,
+            .atr_period=14, .mimic_w=w, .mimic_thr=thr, .ride_to_flip=true,
             .round_trip_bp=20.0, .max_history=96 };
     };
-    // KILL_UPJUMP_PARENTS (2026-07-13): objects kept (GridCoin feed refs need them; grid is dead)
-    // but NOT wired — no up-jump on any engine. wire_engine is a live no-op anyway (CHIMERA_WIRE_LEGACY).
-    chimera::EdgeEngine near_uj8_d1 (make_uj("nearusdt","NEAR-UPJUMP8-D1", 86400,24,0.08));
-    chimera::EdgeEngine avax_uj5_d1 (make_uj("avaxusdt","AVAX-UPJUMP5-D1", 86400,24,0.05));
-    chimera::EdgeEngine link_uj8_d1 (make_uj("linkusdt","LINK-UPJUMP8-D1", 86400,24,0.08));
-    chimera::EdgeEngine bch_uj4_d1  (make_uj("bchusdt", "BCH-UPJUMP4X48-D1",86400,48,0.04));
-    chimera::EdgeEngine uni_uj8_d1  (make_uj("uniusdt", "UNI-UPJUMP8-D1",  86400,24,0.08));
-    chimera::EdgeEngine ldo_uj3_d1  (make_uj("ldousdt", "LDO-UPJUMP3-D1",  86400,24,0.03));
-    chimera::EdgeEngine op_uj3_h4   (make_uj("opusdt",  "OP-UPJUMP3-H4",   14400,24,0.03));
-    // S-2026-07-13c operator: XLM/GRT/AAVE passed the thrfloor up-jump BE-cascade study at
+    // KILL_IMMEDIATE_PARENTS (2026-07-13): objects kept (GridCoin feed refs need them; grid is dead)
+    // but NOT wired — no mimic on any engine. wire_engine is a live no-op anyway (CHIMERA_WIRE_LEGACY).
+    chimera::EdgeEngine near_mim8_d1 (make_mim("nearusdt","NEAR-MIMIC8-D1", 86400,24,0.08));
+    chimera::EdgeEngine avax_mim5_d1 (make_mim("avaxusdt","AVAX-MIMIC5-D1", 86400,24,0.05));
+    chimera::EdgeEngine link_mim8_d1 (make_mim("linkusdt","LINK-MIMIC8-D1", 86400,24,0.08));
+    chimera::EdgeEngine bch_mim4_d1  (make_mim("bchusdt", "BCH-MIMIC4X48-D1",86400,48,0.04));
+    chimera::EdgeEngine uni_mim8_d1  (make_mim("uniusdt", "UNI-MIMIC8-D1",  86400,24,0.08));
+    chimera::EdgeEngine ldo_mim3_d1  (make_mim("ldousdt", "LDO-MIMIC3-D1",  86400,24,0.03));
+    chimera::EdgeEngine op_mim3_h4   (make_mim("opusdt",  "OP-MIMIC3-H4",   14400,24,0.03));
+    // S-2026-07-13c operator: XLM/GRT/AAVE passed the thrfloor mimic BE-cascade study at
     // every threshold (0.5-3%, PF 2.4-2.8, both WF halves +, y2022 +). They were Keltner-only
-    // (greyed on the desk = no mimic). Give them the SAME up-jump grid + mimics as the other
+    // (greyed on the desk = no mimic). Give them the SAME mimic grid + mimics as the other
     // daily coins; the Keltner engines above stay as separate ADDITIVE books.
-    chimera::EdgeEngine xlm_uj5_d1  (make_uj("xlmusdt", "XLM-UPJUMP5-D1",  86400,24,0.05));   // KILL_UPJUMP_PARENTS: not wired
-    chimera::EdgeEngine grt_uj5_d1  (make_uj("grtusdt", "GRT-UPJUMP5-D1",  86400,24,0.05));   // KILL_UPJUMP_PARENTS: not wired
-    chimera::EdgeEngine aave_uj5_d1 (make_uj("aaveusdt","AAVE-UPJUMP5-D1", 86400,24,0.05));   // KILL_UPJUMP_PARENTS: not wired
+    chimera::EdgeEngine xlm_mim5_d1  (make_mim("xlmusdt", "XLM-MIMIC5-D1",  86400,24,0.05));   // KILL_IMMEDIATE_PARENTS: not wired
+    chimera::EdgeEngine grt_mim5_d1  (make_mim("grtusdt", "GRT-MIMIC5-D1",  86400,24,0.05));   // KILL_IMMEDIATE_PARENTS: not wired
+    chimera::EdgeEngine aave_mim5_d1 (make_mim("aaveusdt","AAVE-MIMIC5-D1", 86400,24,0.05));   // KILL_IMMEDIATE_PARENTS: not wired
 
     struct GridCoin { const char* pfx; const char* sym; chimera::EdgeEngine* feed; int det_w;
                       std::vector<double> arms; double retire_bp; };
     std::vector<GridCoin> _gcoins = {
-        {"ETH", "ethusdt", &eth_upjump2_h1, 1, {0.2,2,3,4,6,8},        -31500.0},   // BE-cascade N6
-        {"BTC", "btcusdt", &btc_upjump4_h1, 2, {3,4,6,8,10,12},        -43000.0},   // arm>=3 N6, 2h window
-        {"BNB", "bnbusdt", &bnb_upjump3_h1, 1, {3,4,6,8,10,12,14,16},  -38500.0},   // arm>=3 N8
-        {"SOL", "solusdt", &sol_upjump5_h1, 1, {0.2,2,3,4,6,8,10,12}, -100000.0},   // BE-cascade N8
-        {"DOGE","dogeusdt",&doge_upjump4_h4,4, {0.2,2,3,4,6,8},        -40500.0},   // BE-cascade N6, 4h window
-        {"ADA", "adausdt", &ada_upjump5_h1, 1, {0.2,2,3,4,6,8},        -45000.0},   // BE-cascade N6
-        {"XRP", "xrpusdt", &xrp_upjump4_h1, 1, {0.2,2,3,4,6,8},        -33000.0},   // BE-cascade N6
-        {"TRX", "trxusdt", &trx_upjump5_h1, 1, {0.2,2,3,4,6,8},        -25500.0},   // BE-cascade N6
-        // S-2026-07-12 daily/4h up-jump winners — MIMIC overlay on the parents above (additive).
-        {"NEAR","nearusdt",&near_uj8_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 7.4-8.0
-        {"AVAX","avaxusdt",&avax_uj5_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 13.9-16.9
-        {"LINK","linkusdt",&link_uj8_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 5.4-10.6
-        {"BCH", "bchusdt", &bch_uj4_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 2.6-3.5
-        {"UNI", "uniusdt", &uni_uj8_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 11.3-15.2
-        {"LDO", "ldousdt", &ldo_uj3_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 4.5-5.9
-        {"OP",  "opusdt",  &op_uj3_h4,   1, {0.2,2,3,4,6,8}, -50000.0},   // 4h, mimic overlay on OP parent
-        // S-2026-07-13c: Keltner coins promoted to full up-jump grid+mimic (thrfloor PASS).
-        {"XLM", "xlmusdt", &xlm_uj5_d1,  1, {0.2,2,3,4,6,8}, -50000.0},
-        {"GRT", "grtusdt", &grt_uj5_d1,  1, {0.2,2,3,4,6,8}, -50000.0},
-        {"AAVE","aaveusdt",&aave_uj5_d1, 1, {0.2,2,3,4,6,8}, -50000.0},
+        {"ETH", "ethusdt", &eth_mimic2_h1, 1, {0.2,2,3,4,6,8},        -31500.0},   // BE-cascade N6
+        {"BTC", "btcusdt", &btc_mimic4_h1, 2, {3,4,6,8,10,12},        -43000.0},   // arm>=3 N6, 2h window
+        {"BNB", "bnbusdt", &bnb_mimic3_h1, 1, {3,4,6,8,10,12,14,16},  -38500.0},   // arm>=3 N8
+        {"SOL", "solusdt", &sol_mimic5_h1, 1, {0.2,2,3,4,6,8,10,12}, -100000.0},   // BE-cascade N8
+        {"DOGE","dogeusdt",&doge_mimic4_h4,4, {0.2,2,3,4,6,8},        -40500.0},   // BE-cascade N6, 4h window
+        {"ADA", "adausdt", &ada_mimic5_h1, 1, {0.2,2,3,4,6,8},        -45000.0},   // BE-cascade N6
+        {"XRP", "xrpusdt", &xrp_mimic4_h1, 1, {0.2,2,3,4,6,8},        -33000.0},   // BE-cascade N6
+        {"TRX", "trxusdt", &trx_mimic5_h1, 1, {0.2,2,3,4,6,8},        -25500.0},   // BE-cascade N6
+        // S-2026-07-12 daily/4h mimic winners — MIMIC overlay on the parents above (additive).
+        {"NEAR","nearusdt",&near_mim8_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 7.4-8.0
+        {"AVAX","avaxusdt",&avax_mim5_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 13.9-16.9
+        {"LINK","linkusdt",&link_mim8_d1, 1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 5.4-10.6
+        {"BCH", "bchusdt", &bch_mim4_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 2.6-3.5
+        {"UNI", "uniusdt", &uni_mim8_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 11.3-15.2
+        {"LDO", "ldousdt", &ldo_mim3_d1,  1, {0.2,2,3,4,6,8}, -50000.0},   // daily, mimic PF 4.5-5.9
+        {"OP",  "opusdt",  &op_mim3_h4,   1, {0.2,2,3,4,6,8}, -50000.0},   // 4h, mimic overlay on OP parent
+        // S-2026-07-13c: Keltner coins promoted to full mimic grid+mimic (thrfloor PASS).
+        {"XLM", "xlmusdt", &xlm_mim5_d1,  1, {0.2,2,3,4,6,8}, -50000.0},
+        {"GRT", "grtusdt", &grt_mim5_d1,  1, {0.2,2,3,4,6,8}, -50000.0},
+        {"AAVE","aaveusdt",&aave_mim5_d1, 1, {0.2,2,3,4,6,8}, -50000.0},
     };
     // stable tag storage: make_stagger_companion copies the char* into std::string, but keep
     // the backing strings alive for the whole run anyway (main never returns).
     std::vector<std::string> _grid_ptags, _grid_ctags;
-    std::vector<chimera::UpJumpLadderCompanion> _grid; _grid.reserve(520);   // reserve => &_grid[i] stable (S-2026-07-18ai: +264 alt low-thr cells -> 423 total, bumped 220->520 with headroom rather than exact-recount every roster -- an under-reserve here is silent pointer-invalidation UB, not a compile error)
+    std::vector<chimera::MimicLadderCompanion> _grid; _grid.reserve(520);   // reserve => &_grid[i] stable (S-2026-07-18ai: +264 alt low-thr cells -> 423 total, bumped 220->520 with headroom rather than exact-recount every roster -- an under-reserve here is silent pointer-invalidation UB, not a compile error)
     std::vector<chimera::EdgeEngine*> _grid_feeds;
-    // ── KILL_UPJUMP_CLIPS (operator 2026-07-13, both systems) ────────────────────
-    // The ENTIRE UpJumpLadderCompanion clip layer (the 2/3/4/5% threshold grid + the
-    // 0.5% UJH low-thr family) is DISABLED. Every cell enters IMMEDIATELY on the up-jump
+    // ── KILL_IMMEDIATE_CLIPS (operator 2026-07-13, both systems) ────────────────────
+    // The ENTIRE MimicLadderCompanion clip layer (the 2/3/4/5% threshold grid + the
+    // 0.5% MIMH low-thr family) is DISABLED. Every cell enters IMMEDIATELY on the mimic
     // detection (det_thr) and books a -70bp REVERSAL_CUT when price reverses -- an
     // immediate-entry structure that "trades into a loss" (forbidden). The same-day 50bp
     // loss_cut (2330a8a) was insufficient (clips still booked the reversal cut), so the
     // clips are removed ENTIRELY rather than cut-protected. Skipping population keeps
-    // the up-jump cells out of _grid/_all_clips (Phase-3 BE-entry mimics below DO
+    // the mimic cells out of _grid/_all_clips (Phase-3 BE-entry mimics below DO
     // populate _grid — they are NOT this failure class: they open only past BE).
-    // The PARENT EdgeEngine UPJUMP legs (wire_engine +
+    // The PARENT EdgeEngine MIMIC legs (wire_engine +
     // g_slots, ride_to_flip) are UNTOUCHED -- the core crypto strategy keeps riding to flip.
     // NOT the clip failure class. StallCompanion (retired-Mac python) is not native here, so
     // there is no at-BE mimic to preserve. Re-enable = flip this flag back to false + rebuild.
-    const bool KILL_UPJUMP_CLIPS = true;
+    const bool KILL_IMMEDIATE_CLIPS = true;
     for (auto& gc : _gcoins)
         for (int thr : {2, 3, 4, 5}) {
-            if (KILL_UPJUMP_CLIPS) continue;   // immediate-entry clip layer disabled (see above)
+            if (KILL_IMMEDIATE_CLIPS) continue;   // immediate-entry clip layer disabled (see above)
             _grid_ptags.push_back(std::string(gc.pfx) + "-UJ" + std::to_string(thr));           // distinct map key
             _grid_ctags.push_back(std::string(gc.pfx) + "-UJ" + std::to_string(thr) + "-CLIP"); // desk book tag
             _grid.emplace_back(make_stagger_companion(
@@ -4627,11 +4627,11 @@ int main() {
                 gc.det_w, thr / 100.0, gc.arms, /*BE_CASCADE*/1, 0, 1.0, gc.retire_bp));
             _grid_feeds.push_back(gc.feed);
         }
-    // ── S-2026-07-13 LOW-THRESHOLD (UJH) family, SEPARATE tag from the 2-5% grid.
+    // ── S-2026-07-13 LOW-THRESHOLD (MIMH) family, SEPARATE tag from the 2-5% grid.
     // Operator (2026-07-13b): run the low-thr study on ALL traded crypto, not just the 8 grid
     // coins — no reason to do half. thrfloor mode (Crypto repo) re-run over EVERY coin with 1h
     // data: ALL PASS at 0.5% (PF 2.4-2.8, both WF halves +, y2022 POSITIVE, maxDD shrinks at
-    // low thr). So the UJH cell is added to every _gcoins coin that has passing evidence:
+    // low thr). So the MIMH cell is added to every _gcoins coin that has passing evidence:
     //   8 grid (BTC/ETH/BNB/SOL/DOGE/ADA/XRP/TRX) + daily-cascade NEAR/AVAX/LINK/BCH/UNI/OP.
     // LDO EXCLUDED — no 1h data to backtest 0.5% on it (add when data exists; do not wire blind).
     // XLM/GRT/AAVE also pass but are Keltner engines (not in _gcoins) — separate feed wiring.
@@ -4639,11 +4639,11 @@ int main() {
     {
         static const std::vector<double> _lowarms = {0.2, 2, 3, 4, 6, 8};
         for (auto& gc : _gcoins) {
-            if (KILL_UPJUMP_CLIPS) continue;   // immediate-entry UJH 0.5% clip family disabled (see above)
+            if (KILL_IMMEDIATE_CLIPS) continue;   // immediate-entry MIMH 0.5% clip family disabled (see above)
             const std::string pfx = gc.pfx;
             if (pfx == "LDO") continue;   // no 1h thrfloor evidence — not wired blind
-            _grid_ptags.push_back(pfx + "-UJH");
-            _grid_ctags.push_back(pfx + "-UJH-CLIP");
+            _grid_ptags.push_back(pfx + "-MIMH");
+            _grid_ctags.push_back(pfx + "-MIMH-CLIP");
             _grid.emplace_back(make_stagger_companion(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), gc.sym,
                 gc.det_w, 0.005, _lowarms, /*BE_CASCADE*/1, 0, 1.0, gc.retire_bp));
@@ -4651,7 +4651,7 @@ int main() {
         }
     }
     // ── PHASE 3 (2026-07-13): REGIME_SWITCH parents + BE-ENTRY MIMIC ─────────────
-    // The replacement for the killed up-jump family (operator: "replace with our mimic
+    // The replacement for the killed mimic family (operator: "replace with our mimic
     // engine", SESSION_HANDOFF_2026-07-13b). Parent kind decided by the Phase-1 scan
     // (backtest/parent_scan_bt.cpp, 54 coins, gate-certified data, random-entry control):
     // REGIME_SWITCH = 30/54 net+ @2x cost, ~59% time-past-BE, flat in chop/bear.
@@ -4681,7 +4681,7 @@ int main() {
     chimera::EdgeEngine sushi_regime_d1(make_regime("sushiusdt","SUSHI-REGIME_SWITCH"));
     chimera::EdgeEngine ada_regime_d1  (make_regime("adausdt",  "ADA-REGIME_SWITCH"));
     chimera::EdgeEngine dot_regime_d1  (make_regime("dotusdt",  "DOT-REGIME_SWITCH"));
-    // BE-ENTRY MIMIC factory — reuses UpJumpLadderCompanion in LADDER mode: det_w=0
+    // BE-ENTRY MIMIC factory — reuses MimicLadderCompanion in LADDER mode: det_w=0
     // observes the EXTERNAL parent above (never self-detects), confirm_bp=20 keeps
     // every leg PENDING (booking nothing, paying no cost) until the parent's move has
     // already cleared +20bp (== BE == RT cost) — it can never open underwater, the
@@ -4694,7 +4694,7 @@ int main() {
     // (DOT 1.70→2.43, ADA 21.2→36.9) and bounds the tail; per-coin auto-retire below.
     auto make_be_mimic = [&unretired](const char* ptag, const char* ctag, const char* sym,
                                       double retire_bp, double gv, double lc, bool anchored) {
-        chimera::UpJumpLadderCompanion::Config c;
+        chimera::MimicLadderCompanion::Config c;
         c.parent_tag = ptag; c.tag = ctag; c.symbol = sym;
         // S-2026-07-16 FLOOR-NOW (operator: "there should be NO more crypto with no floor").
         // Migrated off the floorless BE-cascade ladder (confirm-gate + H1-close giveback race —
@@ -4783,7 +4783,7 @@ int main() {
     // FULLY IRRELEVANT for long-only spot — operator final ruling, feedback-crypto-omit-
     // 2022-longonly). Survivors of the complete validation stack (WF halves + 0.5%-plateau
     // + exbestEpi>0 + 2x-cost re-sim + 20-seed random-entry z), harness
-    // Crypto/backtest/upjump_earlyarm_bt confirmcut/confirmrand with CC_FROMYEAR=2023:
+    // Crypto/backtest/mimic_earlyarm_bt confirmcut/confirmrand with CC_FROMYEAR=2023:
     //   NEAR 4.0%: +603%/PF3.34 n=168, 2x +570/PF3.02, z=+7.4, plateau 3.5-5.5%
     //   UNI  3.5%: +278%/PF1.93 n=235, 2x +231/PF1.70, z=+2.9, plateau 3.5-4.5%
     //   BNB  4.0%: +125%/PF3.91 n=34 (THIN), 2x +119/PF3.51, z=+4.4, plateau 3.5-5.0%
@@ -4792,14 +4792,14 @@ int main() {
     // the permitted mimic class, NOT the killed immediate-entry clips above (those entered
     // ON the jump). Self-detect det_w=1(h1)/det_thr windows: the feed objects below are
     // symbol/tag holders ONLY — never g_slots'd, never wire_engine'd, never ticked — so
-    // KILL_UPJUMP_PARENTS stands (observe() ignores parent state for det_w>0 books; the
+    // KILL_IMMEDIATE_PARENTS stands (observe() ignores parent state for det_w>0 books; the
     // per-tick companion driver matches on the feed's symbol and drives self-detection).
     // NEAR is a SEPARATE book from NEAR-REGIME-BEMIMIC (operator instruction; distinct
     // parent_tag key, distinct desk tag, own bank).
     // ── S-2026-07-15 MIMIC-FLOOR UNIFICATION (operator: every mimic -> ONE exit = BE-floored
     // tight-giveback trail). The SWEET confirmed-entry cells move from the floorless BE-N6
     // ladder to the honest jump_floor floor+HWM-trail (make_mimic_floor_cell). Faithful g-sweep
-    // (upjump_earlyarm_bt `mimicg`: confirm20 + BE-floor + trail-g + reclip, cut=0, 2x-cost,
+    // (mimic_earlyarm_bt `mimicg`: confirm20 + BE-floor + trail-g + reclip, cut=0, 2x-cost,
     // WF-halves, 2023-26; backtest/MIMIC_FLOOR_GSWEEP_FINDINGS_2026-07-15.md) KEPT 5 of the 11:
     //   BNB 1h/+4.0% g0.50 (+36%/PF2.80, 2x +19/1.60)   TRX 8h/+3.5% g0.40 (+53%/PF1.76, 2x +40/1.59)
     //   UNI 1h/+3.5% g1.00 (+104%/PF1.78, 2x +92/1.62)  DOGE 1h/+5.5% g0.20 (+77%/PF1.73, 2x +58/1.50)
@@ -4809,21 +4809,21 @@ int main() {
     // (2x net<0), LINK (net<0), LDO (net<0), INJ (net<0 every g — the −242 cell). Their feed
     // objects are removed with them. Finding: tightening g HURTS these trend cells (best g is
     // high; small g exits winners early) + the pre-arm hard cut churned the edge away (cut=0).
-    chimera::EdgeEngine bnb_sweet_feed (make_uj("bnbusdt",  "BNB-UJ4-SWEETFEED",     3600, 1, 0.040));
-    chimera::EdgeEngine uni_sweet_feed (make_uj("uniusdt",  "UNI-UJ35-SWEETFEED",    3600, 1, 0.035));
-    chimera::EdgeEngine near_sweet_feed(make_uj("nearusdt", "NEAR-UJ4-SWEETFEED",    3600, 1, 0.040));
-    chimera::EdgeEngine trx_sweet_feed (make_uj("trxusdt",  "TRX-UJ35W8-SWEETFEED",  3600, 8, 0.035));
-    chimera::EdgeEngine doge_sweet_feed(make_uj("dogeusdt", "DOGE-UJ55-SWEETFEED",   3600, 1, 0.055));
+    chimera::EdgeEngine bnb_sweet_feed (make_mim("bnbusdt",  "BNB-MIM4-SWEETFEED",     3600, 1, 0.040));
+    chimera::EdgeEngine uni_sweet_feed (make_mim("uniusdt",  "UNI-MIM35-SWEETFEED",    3600, 1, 0.035));
+    chimera::EdgeEngine near_sweet_feed(make_mim("nearusdt", "NEAR-MIM4-SWEETFEED",    3600, 1, 0.040));
+    chimera::EdgeEngine trx_sweet_feed (make_mim("trxusdt",  "TRX-MIM35W8-SWEETFEED",  3600, 8, 0.035));
+    chimera::EdgeEngine doge_sweet_feed(make_mim("dogeusdt", "DOGE-MIM55-SWEETFEED",   3600, 1, 0.055));
     {
         struct SweetCell { const char* pfx; const char* tagsfx; const char* sym;
                            chimera::EdgeEngine* feed; int det_w; double thr; double g; double retire_bp;
                            int stag_legs; };   // stag_legs = max-robust staggered leg count (S-2026-07-16)
         const std::vector<SweetCell> _sweet_cells = {
-            {"BNB",  "UJ4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, 0.50,  -6000.0, 4},
-            {"UNI",  "UJ35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, 1.00,  -7700.0, 3},
-            {"NEAR", "UJ4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, 0.75,  -5200.0, 4},
-            {"TRX",  "UJ35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, 0.40,  -5400.0, 1},  // stacking degrades TRX -> keep single
-            {"DOGE", "UJ55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, 0.20, -12000.0, 4},
+            {"BNB",  "MIM4-SWEET",    "bnbusdt",  &bnb_sweet_feed,  1, 0.040, 0.50,  -6000.0, 4},
+            {"UNI",  "MIM35-SWEET",   "uniusdt",  &uni_sweet_feed,  1, 0.035, 1.00,  -7700.0, 3},
+            {"NEAR", "MIM4-SWEET",    "nearusdt", &near_sweet_feed, 1, 0.040, 0.75,  -5200.0, 4},
+            {"TRX",  "MIM35W8-SWEET", "trxusdt",  &trx_sweet_feed,  8, 0.035, 0.40,  -5400.0, 1},  // stacking degrades TRX -> keep single
+            {"DOGE", "MIM55-SWEET",   "dogeusdt", &doge_sweet_feed, 1, 0.055, 0.20, -12000.0, 4},
         };
         for (const auto& sc : _sweet_cells) {
             _grid_ptags.push_back(std::string(sc.pfx) + "-" + sc.tagsfx + "FEED");
@@ -4835,15 +4835,15 @@ int main() {
         }
     }
     // ── S-2026-07-14 PER-COIN JUMP-FLOOR CELLS — S-2026-07-17s OVERRIDE REVOKED ──
-    // (operator 2026-07-17: "change this to a mimic engine, i want no more upjump").
+    // (operator 2026-07-17: "change this to a mimic engine, i want no more mimic").
     // The S-07-14 immediate-entry override is DEAD. What remains of the family:
     //   AAVE-PJ4W1  REMOVED — floored BE-mimic conversion certified NO-GO
     //                (AAVE_GRT_PJ_MIMIC_FINDINGS_2026-07-17.md: WF-H1 negative at
     //                EVERY g 0.05-1.0 under the 17c foundation recipe; net-neg every
     //                g x lc x cost under the legacy method). Coin keeps floored
-    //                coverage via AAVE-UJ15-BECASC (all-22 PASS).
+    //                coverage via AAVE-MIM15-BECASC (all-22 PASS).
     //   ETH-PJ7W24  REMOVED — mimic NO-GO (07-16, reproduced 07-17: WF-H1 neg all
-    //                cells). Coin keeps floored coverage via ETH-UJ15-BECASC.
+    //                cells). Coin keeps floored coverage via ETH-MIM15-BECASC.
     //   GRT-PJ5W1   RETAINED as SIGNAL-ONLY (signal_only=true): books NOTHING (no
     //                bank/ledger/desk row), full jf state machine still runs purely
     //                to drive the certified GRT-PJ5W1-MIM floored mimic below
@@ -4851,23 +4851,23 @@ int main() {
     //                certified basis = mimic on THIS parent's settled jf state —
     //                keeping the driver verbatim preserves the certification).
     // Original S-07-14 context (historical): EXPLICIT operator override of the
-    // immediate-entry ban for these cells only (feedback-no-immediate-entry-upjump-
-    // mimic-only stood for everything else; KILL_UPJUMP_CLIPS above stays true —
+    // immediate-entry ban for these cells only (feedback-no-immediate-entry-mimic-
+    // mimic-only stood for everything else; KILL_IMMEDIATE_CLIPS above stays true —
     // that grid remains dead).
     // NOT the retired be_floor family: jump_floor enters ON the jump (pays cost, can
     // lose pre-BE — the exposure IS in the BT verdict), floors at BE once a close
-    // covers cost, exits on reversal. Harness: Crypto/backtest/upjump2pct_be_bt.cpp
+    // covers cost, exits on reversal. Harness: Crypto/backtest/mimic2pct_be_bt.cpp
     // `percoin` (936 lever combos/coin, corrected long-only gate + plateau check,
     // 2x-cost re-sim, n>=30). 17/19 coins VIABLE; LDO + LTC NO-CELL (not wired).
     // S-2026-07-14 STOP RE-SWEEP CULL (operator: "remove all and only keep those 4
-    // that are viable"): pre-BE-stop stopsweep (upjump2pct_be_bt `stopsweep`, s in
+    // that are viable"): pre-BE-stop stopsweep (mimic2pct_be_bt `stopsweep`, s in
     // {0.25..5}% at each wired W/thr/g) found only FOUR cells where a hard per-trade
     // cap keeps the gate: ETH s=4% (free — net +18575 vs +18498, maxDD improves),
     // AAVE s=1% (-3.6% net, maxDD halved), GRT s=5% (-6.5% net), DOGE s=4% (-13% net).
     // Everywhere else a stop churns the pre-BE dip that precedes the big riders
     // (60-96% of entries stopped; SOL flips +18938 -> -9445). The 13 stop-incompatible
     // cells (incl. LINK's own s=2 cell) were REMOVED per the same operator call.
-    // retire_bp = -2x the STOPPED config's BT maxDD. Vault: UpJump2pctSpotParent.
+    // retire_bp = -2x the STOPPED config's BT maxDD. Vault: Mimic2pctSpotParent.
     // ADVERSE-PROTECTION: backtested per cell (floor + bracket levers swept);
     // every surviving cell carries a hard pre-BE stop + BE-floor.
     {
@@ -4885,7 +4885,7 @@ int main() {
         static const std::vector<PJCell> _pj_cells = {
             // AAVE-PJ4W1 + ETH-PJ7W24 REMOVED S-17s (imm-entry ban re-imposed; mimic
             // conversions certified NO-GO — see block comment above). DOGE PJ3W12
-            // culled S-07-14 (2021-concentrated edge, UPJUMP_LOWTHR_STOPRESCUE_FINDINGS).
+            // culled S-07-14 (2021-concentrated edge, MIMIC_LOWTHR_STOPRESCUE_FINDINGS).
             {"GRT",  "PJ5W1",   "grtusdt",  1,  0.050, 500.0, 0.70,  -9900.0},   // SIGNAL-ONLY driver for GRT-PJ5W1-MIM
         };
         // feed objects: symbol/tag holders ONLY (SWEET pattern) — never g_slots'd,
@@ -4894,8 +4894,8 @@ int main() {
         for (const auto& pc : _pj_cells) {
             _grid_ptags.push_back(std::string(pc.pfx) + "-" + pc.cell + "-FEED");
             _grid_ctags.push_back(std::string(pc.pfx) + "-" + pc.cell);
-            _pj_feeds.emplace_back(make_uj(pc.sym, _grid_ptags.back().c_str(), 3600, pc.W, pc.thr));
-            chimera::UpJumpLadderCompanion::Config c;
+            _pj_feeds.emplace_back(make_mim(pc.sym, _grid_ptags.back().c_str(), 3600, pc.W, pc.thr));
+            chimera::MimicLadderCompanion::Config c;
             c.parent_tag = _grid_ptags.back(); c.tag = _grid_ctags.back(); c.symbol = pc.sym;
             c.det_w = pc.W; c.det_thr = pc.thr;
             c.jump_floor = true; c.jf_giveback = pc.g; c.jf_prebe_stop_bp = pc.s_bp;
@@ -4927,7 +4927,7 @@ int main() {
     // ADVERSE-PROTECTION: backtested — BE-ENTRY floored-on-open (no pre-BE window,
     // loss_cut n/a) + giveback trail g=0.60 + retire latch; honest gap tail -333bp class.
     {
-        chimera::UpJumpLadderCompanion::Config c;
+        chimera::MimicLadderCompanion::Config c;
         c.parent_tag = "GRT-PJ5W1-MIM-DRV"; c.tag = "GRT-PJ5W1-MIM"; c.symbol = "grtusdt";
         c.tight = {0.2, 0, 0.0, 0};          // single managed leg; floor trail governs
         c.reclip_pct = 0.0; c.anchored_reclip = false;   // reclip OFF (certified config)
@@ -4946,7 +4946,7 @@ int main() {
         _grid.emplace_back(std::move(c));
         _grid_feeds.push_back(nullptr);      // parent is a companion, not an EdgeEngine
     }
-    // ── S-2026-07-17s AAVE/ETH RESCUE MIMICS (operator: "no more upjump … work out how we
+    // ── S-2026-07-17s AAVE/ETH RESCUE MIMICS (operator: "no more mimic … work out how we
     // do this on those no-go backtested crypto, find a solution that's viable"). The PJ
     // parent-driven mimics stay NO-GO (AAVE_GRT_PJ_MIMIC_FINDINGS_2026-07-17.md); these are
     // SELF-TRIGGERING mimic_floor cells at a DIFFERENT trigger (8h/+2.0% vs PJ 1h/+4% /
@@ -4957,7 +4957,7 @@ int main() {
     // Deep plateau (AAVE 419/480, ETH 364/480 grid PASS; all years positive), g=0.20 =
     // tightest-certified (profit-lock g<1.0, neighbors g0.3/0.4 also pass). CERTIFIED AT
     // reclip=0 — do NOT enable anchored_reclip without re-certifying. retire ~= -2x certified
-    // worst clip on RAW bank (GRT-MIM convention). ADDITIVE to the UJ15-BECASC cells
+    // worst clip on RAW bank (GRT-MIM convention). ADDITIVE to the MIM15-BECASC cells
     // (different trigger family, ~10x lower turnover). SHADOW.
     // ADVERSE-PROTECTION: backtested — BE-ENTRY floored-on-open (confirm 60bp >= 2x measured
     // cost, anchor le=epx), g=0.20 giveback trail, retire latch; honest gap tail AAVE -367bp /
@@ -4980,7 +4980,7 @@ int main() {
             {"VET",  "vetusdt",  -1278.0},  // n=432 +318% PF5.72 worst -638.8bp
             {"RUNE", "runeusdt", -1262.0},  // n=487 +392% PF4.83 worst -631.2bp
             // S-2026-07-18k: FLEET-WIDE rescue tier (operator: "do this fleet wide") — the 18
-            // remaining coins without a UJ2W8-MIM cell, certified FLEETWIDE_RESCUE_TIER_CERT_
+            // remaining coins without a MIM2W8-MIM cell, certified FLEETWIDE_RESCUE_TIER_CERT_
             // 2026-07-18.md (same harness/recipe/gate; 17/18 full-grid 24/24 PASS, BTC 23/24
             // with pick-neighborhood 9/9 — plateau intact). Every coin PASSES the W8/+2%/g0.20 pick.
             {"APT",   "aptusdt",   -1067.0},  // n=504 +369% PF4.71 worst -533.3bp
@@ -5004,10 +5004,10 @@ int main() {
         };
         static std::vector<chimera::EdgeEngine> _rescue_feeds; _rescue_feeds.reserve(_rescue_cells.size());
         for (const auto& rc : _rescue_cells) {
-            _grid_ptags.push_back(std::string(rc.pfx) + "-UJ2W8-MIMFEED");
-            _grid_ctags.push_back(std::string(rc.pfx) + "-UJ2W8-MIM");
-            _rescue_feeds.emplace_back(make_uj(rc.sym, _grid_ptags.back().c_str(), 3600, 8, 0.020));
-            chimera::UpJumpLadderCompanion::Config c;
+            _grid_ptags.push_back(std::string(rc.pfx) + "-MIM2W8-MIMFEED");
+            _grid_ctags.push_back(std::string(rc.pfx) + "-MIM2W8-MIM");
+            _rescue_feeds.emplace_back(make_mim(rc.sym, _grid_ptags.back().c_str(), 3600, 8, 0.020));
+            chimera::MimicLadderCompanion::Config c;
             c.parent_tag = _grid_ptags.back(); c.tag = _grid_ctags.back(); c.symbol = rc.sym;
             c.reclip_pct = 0.0; c.anchored_reclip = false;   // certified config: reclip OFF
             c.confirm_bp = 60.0;                 // BE-ENTRY: books nothing until fav >= 60bp (>2x cost)
@@ -5029,7 +5029,7 @@ int main() {
     // ── S-2026-07-16 BE-CASCADE ALL-COIN MIMIC (operator: validated ALL-22 PASS -> "wire all coins") ──
     // 22 independent SHADOW BE-cascade companion books, one per coin, the operator EXACT spec
     // (make_becascade_cell above; stagger_mode=1, det_w=4, g0.5, BE-ENTRY confirm60/anchor, cap8). Reproduced at the
-    // locked config (eth_ujmimic_15_becascade_bt UM_COIN sweep): ALL 22 PASS the standalone gate
+    // locked config (eth_mimic_15_becascade_bt UM_COIN sweep): ALL 22 PASS the standalone gate
     // (net>0 & PF>=1.3 & both WF halves>0 at base AND 2x cost, omit-2022), now NEVER-neg (BE-entry floored-on-open, S-2026-07-17)
     // (lc150 caps every coin). BTC@2% +2117% PF5.20; ETH +5711; SOL +12510; ... PF 4.7-7.3 across.
     // thr = BTC 2.0% (fat-tail spacing), all others 1.5%. ADDITIVE alongside the SWEET/PJ cells on the
@@ -5040,50 +5040,50 @@ int main() {
     // retire_bp = -8000bp uniform CONSERVATIVE catastrophe backstop (retires a book only if banked REAL
     // net <= -80%; won't false-trigger a +2000%+ PASS book). PLACEHOLDER pending per-coin -2x BT maxDD
     // (same follow-up as the per-coin measured-cost re-run). Every cell mimic_floor=true -> clears the
-    // boot [MIMIC-FLOOR-GATE]. Vault [[EthUjMimic15BeCascade]] (all-coin extension owed this session).
+    // boot [MIMIC-FLOOR-GATE]. Vault [[EthMimic15BeCascade]] (all-coin extension owed this session).
     {
         struct BcCell { const char* pfx; const char* cell; const char* sym; double thr; double retire_bp; };
         static const std::vector<BcCell> _bc_cells = {
-            {"BTC",  "UJ2-BECASC",  "btcusdt",  0.020, -8000.0},
-            {"ETH",  "UJ15-BECASC", "ethusdt",  0.015, -8000.0},
-            {"SOL",  "UJ15-BECASC", "solusdt",  0.015, -8000.0},
-            {"BNB",  "UJ15-BECASC", "bnbusdt",  0.015, -8000.0},
-            {"XRP",  "UJ15-BECASC", "xrpusdt",  0.015, -8000.0},
-            {"DOGE", "UJ15-BECASC", "dogeusdt", 0.015, -8000.0},
-            {"ADA",  "UJ15-BECASC", "adausdt",  0.015, -8000.0},
-            {"AVAX", "UJ15-BECASC", "avaxusdt", 0.015, -8000.0},
-            {"LINK", "UJ15-BECASC", "linkusdt", 0.015, -8000.0},
-            {"LTC",  "UJ15-BECASC", "ltcusdt",  0.015, -8000.0},
-            {"NEAR", "UJ15-BECASC", "nearusdt", 0.015, -8000.0},
-            {"UNI",  "UJ15-BECASC", "uniusdt",  0.015, -8000.0},
-            {"DOT",  "UJ15-BECASC", "dotusdt",  0.015, -8000.0},
-            {"ATOM", "UJ15-BECASC", "atomusdt", 0.015, -8000.0},
-            {"BCH",  "UJ15-BECASC", "bchusdt",  0.015, -8000.0},
-            {"TRX",  "UJ15-BECASC", "trxusdt",  0.015, -8000.0},
-            {"AAVE", "UJ15-BECASC", "aaveusdt", 0.015, -8000.0},
-            {"INJ",  "UJ15-BECASC", "injusdt",  0.015, -8000.0},
-            {"APT",  "UJ15-BECASC", "aptusdt",  0.015, -8000.0},
-            {"OP",   "UJ15-BECASC", "opusdt",   0.015, -8000.0},
-            {"SUI",  "UJ15-BECASC", "suiusdt",  0.015, -8000.0},
-            {"TIA",  "UJ15-BECASC", "tiausdt",  0.015, -8000.0},
+            {"BTC",  "MIM2-BECASC",  "btcusdt",  0.020, -8000.0},
+            {"ETH",  "MIM15-BECASC", "ethusdt",  0.015, -8000.0},
+            {"SOL",  "MIM15-BECASC", "solusdt",  0.015, -8000.0},
+            {"BNB",  "MIM15-BECASC", "bnbusdt",  0.015, -8000.0},
+            {"XRP",  "MIM15-BECASC", "xrpusdt",  0.015, -8000.0},
+            {"DOGE", "MIM15-BECASC", "dogeusdt", 0.015, -8000.0},
+            {"ADA",  "MIM15-BECASC", "adausdt",  0.015, -8000.0},
+            {"AVAX", "MIM15-BECASC", "avaxusdt", 0.015, -8000.0},
+            {"LINK", "MIM15-BECASC", "linkusdt", 0.015, -8000.0},
+            {"LTC",  "MIM15-BECASC", "ltcusdt",  0.015, -8000.0},
+            {"NEAR", "MIM15-BECASC", "nearusdt", 0.015, -8000.0},
+            {"UNI",  "MIM15-BECASC", "uniusdt",  0.015, -8000.0},
+            {"DOT",  "MIM15-BECASC", "dotusdt",  0.015, -8000.0},
+            {"ATOM", "MIM15-BECASC", "atomusdt", 0.015, -8000.0},
+            {"BCH",  "MIM15-BECASC", "bchusdt",  0.015, -8000.0},
+            {"TRX",  "MIM15-BECASC", "trxusdt",  0.015, -8000.0},
+            {"AAVE", "MIM15-BECASC", "aaveusdt", 0.015, -8000.0},
+            {"INJ",  "MIM15-BECASC", "injusdt",  0.015, -8000.0},
+            {"APT",  "MIM15-BECASC", "aptusdt",  0.015, -8000.0},
+            {"OP",   "MIM15-BECASC", "opusdt",   0.015, -8000.0},
+            {"SUI",  "MIM15-BECASC", "suiusdt",  0.015, -8000.0},
+            {"TIA",  "MIM15-BECASC", "tiausdt",  0.015, -8000.0},
             // S-2026-07-18j: 9 new live-pilot coins, base W4/g0.5 certified 18/18 grid PASS per
             // coin (NEWCOIN9_MIMIC_CERT_2026-07-18.md; regression reproduced ETH F/S to the digit).
             // Same -8000 conservative catastrophe placeholder as the original 22.
-            {"FIL",  "UJ15-BECASC", "filusdt",  0.015, -8000.0},  // n=3799 +6032% PF8.88 worst -1281bp
-            {"ICP",  "UJ15-BECASC", "icpusdt",  0.015, -8000.0},  // n=4107 +6852% PF9.92 worst -811bp
-            {"SAND", "UJ15-BECASC", "sandusdt", 0.015, -8000.0},  // n=3854 +6280% PF10.19 worst -1672bp
-            {"MANA", "UJ15-BECASC", "manausdt", 0.015, -8000.0},  // n=3815 +5700% PF9.28 worst -962bp
-            {"CRV",  "UJ15-BECASC", "crvusdt",  0.015, -8000.0},  // n=4322 +7517% PF10.35 worst -958bp
-            {"COMP", "UJ15-BECASC", "compusdt", 0.015, -8000.0},  // n=3886 +5917% PF8.94 worst -854bp
-            {"ETC",  "UJ15-BECASC", "etcusdt",  0.015, -8000.0},  // n=2968 +3989% PF8.83 worst -629bp
-            {"VET",  "UJ15-BECASC", "vetusdt",  0.015, -8000.0},  // n=3670 +5322% PF8.14 worst -1164bp
-            {"RUNE", "UJ15-BECASC", "runeusdt", 0.015, -8000.0},  // n=3971 +7932% PF12.13 worst -794bp
+            {"FIL",  "MIM15-BECASC", "filusdt",  0.015, -8000.0},  // n=3799 +6032% PF8.88 worst -1281bp
+            {"ICP",  "MIM15-BECASC", "icpusdt",  0.015, -8000.0},  // n=4107 +6852% PF9.92 worst -811bp
+            {"SAND", "MIM15-BECASC", "sandusdt", 0.015, -8000.0},  // n=3854 +6280% PF10.19 worst -1672bp
+            {"MANA", "MIM15-BECASC", "manausdt", 0.015, -8000.0},  // n=3815 +5700% PF9.28 worst -962bp
+            {"CRV",  "MIM15-BECASC", "crvusdt",  0.015, -8000.0},  // n=4322 +7517% PF10.35 worst -958bp
+            {"COMP", "MIM15-BECASC", "compusdt", 0.015, -8000.0},  // n=3886 +5917% PF8.94 worst -854bp
+            {"ETC",  "MIM15-BECASC", "etcusdt",  0.015, -8000.0},  // n=2968 +3989% PF8.83 worst -629bp
+            {"VET",  "MIM15-BECASC", "vetusdt",  0.015, -8000.0},  // n=3670 +5322% PF8.14 worst -1164bp
+            {"RUNE", "MIM15-BECASC", "runeusdt", 0.015, -8000.0},  // n=3971 +7932% PF12.13 worst -794bp
         };
         static std::vector<chimera::EdgeEngine> _bc_feeds; _bc_feeds.reserve(_bc_cells.size());
         for (const auto& bc : _bc_cells) {
             _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
             _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, 4, bc.thr));
+            _bc_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, 4, bc.thr));
             _grid.emplace_back(make_becascade_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp));
             _grid_feeds.push_back(&_bc_feeds.back());
@@ -5095,7 +5095,7 @@ int main() {
     // BE-cascade books per coin now). SAME foundation recipe (BE-ENTRY confirm60 anchored le=epx,
     // reclip OFF, mimic_floor+stagger_mode=1 BE_CASCADE, cap8) — only det_w (cadence) and
     // mimic_giveback (trail tightness) vary per tier, each independently certified.
-    // Sweep: eth_ujmimic_15_becascade_bt (real UpJumpLadderCompanion @ HEAD, honest 17f fills,
+    // Sweep: eth_mimic_15_becascade_bt (real MimicLadderCompanion @ HEAD, honest 17f fills,
     // confirm60/anchor), W{1,2,8,12,24} x g{0.2,0.5,0.75}, legs8, thr=coin's live thr (BTC 2.0%,
     // rest 1.5%), gate = net>0 & PF>=1.3 & both WF-halves>0 at base AND 2x cost, omit-2022.
     // ALL 44 cells (22 coins x 2 tiers) PASS the gate — zero fails, deep plateau (every FAST/SLOW
@@ -5108,80 +5108,80 @@ int main() {
         struct BcCell2 { const char* pfx; const char* cell; const char* sym; double thr;
                          int det_w; double giveback; double retire_bp; };
         static const std::vector<BcCell2> _bc_fast_cells = {
-            {"BTC", "BTC-UJ20-BECASC-F", "btcusdt", 0.020, 2, 0.75, -1563.0},  // n=1798 net=+2273% PF5.33 worst=-781.7bp
-            {"ETH", "ETH-UJ15-BECASC-F", "ethusdt", 0.015, 2, 0.20, -1995.0},  // n=4134 net=+6113% PF16.21 worst=-997.5bp
-            {"SOL", "SOL-UJ15-BECASC-F", "solusdt", 0.015, 2, 0.20, -1756.0},  // n=6409 net=+13602% PF17.72 worst=-877.8bp
-            {"BNB", "BNB-UJ15-BECASC-F", "bnbusdt", 0.015, 2, 0.75, -1910.0},  // n=3577 net=+6397% PF7.18 worst=-955.0bp
-            {"XRP", "XRP-UJ15-BECASC-F", "xrpusdt", 0.015, 2, 0.75, -2894.0},  // n=4426 net=+7662% PF6.25 worst=-1446.8bp
-            {"DOGE", "DOGE-UJ15-BECASC-F", "dogeusdt", 0.015, 2, 0.75, -1725.0},  // n=5426 net=+12485% PF7.47 worst=-862.4bp
-            {"ADA", "ADA-UJ15-BECASC-F", "adausdt", 0.015, 2, 0.20, -1206.0},  // n=5393 net=+9734% PF16.05 worst=-603.0bp
-            {"AVAX", "AVAX-UJ15-BECASC-F", "avaxusdt", 0.015, 2, 0.75, -2556.0},  // n=6576 net=+14069% PF7.12 worst=-1278.0bp
-            {"LINK", "LINK-UJ15-BECASC-F", "linkusdt", 0.015, 2, 0.20, -1906.0},  // n=6156 net=+10962% PF15.71 worst=-953.1bp
-            {"LTC", "LTC-UJ15-BECASC-F", "ltcusdt", 0.015, 2, 0.20, -1938.0},  // n=5000 net=+7564% PF13.86 worst=-968.8bp
-            {"NEAR", "NEAR-UJ15-BECASC-F", "nearusdt", 0.015, 2, 0.75, -1915.0},  // n=7168 net=+14770% PF6.97 worst=-957.3bp
-            {"UNI", "UNI-UJ15-BECASC-F", "uniusdt", 0.015, 2, 0.20, -1555.0},  // n=6622 net=+13552% PF17.69 worst=-777.4bp
-            {"DOT", "DOT-UJ15-BECASC-F", "dotusdt", 0.015, 2, 0.75, -1595.0},  // n=2860 net=+5140% PF7.34 worst=-797.5bp
-            {"ATOM", "ATOM-UJ15-BECASC-F", "atomusdt", 0.015, 2, 0.20, -891.0},  // n=2881 net=+4246% PF17.20 worst=-445.3bp
-            {"BCH", "BCH-UJ15-BECASC-F", "bchusdt", 0.015, 2, 0.20, -1495.0},  // n=4811 net=+8644% PF16.88 worst=-747.5bp
-            {"TRX", "TRX-UJ15-BECASC-F", "trxusdt", 0.015, 2, 0.20, -1199.0},  // n=2669 net=+4783% PF18.26 worst=-599.4bp
-            {"AAVE", "AAVE-UJ15-BECASC-F", "aaveusdt", 0.015, 2, 0.20, -3239.0},  // n=6652 net=+13292% PF15.13 worst=-1619.4bp
-            {"INJ", "INJ-UJ15-BECASC-F", "injusdt", 0.015, 2, 0.75, -1897.0},  // n=4460 net=+9326% PF7.95 worst=-948.5bp
-            {"APT", "APT-UJ15-BECASC-F", "aptusdt", 0.015, 2, 0.20, -1780.0},  // n=3834 net=+7411% PF17.01 worst=-890.0bp
-            {"OP", "OP-UJ15-BECASC-F", "opusdt", 0.015, 2, 0.75, -1874.0},  // n=5033 net=+11011% PF7.18 worst=-937.1bp
-            {"SUI", "SUI-UJ15-BECASC-F", "suiusdt", 0.015, 2, 0.75, -2519.0},  // n=3845 net=+8614% PF8.07 worst=-1259.5bp
-            {"TIA", "TIA-UJ15-BECASC-F", "tiausdt", 0.015, 2, 0.75, -1336.0},  // n=3734 net=+7835% PF6.90 worst=-668.0bp
+            {"BTC", "BTC-MIM20-BECASC-F", "btcusdt", 0.020, 2, 0.75, -1563.0},  // n=1798 net=+2273% PF5.33 worst=-781.7bp
+            {"ETH", "ETH-MIM15-BECASC-F", "ethusdt", 0.015, 2, 0.20, -1995.0},  // n=4134 net=+6113% PF16.21 worst=-997.5bp
+            {"SOL", "SOL-MIM15-BECASC-F", "solusdt", 0.015, 2, 0.20, -1756.0},  // n=6409 net=+13602% PF17.72 worst=-877.8bp
+            {"BNB", "BNB-MIM15-BECASC-F", "bnbusdt", 0.015, 2, 0.75, -1910.0},  // n=3577 net=+6397% PF7.18 worst=-955.0bp
+            {"XRP", "XRP-MIM15-BECASC-F", "xrpusdt", 0.015, 2, 0.75, -2894.0},  // n=4426 net=+7662% PF6.25 worst=-1446.8bp
+            {"DOGE", "DOGE-MIM15-BECASC-F", "dogeusdt", 0.015, 2, 0.75, -1725.0},  // n=5426 net=+12485% PF7.47 worst=-862.4bp
+            {"ADA", "ADA-MIM15-BECASC-F", "adausdt", 0.015, 2, 0.20, -1206.0},  // n=5393 net=+9734% PF16.05 worst=-603.0bp
+            {"AVAX", "AVAX-MIM15-BECASC-F", "avaxusdt", 0.015, 2, 0.75, -2556.0},  // n=6576 net=+14069% PF7.12 worst=-1278.0bp
+            {"LINK", "LINK-MIM15-BECASC-F", "linkusdt", 0.015, 2, 0.20, -1906.0},  // n=6156 net=+10962% PF15.71 worst=-953.1bp
+            {"LTC", "LTC-MIM15-BECASC-F", "ltcusdt", 0.015, 2, 0.20, -1938.0},  // n=5000 net=+7564% PF13.86 worst=-968.8bp
+            {"NEAR", "NEAR-MIM15-BECASC-F", "nearusdt", 0.015, 2, 0.75, -1915.0},  // n=7168 net=+14770% PF6.97 worst=-957.3bp
+            {"UNI", "UNI-MIM15-BECASC-F", "uniusdt", 0.015, 2, 0.20, -1555.0},  // n=6622 net=+13552% PF17.69 worst=-777.4bp
+            {"DOT", "DOT-MIM15-BECASC-F", "dotusdt", 0.015, 2, 0.75, -1595.0},  // n=2860 net=+5140% PF7.34 worst=-797.5bp
+            {"ATOM", "ATOM-MIM15-BECASC-F", "atomusdt", 0.015, 2, 0.20, -891.0},  // n=2881 net=+4246% PF17.20 worst=-445.3bp
+            {"BCH", "BCH-MIM15-BECASC-F", "bchusdt", 0.015, 2, 0.20, -1495.0},  // n=4811 net=+8644% PF16.88 worst=-747.5bp
+            {"TRX", "TRX-MIM15-BECASC-F", "trxusdt", 0.015, 2, 0.20, -1199.0},  // n=2669 net=+4783% PF18.26 worst=-599.4bp
+            {"AAVE", "AAVE-MIM15-BECASC-F", "aaveusdt", 0.015, 2, 0.20, -3239.0},  // n=6652 net=+13292% PF15.13 worst=-1619.4bp
+            {"INJ", "INJ-MIM15-BECASC-F", "injusdt", 0.015, 2, 0.75, -1897.0},  // n=4460 net=+9326% PF7.95 worst=-948.5bp
+            {"APT", "APT-MIM15-BECASC-F", "aptusdt", 0.015, 2, 0.20, -1780.0},  // n=3834 net=+7411% PF17.01 worst=-890.0bp
+            {"OP", "OP-MIM15-BECASC-F", "opusdt", 0.015, 2, 0.75, -1874.0},  // n=5033 net=+11011% PF7.18 worst=-937.1bp
+            {"SUI", "SUI-MIM15-BECASC-F", "suiusdt", 0.015, 2, 0.75, -2519.0},  // n=3845 net=+8614% PF8.07 worst=-1259.5bp
+            {"TIA", "TIA-MIM15-BECASC-F", "tiausdt", 0.015, 2, 0.75, -1336.0},  // n=3734 net=+7835% PF6.90 worst=-668.0bp
             // S-2026-07-18j: 9 new live-pilot coins (NEWCOIN9_MIMIC_CERT_2026-07-18.md, same
             // lane rules: W2, best 2x-cost net among certified g; retire = 2x own worst clip).
-            {"FIL", "FIL-UJ15-BECASC-F", "filusdt", 0.015, 2, 0.20, -2586.0},  // n=3462 net=+6138% PF16.64 worst=-1292.9bp
-            {"ICP", "ICP-UJ15-BECASC-F", "icpusdt", 0.015, 2, 0.20, -1623.0},  // n=3820 net=+6540% PF14.49 worst=-811.4bp
-            {"SAND", "SAND-UJ15-BECASC-F", "sandusdt", 0.015, 2, 0.20, -1492.0},  // n=3459 net=+6051% PF18.20 worst=-746.2bp
-            {"MANA", "MANA-UJ15-BECASC-F", "manausdt", 0.015, 2, 0.20, -1924.0},  // n=3388 net=+5568% PF17.65 worst=-962.1bp
-            {"CRV", "CRV-UJ15-BECASC-F", "crvusdt", 0.015, 2, 0.20, -1312.0},  // n=3991 net=+7525% PF16.30 worst=-655.8bp
-            {"COMP", "COMP-UJ15-BECASC-F", "compusdt", 0.015, 2, 0.75, -1971.0},  // n=3475 net=+5479% PF5.49 worst=-985.3bp
-            {"ETC", "ETC-UJ15-BECASC-F", "etcusdt", 0.015, 2, 0.20, -1177.0},  // n=2503 net=+3851% PF18.37 worst=-588.6bp
-            {"VET", "VET-UJ15-BECASC-F", "vetusdt", 0.015, 2, 0.75, -2341.0},  // n=3236 net=+5602% PF6.31 worst=-1170.5bp
-            {"RUNE", "RUNE-UJ15-BECASC-F", "runeusdt", 0.015, 2, 0.75, -3035.0},  // n=3754 net=+7731% PF6.94 worst=-1517.4bp
+            {"FIL", "FIL-MIM15-BECASC-F", "filusdt", 0.015, 2, 0.20, -2586.0},  // n=3462 net=+6138% PF16.64 worst=-1292.9bp
+            {"ICP", "ICP-MIM15-BECASC-F", "icpusdt", 0.015, 2, 0.20, -1623.0},  // n=3820 net=+6540% PF14.49 worst=-811.4bp
+            {"SAND", "SAND-MIM15-BECASC-F", "sandusdt", 0.015, 2, 0.20, -1492.0},  // n=3459 net=+6051% PF18.20 worst=-746.2bp
+            {"MANA", "MANA-MIM15-BECASC-F", "manausdt", 0.015, 2, 0.20, -1924.0},  // n=3388 net=+5568% PF17.65 worst=-962.1bp
+            {"CRV", "CRV-MIM15-BECASC-F", "crvusdt", 0.015, 2, 0.20, -1312.0},  // n=3991 net=+7525% PF16.30 worst=-655.8bp
+            {"COMP", "COMP-MIM15-BECASC-F", "compusdt", 0.015, 2, 0.75, -1971.0},  // n=3475 net=+5479% PF5.49 worst=-985.3bp
+            {"ETC", "ETC-MIM15-BECASC-F", "etcusdt", 0.015, 2, 0.20, -1177.0},  // n=2503 net=+3851% PF18.37 worst=-588.6bp
+            {"VET", "VET-MIM15-BECASC-F", "vetusdt", 0.015, 2, 0.75, -2341.0},  // n=3236 net=+5602% PF6.31 worst=-1170.5bp
+            {"RUNE", "RUNE-MIM15-BECASC-F", "runeusdt", 0.015, 2, 0.75, -3035.0},  // n=3754 net=+7731% PF6.94 worst=-1517.4bp
         };
         static const std::vector<BcCell2> _bc_slow_cells = {
-            {"BTC", "BTC-UJ20-BECASC-S", "btcusdt", 0.020, 12, 0.20, -961.0},  // n=2537 net=+3365% PF22.47 worst=-480.5bp
-            {"ETH", "ETH-UJ15-BECASC-S", "ethusdt", 0.015, 8, 0.75, -2172.0},  // n=4517 net=+7163% PF6.71 worst=-1086.1bp
-            {"SOL", "SOL-UJ15-BECASC-S", "solusdt", 0.015, 8, 0.75, -1482.0},  // n=6023 net=+12702% PF7.86 worst=-740.8bp
-            {"BNB", "BNB-UJ15-BECASC-S", "bnbusdt", 0.015, 8, 0.75, -2036.0},  // n=4180 net=+7337% PF7.92 worst=-1017.9bp
-            {"XRP", "XRP-UJ15-BECASC-S", "xrpusdt", 0.015, 8, 0.75, -1530.0},  // n=4954 net=+8254% PF6.53 worst=-764.9bp
-            {"DOGE", "DOGE-UJ15-BECASC-S", "dogeusdt", 0.015, 8, 0.75, -2708.0},  // n=5369 net=+16234% PF10.53 worst=-1354.1bp
-            {"ADA", "ADA-UJ15-BECASC-S", "adausdt", 0.015, 8, 0.75, -1194.0},  // n=5288 net=+10219% PF7.52 worst=-597.0bp
-            {"AVAX", "AVAX-UJ15-BECASC-S", "avaxusdt", 0.015, 8, 0.75, -1706.0},  // n=6048 net=+12550% PF6.61 worst=-853.0bp
-            {"LINK", "LINK-UJ15-BECASC-S", "linkusdt", 0.015, 8, 0.20, -1485.0},  // n=5991 net=+10179% PF16.53 worst=-742.7bp
-            {"LTC", "LTC-UJ15-BECASC-S", "ltcusdt", 0.015, 8, 0.20, -1332.0},  // n=5055 net=+7744% PF16.43 worst=-666.1bp
-            {"NEAR", "NEAR-UJ15-BECASC-S", "nearusdt", 0.015, 8, 0.75, -2364.0},  // n=6490 net=+13303% PF6.49 worst=-1181.8bp
-            {"UNI", "UNI-UJ15-BECASC-S", "uniusdt", 0.015, 8, 0.75, -1624.0},  // n=6202 net=+11092% PF6.35 worst=-812.2bp
-            {"DOT", "DOT-UJ15-BECASC-S", "dotusdt", 0.015, 8, 0.20, -2456.0},  // n=3239 net=+4873% PF16.85 worst=-1227.9bp
-            {"ATOM", "ATOM-UJ15-BECASC-S", "atomusdt", 0.015, 8, 0.20, -1450.0},  // n=3155 net=+4020% PF15.99 worst=-725.0bp
-            {"BCH", "BCH-UJ15-BECASC-S", "bchusdt", 0.015, 8, 0.20, -1620.0},  // n=5014 net=+8301% PF17.28 worst=-810.2bp
-            {"TRX", "TRX-UJ15-BECASC-S", "trxusdt", 0.015, 12, 0.75, -991.0},  // n=3119 net=+5437% PF8.18 worst=-495.4bp
-            {"AAVE", "AAVE-UJ15-BECASC-S", "aaveusdt", 0.015, 8, 0.75, -1370.0},  // n=6279 net=+12440% PF6.92 worst=-684.8bp
-            {"INJ", "INJ-UJ15-BECASC-S", "injusdt", 0.015, 8, 0.75, -1253.0},  // n=4140 net=+7969% PF7.32 worst=-626.4bp
-            {"APT", "APT-UJ15-BECASC-S", "aptusdt", 0.015, 8, 0.20, -1615.0},  // n=3677 net=+6271% PF15.77 worst=-807.5bp
-            {"OP", "OP-UJ15-BECASC-S", "opusdt", 0.015, 8, 0.75, -2370.0},  // n=4528 net=+8979% PF6.81 worst=-1185.2bp
-            {"SUI", "SUI-UJ15-BECASC-S", "suiusdt", 0.015, 8, 0.75, -3459.0},  // n=3576 net=+7125% PF7.27 worst=-1729.5bp
-            {"TIA", "TIA-UJ15-BECASC-S", "tiausdt", 0.015, 8, 0.20, -965.0},  // n=3276 net=+6253% PF14.61 worst=-482.5bp
+            {"BTC", "BTC-MIM20-BECASC-S", "btcusdt", 0.020, 12, 0.20, -961.0},  // n=2537 net=+3365% PF22.47 worst=-480.5bp
+            {"ETH", "ETH-MIM15-BECASC-S", "ethusdt", 0.015, 8, 0.75, -2172.0},  // n=4517 net=+7163% PF6.71 worst=-1086.1bp
+            {"SOL", "SOL-MIM15-BECASC-S", "solusdt", 0.015, 8, 0.75, -1482.0},  // n=6023 net=+12702% PF7.86 worst=-740.8bp
+            {"BNB", "BNB-MIM15-BECASC-S", "bnbusdt", 0.015, 8, 0.75, -2036.0},  // n=4180 net=+7337% PF7.92 worst=-1017.9bp
+            {"XRP", "XRP-MIM15-BECASC-S", "xrpusdt", 0.015, 8, 0.75, -1530.0},  // n=4954 net=+8254% PF6.53 worst=-764.9bp
+            {"DOGE", "DOGE-MIM15-BECASC-S", "dogeusdt", 0.015, 8, 0.75, -2708.0},  // n=5369 net=+16234% PF10.53 worst=-1354.1bp
+            {"ADA", "ADA-MIM15-BECASC-S", "adausdt", 0.015, 8, 0.75, -1194.0},  // n=5288 net=+10219% PF7.52 worst=-597.0bp
+            {"AVAX", "AVAX-MIM15-BECASC-S", "avaxusdt", 0.015, 8, 0.75, -1706.0},  // n=6048 net=+12550% PF6.61 worst=-853.0bp
+            {"LINK", "LINK-MIM15-BECASC-S", "linkusdt", 0.015, 8, 0.20, -1485.0},  // n=5991 net=+10179% PF16.53 worst=-742.7bp
+            {"LTC", "LTC-MIM15-BECASC-S", "ltcusdt", 0.015, 8, 0.20, -1332.0},  // n=5055 net=+7744% PF16.43 worst=-666.1bp
+            {"NEAR", "NEAR-MIM15-BECASC-S", "nearusdt", 0.015, 8, 0.75, -2364.0},  // n=6490 net=+13303% PF6.49 worst=-1181.8bp
+            {"UNI", "UNI-MIM15-BECASC-S", "uniusdt", 0.015, 8, 0.75, -1624.0},  // n=6202 net=+11092% PF6.35 worst=-812.2bp
+            {"DOT", "DOT-MIM15-BECASC-S", "dotusdt", 0.015, 8, 0.20, -2456.0},  // n=3239 net=+4873% PF16.85 worst=-1227.9bp
+            {"ATOM", "ATOM-MIM15-BECASC-S", "atomusdt", 0.015, 8, 0.20, -1450.0},  // n=3155 net=+4020% PF15.99 worst=-725.0bp
+            {"BCH", "BCH-MIM15-BECASC-S", "bchusdt", 0.015, 8, 0.20, -1620.0},  // n=5014 net=+8301% PF17.28 worst=-810.2bp
+            {"TRX", "TRX-MIM15-BECASC-S", "trxusdt", 0.015, 12, 0.75, -991.0},  // n=3119 net=+5437% PF8.18 worst=-495.4bp
+            {"AAVE", "AAVE-MIM15-BECASC-S", "aaveusdt", 0.015, 8, 0.75, -1370.0},  // n=6279 net=+12440% PF6.92 worst=-684.8bp
+            {"INJ", "INJ-MIM15-BECASC-S", "injusdt", 0.015, 8, 0.75, -1253.0},  // n=4140 net=+7969% PF7.32 worst=-626.4bp
+            {"APT", "APT-MIM15-BECASC-S", "aptusdt", 0.015, 8, 0.20, -1615.0},  // n=3677 net=+6271% PF15.77 worst=-807.5bp
+            {"OP", "OP-MIM15-BECASC-S", "opusdt", 0.015, 8, 0.75, -2370.0},  // n=4528 net=+8979% PF6.81 worst=-1185.2bp
+            {"SUI", "SUI-MIM15-BECASC-S", "suiusdt", 0.015, 8, 0.75, -3459.0},  // n=3576 net=+7125% PF7.27 worst=-1729.5bp
+            {"TIA", "TIA-MIM15-BECASC-S", "tiausdt", 0.015, 8, 0.20, -965.0},  // n=3276 net=+6253% PF14.61 worst=-482.5bp
             // S-2026-07-18j: 9 new live-pilot coins (NEWCOIN9_MIMIC_CERT_2026-07-18.md, SLOW
             // lane: W8 best 2x-cost net among certified g; retire = 2x own worst clip).
-            {"FIL", "FIL-UJ15-BECASC-S", "filusdt", 0.015, 8, 0.75, -1563.0},  // n=3548 net=+6432% PF5.98 worst=-781.7bp
-            {"ICP", "ICP-UJ15-BECASC-S", "icpusdt", 0.015, 8, 0.20, -1623.0},  // n=3597 net=+5877% PF13.84 worst=-811.4bp
-            {"SAND", "SAND-UJ15-BECASC-S", "sandusdt", 0.015, 8, 0.20, -1205.0},  // n=3483 net=+5892% PF19.98 worst=-602.3bp
-            {"MANA", "MANA-UJ15-BECASC-S", "manausdt", 0.015, 8, 0.20, -1847.0},  // n=3533 net=+5803% PF19.16 worst=-923.3bp
-            {"CRV", "CRV-UJ15-BECASC-S", "crvusdt", 0.015, 8, 0.20, -1893.0},  // n=3901 net=+6963% PF15.14 worst=-946.5bp
-            {"COMP", "COMP-UJ15-BECASC-S", "compusdt", 0.015, 8, 0.20, -2628.0},  // n=3611 net=+6038% PF15.55 worst=-1313.8bp
-            {"ETC", "ETC-UJ15-BECASC-S", "etcusdt", 0.015, 8, 0.20, -1177.0},  // n=2998 net=+4520% PF19.40 worst=-588.6bp
-            {"VET", "VET-UJ15-BECASC-S", "vetusdt", 0.015, 8, 0.20, -2423.0},  // n=3360 net=+5137% PF15.52 worst=-1211.3bp
-            {"RUNE", "RUNE-UJ15-BECASC-S", "runeusdt", 0.015, 8, 0.75, -3288.0},  // n=3556 net=+6818% PF7.18 worst=-1644.2bp
+            {"FIL", "FIL-MIM15-BECASC-S", "filusdt", 0.015, 8, 0.75, -1563.0},  // n=3548 net=+6432% PF5.98 worst=-781.7bp
+            {"ICP", "ICP-MIM15-BECASC-S", "icpusdt", 0.015, 8, 0.20, -1623.0},  // n=3597 net=+5877% PF13.84 worst=-811.4bp
+            {"SAND", "SAND-MIM15-BECASC-S", "sandusdt", 0.015, 8, 0.20, -1205.0},  // n=3483 net=+5892% PF19.98 worst=-602.3bp
+            {"MANA", "MANA-MIM15-BECASC-S", "manausdt", 0.015, 8, 0.20, -1847.0},  // n=3533 net=+5803% PF19.16 worst=-923.3bp
+            {"CRV", "CRV-MIM15-BECASC-S", "crvusdt", 0.015, 8, 0.20, -1893.0},  // n=3901 net=+6963% PF15.14 worst=-946.5bp
+            {"COMP", "COMP-MIM15-BECASC-S", "compusdt", 0.015, 8, 0.20, -2628.0},  // n=3611 net=+6038% PF15.55 worst=-1313.8bp
+            {"ETC", "ETC-MIM15-BECASC-S", "etcusdt", 0.015, 8, 0.20, -1177.0},  // n=2998 net=+4520% PF19.40 worst=-588.6bp
+            {"VET", "VET-MIM15-BECASC-S", "vetusdt", 0.015, 8, 0.20, -2423.0},  // n=3360 net=+5137% PF15.52 worst=-1211.3bp
+            {"RUNE", "RUNE-MIM15-BECASC-S", "runeusdt", 0.015, 8, 0.75, -3288.0},  // n=3556 net=+6818% PF7.18 worst=-1644.2bp
         };
         static std::vector<chimera::EdgeEngine> _bc_fs_feeds; _bc_fs_feeds.reserve(_bc_fast_cells.size() + _bc_slow_cells.size());
         for (const auto& bc : _bc_fast_cells) {
             _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
             _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_fs_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _bc_fs_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
             _grid.emplace_back(make_becascade_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
                 bc.det_w, bc.giveback));
@@ -5190,7 +5190,7 @@ int main() {
         for (const auto& bc : _bc_slow_cells) {
             _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
             _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_fs_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _bc_fs_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
             _grid.emplace_back(make_becascade_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
                 bc.det_w, bc.giveback));
@@ -5199,7 +5199,7 @@ int main() {
         // ── S-2026-07-18ab: BTC LOW-THRESHOLD +4 mimic cells (operator: "we simply have to
         // trade more on BTC ... find a lower entry point; min cost 30bp factored into the
         // start of the mimic"). BTC was the ONLY coin still detecting at 2.0% (fleet=1.5%).
-        // Cert: same harness (eth_ujmimic_15_becascade_bt vs HEAD engine, honest 17f fills),
+        // Cert: same harness (eth_mimic_15_becascade_bt vs HEAD engine, honest 17f fills),
         // confirm60 anchored = exactly 2x the operator's 30bp min cost, RT=30/60bp (stricter
         // than the fleet's 28), thr {0.5,0.75,1.0,1.25,1.5,2.0}% x W{1,2,4,8,12,24} x
         // g{0.2,0.5,0.75}: ALL 108 cells PASS the standalone gate (net>0 & PF>=1.3 & both
@@ -5213,26 +5213,26 @@ int main() {
         // ALL-108-PASS sweep ship too, additive alongside 2.0% + 0.5%): +8 cells below.
         // Same cert run, same gate, per-lane picks = best 2x-cost net (figures = exact
         // harness reruns 2026-07-18, reproduce the operator's transcript tables).
-        // BTC total: 4 (2.0%) + 4 (UJ15) + 4 (UJ10) + 4 (UJ05) = 16 books.
+        // BTC total: 4 (2.0%) + 4 (MIM15) + 4 (MIM10) + 4 (MIM05) = 16 books.
         static const std::vector<BcCell2> _bc_btc_lowthr_cells = {
-            {"BTC", "BTC-UJ05-BECASC-W1",  "btcusdt", 0.005,  1, 0.20, -1134.0},  // n=6215 net=+6963% PF16.57 worst=-566.9bp 2xnet=+5122%
-            {"BTC", "BTC-UJ05-BECASC-W2",  "btcusdt", 0.005,  2, 0.20,  -850.0},  // n=6639 net=+7782% PF19.31 worst=-424.9bp 2xnet=+5815%
-            {"BTC", "BTC-UJ05-BECASC-W4",  "btcusdt", 0.005,  4, 0.75, -1567.0},  // n=6512 net=+8297% PF8.17  worst=-783.7bp 2xnet=+6539%
-            {"BTC", "BTC-UJ05-BECASC-W12", "btcusdt", 0.005, 12, 0.20,  -969.0},  // n=5181 net=+6164% PF23.41 worst=-484.7bp 2xnet=+4630%
-            {"BTC", "BTC-UJ10-BECASC-W1",  "btcusdt", 0.010,  1, 0.20, -1134.0},  // n=3581 net=+4632% PF19.43 worst=-566.9bp 2xnet=+3570%
-            {"BTC", "BTC-UJ10-BECASC-W2",  "btcusdt", 0.010,  2, 0.20,  -967.0},  // n=4397 net=+5621% PF19.35 worst=-483.5bp 2xnet=+4315%
-            {"BTC", "BTC-UJ10-BECASC-W4",  "btcusdt", 0.010,  4, 0.20,  -965.0},  // n=4783 net=+6112% PF20.03 worst=-482.5bp 2xnet=+4692%
-            {"BTC", "BTC-UJ10-BECASC-W12", "btcusdt", 0.010, 12, 0.75, -1567.0},  // n=3997 net=+5129% PF6.45  worst=-783.7bp 2xnet=+4064%
-            {"BTC", "BTC-UJ15-BECASC-W1",  "btcusdt", 0.015,  1, 0.75, -1567.0},  // n=1999 net=+2748% PF6.50  worst=-783.7bp 2xnet=+2293%
-            {"BTC", "BTC-UJ15-BECASC-W2",  "btcusdt", 0.015,  2, 0.20, -1405.0},  // n=2800 net=+3650% PF17.72 worst=-702.4bp 2xnet=+2824%
-            {"BTC", "BTC-UJ15-BECASC-W4",  "btcusdt", 0.015,  4, 0.20,  -965.0},  // n=3293 net=+4180% PF19.67 worst=-482.5bp 2xnet=+3203%
-            {"BTC", "BTC-UJ15-BECASC-W12", "btcusdt", 0.015, 12, 0.75,  -965.0},  // n=3136 net=+3922% PF6.28  worst=-482.5bp 2xnet=+3065%
+            {"BTC", "BTC-MIM05-BECASC-W1",  "btcusdt", 0.005,  1, 0.20, -1134.0},  // n=6215 net=+6963% PF16.57 worst=-566.9bp 2xnet=+5122%
+            {"BTC", "BTC-MIM05-BECASC-W2",  "btcusdt", 0.005,  2, 0.20,  -850.0},  // n=6639 net=+7782% PF19.31 worst=-424.9bp 2xnet=+5815%
+            {"BTC", "BTC-MIM05-BECASC-W4",  "btcusdt", 0.005,  4, 0.75, -1567.0},  // n=6512 net=+8297% PF8.17  worst=-783.7bp 2xnet=+6539%
+            {"BTC", "BTC-MIM05-BECASC-W12", "btcusdt", 0.005, 12, 0.20,  -969.0},  // n=5181 net=+6164% PF23.41 worst=-484.7bp 2xnet=+4630%
+            {"BTC", "BTC-MIM10-BECASC-W1",  "btcusdt", 0.010,  1, 0.20, -1134.0},  // n=3581 net=+4632% PF19.43 worst=-566.9bp 2xnet=+3570%
+            {"BTC", "BTC-MIM10-BECASC-W2",  "btcusdt", 0.010,  2, 0.20,  -967.0},  // n=4397 net=+5621% PF19.35 worst=-483.5bp 2xnet=+4315%
+            {"BTC", "BTC-MIM10-BECASC-W4",  "btcusdt", 0.010,  4, 0.20,  -965.0},  // n=4783 net=+6112% PF20.03 worst=-482.5bp 2xnet=+4692%
+            {"BTC", "BTC-MIM10-BECASC-W12", "btcusdt", 0.010, 12, 0.75, -1567.0},  // n=3997 net=+5129% PF6.45  worst=-783.7bp 2xnet=+4064%
+            {"BTC", "BTC-MIM15-BECASC-W1",  "btcusdt", 0.015,  1, 0.75, -1567.0},  // n=1999 net=+2748% PF6.50  worst=-783.7bp 2xnet=+2293%
+            {"BTC", "BTC-MIM15-BECASC-W2",  "btcusdt", 0.015,  2, 0.20, -1405.0},  // n=2800 net=+3650% PF17.72 worst=-702.4bp 2xnet=+2824%
+            {"BTC", "BTC-MIM15-BECASC-W4",  "btcusdt", 0.015,  4, 0.20,  -965.0},  // n=3293 net=+4180% PF19.67 worst=-482.5bp 2xnet=+3203%
+            {"BTC", "BTC-MIM15-BECASC-W12", "btcusdt", 0.015, 12, 0.75,  -965.0},  // n=3136 net=+3922% PF6.28  worst=-482.5bp 2xnet=+3065%
         };
         static std::vector<chimera::EdgeEngine> _bc_btc_lt_feeds; _bc_btc_lt_feeds.reserve(_bc_btc_lowthr_cells.size());
         for (const auto& bc : _bc_btc_lowthr_cells) {
             _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
             _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_btc_lt_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _bc_btc_lt_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
             _grid.emplace_back(make_becascade_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
                 bc.det_w, bc.giveback));
@@ -5240,7 +5240,7 @@ int main() {
         }
         // ── S-2026-07-18: ETH LOW-THRESHOLD +11 mimic cells (operator: "roll the same
         // setting out for eth now" — the S-18ab/ac BTC low-thr rollout applied to ETH).
-        // Cert: same harness (eth_ujmimic_15_becascade_bt vs HEAD 01a30d2, honest 17f
+        // Cert: same harness (eth_mimic_15_becascade_bt vs HEAD 01a30d2, honest 17f
         // fills), UM_COIN=ETH, confirm60 BE-ENTRY anchored, RT=30/60bp (stricter than the
         // fleet's 28 / ETH's measured ~28), data ETHUSDT_1h 2021-01→2026-07-18 integrity
         // PASS, thr {0.5,0.75,1.0,1.25,1.5,2.0}% x W{1,2,4,8,12,24} x g{0.2,0.5,0.75}:
@@ -5251,28 +5251,28 @@ int main() {
         // Picks = best 2x-cost net per W lane; g0.20 preferred when within 5% of lane max
         // (PF 2-3x higher, sumNeg half — the BTC "g0.20 beat g0.75 on PF/tail at
         // near-equal net" precedent); retire_bp = 2x own backtested worst clip.
-        // UJ15 W2/W8 lanes NOT duplicated: live ETH-UJ15-BECASC-F (W2 g0.20) and -S
+        // MIM15 W2/W8 lanes NOT duplicated: live ETH-MIM15-BECASC-F (W2 g0.20) and -S
         // (W8 g0.75) already cover them. ADDITIVE independent books, cap8 each.
-        // ETH total: UJ2 parent-cascade + F/S + these 11 = 14 books.
+        // ETH total: MIM2 parent-cascade + F/S + these 11 = 14 books.
         // ETH_LOWTHR_MIMIC_FINDINGS_2026-07-18.md (Crypto repo).
         static const std::vector<BcCell2> _bc_eth_lowthr_cells = {
-            {"ETH", "ETH-UJ05-BECASC-W1",  "ethusdt", 0.005,  1, 0.20, -1932.0},  // n=7671 net=+10097% PF14.75 worst=-966.2bp 2xnet=+7816%
-            {"ETH", "ETH-UJ05-BECASC-W2",  "ethusdt", 0.005,  2, 0.20, -1999.0},  // n=7828 net=+10974% PF17.14 worst=-999.5bp 2xnet=+8647%
-            {"ETH", "ETH-UJ05-BECASC-W4",  "ethusdt", 0.005,  4, 0.20, -1768.0},  // n=7937 net=+11577% PF18.14 worst=-883.8bp 2xnet=+9214%
-            {"ETH", "ETH-UJ05-BECASC-W12", "ethusdt", 0.005, 12, 0.75, -2154.0},  // n=5895 net=+9030%  PF7.35  worst=-1077.0bp 2xnet=+7341%
-            {"ETH", "ETH-UJ10-BECASC-W1",  "ethusdt", 0.010,  1, 0.20, -1932.0},  // n=5142 net=+7479%  PF16.49 worst=-966.2bp 2xnet=+5950%
-            {"ETH", "ETH-UJ10-BECASC-W2",  "ethusdt", 0.010,  2, 0.20, -1999.0},  // n=6115 net=+9266%  PF17.32 worst=-999.5bp 2xnet=+7449%
-            {"ETH", "ETH-UJ10-BECASC-W4",  "ethusdt", 0.010,  4, 0.20, -1768.0},  // n=6352 net=+9467%  PF17.07 worst=-883.8bp 2xnet=+7560%
-            {"ETH", "ETH-UJ10-BECASC-W12", "ethusdt", 0.010, 12, 0.75, -2154.0},  // n=4782 net=+8153%  PF7.80  worst=-1077.0bp 2xnet=+6511%
-            {"ETH", "ETH-UJ15-BECASC-W1",  "ethusdt", 0.015,  1, 0.20, -1932.0},  // n=3042 net=+4849%  PF15.83 worst=-966.2bp 2xnet=+3942%
-            {"ETH", "ETH-UJ15-BECASC-W4",  "ethusdt", 0.015,  4, 0.20, -1628.0},  // n=4779 net=+7190%  PF17.58 worst=-813.9bp 2xnet=+5771%
-            {"ETH", "ETH-UJ15-BECASC-W12", "ethusdt", 0.015, 12, 0.20, -1768.0},  // n=4022 net=+5931%  PF19.14 worst=-883.8bp 2xnet=+4719%
+            {"ETH", "ETH-MIM05-BECASC-W1",  "ethusdt", 0.005,  1, 0.20, -1932.0},  // n=7671 net=+10097% PF14.75 worst=-966.2bp 2xnet=+7816%
+            {"ETH", "ETH-MIM05-BECASC-W2",  "ethusdt", 0.005,  2, 0.20, -1999.0},  // n=7828 net=+10974% PF17.14 worst=-999.5bp 2xnet=+8647%
+            {"ETH", "ETH-MIM05-BECASC-W4",  "ethusdt", 0.005,  4, 0.20, -1768.0},  // n=7937 net=+11577% PF18.14 worst=-883.8bp 2xnet=+9214%
+            {"ETH", "ETH-MIM05-BECASC-W12", "ethusdt", 0.005, 12, 0.75, -2154.0},  // n=5895 net=+9030%  PF7.35  worst=-1077.0bp 2xnet=+7341%
+            {"ETH", "ETH-MIM10-BECASC-W1",  "ethusdt", 0.010,  1, 0.20, -1932.0},  // n=5142 net=+7479%  PF16.49 worst=-966.2bp 2xnet=+5950%
+            {"ETH", "ETH-MIM10-BECASC-W2",  "ethusdt", 0.010,  2, 0.20, -1999.0},  // n=6115 net=+9266%  PF17.32 worst=-999.5bp 2xnet=+7449%
+            {"ETH", "ETH-MIM10-BECASC-W4",  "ethusdt", 0.010,  4, 0.20, -1768.0},  // n=6352 net=+9467%  PF17.07 worst=-883.8bp 2xnet=+7560%
+            {"ETH", "ETH-MIM10-BECASC-W12", "ethusdt", 0.010, 12, 0.75, -2154.0},  // n=4782 net=+8153%  PF7.80  worst=-1077.0bp 2xnet=+6511%
+            {"ETH", "ETH-MIM15-BECASC-W1",  "ethusdt", 0.015,  1, 0.20, -1932.0},  // n=3042 net=+4849%  PF15.83 worst=-966.2bp 2xnet=+3942%
+            {"ETH", "ETH-MIM15-BECASC-W4",  "ethusdt", 0.015,  4, 0.20, -1628.0},  // n=4779 net=+7190%  PF17.58 worst=-813.9bp 2xnet=+5771%
+            {"ETH", "ETH-MIM15-BECASC-W12", "ethusdt", 0.015, 12, 0.20, -1768.0},  // n=4022 net=+5931%  PF19.14 worst=-883.8bp 2xnet=+4719%
         };
         static std::vector<chimera::EdgeEngine> _bc_eth_lt_feeds; _bc_eth_lt_feeds.reserve(_bc_eth_lowthr_cells.size());
         for (const auto& bc : _bc_eth_lowthr_cells) {
             _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
             _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_eth_lt_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _bc_eth_lt_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
             _grid.emplace_back(make_becascade_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
                 bc.det_w, bc.giveback));
@@ -5281,7 +5281,7 @@ int main() {
         // ── S-2026-07-18ai: ALT-FLEET LOW-THRESHOLD +264 mimic cells (operator: "rollout
         // the same low thresholds for the other cryptos after you check which it will be
         // viable for" — the S-18ab/ac BTC + S-18ag ETH low-thr rollout applied to the
-        // remaining 33 roster coins). Cert: same harness (eth_ujmimic_15_becascade_bt vs
+        // remaining 33 roster coins). Cert: same harness (eth_mimic_15_becascade_bt vs
         // HEAD f159b94, honest 17f fills), per-coin UM_COIN, confirm60 BE-ENTRY anchored
         // (= 2x the 30bp min cost, >= 2x the fleet's measured 28bp safe_cost), RT=30/60bp,
         // data <COIN>USDT_1h through 2026-07-18 (append-only direct-klines tail refresh,
@@ -5291,291 +5291,291 @@ int main() {
         // at base AND 2x cost, omit-2022) — zero fails fleet-wide; margin floor across all
         // 3,564 cells: min PF 3.51, min WF-half +479%, min 2x-net +854% (ATOM/ETC thr2.0
         // corners — nowhere near the gate). Same deep plateau as BTC/ETH. VIABLE = all 33.
-        // Rollout scope = the LOW thresholds only (UJ05 0.5% + UJ10 1.0% W{1,2,4,12} quads,
-        // 8 cells/coin); UJ15 W-lane fill-ins NOT rolled to alts (each alt already runs
-        // UJ15 F/S at W2/W8 — majors-only extension, keeps the fleet 423 not 500+).
+        // Rollout scope = the LOW thresholds only (MIM05 0.5% + MIM10 1.0% W{1,2,4,12} quads,
+        // 8 cells/coin); MIM15 W-lane fill-ins NOT rolled to alts (each alt already runs
+        // MIM15 F/S at W2/W8 — majors-only extension, keeps the fleet 423 not 500+).
         // Picks = best 2x-cost net per W lane, g0.20 preferred when within 5% of lane max
         // (PF 2-3x higher, sumNeg ~half — BTC/ETH precedent); retire_bp = 2x own worst.
         // ADDITIVE independent books, cap8 each, judged STANDALONE.
         // Crypto repo: ALT_LOWTHR_MIMIC_FINDINGS_2026-07-18.md + lowthr_sweep_2026-07-18/.
         static const std::vector<BcCell2> _bc_alt_lowthr_cells = {
-            {"AAVE", "AAVE-UJ05-BECASC-W1", "aaveusdt", 0.0050,  1, 0.20,  -2998.0},  // n=9218 net=+15414% PF13.10 worst=-1499.1bp 2xnet=+12647%
-            {"AAVE", "AAVE-UJ05-BECASC-W2", "aaveusdt", 0.0050,  2, 0.20,  -3242.0},  // n=9534 net=+17219% PF14.93 worst=-1621.4bp 2xnet=+14352%
-            {"AAVE", "AAVE-UJ05-BECASC-W4", "aaveusdt", 0.0050,  4, 0.20,  -2998.0},  // n=9468 net=+17986% PF17.23 worst=-1499.1bp 2xnet=+15150%
-            {"AAVE", "AAVE-UJ05-BECASC-W12", "aaveusdt", 0.0050, 12, 0.20,  -1270.0},  // n=6565 net=+11853% PF15.39 worst=-635.1bp 2xnet=+9897%
-            {"AAVE", "AAVE-UJ10-BECASC-W1", "aaveusdt", 0.0100,  1, 0.20,  -2998.0},  // n=7667 net=+14403% PF14.85 worst=-1499.1bp 2xnet=+12106%
-            {"AAVE", "AAVE-UJ10-BECASC-W2", "aaveusdt", 0.0100,  2, 0.20,  -3242.0},  // n=8544 net=+16055% PF15.00 worst=-1621.4bp 2xnet=+13503%
-            {"AAVE", "AAVE-UJ10-BECASC-W4", "aaveusdt", 0.0100,  4, 0.20,  -2998.0},  // n=8412 net=+16266% PF16.79 worst=-1499.1bp 2xnet=+13742%
-            {"AAVE", "AAVE-UJ10-BECASC-W12", "aaveusdt", 0.0100, 12, 0.20,  -1246.0},  // n=5945 net=+10786% PF15.15 worst=-623.2bp 2xnet=+9007%
-            {"ADA", "ADA-UJ05-BECASC-W1", "adausdt", 0.0050,  1, 0.75,  -2571.0},  // n=8319 net=+13161% PF7.05 worst=-1285.9bp 2xnet=+10874%
-            {"ADA", "ADA-UJ05-BECASC-W2", "adausdt", 0.0050,  2, 0.75,  -1523.0},  // n=8688 net=+14545% PF7.84 worst=-761.9bp 2xnet=+12087%
-            {"ADA", "ADA-UJ05-BECASC-W4", "adausdt", 0.0050,  4, 0.75,  -2442.0},  // n=8731 net=+15329% PF7.68 worst=-1221.4bp 2xnet=+12968%
-            {"ADA", "ADA-UJ05-BECASC-W12", "adausdt", 0.0050, 12, 0.75,  -1616.0},  // n=6195 net=+11430% PF7.22 worst=-808.4bp 2xnet=+9598%
-            {"ADA", "ADA-UJ10-BECASC-W1", "adausdt", 0.0100,  1, 0.20,  -1551.0},  // n=6508 net=+10513% PF13.00 worst=-775.5bp 2xnet=+8574%
-            {"ADA", "ADA-UJ10-BECASC-W2", "adausdt", 0.0100,  2, 0.20,  -1136.0},  // n=7248 net=+11969% PF16.42 worst=-568.4bp 2xnet=+9797%
-            {"ADA", "ADA-UJ10-BECASC-W4", "adausdt", 0.0100,  4, 0.75,  -2442.0},  // n=7489 net=+13379% PF7.24 worst=-1221.4bp 2xnet=+11214%
-            {"ADA", "ADA-UJ10-BECASC-W12", "adausdt", 0.0100, 12, 0.20,  -1055.0},  // n=5532 net=+9775% PF20.59 worst=-527.8bp 2xnet=+8107%
-            {"APT", "APT-UJ05-BECASC-W1", "aptusdt", 0.0050,  1, 0.75,  -1784.0},  // n=5563 net=+9035% PF7.16 worst=-892.0bp 2xnet=+7545%
-            {"APT", "APT-UJ05-BECASC-W2", "aptusdt", 0.0050,  2, 0.75,  -1956.0},  // n=5694 net=+10050% PF8.03 worst=-978.4bp 2xnet=+8546%
-            {"APT", "APT-UJ05-BECASC-W4", "aptusdt", 0.0050,  4, 0.20,  -1288.0},  // n=5710 net=+9917% PF18.29 worst=-644.2bp 2xnet=+8214%
-            {"APT", "APT-UJ05-BECASC-W12", "aptusdt", 0.0050, 12, 0.20,  -1784.0},  // n=4154 net=+6706% PF14.48 worst=-892.0bp 2xnet=+5466%
-            {"APT", "APT-UJ10-BECASC-W1", "aptusdt", 0.0100,  1, 0.20,  -1956.0},  // n=4590 net=+8127% PF16.43 worst=-978.4bp 2xnet=+6758%
-            {"APT", "APT-UJ10-BECASC-W2", "aptusdt", 0.0100,  2, 0.20,  -1956.0},  // n=4916 net=+9196% PF17.83 worst=-978.4bp 2xnet=+7729%
-            {"APT", "APT-UJ10-BECASC-W4", "aptusdt", 0.0100,  4, 0.20,  -1784.0},  // n=4995 net=+8597% PF15.48 worst=-892.0bp 2xnet=+7105%
-            {"APT", "APT-UJ10-BECASC-W12", "aptusdt", 0.0100, 12, 0.50,  -1431.0},  // n=3728 net=+6431% PF10.66 worst=-715.5bp 2xnet=+5383%
-            {"ATOM", "ATOM-UJ05-BECASC-W1", "atomusdt", 0.0050,  1, 0.75,  -1300.0},  // n=5292 net=+6767% PF7.27 worst=-650.2bp 2xnet=+5289%
-            {"ATOM", "ATOM-UJ05-BECASC-W2", "atomusdt", 0.0050,  2, 0.20,  -1332.0},  // n=5504 net=+7003% PF17.41 worst=-666.3bp 2xnet=+5355%
-            {"ATOM", "ATOM-UJ05-BECASC-W4", "atomusdt", 0.0050,  4, 0.20,  -1482.0},  // n=5342 net=+6623% PF16.75 worst=-741.4bp 2xnet=+5024%
-            {"ATOM", "ATOM-UJ05-BECASC-W12", "atomusdt", 0.0050, 12, 0.20,  -2030.0},  // n=3909 net=+4941% PF16.95 worst=-1015.2bp 2xnet=+3776%
-            {"ATOM", "ATOM-UJ10-BECASC-W1", "atomusdt", 0.0100,  1, 0.20,   -762.0},  // n=3605 net=+5067% PF16.85 worst=-381.3bp 2xnet=+3976%
-            {"ATOM", "ATOM-UJ10-BECASC-W2", "atomusdt", 0.0100,  2, 0.20,  -1482.0},  // n=4328 net=+5586% PF14.78 worst=-741.4bp 2xnet=+4290%
-            {"ATOM", "ATOM-UJ10-BECASC-W4", "atomusdt", 0.0100,  4, 0.20,  -1482.0},  // n=4466 net=+5645% PF16.22 worst=-741.4bp 2xnet=+4311%
-            {"ATOM", "ATOM-UJ10-BECASC-W12", "atomusdt", 0.0100, 12, 0.20,  -2030.0},  // n=3305 net=+4295% PF18.16 worst=-1015.2bp 2xnet=+3305%
-            {"AVAX", "AVAX-UJ05-BECASC-W1", "avaxusdt", 0.0050,  1, 0.20,  -1893.0},  // n=8983 net=+14486% PF11.38 worst=-946.8bp 2xnet=+11806%
-            {"AVAX", "AVAX-UJ05-BECASC-W2", "avaxusdt", 0.0050,  2, 0.20,  -1618.0},  // n=9425 net=+16963% PF14.20 worst=-809.4bp 2xnet=+14140%
-            {"AVAX", "AVAX-UJ05-BECASC-W4", "avaxusdt", 0.0050,  4, 0.20,  -1318.0},  // n=9256 net=+17972% PF16.14 worst=-659.0bp 2xnet=+15198%
-            {"AVAX", "AVAX-UJ05-BECASC-W12", "avaxusdt", 0.0050, 12, 0.20,  -1445.0},  // n=6526 net=+12874% PF17.06 worst=-722.6bp 2xnet=+10917%
-            {"AVAX", "AVAX-UJ10-BECASC-W1", "avaxusdt", 0.0100,  1, 0.20,  -1893.0},  // n=7497 net=+13420% PF12.44 worst=-946.8bp 2xnet=+11192%
-            {"AVAX", "AVAX-UJ10-BECASC-W2", "avaxusdt", 0.0100,  2, 0.20,  -1618.0},  // n=8167 net=+15500% PF13.61 worst=-809.4bp 2xnet=+13049%
-            {"AVAX", "AVAX-UJ10-BECASC-W4", "avaxusdt", 0.0100,  4, 0.20,  -1318.0},  // n=8185 net=+16493% PF16.13 worst=-659.0bp 2xnet=+14038%
-            {"AVAX", "AVAX-UJ10-BECASC-W12", "avaxusdt", 0.0100, 12, 0.75,  -1667.0},  // n=5775 net=+12266% PF6.83 worst=-833.7bp 2xnet=+10565%
-            {"BCH", "BCH-UJ05-BECASC-W1", "bchusdt", 0.0050,  1, 0.20,  -1743.0},  // n=7996 net=+11697% PF15.69 worst=-871.8bp 2xnet=+9308%
-            {"BCH", "BCH-UJ05-BECASC-W2", "bchusdt", 0.0050,  2, 0.75,  -1254.0},  // n=8167 net=+12687% PF7.22 worst=-627.2bp 2xnet=+10483%
-            {"BCH", "BCH-UJ05-BECASC-W4", "bchusdt", 0.0050,  4, 0.75,  -2171.0},  // n=8334 net=+13180% PF7.12 worst=-1085.7bp 2xnet=+10888%
-            {"BCH", "BCH-UJ05-BECASC-W12", "bchusdt", 0.0050, 12, 0.20,  -1499.0},  // n=6239 net=+9693% PF18.62 worst=-749.5bp 2xnet=+7829%
-            {"BCH", "BCH-UJ10-BECASC-W1", "bchusdt", 0.0100,  1, 0.20,  -1060.0},  // n=5830 net=+9559% PF17.61 worst=-530.3bp 2xnet=+7818%
-            {"BCH", "BCH-UJ10-BECASC-W2", "bchusdt", 0.0100,  2, 0.20,  -1499.0},  // n=6763 net=+10886% PF15.76 worst=-749.5bp 2xnet=+8863%
-            {"BCH", "BCH-UJ10-BECASC-W4", "bchusdt", 0.0100,  4, 0.20,  -1189.0},  // n=6971 net=+11414% PF18.51 worst=-594.9bp 2xnet=+9323%
-            {"BCH", "BCH-UJ10-BECASC-W12", "bchusdt", 0.0100, 12, 0.20,  -1499.0},  // n=5303 net=+8488% PF19.01 worst=-749.5bp 2xnet=+6900%
-            {"BNB", "BNB-UJ05-BECASC-W1", "bnbusdt", 0.0050,  1, 0.20,  -2118.0},  // n=7441 net=+9325% PF15.99 worst=-1059.2bp 2xnet=+7109%
-            {"BNB", "BNB-UJ05-BECASC-W2", "bnbusdt", 0.0050,  2, 0.20,  -2011.0},  // n=7844 net=+10025% PF16.80 worst=-1005.9bp 2xnet=+7686%
-            {"BNB", "BNB-UJ05-BECASC-W4", "bnbusdt", 0.0050,  4, 0.75,  -2457.0},  // n=7760 net=+10672% PF8.09 worst=-1228.5bp 2xnet=+8459%
-            {"BNB", "BNB-UJ05-BECASC-W12", "bnbusdt", 0.0050, 12, 0.75,  -2242.0},  // n=5745 net=+8760% PF7.49 worst=-1121.0bp 2xnet=+7186%
-            {"BNB", "BNB-UJ10-BECASC-W1", "bnbusdt", 0.0100,  1, 0.20,  -1217.0},  // n=4536 net=+6742% PF14.93 worst=-608.9bp 2xnet=+5390%
-            {"BNB", "BNB-UJ10-BECASC-W2", "bnbusdt", 0.0100,  2, 0.20,  -1914.0},  // n=5678 net=+8418% PF17.53 worst=-957.0bp 2xnet=+6726%
-            {"BNB", "BNB-UJ10-BECASC-W4", "bnbusdt", 0.0100,  4, 0.75,  -2457.0},  // n=5935 net=+9168% PF7.82 worst=-1228.5bp 2xnet=+7424%
-            {"BNB", "BNB-UJ10-BECASC-W12", "bnbusdt", 0.0100, 12, 0.75,  -2242.0},  // n=4794 net=+7515% PF7.46 worst=-1121.0bp 2xnet=+6254%
-            {"COMP", "COMP-UJ05-BECASC-W1", "compusdt", 0.0050,  1, 0.20,  -1712.0},  // n=5543 net=+7597% PF12.64 worst=-856.1bp 2xnet=+5945%
-            {"COMP", "COMP-UJ05-BECASC-W2", "compusdt", 0.0050,  2, 0.75,  -1712.0},  // n=5644 net=+8808% PF7.93 worst=-856.1bp 2xnet=+7247%
-            {"COMP", "COMP-UJ05-BECASC-W4", "compusdt", 0.0050,  4, 0.20,  -1712.0},  // n=5620 net=+8798% PF16.15 worst=-856.1bp 2xnet=+7123%
-            {"COMP", "COMP-UJ05-BECASC-W12", "compusdt", 0.0050, 12, 0.20,  -1548.0},  // n=4088 net=+6771% PF17.95 worst=-774.1bp 2xnet=+5552%
-            {"COMP", "COMP-UJ10-BECASC-W1", "compusdt", 0.0100,  1, 0.75,  -4744.0},  // n=4086 net=+6061% PF5.12 worst=-2372.1bp 2xnet=+5110%
-            {"COMP", "COMP-UJ10-BECASC-W2", "compusdt", 0.0100,  2, 0.20,  -1712.0},  // n=4805 net=+7564% PF15.12 worst=-856.1bp 2xnet=+6137%
-            {"COMP", "COMP-UJ10-BECASC-W4", "compusdt", 0.0100,  4, 0.20,  -1712.0},  // n=4927 net=+7934% PF15.38 worst=-856.1bp 2xnet=+6470%
-            {"COMP", "COMP-UJ10-BECASC-W12", "compusdt", 0.0100, 12, 0.20,  -1210.0},  // n=3629 net=+5535% PF15.50 worst=-605.4bp 2xnet=+4455%
-            {"CRV", "CRV-UJ05-BECASC-W1", "crvusdt", 0.0050,  1, 0.20,  -1913.0},  // n=5566 net=+8979% PF13.88 worst=-956.6bp 2xnet=+7313%
-            {"CRV", "CRV-UJ05-BECASC-W2", "crvusdt", 0.0050,  2, 0.20,  -1913.0},  // n=5844 net=+10130% PF15.92 worst=-956.6bp 2xnet=+8377%
-            {"CRV", "CRV-UJ05-BECASC-W4", "crvusdt", 0.0050,  4, 0.20,  -1251.0},  // n=5818 net=+10539% PF17.31 worst=-625.6bp 2xnet=+8807%
-            {"CRV", "CRV-UJ05-BECASC-W12", "crvusdt", 0.0050, 12, 0.20,  -2275.0},  // n=4247 net=+7643% PF16.01 worst=-1137.8bp 2xnet=+6374%
-            {"CRV", "CRV-UJ10-BECASC-W1", "crvusdt", 0.0100,  1, 0.20,  -1438.0},  // n=4628 net=+8213% PF14.62 worst=-719.0bp 2xnet=+6828%
-            {"CRV", "CRV-UJ10-BECASC-W2", "crvusdt", 0.0100,  2, 0.20,  -1315.0},  // n=5242 net=+9358% PF15.79 worst=-657.8bp 2xnet=+7789%
-            {"CRV", "CRV-UJ10-BECASC-W4", "crvusdt", 0.0100,  4, 0.20,  -1920.0},  // n=5127 net=+9581% PF16.67 worst=-960.2bp 2xnet=+8046%
-            {"CRV", "CRV-UJ10-BECASC-W12", "crvusdt", 0.0100, 12, 0.20,  -2275.0},  // n=3835 net=+6737% PF15.07 worst=-1137.8bp 2xnet=+5593%
-            {"DOGE", "DOGE-UJ05-BECASC-W1", "dogeusdt", 0.0050,  1, 0.75,  -2712.0},  // n=8300 net=+13524% PF6.61 worst=-1356.1bp 2xnet=+11280%
-            {"DOGE", "DOGE-UJ05-BECASC-W2", "dogeusdt", 0.0050,  2, 0.75,  -2094.0},  // n=8676 net=+17912% PF8.25 worst=-1047.2bp 2xnet=+15555%
-            {"DOGE", "DOGE-UJ05-BECASC-W4", "dogeusdt", 0.0050,  4, 0.75,  -2481.0},  // n=8556 net=+18547% PF8.64 worst=-1240.8bp 2xnet=+16199%
-            {"DOGE", "DOGE-UJ05-BECASC-W12", "dogeusdt", 0.0050, 12, 0.75,  -1743.0},  // n=6217 net=+18081% PF10.49 worst=-871.9bp 2xnet=+16304%
-            {"DOGE", "DOGE-UJ10-BECASC-W1", "dogeusdt", 0.0100,  1, 0.75,  -2712.0},  // n=6262 net=+12874% PF6.61 worst=-1356.1bp 2xnet=+11173%
-            {"DOGE", "DOGE-UJ10-BECASC-W2", "dogeusdt", 0.0100,  2, 0.75,  -2094.0},  // n=7276 net=+16168% PF8.04 worst=-1047.2bp 2xnet=+14142%
-            {"DOGE", "DOGE-UJ10-BECASC-W4", "dogeusdt", 0.0100,  4, 0.75,  -2481.0},  // n=7415 net=+17795% PF8.63 worst=-1240.8bp 2xnet=+15744%
-            {"DOGE", "DOGE-UJ10-BECASC-W12", "dogeusdt", 0.0100, 12, 0.75,  -1743.0},  // n=5383 net=+16721% PF11.56 worst=-871.9bp 2xnet=+15176%
-            {"DOT", "DOT-UJ05-BECASC-W1", "dotusdt", 0.0050,  1, 0.75,  -1202.0},  // n=5212 net=+7142% PF7.20 worst=-601.0bp 2xnet=+5584%
-            {"DOT", "DOT-UJ05-BECASC-W2", "dotusdt", 0.0050,  2, 0.75,  -1411.0},  // n=5443 net=+7796% PF7.35 worst=-705.6bp 2xnet=+6253%
-            {"DOT", "DOT-UJ05-BECASC-W4", "dotusdt", 0.0050,  4, 0.75,  -1087.0},  // n=5322 net=+7923% PF7.43 worst=-543.9bp 2xnet=+6476%
-            {"DOT", "DOT-UJ05-BECASC-W12", "dotusdt", 0.0050, 12, 0.20,  -1276.0},  // n=3828 net=+5341% PF15.51 worst=-638.0bp 2xnet=+4205%
-            {"DOT", "DOT-UJ10-BECASC-W1", "dotusdt", 0.0100,  1, 0.20,  -1010.0},  // n=3654 net=+5561% PF15.99 worst=-505.2bp 2xnet=+4474%
-            {"DOT", "DOT-UJ10-BECASC-W2", "dotusdt", 0.0100,  2, 0.20,  -1411.0},  // n=4406 net=+6301% PF14.07 worst=-705.6bp 2xnet=+4979%
-            {"DOT", "DOT-UJ10-BECASC-W4", "dotusdt", 0.0100,  4, 0.20,  -1276.0},  // n=4457 net=+6354% PF16.69 worst=-638.0bp 2xnet=+5026%
-            {"DOT", "DOT-UJ10-BECASC-W12", "dotusdt", 0.0100, 12, 0.20,  -1276.0},  // n=3304 net=+4948% PF15.71 worst=-638.0bp 2xnet=+3962%
-            {"ETC", "ETC-UJ05-BECASC-W1", "etcusdt", 0.0050,  1, 0.20,  -1261.0},  // n=4770 net=+6170% PF16.97 worst=-630.6bp 2xnet=+4758%
-            {"ETC", "ETC-UJ05-BECASC-W2", "etcusdt", 0.0050,  2, 0.20,  -1269.0},  // n=4906 net=+6782% PF20.80 worst=-634.9bp 2xnet=+5322%
-            {"ETC", "ETC-UJ05-BECASC-W4", "etcusdt", 0.0050,  4, 0.20,  -1269.0},  // n=4987 net=+6699% PF17.87 worst=-634.9bp 2xnet=+5220%
-            {"ETC", "ETC-UJ05-BECASC-W12", "etcusdt", 0.0050, 12, 0.20,  -1261.0},  // n=3720 net=+5184% PF19.41 worst=-630.6bp 2xnet=+4078%
-            {"ETC", "ETC-UJ10-BECASC-W1", "etcusdt", 0.0100,  1, 0.20,  -1261.0},  // n=3090 net=+4586% PF20.09 worst=-630.6bp 2xnet=+3666%
-            {"ETC", "ETC-UJ10-BECASC-W2", "etcusdt", 0.0100,  2, 0.20,  -1269.0},  // n=3924 net=+5507% PF19.33 worst=-634.9bp 2xnet=+4329%
-            {"ETC", "ETC-UJ10-BECASC-W4", "etcusdt", 0.0100,  4, 0.20,  -1261.0},  // n=4014 net=+5648% PF18.82 worst=-630.6bp 2xnet=+4457%
-            {"ETC", "ETC-UJ10-BECASC-W12", "etcusdt", 0.0100, 12, 0.20,  -1333.0},  // n=3121 net=+4577% PF18.51 worst=-666.7bp 2xnet=+3650%
-            {"FIL", "FIL-UJ05-BECASC-W1", "filusdt", 0.0050,  1, 0.20,   -987.0},  // n=5567 net=+7879% PF13.68 worst=-493.8bp 2xnet=+6216%
-            {"FIL", "FIL-UJ05-BECASC-W2", "filusdt", 0.0050,  2, 0.75,  -2170.0},  // n=5760 net=+9255% PF7.33 worst=-1085.0bp 2xnet=+7725%
-            {"FIL", "FIL-UJ05-BECASC-W4", "filusdt", 0.0050,  4, 0.20,  -2589.0},  // n=5630 net=+9048% PF15.99 worst=-1294.9bp 2xnet=+7367%
-            {"FIL", "FIL-UJ05-BECASC-W12", "filusdt", 0.0050, 12, 0.20,  -1666.0},  // n=3959 net=+6632% PF18.46 worst=-833.2bp 2xnet=+5453%
-            {"FIL", "FIL-UJ10-BECASC-W1", "filusdt", 0.0100,  1, 0.20,  -2589.0},  // n=4277 net=+6677% PF13.98 worst=-1294.9bp 2xnet=+5396%
-            {"FIL", "FIL-UJ10-BECASC-W2", "filusdt", 0.0100,  2, 0.20,  -2589.0},  // n=4696 net=+7710% PF16.16 worst=-1294.9bp 2xnet=+6308%
-            {"FIL", "FIL-UJ10-BECASC-W4", "filusdt", 0.0100,  4, 0.20,  -1493.0},  // n=4869 net=+8360% PF18.33 worst=-746.6bp 2xnet=+6913%
-            {"FIL", "FIL-UJ10-BECASC-W12", "filusdt", 0.0100, 12, 0.20,  -2607.0},  // n=3522 net=+5991% PF18.72 worst=-1303.6bp 2xnet=+4936%
-            {"GRT", "GRT-UJ05-BECASC-W1", "grtusdt", 0.0050,  1, 0.75,  -1963.0},  // n=9114 net=+15762% PF7.07 worst=-981.9bp 2xnet=+13352%
-            {"GRT", "GRT-UJ05-BECASC-W2", "grtusdt", 0.0050,  2, 0.20,  -1963.0},  // n=9518 net=+17273% PF13.38 worst=-981.9bp 2xnet=+14434%
-            {"GRT", "GRT-UJ05-BECASC-W4", "grtusdt", 0.0050,  4, 0.20,  -2003.0},  // n=9518 net=+17839% PF15.03 worst=-1001.7bp 2xnet=+14999%
-            {"GRT", "GRT-UJ05-BECASC-W12", "grtusdt", 0.0050, 12, 0.20,  -2111.0},  // n=6819 net=+12570% PF14.75 worst=-1055.6bp 2xnet=+10541%
-            {"GRT", "GRT-UJ10-BECASC-W1", "grtusdt", 0.0100,  1, 0.20,  -1336.0},  // n=7901 net=+14945% PF14.28 worst=-668.3bp 2xnet=+12593%
-            {"GRT", "GRT-UJ10-BECASC-W2", "grtusdt", 0.0100,  2, 0.50,  -2763.0},  // n=8684 net=+16708% PF9.60 worst=-1381.8bp 2xnet=+14186%
-            {"GRT", "GRT-UJ10-BECASC-W4", "grtusdt", 0.0100,  4, 0.20,  -2003.0},  // n=8542 net=+16322% PF14.34 worst=-1001.7bp 2xnet=+13766%
-            {"GRT", "GRT-UJ10-BECASC-W12", "grtusdt", 0.0100, 12, 0.20,  -2111.0},  // n=5926 net=+11366% PF15.59 worst=-1055.6bp 2xnet=+9596%
-            {"ICP", "ICP-UJ05-BECASC-W1", "icpusdt", 0.0050,  1, 0.20,  -1624.0},  // n=5574 net=+7647% PF12.69 worst=-812.2bp 2xnet=+5994%
-            {"ICP", "ICP-UJ05-BECASC-W2", "icpusdt", 0.0050,  2, 0.20,  -1314.0},  // n=5847 net=+8874% PF15.23 worst=-657.3bp 2xnet=+7135%
-            {"ICP", "ICP-UJ05-BECASC-W4", "icpusdt", 0.0050,  4, 0.20,  -1624.0},  // n=5859 net=+9550% PF17.07 worst=-812.2bp 2xnet=+7806%
-            {"ICP", "ICP-UJ05-BECASC-W12", "icpusdt", 0.0050, 12, 0.20,  -1624.0},  // n=4055 net=+6212% PF14.23 worst=-812.2bp 2xnet=+4999%
-            {"ICP", "ICP-UJ10-BECASC-W1", "icpusdt", 0.0100,  1, 0.20,  -1624.0},  // n=4332 net=+6842% PF13.40 worst=-812.2bp 2xnet=+5549%
-            {"ICP", "ICP-UJ10-BECASC-W2", "icpusdt", 0.0100,  2, 0.20,  -1624.0},  // n=5094 net=+8312% PF15.51 worst=-812.2bp 2xnet=+6794%
-            {"ICP", "ICP-UJ10-BECASC-W4", "icpusdt", 0.0100,  4, 0.20,  -1626.0},  // n=5043 net=+8213% PF15.29 worst=-813.4bp 2xnet=+6705%
-            {"ICP", "ICP-UJ10-BECASC-W12", "icpusdt", 0.0100, 12, 0.20,  -1631.0},  // n=3633 net=+5635% PF14.28 worst=-815.6bp 2xnet=+4550%
-            {"INJ", "INJ-UJ05-BECASC-W1", "injusdt", 0.0050,  1, 0.20,  -1554.0},  // n=5868 net=+9752% PF13.11 worst=-777.1bp 2xnet=+8003%
-            {"INJ", "INJ-UJ05-BECASC-W2", "injusdt", 0.0050,  2, 0.20,  -1711.0},  // n=6083 net=+11429% PF15.27 worst=-855.7bp 2xnet=+9616%
-            {"INJ", "INJ-UJ05-BECASC-W4", "injusdt", 0.0050,  4, 0.75,  -1784.0},  // n=6145 net=+12641% PF8.66 worst=-892.3bp 2xnet=+10884%
-            {"INJ", "INJ-UJ05-BECASC-W12", "injusdt", 0.0050, 12, 0.75,  -1901.0},  // n=4328 net=+9104% PF7.89 worst=-950.5bp 2xnet=+7887%
-            {"INJ", "INJ-UJ10-BECASC-W1", "injusdt", 0.0100,  1, 0.20,  -1140.0},  // n=5218 net=+9775% PF15.58 worst=-570.1bp 2xnet=+8214%
-            {"INJ", "INJ-UJ10-BECASC-W2", "injusdt", 0.0100,  2, 0.20,  -1711.0},  // n=5682 net=+10856% PF15.92 worst=-855.7bp 2xnet=+9161%
-            {"INJ", "INJ-UJ10-BECASC-W4", "injusdt", 0.0100,  4, 0.20,  -1530.0},  // n=5538 net=+11044% PF16.99 worst=-765.1bp 2xnet=+9386%
-            {"INJ", "INJ-UJ10-BECASC-W12", "injusdt", 0.0100, 12, 0.20,   -942.0},  // n=3864 net=+7984% PF17.67 worst=-471.0bp 2xnet=+6831%
-            {"LDO", "LDO-UJ05-BECASC-W1", "ldousdt", 0.0050,  1, 0.20,  -1930.0},  // n=6233 net=+10002% PF11.81 worst=-965.2bp 2xnet=+8144%
-            {"LDO", "LDO-UJ05-BECASC-W2", "ldousdt", 0.0050,  2, 0.20,  -1930.0},  // n=6448 net=+11608% PF14.50 worst=-965.2bp 2xnet=+9667%
-            {"LDO", "LDO-UJ05-BECASC-W4", "ldousdt", 0.0050,  4, 0.20,  -1930.0},  // n=6668 net=+12761% PF15.75 worst=-965.2bp 2xnet=+10762%
-            {"LDO", "LDO-UJ05-BECASC-W12", "ldousdt", 0.0050, 12, 0.75,  -4166.0},  // n=4649 net=+9430% PF6.79 worst=-2083.0bp 2xnet=+8168%
-            {"LDO", "LDO-UJ10-BECASC-W1", "ldousdt", 0.0100,  1, 0.20,  -1930.0},  // n=5333 net=+10416% PF14.39 worst=-965.2bp 2xnet=+8818%
-            {"LDO", "LDO-UJ10-BECASC-W2", "ldousdt", 0.0100,  2, 0.20,  -1930.0},  // n=5984 net=+11618% PF15.80 worst=-965.2bp 2xnet=+9825%
-            {"LDO", "LDO-UJ10-BECASC-W4", "ldousdt", 0.0100,  4, 0.20,  -1607.0},  // n=5936 net=+11214% PF15.74 worst=-803.9bp 2xnet=+9440%
-            {"LDO", "LDO-UJ10-BECASC-W12", "ldousdt", 0.0100, 12, 0.75,  -4166.0},  // n=4092 net=+8559% PF6.86 worst=-2083.0bp 2xnet=+7464%
-            {"LINK", "LINK-UJ05-BECASC-W1", "linkusdt", 0.0050,  1, 0.20,  -2001.0},  // n=9068 net=+13266% PF13.14 worst=-1000.8bp 2xnet=+10554%
-            {"LINK", "LINK-UJ05-BECASC-W2", "linkusdt", 0.0050,  2, 0.20,  -2001.0},  // n=9493 net=+14810% PF14.27 worst=-1000.8bp 2xnet=+11976%
-            {"LINK", "LINK-UJ05-BECASC-W4", "linkusdt", 0.0050,  4, 0.50,  -1983.0},  // n=9401 net=+15030% PF9.61 worst=-991.5bp 2xnet=+12349%
-            {"LINK", "LINK-UJ05-BECASC-W12", "linkusdt", 0.0050, 12, 0.20,  -1489.0},  // n=6751 net=+10866% PF16.48 worst=-744.7bp 2xnet=+8851%
-            {"LINK", "LINK-UJ10-BECASC-W1", "linkusdt", 0.0100,  1, 0.20,  -2001.0},  // n=7107 net=+11655% PF13.52 worst=-1000.8bp 2xnet=+9529%
-            {"LINK", "LINK-UJ10-BECASC-W2", "linkusdt", 0.0100,  2, 0.75,  -1945.0},  // n=8069 net=+13677% PF6.50 worst=-972.6bp 2xnet=+11371%
-            {"LINK", "LINK-UJ10-BECASC-W4", "linkusdt", 0.0100,  4, 0.75,  -1983.0},  // n=8011 net=+13595% PF6.75 worst=-991.5bp 2xnet=+11236%
-            {"LINK", "LINK-UJ10-BECASC-W12", "linkusdt", 0.0100, 12, 0.20,  -1489.0},  // n=5889 net=+9695% PF16.86 worst=-744.7bp 2xnet=+7939%
-            {"LTC", "LTC-UJ05-BECASC-W1", "ltcusdt", 0.0050,  1, 0.20,  -1552.0},  // n=8096 net=+10040% PF11.47 worst=-776.0bp 2xnet=+7625%
-            {"LTC", "LTC-UJ05-BECASC-W2", "ltcusdt", 0.0050,  2, 0.20,  -1519.0},  // n=8574 net=+11051% PF12.79 worst=-759.5bp 2xnet=+8493%
-            {"LTC", "LTC-UJ05-BECASC-W4", "ltcusdt", 0.0050,  4, 0.20,  -1941.0},  // n=8618 net=+11591% PF14.13 worst=-970.8bp 2xnet=+9023%
-            {"LTC", "LTC-UJ05-BECASC-W12", "ltcusdt", 0.0050, 12, 0.20,  -1060.0},  // n=6384 net=+8551% PF14.95 worst=-530.2bp 2xnet=+6644%
-            {"LTC", "LTC-UJ10-BECASC-W1", "ltcusdt", 0.0100,  1, 0.20,  -1552.0},  // n=5941 net=+8412% PF12.61 worst=-776.0bp 2xnet=+6643%
-            {"LTC", "LTC-UJ10-BECASC-W2", "ltcusdt", 0.0100,  2, 0.20,  -1941.0},  // n=7002 net=+9747% PF13.79 worst=-970.8bp 2xnet=+7655%
-            {"LTC", "LTC-UJ10-BECASC-W4", "ltcusdt", 0.0100,  4, 0.20,   -971.0},  // n=7024 net=+9727% PF14.66 worst=-485.5bp 2xnet=+7635%
-            {"LTC", "LTC-UJ10-BECASC-W12", "ltcusdt", 0.0100, 12, 0.20,   -984.0},  // n=5447 net=+7553% PF15.70 worst=-492.0bp 2xnet=+5931%
-            {"MANA", "MANA-UJ05-BECASC-W1", "manausdt", 0.0050,  1, 0.75,  -1840.0},  // n=5442 net=+8382% PF7.77 worst=-920.0bp 2xnet=+6816%
-            {"MANA", "MANA-UJ05-BECASC-W2", "manausdt", 0.0050,  2, 0.75,  -1748.0},  // n=5560 net=+8946% PF7.99 worst=-874.3bp 2xnet=+7267%
-            {"MANA", "MANA-UJ05-BECASC-W4", "manausdt", 0.0050,  4, 0.50,  -1928.0},  // n=5533 net=+8701% PF10.13 worst=-964.1bp 2xnet=+7117%
-            {"MANA", "MANA-UJ05-BECASC-W12", "manausdt", 0.0050, 12, 0.20,  -1945.0},  // n=4088 net=+6342% PF17.61 worst=-972.9bp 2xnet=+5128%
-            {"MANA", "MANA-UJ10-BECASC-W1", "manausdt", 0.0100,  1, 0.20,  -1381.0},  // n=3905 net=+6261% PF14.74 worst=-690.8bp 2xnet=+5095%
-            {"MANA", "MANA-UJ10-BECASC-W2", "manausdt", 0.0100,  2, 0.20,  -1928.0},  // n=4733 net=+7247% PF15.78 worst=-964.1bp 2xnet=+5831%
-            {"MANA", "MANA-UJ10-BECASC-W4", "manausdt", 0.0100,  4, 0.20,  -1928.0},  // n=4776 net=+7548% PF17.23 worst=-964.1bp 2xnet=+6110%
-            {"MANA", "MANA-UJ10-BECASC-W12", "manausdt", 0.0100, 12, 0.20,  -1586.0},  // n=3529 net=+5469% PF17.69 worst=-793.1bp 2xnet=+4412%
-            {"NEAR", "NEAR-UJ05-BECASC-W1", "nearusdt", 0.0050,  1, 0.20,  -2348.0},  // n=9258 net=+15130% PF11.10 worst=-1174.1bp 2xnet=+12344%
-            {"NEAR", "NEAR-UJ05-BECASC-W2", "nearusdt", 0.0050,  2, 0.20,  -1918.0},  // n=9559 net=+17790% PF13.24 worst=-959.3bp 2xnet=+14939%
-            {"NEAR", "NEAR-UJ05-BECASC-W4", "nearusdt", 0.0050,  4, 0.75,  -2348.0},  // n=9530 net=+19878% PF7.93 worst=-1174.1bp 2xnet=+17111%
-            {"NEAR", "NEAR-UJ05-BECASC-W12", "nearusdt", 0.0050, 12, 0.20,  -1532.0},  // n=6924 net=+13445% PF15.50 worst=-766.2bp 2xnet=+11376%
-            {"NEAR", "NEAR-UJ10-BECASC-W1", "nearusdt", 0.0100,  1, 0.20,  -2348.0},  // n=8050 net=+14925% PF12.67 worst=-1174.1bp 2xnet=+12506%
-            {"NEAR", "NEAR-UJ10-BECASC-W2", "nearusdt", 0.0100,  2, 0.20,  -1918.0},  // n=8702 net=+17150% PF13.93 worst=-959.3bp 2xnet=+14551%
-            {"NEAR", "NEAR-UJ10-BECASC-W4", "nearusdt", 0.0100,  4, 0.75,  -2348.0},  // n=8514 net=+18075% PF7.53 worst=-1174.1bp 2xnet=+15755%
-            {"NEAR", "NEAR-UJ10-BECASC-W12", "nearusdt", 0.0100, 12, 0.20,  -1532.0},  // n=6218 net=+12328% PF15.82 worst=-766.2bp 2xnet=+10466%
-            {"OP", "OP-UJ05-BECASC-W1", "opusdt", 0.0050,  1, 0.75,  -2258.0},  // n=6861 net=+11683% PF7.09 worst=-1129.4bp 2xnet=+9836%
-            {"OP", "OP-UJ05-BECASC-W2", "opusdt", 0.0050,  2, 0.20,  -1762.0},  // n=7022 net=+12665% PF15.10 worst=-881.2bp 2xnet=+10563%
-            {"OP", "OP-UJ05-BECASC-W4", "opusdt", 0.0050,  4, 0.20,  -2374.0},  // n=6930 net=+13579% PF15.22 worst=-1187.2bp 2xnet=+11499%
-            {"OP", "OP-UJ05-BECASC-W12", "opusdt", 0.0050, 12, 0.75,  -1671.0},  // n=4921 net=+9311% PF6.22 worst=-835.5bp 2xnet=+8000%
-            {"OP", "OP-UJ10-BECASC-W1", "opusdt", 0.0100,  1, 0.75,  -2258.0},  // n=5588 net=+11558% PF7.24 worst=-1129.4bp 2xnet=+10066%
-            {"OP", "OP-UJ10-BECASC-W2", "opusdt", 0.0100,  2, 0.20,  -1878.0},  // n=6243 net=+11943% PF16.16 worst=-939.1bp 2xnet=+10073%
-            {"OP", "OP-UJ10-BECASC-W4", "opusdt", 0.0100,  4, 0.20,  -2080.0},  // n=6208 net=+12105% PF15.40 worst=-1040.3bp 2xnet=+10234%
-            {"OP", "OP-UJ10-BECASC-W12", "opusdt", 0.0100, 12, 0.75,  -1743.0},  // n=4405 net=+8680% PF5.97 worst=-871.5bp 2xnet=+7536%
-            {"RUNE", "RUNE-UJ05-BECASC-W1", "runeusdt", 0.0050,  1, 0.75,  -2881.0},  // n=5664 net=+10197% PF8.27 worst=-1440.6bp 2xnet=+8651%
-            {"RUNE", "RUNE-UJ05-BECASC-W2", "runeusdt", 0.0050,  2, 0.75,  -1476.0},  // n=5942 net=+10999% PF8.45 worst=-738.4bp 2xnet=+9250%
-            {"RUNE", "RUNE-UJ05-BECASC-W4", "runeusdt", 0.0050,  4, 0.75,  -1591.0},  // n=5662 net=+11232% PF8.83 worst=-795.9bp 2xnet=+9748%
-            {"RUNE", "RUNE-UJ05-BECASC-W12", "runeusdt", 0.0050, 12, 0.75,  -1424.0},  // n=4078 net=+7876% PF7.43 worst=-712.2bp 2xnet=+6844%
-            {"RUNE", "RUNE-UJ10-BECASC-W1", "runeusdt", 0.0100,  1, 0.75,  -2881.0},  // n=4251 net=+8402% PF7.31 worst=-1440.6bp 2xnet=+7174%
-            {"RUNE", "RUNE-UJ10-BECASC-W2", "runeusdt", 0.0100,  2, 0.20,  -1269.0},  // n=5118 net=+9288% PF16.74 worst=-634.9bp 2xnet=+7758%
-            {"RUNE", "RUNE-UJ10-BECASC-W4", "runeusdt", 0.0100,  4, 0.20,  -1591.0},  // n=4934 net=+9235% PF19.29 worst=-795.9bp 2xnet=+7762%
-            {"RUNE", "RUNE-UJ10-BECASC-W12", "runeusdt", 0.0100, 12, 0.75,  -3038.0},  // n=3574 net=+6870% PF6.41 worst=-1519.4bp 2xnet=+5897%
-            {"SAND", "SAND-UJ05-BECASC-W1", "sandusdt", 0.0050,  1, 0.75,  -2369.0},  // n=5594 net=+8599% PF7.78 worst=-1184.5bp 2xnet=+7162%
-            {"SAND", "SAND-UJ05-BECASC-W2", "sandusdt", 0.0050,  2, 0.20,  -1179.0},  // n=5597 net=+9153% PF20.26 worst=-589.6bp 2xnet=+7475%
-            {"SAND", "SAND-UJ05-BECASC-W4", "sandusdt", 0.0050,  4, 0.20,  -1586.0},  // n=5580 net=+9096% PF21.36 worst=-793.3bp 2xnet=+7423%
-            {"SAND", "SAND-UJ05-BECASC-W12", "sandusdt", 0.0050, 12, 0.20,  -1586.0},  // n=4034 net=+6303% PF17.65 worst=-793.3bp 2xnet=+5103%
-            {"SAND", "SAND-UJ10-BECASC-W1", "sandusdt", 0.0100,  1, 0.20,  -1504.0},  // n=4147 net=+6916% PF17.67 worst=-752.2bp 2xnet=+5678%
-            {"SAND", "SAND-UJ10-BECASC-W2", "sandusdt", 0.0100,  2, 0.20,  -1586.0},  // n=4822 net=+7903% PF17.62 worst=-793.3bp 2xnet=+6452%
-            {"SAND", "SAND-UJ10-BECASC-W4", "sandusdt", 0.0100,  4, 0.20,  -1586.0},  // n=4855 net=+8093% PF21.05 worst=-793.3bp 2xnet=+6644%
-            {"SAND", "SAND-UJ10-BECASC-W12", "sandusdt", 0.0100, 12, 0.20,  -1586.0},  // n=3573 net=+5656% PF17.17 worst=-793.3bp 2xnet=+4589%
-            {"SOL", "SOL-UJ05-BECASC-W1", "solusdt", 0.0050,  1, 0.75,  -1661.0},  // n=9116 net=+15402% PF6.93 worst=-830.9bp 2xnet=+13021%
-            {"SOL", "SOL-UJ05-BECASC-W2", "solusdt", 0.0050,  2, 0.75,  -2450.0},  // n=9527 net=+17753% PF7.96 worst=-1225.3bp 2xnet=+15172%
-            {"SOL", "SOL-UJ05-BECASC-W4", "solusdt", 0.0050,  4, 0.20,  -1759.0},  // n=9594 net=+18205% PF18.55 worst=-879.8bp 2xnet=+15342%
-            {"SOL", "SOL-UJ05-BECASC-W12", "solusdt", 0.0050, 12, 0.20,  -2667.0},  // n=6761 net=+13574% PF19.41 worst=-1333.8bp 2xnet=+11564%
-            {"SOL", "SOL-UJ10-BECASC-W1", "solusdt", 0.0100,  1, 0.20,  -1661.0},  // n=7566 net=+14070% PF15.46 worst=-830.9bp 2xnet=+11811%
-            {"SOL", "SOL-UJ10-BECASC-W2", "solusdt", 0.0100,  2, 0.20,  -1759.0},  // n=8391 net=+15949% PF17.36 worst=-879.8bp 2xnet=+13447%
-            {"SOL", "SOL-UJ10-BECASC-W4", "solusdt", 0.0100,  4, 0.20,  -1759.0},  // n=8368 net=+16597% PF18.57 worst=-879.8bp 2xnet=+14098%
-            {"SOL", "SOL-UJ10-BECASC-W12", "solusdt", 0.0100, 12, 0.20,  -2667.0},  // n=5879 net=+12041% PF20.22 worst=-1333.8bp 2xnet=+10292%
-            {"SUI", "SUI-UJ05-BECASC-W1", "suiusdt", 0.0050,  1, 0.20,  -1091.0},  // n=5144 net=+8810% PF15.13 worst=-545.5bp 2xnet=+7274%
-            {"SUI", "SUI-UJ05-BECASC-W2", "suiusdt", 0.0050,  2, 0.20,  -1086.0},  // n=5263 net=+9739% PF17.11 worst=-543.2bp 2xnet=+8171%
-            {"SUI", "SUI-UJ05-BECASC-W4", "suiusdt", 0.0050,  4, 0.20,  -2523.0},  // n=5352 net=+10414% PF18.25 worst=-1261.5bp 2xnet=+8816%
-            {"SUI", "SUI-UJ05-BECASC-W12", "suiusdt", 0.0050, 12, 0.20,  -3095.0},  // n=3750 net=+7759% PF18.88 worst=-1547.6bp 2xnet=+6641%
-            {"SUI", "SUI-UJ10-BECASC-W1", "suiusdt", 0.0100,  1, 0.20,  -2236.0},  // n=4302 net=+8301% PF15.77 worst=-1118.1bp 2xnet=+7014%
-            {"SUI", "SUI-UJ10-BECASC-W2", "suiusdt", 0.0100,  2, 0.20,  -2228.0},  // n=4826 net=+9908% PF17.24 worst=-1114.2bp 2xnet=+8468%
-            {"SUI", "SUI-UJ10-BECASC-W4", "suiusdt", 0.0100,  4, 0.20,  -2168.0},  // n=4677 net=+9311% PF17.96 worst=-1084.1bp 2xnet=+7909%
-            {"SUI", "SUI-UJ10-BECASC-W12", "suiusdt", 0.0100, 12, 0.75,  -3095.0},  // n=3346 net=+7135% PF7.35 worst=-1547.6bp 2xnet=+6270%
-            {"SUSHI", "SUSHI-UJ05-BECASC-W1", "sushiusdt", 0.0050,  1, 0.20,  -1973.0},  // n=5819 net=+8454% PF12.54 worst=-986.7bp 2xnet=+6717%
-            {"SUSHI", "SUSHI-UJ05-BECASC-W2", "sushiusdt", 0.0050,  2, 0.20,  -1908.0},  // n=5997 net=+9527% PF14.18 worst=-954.0bp 2xnet=+7733%
-            {"SUSHI", "SUSHI-UJ05-BECASC-W4", "sushiusdt", 0.0050,  4, 0.20,  -1708.0},  // n=5888 net=+10130% PF16.09 worst=-854.3bp 2xnet=+8365%
-            {"SUSHI", "SUSHI-UJ05-BECASC-W12", "sushiusdt", 0.0050, 12, 0.20,  -1087.0},  // n=4362 net=+7251% PF16.81 worst=-543.6bp 2xnet=+5945%
-            {"SUSHI", "SUSHI-UJ10-BECASC-W1", "sushiusdt", 0.0100,  1, 0.20,  -1708.0},  // n=4636 net=+7646% PF13.59 worst=-854.3bp 2xnet=+6258%
-            {"SUSHI", "SUSHI-UJ10-BECASC-W2", "sushiusdt", 0.0100,  2, 0.20,  -1708.0},  // n=5275 net=+8805% PF14.62 worst=-854.3bp 2xnet=+7223%
-            {"SUSHI", "SUSHI-UJ10-BECASC-W4", "sushiusdt", 0.0100,  4, 0.20,  -1445.0},  // n=5219 net=+9110% PF16.57 worst=-722.8bp 2xnet=+7544%
-            {"SUSHI", "SUSHI-UJ10-BECASC-W12", "sushiusdt", 0.0100, 12, 0.20,  -1401.0},  // n=3771 net=+6107% PF15.20 worst=-700.9bp 2xnet=+4981%
-            {"THETA", "THETA-UJ05-BECASC-W1", "thetausdt", 0.0050,  1, 0.75,  -1690.0},  // n=5683 net=+9413% PF7.31 worst=-845.0bp 2xnet=+7921%
-            {"THETA", "THETA-UJ05-BECASC-W2", "thetausdt", 0.0050,  2, 0.75,  -1690.0},  // n=5875 net=+10147% PF7.84 worst=-845.0bp 2xnet=+8577%
-            {"THETA", "THETA-UJ05-BECASC-W4", "thetausdt", 0.0050,  4, 0.75,  -1827.0},  // n=5753 net=+10400% PF8.25 worst=-913.5bp 2xnet=+8805%
-            {"THETA", "THETA-UJ05-BECASC-W12", "thetausdt", 0.0050, 12, 0.20,  -2111.0},  // n=4298 net=+7163% PF17.13 worst=-1055.6bp 2xnet=+5871%
-            {"THETA", "THETA-UJ10-BECASC-W1", "thetausdt", 0.0100,  1, 0.20,  -1484.0},  // n=4599 net=+7649% PF15.08 worst=-742.4bp 2xnet=+6270%
-            {"THETA", "THETA-UJ10-BECASC-W2", "thetausdt", 0.0100,  2, 0.75,  -1710.0},  // n=4988 net=+8916% PF7.21 worst=-855.4bp 2xnet=+7518%
-            {"THETA", "THETA-UJ10-BECASC-W4", "thetausdt", 0.0100,  4, 0.20,  -1827.0},  // n=5004 net=+8537% PF16.80 worst=-913.5bp 2xnet=+7041%
-            {"THETA", "THETA-UJ10-BECASC-W12", "thetausdt", 0.0100, 12, 0.20,  -2111.0},  // n=3774 net=+6096% PF15.97 worst=-1055.6bp 2xnet=+4962%
-            {"TIA", "TIA-UJ05-BECASC-W1", "tiausdt", 0.0050,  1, 0.20,  -2819.0},  // n=4583 net=+8161% PF11.28 worst=-1409.7bp 2xnet=+6793%
-            {"TIA", "TIA-UJ05-BECASC-W2", "tiausdt", 0.0050,  2, 0.20,  -1982.0},  // n=4738 net=+8827% PF12.78 worst=-991.1bp 2xnet=+7415%
-            {"TIA", "TIA-UJ05-BECASC-W4", "tiausdt", 0.0050,  4, 0.20,  -1634.0},  // n=4733 net=+9600% PF15.26 worst=-817.3bp 2xnet=+8182%
-            {"TIA", "TIA-UJ05-BECASC-W12", "tiausdt", 0.0050, 12, 0.20,  -1142.0},  // n=3388 net=+6618% PF15.54 worst=-571.3bp 2xnet=+5602%
-            {"TIA", "TIA-UJ10-BECASC-W1", "tiausdt", 0.0100,  1, 0.20,  -2819.0},  // n=4229 net=+8218% PF13.11 worst=-1409.7bp 2xnet=+6955%
-            {"TIA", "TIA-UJ10-BECASC-W2", "tiausdt", 0.0100,  2, 0.20,  -1030.0},  // n=4495 net=+8686% PF14.21 worst=-515.4bp 2xnet=+7354%
-            {"TIA", "TIA-UJ10-BECASC-W4", "tiausdt", 0.0100,  4, 0.20,  -1634.0},  // n=4246 net=+8707% PF15.21 worst=-817.3bp 2xnet=+7436%
-            {"TIA", "TIA-UJ10-BECASC-W12", "tiausdt", 0.0100, 12, 0.20,  -1142.0},  // n=3089 net=+6054% PF15.45 worst=-571.3bp 2xnet=+5127%
-            {"TRX", "TRX-UJ05-BECASC-W1", "trxusdt", 0.0050,  1, 0.75,  -1135.0},  // n=5662 net=+7385% PF7.33 worst=-567.8bp 2xnet=+5730%
-            {"TRX", "TRX-UJ05-BECASC-W2", "trxusdt", 0.0050,  2, 0.75,  -1271.0},  // n=6785 net=+9140% PF8.05 worst=-635.8bp 2xnet=+7079%
-            {"TRX", "TRX-UJ05-BECASC-W4", "trxusdt", 0.0050,  4, 0.75,  -2063.0},  // n=6972 net=+9265% PF7.92 worst=-1031.5bp 2xnet=+7276%
-            {"TRX", "TRX-UJ05-BECASC-W12", "trxusdt", 0.0050, 12, 0.75,   -994.0},  // n=5171 net=+6926% PF7.19 worst=-497.4bp 2xnet=+5501%
-            {"TRX", "TRX-UJ10-BECASC-W1", "trxusdt", 0.0100,  1, 0.20,   -737.0},  // n=3139 net=+5172% PF19.22 worst=-368.5bp 2xnet=+4231%
-            {"TRX", "TRX-UJ10-BECASC-W2", "trxusdt", 0.0100,  2, 0.20,  -1183.0},  // n=4099 net=+6478% PF18.32 worst=-591.5bp 2xnet=+5252%
-            {"TRX", "TRX-UJ10-BECASC-W4", "trxusdt", 0.0100,  4, 0.75,  -2063.0},  // n=4703 net=+7524% PF7.31 worst=-1031.5bp 2xnet=+6148%
-            {"TRX", "TRX-UJ10-BECASC-W12", "trxusdt", 0.0100, 12, 0.75,  -1050.0},  // n=4077 net=+6324% PF7.48 worst=-525.2bp 2xnet=+5101%
-            {"UNI", "UNI-UJ05-BECASC-W1", "uniusdt", 0.0050,  1, 0.20,  -1904.0},  // n=9136 net=+15572% PF14.37 worst=-952.3bp 2xnet=+12826%
-            {"UNI", "UNI-UJ05-BECASC-W2", "uniusdt", 0.0050,  2, 0.75,  -1661.0},  // n=9276 net=+17673% PF8.59 worst=-830.5bp 2xnet=+14987%
-            {"UNI", "UNI-UJ05-BECASC-W4", "uniusdt", 0.0050,  4, 0.20,  -1638.0},  // n=9459 net=+17343% PF17.73 worst=-819.4bp 2xnet=+14496%
-            {"UNI", "UNI-UJ05-BECASC-W12", "uniusdt", 0.0050, 12, 0.20,  -1558.0},  // n=6681 net=+11296% PF15.81 worst=-779.4bp 2xnet=+9306%
-            {"UNI", "UNI-UJ10-BECASC-W1", "uniusdt", 0.0100,  1, 0.20,  -1904.0},  // n=7611 net=+13966% PF15.19 worst=-952.3bp 2xnet=+11694%
-            {"UNI", "UNI-UJ10-BECASC-W2", "uniusdt", 0.0100,  2, 0.20,  -1558.0},  // n=8428 net=+15631% PF15.54 worst=-779.4bp 2xnet=+13115%
-            {"UNI", "UNI-UJ10-BECASC-W4", "uniusdt", 0.0100,  4, 0.20,  -1102.0},  // n=8372 net=+15339% PF17.65 worst=-551.3bp 2xnet=+12836%
-            {"UNI", "UNI-UJ10-BECASC-W12", "uniusdt", 0.0100, 12, 0.20,  -1558.0},  // n=5980 net=+10352% PF15.74 worst=-779.4bp 2xnet=+8567%
-            {"VET", "VET-UJ05-BECASC-W1", "vetusdt", 0.0050,  1, 0.20,  -1608.0},  // n=5368 net=+7283% PF13.56 worst=-804.1bp 2xnet=+5684%
-            {"VET", "VET-UJ05-BECASC-W2", "vetusdt", 0.0050,  2, 0.20,  -1608.0},  // n=5466 net=+7951% PF15.82 worst=-804.1bp 2xnet=+6316%
-            {"VET", "VET-UJ05-BECASC-W4", "vetusdt", 0.0050,  4, 0.20,  -1635.0},  // n=5405 net=+8321% PF16.02 worst=-817.8bp 2xnet=+6714%
-            {"VET", "VET-UJ05-BECASC-W12", "vetusdt", 0.0050, 12, 0.20,  -2426.0},  // n=4009 net=+5600% PF14.90 worst=-1213.3bp 2xnet=+4396%
-            {"VET", "VET-UJ10-BECASC-W1", "vetusdt", 0.0100,  1, 0.20,  -1608.0},  // n=3987 net=+6005% PF13.92 worst=-804.1bp 2xnet=+4810%
-            {"VET", "VET-UJ10-BECASC-W2", "vetusdt", 0.0100,  2, 0.20,  -1608.0},  // n=4567 net=+7059% PF15.23 worst=-804.1bp 2xnet=+5704%
-            {"VET", "VET-UJ10-BECASC-W4", "vetusdt", 0.0100,  4, 0.20,  -1594.0},  // n=4672 net=+7558% PF15.85 worst=-797.2bp 2xnet=+6151%
-            {"VET", "VET-UJ10-BECASC-W12", "vetusdt", 0.0100, 12, 0.20,  -2304.0},  // n=3452 net=+4935% PF15.26 worst=-1152.0bp 2xnet=+3902%
-            {"XRP", "XRP-UJ05-BECASC-W1", "xrpusdt", 0.0050,  1, 0.75,  -1912.0},  // n=7809 net=+10789% PF6.41 worst=-956.2bp 2xnet=+8785%
-            {"XRP", "XRP-UJ05-BECASC-W2", "xrpusdt", 0.0050,  2, 0.75,  -3158.0},  // n=8295 net=+12224% PF7.07 worst=-1579.2bp 2xnet=+9994%
-            {"XRP", "XRP-UJ05-BECASC-W4", "xrpusdt", 0.0050,  4, 0.75,  -1889.0},  // n=8187 net=+13162% PF7.63 worst=-944.8bp 2xnet=+10854%
-            {"XRP", "XRP-UJ05-BECASC-W12", "xrpusdt", 0.0050, 12, 0.75,  -1683.0},  // n=5781 net=+10128% PF7.05 worst=-841.5bp 2xnet=+8441%
-            {"XRP", "XRP-UJ10-BECASC-W1", "xrpusdt", 0.0100,  1, 0.75,  -1522.0},  // n=5371 net=+8822% PF6.15 worst=-761.0bp 2xnet=+7349%
-            {"XRP", "XRP-UJ10-BECASC-W2", "xrpusdt", 0.0100,  2, 0.20,  -2004.0},  // n=6511 net=+10178% PF15.91 worst=-1002.0bp 2xnet=+8239%
-            {"XRP", "XRP-UJ10-BECASC-W4", "xrpusdt", 0.0100,  4, 0.20,  -1450.0},  // n=6804 net=+10711% PF17.97 worst=-725.4bp 2xnet=+8682%
-            {"XRP", "XRP-UJ10-BECASC-W12", "xrpusdt", 0.0100, 12, 0.75,  -1726.0},  // n=4880 net=+8590% PF6.73 worst=-863.0bp 2xnet=+7406%
+            {"AAVE", "AAVE-MIM05-BECASC-W1", "aaveusdt", 0.0050,  1, 0.20,  -2998.0},  // n=9218 net=+15414% PF13.10 worst=-1499.1bp 2xnet=+12647%
+            {"AAVE", "AAVE-MIM05-BECASC-W2", "aaveusdt", 0.0050,  2, 0.20,  -3242.0},  // n=9534 net=+17219% PF14.93 worst=-1621.4bp 2xnet=+14352%
+            {"AAVE", "AAVE-MIM05-BECASC-W4", "aaveusdt", 0.0050,  4, 0.20,  -2998.0},  // n=9468 net=+17986% PF17.23 worst=-1499.1bp 2xnet=+15150%
+            {"AAVE", "AAVE-MIM05-BECASC-W12", "aaveusdt", 0.0050, 12, 0.20,  -1270.0},  // n=6565 net=+11853% PF15.39 worst=-635.1bp 2xnet=+9897%
+            {"AAVE", "AAVE-MIM10-BECASC-W1", "aaveusdt", 0.0100,  1, 0.20,  -2998.0},  // n=7667 net=+14403% PF14.85 worst=-1499.1bp 2xnet=+12106%
+            {"AAVE", "AAVE-MIM10-BECASC-W2", "aaveusdt", 0.0100,  2, 0.20,  -3242.0},  // n=8544 net=+16055% PF15.00 worst=-1621.4bp 2xnet=+13503%
+            {"AAVE", "AAVE-MIM10-BECASC-W4", "aaveusdt", 0.0100,  4, 0.20,  -2998.0},  // n=8412 net=+16266% PF16.79 worst=-1499.1bp 2xnet=+13742%
+            {"AAVE", "AAVE-MIM10-BECASC-W12", "aaveusdt", 0.0100, 12, 0.20,  -1246.0},  // n=5945 net=+10786% PF15.15 worst=-623.2bp 2xnet=+9007%
+            {"ADA", "ADA-MIM05-BECASC-W1", "adausdt", 0.0050,  1, 0.75,  -2571.0},  // n=8319 net=+13161% PF7.05 worst=-1285.9bp 2xnet=+10874%
+            {"ADA", "ADA-MIM05-BECASC-W2", "adausdt", 0.0050,  2, 0.75,  -1523.0},  // n=8688 net=+14545% PF7.84 worst=-761.9bp 2xnet=+12087%
+            {"ADA", "ADA-MIM05-BECASC-W4", "adausdt", 0.0050,  4, 0.75,  -2442.0},  // n=8731 net=+15329% PF7.68 worst=-1221.4bp 2xnet=+12968%
+            {"ADA", "ADA-MIM05-BECASC-W12", "adausdt", 0.0050, 12, 0.75,  -1616.0},  // n=6195 net=+11430% PF7.22 worst=-808.4bp 2xnet=+9598%
+            {"ADA", "ADA-MIM10-BECASC-W1", "adausdt", 0.0100,  1, 0.20,  -1551.0},  // n=6508 net=+10513% PF13.00 worst=-775.5bp 2xnet=+8574%
+            {"ADA", "ADA-MIM10-BECASC-W2", "adausdt", 0.0100,  2, 0.20,  -1136.0},  // n=7248 net=+11969% PF16.42 worst=-568.4bp 2xnet=+9797%
+            {"ADA", "ADA-MIM10-BECASC-W4", "adausdt", 0.0100,  4, 0.75,  -2442.0},  // n=7489 net=+13379% PF7.24 worst=-1221.4bp 2xnet=+11214%
+            {"ADA", "ADA-MIM10-BECASC-W12", "adausdt", 0.0100, 12, 0.20,  -1055.0},  // n=5532 net=+9775% PF20.59 worst=-527.8bp 2xnet=+8107%
+            {"APT", "APT-MIM05-BECASC-W1", "aptusdt", 0.0050,  1, 0.75,  -1784.0},  // n=5563 net=+9035% PF7.16 worst=-892.0bp 2xnet=+7545%
+            {"APT", "APT-MIM05-BECASC-W2", "aptusdt", 0.0050,  2, 0.75,  -1956.0},  // n=5694 net=+10050% PF8.03 worst=-978.4bp 2xnet=+8546%
+            {"APT", "APT-MIM05-BECASC-W4", "aptusdt", 0.0050,  4, 0.20,  -1288.0},  // n=5710 net=+9917% PF18.29 worst=-644.2bp 2xnet=+8214%
+            {"APT", "APT-MIM05-BECASC-W12", "aptusdt", 0.0050, 12, 0.20,  -1784.0},  // n=4154 net=+6706% PF14.48 worst=-892.0bp 2xnet=+5466%
+            {"APT", "APT-MIM10-BECASC-W1", "aptusdt", 0.0100,  1, 0.20,  -1956.0},  // n=4590 net=+8127% PF16.43 worst=-978.4bp 2xnet=+6758%
+            {"APT", "APT-MIM10-BECASC-W2", "aptusdt", 0.0100,  2, 0.20,  -1956.0},  // n=4916 net=+9196% PF17.83 worst=-978.4bp 2xnet=+7729%
+            {"APT", "APT-MIM10-BECASC-W4", "aptusdt", 0.0100,  4, 0.20,  -1784.0},  // n=4995 net=+8597% PF15.48 worst=-892.0bp 2xnet=+7105%
+            {"APT", "APT-MIM10-BECASC-W12", "aptusdt", 0.0100, 12, 0.50,  -1431.0},  // n=3728 net=+6431% PF10.66 worst=-715.5bp 2xnet=+5383%
+            {"ATOM", "ATOM-MIM05-BECASC-W1", "atomusdt", 0.0050,  1, 0.75,  -1300.0},  // n=5292 net=+6767% PF7.27 worst=-650.2bp 2xnet=+5289%
+            {"ATOM", "ATOM-MIM05-BECASC-W2", "atomusdt", 0.0050,  2, 0.20,  -1332.0},  // n=5504 net=+7003% PF17.41 worst=-666.3bp 2xnet=+5355%
+            {"ATOM", "ATOM-MIM05-BECASC-W4", "atomusdt", 0.0050,  4, 0.20,  -1482.0},  // n=5342 net=+6623% PF16.75 worst=-741.4bp 2xnet=+5024%
+            {"ATOM", "ATOM-MIM05-BECASC-W12", "atomusdt", 0.0050, 12, 0.20,  -2030.0},  // n=3909 net=+4941% PF16.95 worst=-1015.2bp 2xnet=+3776%
+            {"ATOM", "ATOM-MIM10-BECASC-W1", "atomusdt", 0.0100,  1, 0.20,   -762.0},  // n=3605 net=+5067% PF16.85 worst=-381.3bp 2xnet=+3976%
+            {"ATOM", "ATOM-MIM10-BECASC-W2", "atomusdt", 0.0100,  2, 0.20,  -1482.0},  // n=4328 net=+5586% PF14.78 worst=-741.4bp 2xnet=+4290%
+            {"ATOM", "ATOM-MIM10-BECASC-W4", "atomusdt", 0.0100,  4, 0.20,  -1482.0},  // n=4466 net=+5645% PF16.22 worst=-741.4bp 2xnet=+4311%
+            {"ATOM", "ATOM-MIM10-BECASC-W12", "atomusdt", 0.0100, 12, 0.20,  -2030.0},  // n=3305 net=+4295% PF18.16 worst=-1015.2bp 2xnet=+3305%
+            {"AVAX", "AVAX-MIM05-BECASC-W1", "avaxusdt", 0.0050,  1, 0.20,  -1893.0},  // n=8983 net=+14486% PF11.38 worst=-946.8bp 2xnet=+11806%
+            {"AVAX", "AVAX-MIM05-BECASC-W2", "avaxusdt", 0.0050,  2, 0.20,  -1618.0},  // n=9425 net=+16963% PF14.20 worst=-809.4bp 2xnet=+14140%
+            {"AVAX", "AVAX-MIM05-BECASC-W4", "avaxusdt", 0.0050,  4, 0.20,  -1318.0},  // n=9256 net=+17972% PF16.14 worst=-659.0bp 2xnet=+15198%
+            {"AVAX", "AVAX-MIM05-BECASC-W12", "avaxusdt", 0.0050, 12, 0.20,  -1445.0},  // n=6526 net=+12874% PF17.06 worst=-722.6bp 2xnet=+10917%
+            {"AVAX", "AVAX-MIM10-BECASC-W1", "avaxusdt", 0.0100,  1, 0.20,  -1893.0},  // n=7497 net=+13420% PF12.44 worst=-946.8bp 2xnet=+11192%
+            {"AVAX", "AVAX-MIM10-BECASC-W2", "avaxusdt", 0.0100,  2, 0.20,  -1618.0},  // n=8167 net=+15500% PF13.61 worst=-809.4bp 2xnet=+13049%
+            {"AVAX", "AVAX-MIM10-BECASC-W4", "avaxusdt", 0.0100,  4, 0.20,  -1318.0},  // n=8185 net=+16493% PF16.13 worst=-659.0bp 2xnet=+14038%
+            {"AVAX", "AVAX-MIM10-BECASC-W12", "avaxusdt", 0.0100, 12, 0.75,  -1667.0},  // n=5775 net=+12266% PF6.83 worst=-833.7bp 2xnet=+10565%
+            {"BCH", "BCH-MIM05-BECASC-W1", "bchusdt", 0.0050,  1, 0.20,  -1743.0},  // n=7996 net=+11697% PF15.69 worst=-871.8bp 2xnet=+9308%
+            {"BCH", "BCH-MIM05-BECASC-W2", "bchusdt", 0.0050,  2, 0.75,  -1254.0},  // n=8167 net=+12687% PF7.22 worst=-627.2bp 2xnet=+10483%
+            {"BCH", "BCH-MIM05-BECASC-W4", "bchusdt", 0.0050,  4, 0.75,  -2171.0},  // n=8334 net=+13180% PF7.12 worst=-1085.7bp 2xnet=+10888%
+            {"BCH", "BCH-MIM05-BECASC-W12", "bchusdt", 0.0050, 12, 0.20,  -1499.0},  // n=6239 net=+9693% PF18.62 worst=-749.5bp 2xnet=+7829%
+            {"BCH", "BCH-MIM10-BECASC-W1", "bchusdt", 0.0100,  1, 0.20,  -1060.0},  // n=5830 net=+9559% PF17.61 worst=-530.3bp 2xnet=+7818%
+            {"BCH", "BCH-MIM10-BECASC-W2", "bchusdt", 0.0100,  2, 0.20,  -1499.0},  // n=6763 net=+10886% PF15.76 worst=-749.5bp 2xnet=+8863%
+            {"BCH", "BCH-MIM10-BECASC-W4", "bchusdt", 0.0100,  4, 0.20,  -1189.0},  // n=6971 net=+11414% PF18.51 worst=-594.9bp 2xnet=+9323%
+            {"BCH", "BCH-MIM10-BECASC-W12", "bchusdt", 0.0100, 12, 0.20,  -1499.0},  // n=5303 net=+8488% PF19.01 worst=-749.5bp 2xnet=+6900%
+            {"BNB", "BNB-MIM05-BECASC-W1", "bnbusdt", 0.0050,  1, 0.20,  -2118.0},  // n=7441 net=+9325% PF15.99 worst=-1059.2bp 2xnet=+7109%
+            {"BNB", "BNB-MIM05-BECASC-W2", "bnbusdt", 0.0050,  2, 0.20,  -2011.0},  // n=7844 net=+10025% PF16.80 worst=-1005.9bp 2xnet=+7686%
+            {"BNB", "BNB-MIM05-BECASC-W4", "bnbusdt", 0.0050,  4, 0.75,  -2457.0},  // n=7760 net=+10672% PF8.09 worst=-1228.5bp 2xnet=+8459%
+            {"BNB", "BNB-MIM05-BECASC-W12", "bnbusdt", 0.0050, 12, 0.75,  -2242.0},  // n=5745 net=+8760% PF7.49 worst=-1121.0bp 2xnet=+7186%
+            {"BNB", "BNB-MIM10-BECASC-W1", "bnbusdt", 0.0100,  1, 0.20,  -1217.0},  // n=4536 net=+6742% PF14.93 worst=-608.9bp 2xnet=+5390%
+            {"BNB", "BNB-MIM10-BECASC-W2", "bnbusdt", 0.0100,  2, 0.20,  -1914.0},  // n=5678 net=+8418% PF17.53 worst=-957.0bp 2xnet=+6726%
+            {"BNB", "BNB-MIM10-BECASC-W4", "bnbusdt", 0.0100,  4, 0.75,  -2457.0},  // n=5935 net=+9168% PF7.82 worst=-1228.5bp 2xnet=+7424%
+            {"BNB", "BNB-MIM10-BECASC-W12", "bnbusdt", 0.0100, 12, 0.75,  -2242.0},  // n=4794 net=+7515% PF7.46 worst=-1121.0bp 2xnet=+6254%
+            {"COMP", "COMP-MIM05-BECASC-W1", "compusdt", 0.0050,  1, 0.20,  -1712.0},  // n=5543 net=+7597% PF12.64 worst=-856.1bp 2xnet=+5945%
+            {"COMP", "COMP-MIM05-BECASC-W2", "compusdt", 0.0050,  2, 0.75,  -1712.0},  // n=5644 net=+8808% PF7.93 worst=-856.1bp 2xnet=+7247%
+            {"COMP", "COMP-MIM05-BECASC-W4", "compusdt", 0.0050,  4, 0.20,  -1712.0},  // n=5620 net=+8798% PF16.15 worst=-856.1bp 2xnet=+7123%
+            {"COMP", "COMP-MIM05-BECASC-W12", "compusdt", 0.0050, 12, 0.20,  -1548.0},  // n=4088 net=+6771% PF17.95 worst=-774.1bp 2xnet=+5552%
+            {"COMP", "COMP-MIM10-BECASC-W1", "compusdt", 0.0100,  1, 0.75,  -4744.0},  // n=4086 net=+6061% PF5.12 worst=-2372.1bp 2xnet=+5110%
+            {"COMP", "COMP-MIM10-BECASC-W2", "compusdt", 0.0100,  2, 0.20,  -1712.0},  // n=4805 net=+7564% PF15.12 worst=-856.1bp 2xnet=+6137%
+            {"COMP", "COMP-MIM10-BECASC-W4", "compusdt", 0.0100,  4, 0.20,  -1712.0},  // n=4927 net=+7934% PF15.38 worst=-856.1bp 2xnet=+6470%
+            {"COMP", "COMP-MIM10-BECASC-W12", "compusdt", 0.0100, 12, 0.20,  -1210.0},  // n=3629 net=+5535% PF15.50 worst=-605.4bp 2xnet=+4455%
+            {"CRV", "CRV-MIM05-BECASC-W1", "crvusdt", 0.0050,  1, 0.20,  -1913.0},  // n=5566 net=+8979% PF13.88 worst=-956.6bp 2xnet=+7313%
+            {"CRV", "CRV-MIM05-BECASC-W2", "crvusdt", 0.0050,  2, 0.20,  -1913.0},  // n=5844 net=+10130% PF15.92 worst=-956.6bp 2xnet=+8377%
+            {"CRV", "CRV-MIM05-BECASC-W4", "crvusdt", 0.0050,  4, 0.20,  -1251.0},  // n=5818 net=+10539% PF17.31 worst=-625.6bp 2xnet=+8807%
+            {"CRV", "CRV-MIM05-BECASC-W12", "crvusdt", 0.0050, 12, 0.20,  -2275.0},  // n=4247 net=+7643% PF16.01 worst=-1137.8bp 2xnet=+6374%
+            {"CRV", "CRV-MIM10-BECASC-W1", "crvusdt", 0.0100,  1, 0.20,  -1438.0},  // n=4628 net=+8213% PF14.62 worst=-719.0bp 2xnet=+6828%
+            {"CRV", "CRV-MIM10-BECASC-W2", "crvusdt", 0.0100,  2, 0.20,  -1315.0},  // n=5242 net=+9358% PF15.79 worst=-657.8bp 2xnet=+7789%
+            {"CRV", "CRV-MIM10-BECASC-W4", "crvusdt", 0.0100,  4, 0.20,  -1920.0},  // n=5127 net=+9581% PF16.67 worst=-960.2bp 2xnet=+8046%
+            {"CRV", "CRV-MIM10-BECASC-W12", "crvusdt", 0.0100, 12, 0.20,  -2275.0},  // n=3835 net=+6737% PF15.07 worst=-1137.8bp 2xnet=+5593%
+            {"DOGE", "DOGE-MIM05-BECASC-W1", "dogeusdt", 0.0050,  1, 0.75,  -2712.0},  // n=8300 net=+13524% PF6.61 worst=-1356.1bp 2xnet=+11280%
+            {"DOGE", "DOGE-MIM05-BECASC-W2", "dogeusdt", 0.0050,  2, 0.75,  -2094.0},  // n=8676 net=+17912% PF8.25 worst=-1047.2bp 2xnet=+15555%
+            {"DOGE", "DOGE-MIM05-BECASC-W4", "dogeusdt", 0.0050,  4, 0.75,  -2481.0},  // n=8556 net=+18547% PF8.64 worst=-1240.8bp 2xnet=+16199%
+            {"DOGE", "DOGE-MIM05-BECASC-W12", "dogeusdt", 0.0050, 12, 0.75,  -1743.0},  // n=6217 net=+18081% PF10.49 worst=-871.9bp 2xnet=+16304%
+            {"DOGE", "DOGE-MIM10-BECASC-W1", "dogeusdt", 0.0100,  1, 0.75,  -2712.0},  // n=6262 net=+12874% PF6.61 worst=-1356.1bp 2xnet=+11173%
+            {"DOGE", "DOGE-MIM10-BECASC-W2", "dogeusdt", 0.0100,  2, 0.75,  -2094.0},  // n=7276 net=+16168% PF8.04 worst=-1047.2bp 2xnet=+14142%
+            {"DOGE", "DOGE-MIM10-BECASC-W4", "dogeusdt", 0.0100,  4, 0.75,  -2481.0},  // n=7415 net=+17795% PF8.63 worst=-1240.8bp 2xnet=+15744%
+            {"DOGE", "DOGE-MIM10-BECASC-W12", "dogeusdt", 0.0100, 12, 0.75,  -1743.0},  // n=5383 net=+16721% PF11.56 worst=-871.9bp 2xnet=+15176%
+            {"DOT", "DOT-MIM05-BECASC-W1", "dotusdt", 0.0050,  1, 0.75,  -1202.0},  // n=5212 net=+7142% PF7.20 worst=-601.0bp 2xnet=+5584%
+            {"DOT", "DOT-MIM05-BECASC-W2", "dotusdt", 0.0050,  2, 0.75,  -1411.0},  // n=5443 net=+7796% PF7.35 worst=-705.6bp 2xnet=+6253%
+            {"DOT", "DOT-MIM05-BECASC-W4", "dotusdt", 0.0050,  4, 0.75,  -1087.0},  // n=5322 net=+7923% PF7.43 worst=-543.9bp 2xnet=+6476%
+            {"DOT", "DOT-MIM05-BECASC-W12", "dotusdt", 0.0050, 12, 0.20,  -1276.0},  // n=3828 net=+5341% PF15.51 worst=-638.0bp 2xnet=+4205%
+            {"DOT", "DOT-MIM10-BECASC-W1", "dotusdt", 0.0100,  1, 0.20,  -1010.0},  // n=3654 net=+5561% PF15.99 worst=-505.2bp 2xnet=+4474%
+            {"DOT", "DOT-MIM10-BECASC-W2", "dotusdt", 0.0100,  2, 0.20,  -1411.0},  // n=4406 net=+6301% PF14.07 worst=-705.6bp 2xnet=+4979%
+            {"DOT", "DOT-MIM10-BECASC-W4", "dotusdt", 0.0100,  4, 0.20,  -1276.0},  // n=4457 net=+6354% PF16.69 worst=-638.0bp 2xnet=+5026%
+            {"DOT", "DOT-MIM10-BECASC-W12", "dotusdt", 0.0100, 12, 0.20,  -1276.0},  // n=3304 net=+4948% PF15.71 worst=-638.0bp 2xnet=+3962%
+            {"ETC", "ETC-MIM05-BECASC-W1", "etcusdt", 0.0050,  1, 0.20,  -1261.0},  // n=4770 net=+6170% PF16.97 worst=-630.6bp 2xnet=+4758%
+            {"ETC", "ETC-MIM05-BECASC-W2", "etcusdt", 0.0050,  2, 0.20,  -1269.0},  // n=4906 net=+6782% PF20.80 worst=-634.9bp 2xnet=+5322%
+            {"ETC", "ETC-MIM05-BECASC-W4", "etcusdt", 0.0050,  4, 0.20,  -1269.0},  // n=4987 net=+6699% PF17.87 worst=-634.9bp 2xnet=+5220%
+            {"ETC", "ETC-MIM05-BECASC-W12", "etcusdt", 0.0050, 12, 0.20,  -1261.0},  // n=3720 net=+5184% PF19.41 worst=-630.6bp 2xnet=+4078%
+            {"ETC", "ETC-MIM10-BECASC-W1", "etcusdt", 0.0100,  1, 0.20,  -1261.0},  // n=3090 net=+4586% PF20.09 worst=-630.6bp 2xnet=+3666%
+            {"ETC", "ETC-MIM10-BECASC-W2", "etcusdt", 0.0100,  2, 0.20,  -1269.0},  // n=3924 net=+5507% PF19.33 worst=-634.9bp 2xnet=+4329%
+            {"ETC", "ETC-MIM10-BECASC-W4", "etcusdt", 0.0100,  4, 0.20,  -1261.0},  // n=4014 net=+5648% PF18.82 worst=-630.6bp 2xnet=+4457%
+            {"ETC", "ETC-MIM10-BECASC-W12", "etcusdt", 0.0100, 12, 0.20,  -1333.0},  // n=3121 net=+4577% PF18.51 worst=-666.7bp 2xnet=+3650%
+            {"FIL", "FIL-MIM05-BECASC-W1", "filusdt", 0.0050,  1, 0.20,   -987.0},  // n=5567 net=+7879% PF13.68 worst=-493.8bp 2xnet=+6216%
+            {"FIL", "FIL-MIM05-BECASC-W2", "filusdt", 0.0050,  2, 0.75,  -2170.0},  // n=5760 net=+9255% PF7.33 worst=-1085.0bp 2xnet=+7725%
+            {"FIL", "FIL-MIM05-BECASC-W4", "filusdt", 0.0050,  4, 0.20,  -2589.0},  // n=5630 net=+9048% PF15.99 worst=-1294.9bp 2xnet=+7367%
+            {"FIL", "FIL-MIM05-BECASC-W12", "filusdt", 0.0050, 12, 0.20,  -1666.0},  // n=3959 net=+6632% PF18.46 worst=-833.2bp 2xnet=+5453%
+            {"FIL", "FIL-MIM10-BECASC-W1", "filusdt", 0.0100,  1, 0.20,  -2589.0},  // n=4277 net=+6677% PF13.98 worst=-1294.9bp 2xnet=+5396%
+            {"FIL", "FIL-MIM10-BECASC-W2", "filusdt", 0.0100,  2, 0.20,  -2589.0},  // n=4696 net=+7710% PF16.16 worst=-1294.9bp 2xnet=+6308%
+            {"FIL", "FIL-MIM10-BECASC-W4", "filusdt", 0.0100,  4, 0.20,  -1493.0},  // n=4869 net=+8360% PF18.33 worst=-746.6bp 2xnet=+6913%
+            {"FIL", "FIL-MIM10-BECASC-W12", "filusdt", 0.0100, 12, 0.20,  -2607.0},  // n=3522 net=+5991% PF18.72 worst=-1303.6bp 2xnet=+4936%
+            {"GRT", "GRT-MIM05-BECASC-W1", "grtusdt", 0.0050,  1, 0.75,  -1963.0},  // n=9114 net=+15762% PF7.07 worst=-981.9bp 2xnet=+13352%
+            {"GRT", "GRT-MIM05-BECASC-W2", "grtusdt", 0.0050,  2, 0.20,  -1963.0},  // n=9518 net=+17273% PF13.38 worst=-981.9bp 2xnet=+14434%
+            {"GRT", "GRT-MIM05-BECASC-W4", "grtusdt", 0.0050,  4, 0.20,  -2003.0},  // n=9518 net=+17839% PF15.03 worst=-1001.7bp 2xnet=+14999%
+            {"GRT", "GRT-MIM05-BECASC-W12", "grtusdt", 0.0050, 12, 0.20,  -2111.0},  // n=6819 net=+12570% PF14.75 worst=-1055.6bp 2xnet=+10541%
+            {"GRT", "GRT-MIM10-BECASC-W1", "grtusdt", 0.0100,  1, 0.20,  -1336.0},  // n=7901 net=+14945% PF14.28 worst=-668.3bp 2xnet=+12593%
+            {"GRT", "GRT-MIM10-BECASC-W2", "grtusdt", 0.0100,  2, 0.50,  -2763.0},  // n=8684 net=+16708% PF9.60 worst=-1381.8bp 2xnet=+14186%
+            {"GRT", "GRT-MIM10-BECASC-W4", "grtusdt", 0.0100,  4, 0.20,  -2003.0},  // n=8542 net=+16322% PF14.34 worst=-1001.7bp 2xnet=+13766%
+            {"GRT", "GRT-MIM10-BECASC-W12", "grtusdt", 0.0100, 12, 0.20,  -2111.0},  // n=5926 net=+11366% PF15.59 worst=-1055.6bp 2xnet=+9596%
+            {"ICP", "ICP-MIM05-BECASC-W1", "icpusdt", 0.0050,  1, 0.20,  -1624.0},  // n=5574 net=+7647% PF12.69 worst=-812.2bp 2xnet=+5994%
+            {"ICP", "ICP-MIM05-BECASC-W2", "icpusdt", 0.0050,  2, 0.20,  -1314.0},  // n=5847 net=+8874% PF15.23 worst=-657.3bp 2xnet=+7135%
+            {"ICP", "ICP-MIM05-BECASC-W4", "icpusdt", 0.0050,  4, 0.20,  -1624.0},  // n=5859 net=+9550% PF17.07 worst=-812.2bp 2xnet=+7806%
+            {"ICP", "ICP-MIM05-BECASC-W12", "icpusdt", 0.0050, 12, 0.20,  -1624.0},  // n=4055 net=+6212% PF14.23 worst=-812.2bp 2xnet=+4999%
+            {"ICP", "ICP-MIM10-BECASC-W1", "icpusdt", 0.0100,  1, 0.20,  -1624.0},  // n=4332 net=+6842% PF13.40 worst=-812.2bp 2xnet=+5549%
+            {"ICP", "ICP-MIM10-BECASC-W2", "icpusdt", 0.0100,  2, 0.20,  -1624.0},  // n=5094 net=+8312% PF15.51 worst=-812.2bp 2xnet=+6794%
+            {"ICP", "ICP-MIM10-BECASC-W4", "icpusdt", 0.0100,  4, 0.20,  -1626.0},  // n=5043 net=+8213% PF15.29 worst=-813.4bp 2xnet=+6705%
+            {"ICP", "ICP-MIM10-BECASC-W12", "icpusdt", 0.0100, 12, 0.20,  -1631.0},  // n=3633 net=+5635% PF14.28 worst=-815.6bp 2xnet=+4550%
+            {"INJ", "INJ-MIM05-BECASC-W1", "injusdt", 0.0050,  1, 0.20,  -1554.0},  // n=5868 net=+9752% PF13.11 worst=-777.1bp 2xnet=+8003%
+            {"INJ", "INJ-MIM05-BECASC-W2", "injusdt", 0.0050,  2, 0.20,  -1711.0},  // n=6083 net=+11429% PF15.27 worst=-855.7bp 2xnet=+9616%
+            {"INJ", "INJ-MIM05-BECASC-W4", "injusdt", 0.0050,  4, 0.75,  -1784.0},  // n=6145 net=+12641% PF8.66 worst=-892.3bp 2xnet=+10884%
+            {"INJ", "INJ-MIM05-BECASC-W12", "injusdt", 0.0050, 12, 0.75,  -1901.0},  // n=4328 net=+9104% PF7.89 worst=-950.5bp 2xnet=+7887%
+            {"INJ", "INJ-MIM10-BECASC-W1", "injusdt", 0.0100,  1, 0.20,  -1140.0},  // n=5218 net=+9775% PF15.58 worst=-570.1bp 2xnet=+8214%
+            {"INJ", "INJ-MIM10-BECASC-W2", "injusdt", 0.0100,  2, 0.20,  -1711.0},  // n=5682 net=+10856% PF15.92 worst=-855.7bp 2xnet=+9161%
+            {"INJ", "INJ-MIM10-BECASC-W4", "injusdt", 0.0100,  4, 0.20,  -1530.0},  // n=5538 net=+11044% PF16.99 worst=-765.1bp 2xnet=+9386%
+            {"INJ", "INJ-MIM10-BECASC-W12", "injusdt", 0.0100, 12, 0.20,   -942.0},  // n=3864 net=+7984% PF17.67 worst=-471.0bp 2xnet=+6831%
+            {"LDO", "LDO-MIM05-BECASC-W1", "ldousdt", 0.0050,  1, 0.20,  -1930.0},  // n=6233 net=+10002% PF11.81 worst=-965.2bp 2xnet=+8144%
+            {"LDO", "LDO-MIM05-BECASC-W2", "ldousdt", 0.0050,  2, 0.20,  -1930.0},  // n=6448 net=+11608% PF14.50 worst=-965.2bp 2xnet=+9667%
+            {"LDO", "LDO-MIM05-BECASC-W4", "ldousdt", 0.0050,  4, 0.20,  -1930.0},  // n=6668 net=+12761% PF15.75 worst=-965.2bp 2xnet=+10762%
+            {"LDO", "LDO-MIM05-BECASC-W12", "ldousdt", 0.0050, 12, 0.75,  -4166.0},  // n=4649 net=+9430% PF6.79 worst=-2083.0bp 2xnet=+8168%
+            {"LDO", "LDO-MIM10-BECASC-W1", "ldousdt", 0.0100,  1, 0.20,  -1930.0},  // n=5333 net=+10416% PF14.39 worst=-965.2bp 2xnet=+8818%
+            {"LDO", "LDO-MIM10-BECASC-W2", "ldousdt", 0.0100,  2, 0.20,  -1930.0},  // n=5984 net=+11618% PF15.80 worst=-965.2bp 2xnet=+9825%
+            {"LDO", "LDO-MIM10-BECASC-W4", "ldousdt", 0.0100,  4, 0.20,  -1607.0},  // n=5936 net=+11214% PF15.74 worst=-803.9bp 2xnet=+9440%
+            {"LDO", "LDO-MIM10-BECASC-W12", "ldousdt", 0.0100, 12, 0.75,  -4166.0},  // n=4092 net=+8559% PF6.86 worst=-2083.0bp 2xnet=+7464%
+            {"LINK", "LINK-MIM05-BECASC-W1", "linkusdt", 0.0050,  1, 0.20,  -2001.0},  // n=9068 net=+13266% PF13.14 worst=-1000.8bp 2xnet=+10554%
+            {"LINK", "LINK-MIM05-BECASC-W2", "linkusdt", 0.0050,  2, 0.20,  -2001.0},  // n=9493 net=+14810% PF14.27 worst=-1000.8bp 2xnet=+11976%
+            {"LINK", "LINK-MIM05-BECASC-W4", "linkusdt", 0.0050,  4, 0.50,  -1983.0},  // n=9401 net=+15030% PF9.61 worst=-991.5bp 2xnet=+12349%
+            {"LINK", "LINK-MIM05-BECASC-W12", "linkusdt", 0.0050, 12, 0.20,  -1489.0},  // n=6751 net=+10866% PF16.48 worst=-744.7bp 2xnet=+8851%
+            {"LINK", "LINK-MIM10-BECASC-W1", "linkusdt", 0.0100,  1, 0.20,  -2001.0},  // n=7107 net=+11655% PF13.52 worst=-1000.8bp 2xnet=+9529%
+            {"LINK", "LINK-MIM10-BECASC-W2", "linkusdt", 0.0100,  2, 0.75,  -1945.0},  // n=8069 net=+13677% PF6.50 worst=-972.6bp 2xnet=+11371%
+            {"LINK", "LINK-MIM10-BECASC-W4", "linkusdt", 0.0100,  4, 0.75,  -1983.0},  // n=8011 net=+13595% PF6.75 worst=-991.5bp 2xnet=+11236%
+            {"LINK", "LINK-MIM10-BECASC-W12", "linkusdt", 0.0100, 12, 0.20,  -1489.0},  // n=5889 net=+9695% PF16.86 worst=-744.7bp 2xnet=+7939%
+            {"LTC", "LTC-MIM05-BECASC-W1", "ltcusdt", 0.0050,  1, 0.20,  -1552.0},  // n=8096 net=+10040% PF11.47 worst=-776.0bp 2xnet=+7625%
+            {"LTC", "LTC-MIM05-BECASC-W2", "ltcusdt", 0.0050,  2, 0.20,  -1519.0},  // n=8574 net=+11051% PF12.79 worst=-759.5bp 2xnet=+8493%
+            {"LTC", "LTC-MIM05-BECASC-W4", "ltcusdt", 0.0050,  4, 0.20,  -1941.0},  // n=8618 net=+11591% PF14.13 worst=-970.8bp 2xnet=+9023%
+            {"LTC", "LTC-MIM05-BECASC-W12", "ltcusdt", 0.0050, 12, 0.20,  -1060.0},  // n=6384 net=+8551% PF14.95 worst=-530.2bp 2xnet=+6644%
+            {"LTC", "LTC-MIM10-BECASC-W1", "ltcusdt", 0.0100,  1, 0.20,  -1552.0},  // n=5941 net=+8412% PF12.61 worst=-776.0bp 2xnet=+6643%
+            {"LTC", "LTC-MIM10-BECASC-W2", "ltcusdt", 0.0100,  2, 0.20,  -1941.0},  // n=7002 net=+9747% PF13.79 worst=-970.8bp 2xnet=+7655%
+            {"LTC", "LTC-MIM10-BECASC-W4", "ltcusdt", 0.0100,  4, 0.20,   -971.0},  // n=7024 net=+9727% PF14.66 worst=-485.5bp 2xnet=+7635%
+            {"LTC", "LTC-MIM10-BECASC-W12", "ltcusdt", 0.0100, 12, 0.20,   -984.0},  // n=5447 net=+7553% PF15.70 worst=-492.0bp 2xnet=+5931%
+            {"MANA", "MANA-MIM05-BECASC-W1", "manausdt", 0.0050,  1, 0.75,  -1840.0},  // n=5442 net=+8382% PF7.77 worst=-920.0bp 2xnet=+6816%
+            {"MANA", "MANA-MIM05-BECASC-W2", "manausdt", 0.0050,  2, 0.75,  -1748.0},  // n=5560 net=+8946% PF7.99 worst=-874.3bp 2xnet=+7267%
+            {"MANA", "MANA-MIM05-BECASC-W4", "manausdt", 0.0050,  4, 0.50,  -1928.0},  // n=5533 net=+8701% PF10.13 worst=-964.1bp 2xnet=+7117%
+            {"MANA", "MANA-MIM05-BECASC-W12", "manausdt", 0.0050, 12, 0.20,  -1945.0},  // n=4088 net=+6342% PF17.61 worst=-972.9bp 2xnet=+5128%
+            {"MANA", "MANA-MIM10-BECASC-W1", "manausdt", 0.0100,  1, 0.20,  -1381.0},  // n=3905 net=+6261% PF14.74 worst=-690.8bp 2xnet=+5095%
+            {"MANA", "MANA-MIM10-BECASC-W2", "manausdt", 0.0100,  2, 0.20,  -1928.0},  // n=4733 net=+7247% PF15.78 worst=-964.1bp 2xnet=+5831%
+            {"MANA", "MANA-MIM10-BECASC-W4", "manausdt", 0.0100,  4, 0.20,  -1928.0},  // n=4776 net=+7548% PF17.23 worst=-964.1bp 2xnet=+6110%
+            {"MANA", "MANA-MIM10-BECASC-W12", "manausdt", 0.0100, 12, 0.20,  -1586.0},  // n=3529 net=+5469% PF17.69 worst=-793.1bp 2xnet=+4412%
+            {"NEAR", "NEAR-MIM05-BECASC-W1", "nearusdt", 0.0050,  1, 0.20,  -2348.0},  // n=9258 net=+15130% PF11.10 worst=-1174.1bp 2xnet=+12344%
+            {"NEAR", "NEAR-MIM05-BECASC-W2", "nearusdt", 0.0050,  2, 0.20,  -1918.0},  // n=9559 net=+17790% PF13.24 worst=-959.3bp 2xnet=+14939%
+            {"NEAR", "NEAR-MIM05-BECASC-W4", "nearusdt", 0.0050,  4, 0.75,  -2348.0},  // n=9530 net=+19878% PF7.93 worst=-1174.1bp 2xnet=+17111%
+            {"NEAR", "NEAR-MIM05-BECASC-W12", "nearusdt", 0.0050, 12, 0.20,  -1532.0},  // n=6924 net=+13445% PF15.50 worst=-766.2bp 2xnet=+11376%
+            {"NEAR", "NEAR-MIM10-BECASC-W1", "nearusdt", 0.0100,  1, 0.20,  -2348.0},  // n=8050 net=+14925% PF12.67 worst=-1174.1bp 2xnet=+12506%
+            {"NEAR", "NEAR-MIM10-BECASC-W2", "nearusdt", 0.0100,  2, 0.20,  -1918.0},  // n=8702 net=+17150% PF13.93 worst=-959.3bp 2xnet=+14551%
+            {"NEAR", "NEAR-MIM10-BECASC-W4", "nearusdt", 0.0100,  4, 0.75,  -2348.0},  // n=8514 net=+18075% PF7.53 worst=-1174.1bp 2xnet=+15755%
+            {"NEAR", "NEAR-MIM10-BECASC-W12", "nearusdt", 0.0100, 12, 0.20,  -1532.0},  // n=6218 net=+12328% PF15.82 worst=-766.2bp 2xnet=+10466%
+            {"OP", "OP-MIM05-BECASC-W1", "opusdt", 0.0050,  1, 0.75,  -2258.0},  // n=6861 net=+11683% PF7.09 worst=-1129.4bp 2xnet=+9836%
+            {"OP", "OP-MIM05-BECASC-W2", "opusdt", 0.0050,  2, 0.20,  -1762.0},  // n=7022 net=+12665% PF15.10 worst=-881.2bp 2xnet=+10563%
+            {"OP", "OP-MIM05-BECASC-W4", "opusdt", 0.0050,  4, 0.20,  -2374.0},  // n=6930 net=+13579% PF15.22 worst=-1187.2bp 2xnet=+11499%
+            {"OP", "OP-MIM05-BECASC-W12", "opusdt", 0.0050, 12, 0.75,  -1671.0},  // n=4921 net=+9311% PF6.22 worst=-835.5bp 2xnet=+8000%
+            {"OP", "OP-MIM10-BECASC-W1", "opusdt", 0.0100,  1, 0.75,  -2258.0},  // n=5588 net=+11558% PF7.24 worst=-1129.4bp 2xnet=+10066%
+            {"OP", "OP-MIM10-BECASC-W2", "opusdt", 0.0100,  2, 0.20,  -1878.0},  // n=6243 net=+11943% PF16.16 worst=-939.1bp 2xnet=+10073%
+            {"OP", "OP-MIM10-BECASC-W4", "opusdt", 0.0100,  4, 0.20,  -2080.0},  // n=6208 net=+12105% PF15.40 worst=-1040.3bp 2xnet=+10234%
+            {"OP", "OP-MIM10-BECASC-W12", "opusdt", 0.0100, 12, 0.75,  -1743.0},  // n=4405 net=+8680% PF5.97 worst=-871.5bp 2xnet=+7536%
+            {"RUNE", "RUNE-MIM05-BECASC-W1", "runeusdt", 0.0050,  1, 0.75,  -2881.0},  // n=5664 net=+10197% PF8.27 worst=-1440.6bp 2xnet=+8651%
+            {"RUNE", "RUNE-MIM05-BECASC-W2", "runeusdt", 0.0050,  2, 0.75,  -1476.0},  // n=5942 net=+10999% PF8.45 worst=-738.4bp 2xnet=+9250%
+            {"RUNE", "RUNE-MIM05-BECASC-W4", "runeusdt", 0.0050,  4, 0.75,  -1591.0},  // n=5662 net=+11232% PF8.83 worst=-795.9bp 2xnet=+9748%
+            {"RUNE", "RUNE-MIM05-BECASC-W12", "runeusdt", 0.0050, 12, 0.75,  -1424.0},  // n=4078 net=+7876% PF7.43 worst=-712.2bp 2xnet=+6844%
+            {"RUNE", "RUNE-MIM10-BECASC-W1", "runeusdt", 0.0100,  1, 0.75,  -2881.0},  // n=4251 net=+8402% PF7.31 worst=-1440.6bp 2xnet=+7174%
+            {"RUNE", "RUNE-MIM10-BECASC-W2", "runeusdt", 0.0100,  2, 0.20,  -1269.0},  // n=5118 net=+9288% PF16.74 worst=-634.9bp 2xnet=+7758%
+            {"RUNE", "RUNE-MIM10-BECASC-W4", "runeusdt", 0.0100,  4, 0.20,  -1591.0},  // n=4934 net=+9235% PF19.29 worst=-795.9bp 2xnet=+7762%
+            {"RUNE", "RUNE-MIM10-BECASC-W12", "runeusdt", 0.0100, 12, 0.75,  -3038.0},  // n=3574 net=+6870% PF6.41 worst=-1519.4bp 2xnet=+5897%
+            {"SAND", "SAND-MIM05-BECASC-W1", "sandusdt", 0.0050,  1, 0.75,  -2369.0},  // n=5594 net=+8599% PF7.78 worst=-1184.5bp 2xnet=+7162%
+            {"SAND", "SAND-MIM05-BECASC-W2", "sandusdt", 0.0050,  2, 0.20,  -1179.0},  // n=5597 net=+9153% PF20.26 worst=-589.6bp 2xnet=+7475%
+            {"SAND", "SAND-MIM05-BECASC-W4", "sandusdt", 0.0050,  4, 0.20,  -1586.0},  // n=5580 net=+9096% PF21.36 worst=-793.3bp 2xnet=+7423%
+            {"SAND", "SAND-MIM05-BECASC-W12", "sandusdt", 0.0050, 12, 0.20,  -1586.0},  // n=4034 net=+6303% PF17.65 worst=-793.3bp 2xnet=+5103%
+            {"SAND", "SAND-MIM10-BECASC-W1", "sandusdt", 0.0100,  1, 0.20,  -1504.0},  // n=4147 net=+6916% PF17.67 worst=-752.2bp 2xnet=+5678%
+            {"SAND", "SAND-MIM10-BECASC-W2", "sandusdt", 0.0100,  2, 0.20,  -1586.0},  // n=4822 net=+7903% PF17.62 worst=-793.3bp 2xnet=+6452%
+            {"SAND", "SAND-MIM10-BECASC-W4", "sandusdt", 0.0100,  4, 0.20,  -1586.0},  // n=4855 net=+8093% PF21.05 worst=-793.3bp 2xnet=+6644%
+            {"SAND", "SAND-MIM10-BECASC-W12", "sandusdt", 0.0100, 12, 0.20,  -1586.0},  // n=3573 net=+5656% PF17.17 worst=-793.3bp 2xnet=+4589%
+            {"SOL", "SOL-MIM05-BECASC-W1", "solusdt", 0.0050,  1, 0.75,  -1661.0},  // n=9116 net=+15402% PF6.93 worst=-830.9bp 2xnet=+13021%
+            {"SOL", "SOL-MIM05-BECASC-W2", "solusdt", 0.0050,  2, 0.75,  -2450.0},  // n=9527 net=+17753% PF7.96 worst=-1225.3bp 2xnet=+15172%
+            {"SOL", "SOL-MIM05-BECASC-W4", "solusdt", 0.0050,  4, 0.20,  -1759.0},  // n=9594 net=+18205% PF18.55 worst=-879.8bp 2xnet=+15342%
+            {"SOL", "SOL-MIM05-BECASC-W12", "solusdt", 0.0050, 12, 0.20,  -2667.0},  // n=6761 net=+13574% PF19.41 worst=-1333.8bp 2xnet=+11564%
+            {"SOL", "SOL-MIM10-BECASC-W1", "solusdt", 0.0100,  1, 0.20,  -1661.0},  // n=7566 net=+14070% PF15.46 worst=-830.9bp 2xnet=+11811%
+            {"SOL", "SOL-MIM10-BECASC-W2", "solusdt", 0.0100,  2, 0.20,  -1759.0},  // n=8391 net=+15949% PF17.36 worst=-879.8bp 2xnet=+13447%
+            {"SOL", "SOL-MIM10-BECASC-W4", "solusdt", 0.0100,  4, 0.20,  -1759.0},  // n=8368 net=+16597% PF18.57 worst=-879.8bp 2xnet=+14098%
+            {"SOL", "SOL-MIM10-BECASC-W12", "solusdt", 0.0100, 12, 0.20,  -2667.0},  // n=5879 net=+12041% PF20.22 worst=-1333.8bp 2xnet=+10292%
+            {"SUI", "SUI-MIM05-BECASC-W1", "suiusdt", 0.0050,  1, 0.20,  -1091.0},  // n=5144 net=+8810% PF15.13 worst=-545.5bp 2xnet=+7274%
+            {"SUI", "SUI-MIM05-BECASC-W2", "suiusdt", 0.0050,  2, 0.20,  -1086.0},  // n=5263 net=+9739% PF17.11 worst=-543.2bp 2xnet=+8171%
+            {"SUI", "SUI-MIM05-BECASC-W4", "suiusdt", 0.0050,  4, 0.20,  -2523.0},  // n=5352 net=+10414% PF18.25 worst=-1261.5bp 2xnet=+8816%
+            {"SUI", "SUI-MIM05-BECASC-W12", "suiusdt", 0.0050, 12, 0.20,  -3095.0},  // n=3750 net=+7759% PF18.88 worst=-1547.6bp 2xnet=+6641%
+            {"SUI", "SUI-MIM10-BECASC-W1", "suiusdt", 0.0100,  1, 0.20,  -2236.0},  // n=4302 net=+8301% PF15.77 worst=-1118.1bp 2xnet=+7014%
+            {"SUI", "SUI-MIM10-BECASC-W2", "suiusdt", 0.0100,  2, 0.20,  -2228.0},  // n=4826 net=+9908% PF17.24 worst=-1114.2bp 2xnet=+8468%
+            {"SUI", "SUI-MIM10-BECASC-W4", "suiusdt", 0.0100,  4, 0.20,  -2168.0},  // n=4677 net=+9311% PF17.96 worst=-1084.1bp 2xnet=+7909%
+            {"SUI", "SUI-MIM10-BECASC-W12", "suiusdt", 0.0100, 12, 0.75,  -3095.0},  // n=3346 net=+7135% PF7.35 worst=-1547.6bp 2xnet=+6270%
+            {"SUSHI", "SUSHI-MIM05-BECASC-W1", "sushiusdt", 0.0050,  1, 0.20,  -1973.0},  // n=5819 net=+8454% PF12.54 worst=-986.7bp 2xnet=+6717%
+            {"SUSHI", "SUSHI-MIM05-BECASC-W2", "sushiusdt", 0.0050,  2, 0.20,  -1908.0},  // n=5997 net=+9527% PF14.18 worst=-954.0bp 2xnet=+7733%
+            {"SUSHI", "SUSHI-MIM05-BECASC-W4", "sushiusdt", 0.0050,  4, 0.20,  -1708.0},  // n=5888 net=+10130% PF16.09 worst=-854.3bp 2xnet=+8365%
+            {"SUSHI", "SUSHI-MIM05-BECASC-W12", "sushiusdt", 0.0050, 12, 0.20,  -1087.0},  // n=4362 net=+7251% PF16.81 worst=-543.6bp 2xnet=+5945%
+            {"SUSHI", "SUSHI-MIM10-BECASC-W1", "sushiusdt", 0.0100,  1, 0.20,  -1708.0},  // n=4636 net=+7646% PF13.59 worst=-854.3bp 2xnet=+6258%
+            {"SUSHI", "SUSHI-MIM10-BECASC-W2", "sushiusdt", 0.0100,  2, 0.20,  -1708.0},  // n=5275 net=+8805% PF14.62 worst=-854.3bp 2xnet=+7223%
+            {"SUSHI", "SUSHI-MIM10-BECASC-W4", "sushiusdt", 0.0100,  4, 0.20,  -1445.0},  // n=5219 net=+9110% PF16.57 worst=-722.8bp 2xnet=+7544%
+            {"SUSHI", "SUSHI-MIM10-BECASC-W12", "sushiusdt", 0.0100, 12, 0.20,  -1401.0},  // n=3771 net=+6107% PF15.20 worst=-700.9bp 2xnet=+4981%
+            {"THETA", "THETA-MIM05-BECASC-W1", "thetausdt", 0.0050,  1, 0.75,  -1690.0},  // n=5683 net=+9413% PF7.31 worst=-845.0bp 2xnet=+7921%
+            {"THETA", "THETA-MIM05-BECASC-W2", "thetausdt", 0.0050,  2, 0.75,  -1690.0},  // n=5875 net=+10147% PF7.84 worst=-845.0bp 2xnet=+8577%
+            {"THETA", "THETA-MIM05-BECASC-W4", "thetausdt", 0.0050,  4, 0.75,  -1827.0},  // n=5753 net=+10400% PF8.25 worst=-913.5bp 2xnet=+8805%
+            {"THETA", "THETA-MIM05-BECASC-W12", "thetausdt", 0.0050, 12, 0.20,  -2111.0},  // n=4298 net=+7163% PF17.13 worst=-1055.6bp 2xnet=+5871%
+            {"THETA", "THETA-MIM10-BECASC-W1", "thetausdt", 0.0100,  1, 0.20,  -1484.0},  // n=4599 net=+7649% PF15.08 worst=-742.4bp 2xnet=+6270%
+            {"THETA", "THETA-MIM10-BECASC-W2", "thetausdt", 0.0100,  2, 0.75,  -1710.0},  // n=4988 net=+8916% PF7.21 worst=-855.4bp 2xnet=+7518%
+            {"THETA", "THETA-MIM10-BECASC-W4", "thetausdt", 0.0100,  4, 0.20,  -1827.0},  // n=5004 net=+8537% PF16.80 worst=-913.5bp 2xnet=+7041%
+            {"THETA", "THETA-MIM10-BECASC-W12", "thetausdt", 0.0100, 12, 0.20,  -2111.0},  // n=3774 net=+6096% PF15.97 worst=-1055.6bp 2xnet=+4962%
+            {"TIA", "TIA-MIM05-BECASC-W1", "tiausdt", 0.0050,  1, 0.20,  -2819.0},  // n=4583 net=+8161% PF11.28 worst=-1409.7bp 2xnet=+6793%
+            {"TIA", "TIA-MIM05-BECASC-W2", "tiausdt", 0.0050,  2, 0.20,  -1982.0},  // n=4738 net=+8827% PF12.78 worst=-991.1bp 2xnet=+7415%
+            {"TIA", "TIA-MIM05-BECASC-W4", "tiausdt", 0.0050,  4, 0.20,  -1634.0},  // n=4733 net=+9600% PF15.26 worst=-817.3bp 2xnet=+8182%
+            {"TIA", "TIA-MIM05-BECASC-W12", "tiausdt", 0.0050, 12, 0.20,  -1142.0},  // n=3388 net=+6618% PF15.54 worst=-571.3bp 2xnet=+5602%
+            {"TIA", "TIA-MIM10-BECASC-W1", "tiausdt", 0.0100,  1, 0.20,  -2819.0},  // n=4229 net=+8218% PF13.11 worst=-1409.7bp 2xnet=+6955%
+            {"TIA", "TIA-MIM10-BECASC-W2", "tiausdt", 0.0100,  2, 0.20,  -1030.0},  // n=4495 net=+8686% PF14.21 worst=-515.4bp 2xnet=+7354%
+            {"TIA", "TIA-MIM10-BECASC-W4", "tiausdt", 0.0100,  4, 0.20,  -1634.0},  // n=4246 net=+8707% PF15.21 worst=-817.3bp 2xnet=+7436%
+            {"TIA", "TIA-MIM10-BECASC-W12", "tiausdt", 0.0100, 12, 0.20,  -1142.0},  // n=3089 net=+6054% PF15.45 worst=-571.3bp 2xnet=+5127%
+            {"TRX", "TRX-MIM05-BECASC-W1", "trxusdt", 0.0050,  1, 0.75,  -1135.0},  // n=5662 net=+7385% PF7.33 worst=-567.8bp 2xnet=+5730%
+            {"TRX", "TRX-MIM05-BECASC-W2", "trxusdt", 0.0050,  2, 0.75,  -1271.0},  // n=6785 net=+9140% PF8.05 worst=-635.8bp 2xnet=+7079%
+            {"TRX", "TRX-MIM05-BECASC-W4", "trxusdt", 0.0050,  4, 0.75,  -2063.0},  // n=6972 net=+9265% PF7.92 worst=-1031.5bp 2xnet=+7276%
+            {"TRX", "TRX-MIM05-BECASC-W12", "trxusdt", 0.0050, 12, 0.75,   -994.0},  // n=5171 net=+6926% PF7.19 worst=-497.4bp 2xnet=+5501%
+            {"TRX", "TRX-MIM10-BECASC-W1", "trxusdt", 0.0100,  1, 0.20,   -737.0},  // n=3139 net=+5172% PF19.22 worst=-368.5bp 2xnet=+4231%
+            {"TRX", "TRX-MIM10-BECASC-W2", "trxusdt", 0.0100,  2, 0.20,  -1183.0},  // n=4099 net=+6478% PF18.32 worst=-591.5bp 2xnet=+5252%
+            {"TRX", "TRX-MIM10-BECASC-W4", "trxusdt", 0.0100,  4, 0.75,  -2063.0},  // n=4703 net=+7524% PF7.31 worst=-1031.5bp 2xnet=+6148%
+            {"TRX", "TRX-MIM10-BECASC-W12", "trxusdt", 0.0100, 12, 0.75,  -1050.0},  // n=4077 net=+6324% PF7.48 worst=-525.2bp 2xnet=+5101%
+            {"UNI", "UNI-MIM05-BECASC-W1", "uniusdt", 0.0050,  1, 0.20,  -1904.0},  // n=9136 net=+15572% PF14.37 worst=-952.3bp 2xnet=+12826%
+            {"UNI", "UNI-MIM05-BECASC-W2", "uniusdt", 0.0050,  2, 0.75,  -1661.0},  // n=9276 net=+17673% PF8.59 worst=-830.5bp 2xnet=+14987%
+            {"UNI", "UNI-MIM05-BECASC-W4", "uniusdt", 0.0050,  4, 0.20,  -1638.0},  // n=9459 net=+17343% PF17.73 worst=-819.4bp 2xnet=+14496%
+            {"UNI", "UNI-MIM05-BECASC-W12", "uniusdt", 0.0050, 12, 0.20,  -1558.0},  // n=6681 net=+11296% PF15.81 worst=-779.4bp 2xnet=+9306%
+            {"UNI", "UNI-MIM10-BECASC-W1", "uniusdt", 0.0100,  1, 0.20,  -1904.0},  // n=7611 net=+13966% PF15.19 worst=-952.3bp 2xnet=+11694%
+            {"UNI", "UNI-MIM10-BECASC-W2", "uniusdt", 0.0100,  2, 0.20,  -1558.0},  // n=8428 net=+15631% PF15.54 worst=-779.4bp 2xnet=+13115%
+            {"UNI", "UNI-MIM10-BECASC-W4", "uniusdt", 0.0100,  4, 0.20,  -1102.0},  // n=8372 net=+15339% PF17.65 worst=-551.3bp 2xnet=+12836%
+            {"UNI", "UNI-MIM10-BECASC-W12", "uniusdt", 0.0100, 12, 0.20,  -1558.0},  // n=5980 net=+10352% PF15.74 worst=-779.4bp 2xnet=+8567%
+            {"VET", "VET-MIM05-BECASC-W1", "vetusdt", 0.0050,  1, 0.20,  -1608.0},  // n=5368 net=+7283% PF13.56 worst=-804.1bp 2xnet=+5684%
+            {"VET", "VET-MIM05-BECASC-W2", "vetusdt", 0.0050,  2, 0.20,  -1608.0},  // n=5466 net=+7951% PF15.82 worst=-804.1bp 2xnet=+6316%
+            {"VET", "VET-MIM05-BECASC-W4", "vetusdt", 0.0050,  4, 0.20,  -1635.0},  // n=5405 net=+8321% PF16.02 worst=-817.8bp 2xnet=+6714%
+            {"VET", "VET-MIM05-BECASC-W12", "vetusdt", 0.0050, 12, 0.20,  -2426.0},  // n=4009 net=+5600% PF14.90 worst=-1213.3bp 2xnet=+4396%
+            {"VET", "VET-MIM10-BECASC-W1", "vetusdt", 0.0100,  1, 0.20,  -1608.0},  // n=3987 net=+6005% PF13.92 worst=-804.1bp 2xnet=+4810%
+            {"VET", "VET-MIM10-BECASC-W2", "vetusdt", 0.0100,  2, 0.20,  -1608.0},  // n=4567 net=+7059% PF15.23 worst=-804.1bp 2xnet=+5704%
+            {"VET", "VET-MIM10-BECASC-W4", "vetusdt", 0.0100,  4, 0.20,  -1594.0},  // n=4672 net=+7558% PF15.85 worst=-797.2bp 2xnet=+6151%
+            {"VET", "VET-MIM10-BECASC-W12", "vetusdt", 0.0100, 12, 0.20,  -2304.0},  // n=3452 net=+4935% PF15.26 worst=-1152.0bp 2xnet=+3902%
+            {"XRP", "XRP-MIM05-BECASC-W1", "xrpusdt", 0.0050,  1, 0.75,  -1912.0},  // n=7809 net=+10789% PF6.41 worst=-956.2bp 2xnet=+8785%
+            {"XRP", "XRP-MIM05-BECASC-W2", "xrpusdt", 0.0050,  2, 0.75,  -3158.0},  // n=8295 net=+12224% PF7.07 worst=-1579.2bp 2xnet=+9994%
+            {"XRP", "XRP-MIM05-BECASC-W4", "xrpusdt", 0.0050,  4, 0.75,  -1889.0},  // n=8187 net=+13162% PF7.63 worst=-944.8bp 2xnet=+10854%
+            {"XRP", "XRP-MIM05-BECASC-W12", "xrpusdt", 0.0050, 12, 0.75,  -1683.0},  // n=5781 net=+10128% PF7.05 worst=-841.5bp 2xnet=+8441%
+            {"XRP", "XRP-MIM10-BECASC-W1", "xrpusdt", 0.0100,  1, 0.75,  -1522.0},  // n=5371 net=+8822% PF6.15 worst=-761.0bp 2xnet=+7349%
+            {"XRP", "XRP-MIM10-BECASC-W2", "xrpusdt", 0.0100,  2, 0.20,  -2004.0},  // n=6511 net=+10178% PF15.91 worst=-1002.0bp 2xnet=+8239%
+            {"XRP", "XRP-MIM10-BECASC-W4", "xrpusdt", 0.0100,  4, 0.20,  -1450.0},  // n=6804 net=+10711% PF17.97 worst=-725.4bp 2xnet=+8682%
+            {"XRP", "XRP-MIM10-BECASC-W12", "xrpusdt", 0.0100, 12, 0.75,  -1726.0},  // n=4880 net=+8590% PF6.73 worst=-863.0bp 2xnet=+7406%
         };
         static std::vector<chimera::EdgeEngine> _bc_alt_lt_feeds; _bc_alt_lt_feeds.reserve(_bc_alt_lowthr_cells.size());
         for (const auto& bc : _bc_alt_lowthr_cells) {
             _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
             _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_alt_lt_feeds.emplace_back(make_uj(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
+            _bc_alt_lt_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
             _grid.emplace_back(make_becascade_cell(
                 _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
                 bc.det_w, bc.giveback));
             _grid_feeds.push_back(&_bc_alt_lt_feeds.back());
         }
     }
-    std::vector<chimera::UpJumpLadderCompanion*> _all_clips;
+    std::vector<chimera::MimicLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
     // ── S-2026-07-15 MIMIC-FLOOR-VIOLATION GATE (operator mandate: Chimera has no canary
@@ -5610,7 +5610,7 @@ int main() {
     {
         std::lock_guard<std::mutex> lk(g_companion_mtx);
         auto _clip_totals = load_companion_clip_totals();
-        const int _NCLIP = (int)_all_clips.size();   // Phase-3: 5 BE-entry mimics (up-jump grid killed)
+        const int _NCLIP = (int)_all_clips.size();   // Phase-3: 5 BE-entry mimics (mimic grid killed)
         g_grid_clip_count = _NCLIP;   // Phase-4 item 20: real grid-cell count for the honest registry
         for (int i = 0; i < _NCLIP; ++i) {
             _all_clips[i]->shadow_mode = true;
@@ -5621,11 +5621,11 @@ int main() {
                 if (_ct != _clip_totals.end())
                     _all_clips[i]->rehydrate(_ct->second.n, _ct->second.net, _ct->second.net_real, _ct->second.net_real_w);
             }
-            _all_clips[i]->set_on_clip([](const chimera::UpJumpLadderCompanion::ClipRecord& r) {
+            _all_clips[i]->set_on_clip([](const chimera::MimicLadderCompanion::ClipRecord& r) {
                 g_mimic_mirror.on_clip(r);       // live mirror SELL first (no-op when disarmed/never-filled)
                 persist_companion_clip(r);       // then the unchanged shadow record path
             });
-            _all_clips[i]->set_on_leg_open([](const chimera::UpJumpLadderCompanion::OpenRecord& r) {
+            _all_clips[i]->set_on_leg_open([](const chimera::MimicLadderCompanion::OpenRecord& r) {
                 g_mimic_mirror.on_open(r);       // live mirror BUY (no-op when disarmed)
             });
             g_companion_by_parent[_all_clips[i]->config().parent_tag] =
@@ -9398,7 +9398,7 @@ int main() {
     wire_engine(ada_reg_d1);
 
     // AAVE daily Keltner-breakout — folds the Mac ibkrcrypto AAVE Kelt mimic (OOS PF 1.56,
-    // DD 11.5%, 2x-robust; the ONLY viable AAVE mimic — operator hard-no on the 62%-DD UpJump).
+    // DD 11.5%, 2x-robust; the ONLY viable AAVE mimic — operator hard-no on the 62%-DD Mimic).
     // aaveusdt already fed (SYM_AAVE=26 < MAX_SYMBOLS=62). Same KELTNER_BREAK as ADA.
     chimera::EdgeEngine::Config aave_kelt_d1_cfg{
         .symbol="aaveusdt", .tag="AAVE-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
@@ -9411,7 +9411,7 @@ int main() {
 
     // ── S-2026-07-12 UNIVERSE SCAN winners (Kelt cells; deployed settings, 2x-cost robust) ──
     // XLM daily Keltner-break — the STRONGEST candidate in the whole universe (OOS +250%/PF11.9,
-    // 2x-cost PF 11.3). XRP daily Kelt (OOS +163/PF6.0, 2x 5.76) — stronger than its grid up-jump.
+    // 2x-cost PF 11.3). XRP daily Kelt (OOS +163/PF6.0, 2x 5.76) — stronger than its grid mimic.
     // Both fed (SYM_XLM=60, SYM_XRP=6). KELTNER_BREAK = upper-band breakout, ride-to-flip.
     chimera::EdgeEngine::Config xlm_kelt_d1_cfg{
         .symbol="xlmusdt", .tag="XLM-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
@@ -9432,8 +9432,8 @@ int main() {
     wire_engine(xrp_kelt_d1);
 
     // GRT — the only fed coin with NO engine (operator gap). Backtested this session with the
-    // deployed settings: GRT 1d Kelt OOS +48.6/PF2.93 (2x 2.78); UpJump4 even stronger (PF3.12,
-    // -> joins the daily up-jump mimic). Kelt cell closes the gap now. Fed SYM_GRT.
+    // deployed settings: GRT 1d Kelt OOS +48.6/PF2.93 (2x 2.78); Mimic4 even stronger (PF3.12,
+    // -> joins the daily mimic). Kelt cell closes the gap now. Fed SYM_GRT.
     chimera::EdgeEngine::Config grt_kelt_d1_cfg{
         .symbol="grtusdt", .tag="GRT-KELT-D1", .kind=chimera::StrategyKind::KELTNER_BREAK,
         .tf_secs=86400, .lookback=20, .hold_bars=12, .sl_atr_mult=3.0, .atr_period=20,
@@ -9443,9 +9443,9 @@ int main() {
     chimera::EdgeEngine grt_kelt_d1(grt_kelt_d1_cfg);
     wire_engine(grt_kelt_d1);
 
-    // NOTE: the S-2026-07-12 universe-scan up-jump PARENT winners (NEAR/AVAX/LINK/BCH/UNI/LDO
+    // NOTE: the S-2026-07-12 universe-scan mimic PARENT winners (NEAR/AVAX/LINK/BCH/UNI/LDO
     // daily + OP 4h) are declared EARLIER (just before the _gcoins grid) so the grid can feed
-    // them the BE-cascade mimic overlay. See the "DAILY UP-JUMP WINNERS" block above the grid.
+    // them the BE-cascade mimic overlay. See the "DAILY MIMIC WINNERS" block above the grid.
 
     chimera::EdgeEngine::Config trx_tsmom_d1_cfg{
         .symbol="trxusdt", .tag="TRX-TSMOM-D1", .kind=chimera::StrategyKind::TSMOM,
@@ -9520,32 +9520,32 @@ int main() {
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_LINK, &link_tsmom_d1,  "linkusdt", 86400, "LINK-TSMOM-D1",  2.18, 1.92, 100,  23, 13});
     // PHASE3-DEAD-TSMOM (2026-07-13): Phase-1 parent scan = TSMOM 0/54 vs random, book replaced by REGIME_SWITCH: g_slots.push_back({chimera::SYM_BNB,  &bnb_tsmom_d1,   "bnbusdt",  86400, "BNB-TSMOM-D1",   3.16, 2.91,  90,  32, 14});
 
-    // UPJUMP-H1 fat-tail parent legs — RETIRED S-2026-07-11 (threshold-comparison grid supersedes;
+    // MIMIC-H1 fat-tail parent legs — RETIRED S-2026-07-11 (threshold-comparison grid supersedes;
     // no 3-overlapping-sets). Their companion books were retired above; these parent legs are now
     // un-slotted so they no longer trade/clutter the desk. Objects stay declared+wired (untraded,
     // no g_slot => never ticked). The grid's 8 feeds are the tuned parents slotted just below.
-    // g_slots.push_back({chimera::SYM_BTC,  &btc_upjump_h1,  "btcusdt",  3600, "BTC-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_ETH,  &eth_upjump_h1,  "ethusdt",  3600, "ETH-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_SOL,  &sol_upjump_h1,  "solusdt",  3600, "SOL-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_DOGE, &doge_upjump_h1, "dogeusdt", 3600, "DOGE-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump_h1,  "bnbusdt",  3600, "BNB-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_ADA,  &ada_upjump_h1,  "adausdt",  3600, "ADA-UPJUMP-H1",  0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_NEAR, &near_upjump_h1, "nearusdt", 3600, "NEAR-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
-    // g_slots.push_back({chimera::SYM_XRP, &xrp_upjump_h1, "xrpusdt", 3600, "XRP-UPJUMP-H1", 0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_BTC,  &btc_mimic_h1,  "btcusdt",  3600, "BTC-MIMIC-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_ETH,  &eth_mimic_h1,  "ethusdt",  3600, "ETH-MIMIC-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_SOL,  &sol_mimic_h1,  "solusdt",  3600, "SOL-MIMIC-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_DOGE, &doge_mimic_h1, "dogeusdt", 3600, "DOGE-MIMIC-H1", 0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_BNB,  &bnb_mimic_h1,  "bnbusdt",  3600, "BNB-MIMIC-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_ADA,  &ada_mimic_h1,  "adausdt",  3600, "ADA-MIMIC-H1",  0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_NEAR, &near_mimic_h1, "nearusdt", 3600, "NEAR-MIMIC-H1", 0.0, 0.0, 0, 0, 57});
+    // g_slots.push_back({chimera::SYM_XRP, &xrp_mimic_h1, "xrpusdt", 3600, "XRP-MIMIC-H1", 0.0, 0.0, 0, 0, 57});
     // FULL BULL ROSTER parents (S-2026-07-11) — price feed + ARM+SEED for the 8 new companion cells
     // (companions self-detect their own window; parent position not read for det_w books). SHADOW.
-    // KILL_UPJUMP_PARENTS (2026-07-13): the 8 UPJUMP2-5 legs were the ONLY live-driven up-jump
-    // engines (tick loop iterates g_slots). Skip them -> no up-jump trades. EDGE-SLOTS drops 32->24
+    // KILL_IMMEDIATE_PARENTS (2026-07-13): the 8 MIMIC2-5 legs were the ONLY live-driven mimic
+    // engines (tick loop iterates g_slots). Skip them -> no mimic trades. EDGE-SLOTS drops 32->24
     // (TSMOM/ICHI incl BTC-TSMOM-D1 remain) so the registry bucket stays wired (no abort).
-    if (!KILL_UPJUMP_PARENTS) {
-    g_slots.push_back({chimera::SYM_ETH,  &eth_upjump2_h1,  "ethusdt",  3600, "ETH-UPJUMP2-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_BTC,  &btc_upjump4_h1,  "btcusdt",  3600, "BTC-UPJUMP4-H2",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_BNB,  &bnb_upjump3_h1,  "bnbusdt",  3600, "BNB-UPJUMP3-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_SOL,  &sol_upjump5_h1,  "solusdt",  3600, "SOL-UPJUMP5-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_DOGE, &doge_upjump4_h4, "dogeusdt", 3600, "DOGE-UPJUMP4-H4", 0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_ADA,  &ada_upjump5_h1,  "adausdt",  3600, "ADA-UPJUMP5-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_XRP,  &xrp_upjump4_h1,  "xrpusdt",  3600, "XRP-UPJUMP4-H1",  0.0, 0.0, 0, 0, 57});
-    g_slots.push_back({chimera::SYM_TRX,  &trx_upjump5_h1,  "trxusdt",  3600, "TRX-UPJUMP5-H1",  0.0, 0.0, 0, 0, 57});
+    if (!KILL_IMMEDIATE_PARENTS) {
+    g_slots.push_back({chimera::SYM_ETH,  &eth_mimic2_h1,  "ethusdt",  3600, "ETH-MIMIC2-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_BTC,  &btc_mimic4_h1,  "btcusdt",  3600, "BTC-MIMIC4-H2",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_BNB,  &bnb_mimic3_h1,  "bnbusdt",  3600, "BNB-MIMIC3-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_SOL,  &sol_mimic5_h1,  "solusdt",  3600, "SOL-MIMIC5-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_DOGE, &doge_mimic4_h4, "dogeusdt", 3600, "DOGE-MIMIC4-H4", 0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_ADA,  &ada_mimic5_h1,  "adausdt",  3600, "ADA-MIMIC5-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_XRP,  &xrp_mimic4_h1,  "xrpusdt",  3600, "XRP-MIMIC4-H1",  0.0, 0.0, 0, 0, 57});
+    g_slots.push_back({chimera::SYM_TRX,  &trx_mimic5_h1,  "trxusdt",  3600, "TRX-MIMIC5-H1",  0.0, 0.0, 0, 0, 57});
     }
 
     // ── PHASE 3 (2026-07-13): REGIME_SWITCH D1 trend parents — the live book ─────
@@ -9967,7 +9967,7 @@ int main() {
     for (auto& slot : g_slots) {
         if (slot.engine) slot.engine->set_on_bar(on_bar_callback);
         // CHIMERA→OMEGA DESK export (S-2026-07-12): slot engines (TSMOM/ICHI/
-        // BOLL + UPJUMP parents) had NO on_trade wired — wire_engine() is
+        // BOLL + MIMIC parents) had NO on_trade wired — wire_engine() is
         // legacy-gated (CHIMERA_WIRE_LEGACY) and this loop only set on_bar —
         // so every close died in journalctl and the operator's desk was blind
         // (SUI-TSMOM-H4 +12.79bp on 11-07 never left the box). EXPORT-ONLY
@@ -10491,7 +10491,7 @@ int main() {
     }
 
     // ── Companion peak rehydrate (S-2026-07-05) ──────────────────────────
-    // Seed each UpJump companion OPEN + armed from its parent's just-restored live
+    // Seed each Mimic companion OPEN + armed from its parent's just-restored live
     // position, so it reflects the parent's true peak-to-date immediately instead of
     // sitting dark until the next H1 close (companion peak/mfe is per-session ephemeral
     // and otherwise re-anchors to the current bar's fav). Runs AFTER resume_position()
@@ -10511,7 +10511,7 @@ int main() {
         int seeded = 0;
         for (auto& kv : g_companion_by_parent) {
             chimera::EdgeEngine*             par  = kv.second.first;
-            chimera::UpJumpLadderCompanion*  comp = kv.second.second;
+            chimera::MimicLadderCompanion*  comp = kv.second.second;
             if (!par || !comp || comp->config().det_w > 0 || !par->in_position()) continue;
             comp->seed_open(par->entry_px(), par->entry_ts_ms(), par->mfe_px(), now_ms);
             auto s = comp->snapshot();
@@ -10533,12 +10533,12 @@ int main() {
     // (public endpoint, same source as engine seeding). State-only: entries can only
     // fire on LIVE ticks at real prices (see seed_det_ring_hist header note).
     {
-        struct DetSeedJob { chimera::UpJumpLadderCompanion* comp; std::string sym; int det_w; };
+        struct DetSeedJob { chimera::MimicLadderCompanion* comp; std::string sym; int det_w; };
         std::vector<DetSeedJob> jobs;
         {
             std::lock_guard<std::mutex> lk(g_companion_mtx);
             for (auto& kv : g_companion_by_parent) {
-                chimera::UpJumpLadderCompanion* comp = kv.second.second;
+                chimera::MimicLadderCompanion* comp = kv.second.second;
                 if (!comp) continue;
                 const auto& cc = comp->config();
                 if (cc.det_w <= 0) continue;
@@ -10888,7 +10888,7 @@ int main() {
                                          (g_sym_regime[sid].load(std::memory_order_relaxed) >= min_reg);
                     // S-2026-07-11 NO-200DMA (bounce RCA): the S54 "BTC<200d-MA halts
                     // longs" macro veto is REMOVED from ALL slot entry gating. It was
-                    // already cut for UPJUMP on 2026-07-05 by explicit, repeated operator
+                    // already cut for MIMIC on 2026-07-05 by explicit, repeated operator
                     // directive; the standing rule (feedback-no-200dma-crypto) bans a
                     // 200DMA bull-gate ANYWHERE in crypto. During the Jul-8..10 bounce
                     // (all 8 majors +1.7..4.7% off the low) EVERY TSMOM/ICHI/BOLL signal
@@ -10896,12 +10896,12 @@ int main() {
                     // "CLUSTER_GATE" (GateAttribution scored it SUSPECT — killed winners).
                     // g_macro_bull is still COMPUTED for telemetry (/status JSON,
                     // macro-base NAV, S55 grid sleeve) but gates NO slot entry.
-                    // S-2026-07-05 UPJUMP rationale retained: the W-bar up-jump trigger
+                    // S-2026-07-05 MIMIC rationale retained: the W-bar mimic trigger
                     // IS the signal — broad market-direction vetoes are irrelevant to it.
                     // Genuine RISK caps stay in force: per-symbol + per-cluster
                     // concurrency, cluster 24h loss circuit-breaker, and the (non-200DMA)
-                    // BTC/symbol regime chop-halt for non-UPJUMP kinds.
-                    bool direction_ok    = (e->cfg().kind == chimera::StrategyKind::UPJUMP)
+                    // BTC/symbol regime chop-halt for non-MIMIC kinds.
+                    bool direction_ok    = (e->cfg().kind == chimera::StrategyKind::MIMIC)
                                                ? true
                                                : (btc_regime_ok && sym_regime_ok);
                     // Honest gate attribution — pre-fix every suppression printed
@@ -10978,7 +10978,7 @@ int main() {
             }
         }
 
-        // ── UPJUMP companion: drive on EVERY tick (S-2026-07-05) ─────────────
+        // ── MIMIC companion: drive on EVERY tick (S-2026-07-05) ─────────────
         // Was H1-bar-close ONLY (on_bar_callback) -> blind to any mover that
         // spiked+reversed WITHIN the hour: peak-MFE was sampled at the close and
         // the reversal-giveback clip could only fire on the hour boundary. Now
@@ -10997,7 +10997,7 @@ int main() {
                 int clips_before = 0, clips_after = 0;
                 for (auto& kv : g_companion_by_parent) {
                     chimera::EdgeEngine* par            = kv.second.first;
-                    chimera::UpJumpLadderCompanion* comp = kv.second.second;
+                    chimera::MimicLadderCompanion* comp = kv.second.second;
                     if (!par || !comp) continue;
                     if (chimera::symbol_to_id(par->cfg().symbol) != id) continue;
                     clips_before += comp->clips();
@@ -11121,15 +11121,15 @@ int main() {
         g_registry.declare("XSEC-BTC",   chimera::Lifecycle::SHADOW, "cross-sectional momentum, BTC-gated sleeve");
         g_registry.declare("XSEC-BR",    chimera::Lifecycle::SHADOW, "cross-sectional momentum, breadth-gated sleeve");
         g_registry.declare("RIPRIDER",   chimera::Lifecycle::SHADOW, "RipRider next-open sleeve");
-        // KILL_UPJUMP_CLIPS (2026-07-13): the immediate-entry clip grid is disabled (g_grid_clip_count==0),
+        // KILL_IMMEDIATE_CLIPS (2026-07-13): the immediate-entry clip grid is disabled (g_grid_clip_count==0),
         // so declare it DISABLED to keep the honest registry consistent (an ACTIVE decl with no wired
         // callback aborts startup). Re-enabling the grid restores g_grid_clip_count>0 -> SHADOW again.
-        g_registry.declare("UPJUMP-GRID",
+        g_registry.declare("MIMIC-GRID",
                            g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
-                           "companion grid — Phase-3 BE-entry mimics (REGIME_SWITCH parents) + S-2026-07-13 sweet-spot confirmed-entry cells BNB/UNI/NEAR (up-jump immediate-entry clips killed 2026-07-13)");
+                           "companion grid — Phase-3 BE-entry mimics (REGIME_SWITCH parents) + S-2026-07-13 sweet-spot confirmed-entry cells BNB/UNI/NEAR (mimic immediate-entry clips killed 2026-07-13)");
         // S-2026-07-13 campaign architecture (13j §2.11): guarded by the real
         // cell count so a zero-instance build declares DISABLED instead of
-        // aborting validate() (same pattern as UPJUMP-GRID below).
+        // aborting validate() (same pattern as MIMIC-GRID below).
         g_registry.declare("CAMPAIGN-MGR",
                            g_campaign_cell_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED,
                            "virtual-lot parent campaigns (CostLedger+OpportunityGate+CampaignManager) — 4 PASS cells UNI-W1/W2 fused, TRX-W8, LDO-W8; mimic lots OFF");
@@ -11143,12 +11143,12 @@ int main() {
         g_registry.set_state("LEGACY-EDGE",
                              wire_legacy ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
         // PHASE3 (2026-07-13): runtime truth wins for the companion grid too. Its
-        // population is a COMPILE-TIME fact (KILL_UPJUMP_CLIPS / Phase-3 mimic
+        // population is a COMPILE-TIME fact (KILL_IMMEDIATE_CLIPS / Phase-3 mimic
         // registration), so a stale json override can only abort the desk — which it
         // did twice today (json SHADOW vs killed grid crash-loop on the old binary;
         // json DISABLED vs Phase-3 mimics abort on the new one). Same pattern as
         // LEGACY-EDGE above: the json may annotate, the wiring decides the state.
-        g_registry.set_state("UPJUMP-GRID",
+        g_registry.set_state("MIMIC-GRID",
                              g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
         // Campaign books: wiring truth wins over any stale json, same pattern.
         g_registry.set_state("CAMPAIGN-MGR",
@@ -11158,14 +11158,14 @@ int main() {
         // Runtime wiring truth. The XSec/RipRider/grid sleeves are installed +
         // seeded UNCONDITIONALLY (their blocks run regardless of exec_ok — only
         // order routing checks exec_ok), so they are wired+connected in shadow
-        // independent of executor readiness. EDGE-SLOTS/UPJUMP-GRID reflect the
+        // independent of executor readiness. EDGE-SLOTS/MIMIC-GRID reflect the
         // real container sizes.
         g_registry.mark_wired("EDGE-SLOTS",  !g_slots.empty(),                    (int)g_slots.size());
         g_registry.mark_wired("LEGACY-EDGE", wire_legacy && !g_all_wired.empty(), (int)g_all_wired.size());
         g_registry.mark_wired("XSEC-BTC",    true, 1);
         g_registry.mark_wired("XSEC-BR",     true, 1);
         g_registry.mark_wired("RIPRIDER",    true, 1);
-        g_registry.mark_wired("UPJUMP-GRID", g_grid_clip_count > 0, g_grid_clip_count);
+        g_registry.mark_wired("MIMIC-GRID", g_grid_clip_count > 0, g_grid_clip_count);
         g_registry.mark_wired("CAMPAIGN-MGR", g_campaign_cell_count > 0, g_campaign_cell_count);
         g_registry.mark_wired("EXECUTOR",    exec_ok, 1);
         std::string reg_err;
@@ -11198,7 +11198,7 @@ int main() {
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
     std::printf("[STARTUP] ✓ CHIMERA READY — %d engines connected (from the real graph; shadow_mode=true)\n",
                 g_registry.connected_count());
-    std::printf("[STARTUP]   EDGE-SLOTS=%d  LEGACY-EDGE=%d(wired)  XSEC=2  RIPRIDER=1  UPJUMP-GRID=%d\n",
+    std::printf("[STARTUP]   EDGE-SLOTS=%d  LEGACY-EDGE=%d(wired)  XSEC=2  RIPRIDER=1  MIMIC-GRID=%d\n",
                 (int)g_slots.size(), (int)g_all_wired.size(), g_grid_clip_count);
     std::printf("[STARTUP]   Gates observed (item 21): portfolio+cluster+confirm+funding+vol_regime+corr+session+volume+vol_filter+mtf+adx\n");
     std::printf("[STARTUP]   spot-long-only | NO 200DMA | SHADOW | counts are RECONCILED (not aspirational)\n");

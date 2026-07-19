@@ -187,7 +187,7 @@ private:
 };
 
 // ── Sleeve daily-PnL correlation tracker (item 16 companion) ─────────────────
-// Momentum sleeves (XSec / TSMOM / UpJump / RipRider) are one factor; the factor
+// Momentum sleeves (XSec / TSMOM / Mimic / RipRider) are one factor; the factor
 // cap needs to KNOW how correlated their daily PnL is so genuinely-redundant
 // sleeves are not counted as diversification. Pearson over rolling daily returns.
 class SleeveCorrelation {

@@ -29,7 +29,7 @@
 
 #pragma once
 #include "SymbolIndex.hpp"
-#include "UpJumpLadderCompanion.hpp"   // ClipRecord / ClipCallback contract (reused)
+#include "MimicLadderCompanion.hpp"   // ClipRecord / ClipCallback contract (reused)
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -43,8 +43,8 @@ namespace chimera {
 
 class CoreTriggerEngine {
 public:
-    using ClipRecord   = UpJumpLadderCompanion::ClipRecord;
-    using ClipCallback = UpJumpLadderCompanion::ClipCallback;
+    using ClipRecord   = MimicLadderCompanion::ClipRecord;
+    using ClipCallback = MimicLadderCompanion::ClipCallback;
 
     // Per-coin cell config — defaults = the validated ETH/XRP passing cell.
     struct Cell {

@@ -1,7 +1,7 @@
 // regime_exposure_test.cpp — Phase-3 item 19.
 // Breadth -> a CONTINUOUS exposure multiplier (R2 bands), hysteresis-smoothed so
 // it does not oscillate at a band boundary; a severe alarm forces 0%. Family-
-// specific gates: RipRider needs a STRONG regime (flat below a floor); UpJump
+// specific gates: RipRider needs a STRONG regime (flat below a floor); Mimic
 // permits a WEAKER macro but at reduced size.
 #include "live/RegimeExposure.hpp"
 #include <cstdio>
@@ -58,14 +58,14 @@ int main() {
     std::printf("[info] RipRider lo=%.3f hi=%.3f\n", rip_lo, rip_hi);
     CHECK(rip_lo == 0.0);
     CHECK(rip_hi > 0.0);
-    // UpJump: permits a weaker macro but at REDUCED size vs the raw curve.
-    double uj = F.family_exposure(Family::UPJUMP, 0.55, 0.5, false);
+    // Mimic: permits a weaker macro but at REDUCED size vs the raw curve.
+    double uj = F.family_exposure(Family::MIMIC, 0.55, 0.5, false);
     double raw = RegimeExposure::raw_curve(0.55);
-    std::printf("[info] UpJump=%.3f raw=%.3f\n", uj, raw);
+    std::printf("[info] Mimic=%.3f raw=%.3f\n", uj, raw);
     CHECK(uj < raw);                                   // reduced size
     CHECK(uj > 0.0);
-    // UpJump still fires at a low breadth where RipRider is flat (weaker macro OK).
-    double uj_lo = F.family_exposure(Family::UPJUMP, 0.30, 0.5, false);
+    // Mimic still fires at a low breadth where RipRider is flat (weaker macro OK).
+    double uj_lo = F.family_exposure(Family::MIMIC, 0.30, 0.5, false);
     CHECK(uj_lo > 0.0 && F.family_exposure(Family::RIPRIDER, 0.30, 0.5, false) == 0.0);
     // XSec needs dispersion: low dispersion -> smaller exposure than high dispersion.
     double xs_lowdisp  = F.family_exposure(Family::XSEC, 0.70, 0.05, false);

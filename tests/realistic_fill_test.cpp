@@ -32,8 +32,8 @@ int main() {
 
     // (b) round-trip: buy 100 -> sell 110 (a winner). Realistic book keeps LESS.
     ShadowFillComparator cmp; cmp.configure(p);
-    cmp.on_fill("UPJUMP", "solusdt", /*buy*/true,  100.0, 10.0);
-    cmp.on_fill("UPJUMP", "solusdt", /*buy*/false, 110.0, 10.0);
+    cmp.on_fill("MIMIC", "solusdt", /*buy*/true,  100.0, 10.0);
+    cmp.on_fill("MIMIC", "solusdt", /*buy*/false, 110.0, 10.0);
     double sig = cmp.signal_book_pnl();
     double real = cmp.realistic_book_pnl();
     check(sig > 0.0, "signal book realized the winner (+100)");

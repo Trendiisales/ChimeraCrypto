@@ -91,7 +91,7 @@ enum class StrategyKind {
     WILLIAMS_R,     // Williams %R cross up from oversold (Session 29b)
     STOCH_RSI,      // Stochastic RSI cross up from oversold (Session 29b)
     BREAKOUT_PULLBACK, // S38: N-bar high breakout, enter on pullback that holds the breakout level
-    UPJUMP,         // S-2026-07-03: wide W-bar up-jump, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
+    MIMIC,         // S-2026-07-03: wide W-bar mimic, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
     KELTNER_BREAK,  // S-2026-07-12: upper-Keltner breakout TREND (close>EMA+M*ATR -> long), ride to lower-band flip; NO stops. Folds the Mac ibkrcrypto Kelt(20,2.0). NOT KELTNER_REVERT (that's the opposite lower-band mean-revert).
     REGIME_SWITCH   // S-2026-07-12: efficiency-ratio regime switch (ER>hi trending->momentum long; ER<lo chop->IBS mean-rev long; else flat). Folds the Mac ibkrcrypto Regime(20,0.40,0.25); ride_to_flip (exit when signal != long).
 };
@@ -111,7 +111,7 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::WILLIAMS_R:     return "WILLIAMS_R";
         case StrategyKind::STOCH_RSI:      return "STOCH_RSI";
         case StrategyKind::BREAKOUT_PULLBACK: return "BREAKOUT_PULLBACK";
-        case StrategyKind::UPJUMP:         return "UPJUMP";
+        case StrategyKind::MIMIC:         return "MIMIC";
         case StrategyKind::KELTNER_BREAK:  return "KELTNER_BREAK";
         case StrategyKind::REGIME_SWITCH:  return "REGIME_SWITCH";
     }
@@ -130,7 +130,7 @@ inline bool is_trend_kind(StrategyKind k) {
         case StrategyKind::ICHIMOKU:
         case StrategyKind::SUPERTREND:
         case StrategyKind::BREAKOUT_PULLBACK:
-        case StrategyKind::UPJUMP:
+        case StrategyKind::MIMIC:
         case StrategyKind::KELTNER_BREAK:  // upper-band breakout = trend kind
             return true;
         default:               // BOLLINGER/RSI_REVERT/KELTNER_REVERT/WILLIAMS_R/
@@ -149,12 +149,12 @@ public:
         int          hold_bars  = 12;
         double       sl_atr_mult = 2.5;
         int          atr_period  = 14;
-        // UPJUMP (S-2026-07-03): wide W-bar up-jump, ride to symmetric down-jump
+        // MIMIC (S-2026-07-03): wide W-bar mimic, ride to symmetric down-jump
         // flip. ride_to_flip => NO trade-level price stops (vault
         // UpMoveTrailLossMitigation: stops destroy the up-move edge; protection =
         // the separate companion clip only).
-        int          upjump_w    = 24;
-        double       upjump_thr  = 0.08;
+        int          mimic_w    = 24;
+        double       mimic_thr  = 0.08;
         bool         ride_to_flip = false;
         // BOLLINGER:
         double       bb_k        = 2.0;
@@ -663,21 +663,21 @@ public:
             check_exits_(price, ts_ms);
         }
 
-        // ── UPJUMP intra-bar ENTRY (S-2026-07-05, operator: no boundary wait) ──
-        // The up-jump is a PRICE event, not a bar-close event. Fire the instant
+        // ── MIMIC intra-bar ENTRY (S-2026-07-05, operator: no boundary wait) ──
+        // The mimic is a PRICE event, not a bar-close event. Fire the instant
         // the live price crosses the jump threshold vs the close W bars back —
         // do NOT wait for the H1 boundary. Full gate chain still applies inside
-        // evaluate_signal_ (cluster/regime already cut for UPJUMP; funding/vol/
+        // evaluate_signal_ (cluster/regime already cut for MIMIC; funding/vol/
         // confirmation still run). Guarded to at most one attempt per forming
         // bar so a persistent jump doesn't spam entry-eval every tick; the H1
         // close path (close_bar_) remains as the backstop.
-        // Fire on EITHER a fresh live jump (intrabar_upjump_fires_, cheap O(1))
-        // OR an already-standing up-jump regime (upjump_state_()==1) — a coin
-        // that entered up-jump regime on a prior bar and is flat only because
+        // Fire on EITHER a fresh live jump (intrabar_mimic_fires_, cheap O(1))
+        // OR an already-standing mimic regime (mimic_state_()==1) — a coin
+        // that entered mimic regime on a prior bar and is flat only because
         // entry hadn't re-evaluated must open NOW, not wait for the H1 close.
-        if (!in_position_ && !halted_ && cfg_.kind == StrategyKind::UPJUMP
+        if (!in_position_ && !halted_ && cfg_.kind == StrategyKind::MIMIC
             && intrabar_fired_bar_ != cur_bar_id_
-            && (intrabar_upjump_fires_(cur_close_) || upjump_state_() == 1)) {
+            && (intrabar_mimic_fires_(cur_close_) || mimic_state_() == 1)) {
             intrabar_fired_bar_ = cur_bar_id_;
             evaluate_signal_intrabar_(cur_close_, ts_ms);
         }
@@ -914,7 +914,7 @@ public:
         return (spot_px / entry_px_ - 1.0) * 1e4;
     }
     double entry_px() const { return entry_px_; }
-    // Live-trade peak favourable price + entry ts — used by UpJumpCompanionEngine::seed_open()
+    // Live-trade peak favourable price + entry ts — used by MimicCompanionEngine::seed_open()
     // to rehydrate the companion's peak-to-date on restart (S-2026-07-05).
     double  mfe_px()      const { return mfe_px_; }
     int64_t entry_ts_ms() const { return entry_ts_ms_; }
@@ -1234,7 +1234,7 @@ private:
     // Position state
     bool    in_position_ = false;
     double  entry_px_    = 0.0;
-    // Intra-bar UPJUMP entry (S-2026-07-05): when >0, evaluate_signal_ opens at
+    // Intra-bar MIMIC entry (S-2026-07-05): when >0, evaluate_signal_ opens at
     // this live price/ts instead of the just-closed bar. intrabar_fired_bar_
     // caps entry attempts to one per forming bar (avoids per-tick eval spam).
     double  intrabar_entry_px_ = 0.0;
@@ -1559,7 +1559,7 @@ private:
         }
 
         // First, check if a time-based exit just landed on this bar boundary.
-        // UPJUMP (ride_to_flip): skip TIME; exit only on symmetric down-jump flip.
+        // MIMIC (ride_to_flip): skip TIME; exit only on symmetric down-jump flip.
         if (!cfg_.ride_to_flip && in_position_ &&
             cur_open_ts_ms_ + cfg_.tf_secs * 1000 > time_exit_ts_ms_) {
             // exit at this bar's close
@@ -1567,7 +1567,7 @@ private:
         }
         if (cfg_.ride_to_flip && in_position_) {
             bool flip_out = false;
-            if (cfg_.kind == StrategyKind::UPJUMP)             flip_out = (upjump_state_() == 0);
+            if (cfg_.kind == StrategyKind::MIMIC)             flip_out = (mimic_state_() == 0);
             else if (cfg_.kind == StrategyKind::KELTNER_BREAK) flip_out = keltner_break_flipped_out_();
             else if (cfg_.kind == StrategyKind::REGIME_SWITCH) flip_out = regime_switch_flipped_out_();
             if (flip_out) {
@@ -1968,33 +1968,33 @@ private:
         return true;
     }
 
-    // UPJUMP (S-2026-07-03): scan back for the most-recent W-bar symmetric jump
-    // event. +thr => up-jump (long), -thr => down-jump (flat). Returns 1=long, 0=flat.
-    int upjump_state_() const {
-        const int W  = cfg_.upjump_w > 0 ? cfg_.upjump_w : 24;
+    // MIMIC (S-2026-07-03): scan back for the most-recent W-bar symmetric jump
+    // event. +thr => mimic (long), -thr => down-jump (flat). Returns 1=long, 0=flat.
+    int mimic_state_() const {
+        const int W  = cfg_.mimic_w > 0 ? cfg_.mimic_w : 24;
         const int sz = (int)closes_.size();
         if (sz < W + 1) return 0;
         for (int k = sz - 1; k >= W; --k) {
             double j = closes_[k] / closes_[k - W] - 1.0;
-            if (j >=  cfg_.upjump_thr) return 1;   // most recent event = up-jump -> long
-            if (j <= -cfg_.upjump_thr) return 0;   // most recent event = down-jump -> flat
+            if (j >=  cfg_.mimic_thr) return 1;   // most recent event = mimic -> long
+            if (j <= -cfg_.mimic_thr) return 0;   // most recent event = down-jump -> flat
         }
         return 0;
     }
 
-    // Intra-bar UPJUMP test (S-2026-07-05, operator: no boundary wait). The
-    // up-jump is a PRICE event — a jump of live_px vs the close W bars back —
+    // Intra-bar MIMIC test (S-2026-07-05, operator: no boundary wait). The
+    // mimic is a PRICE event — a jump of live_px vs the close W bars back —
     // not a bar-close event. Returns true the instant the live (forming-bar)
     // price crosses +thr, so entry fires mid-hour instead of at the H1 close.
-    bool intrabar_upjump_fires_(double live_px) const {
-        const int W  = cfg_.upjump_w > 0 ? cfg_.upjump_w : 24;
+    bool intrabar_mimic_fires_(double live_px) const {
+        const int W  = cfg_.mimic_w > 0 ? cfg_.mimic_w : 24;
         const int sz = (int)closes_.size();
         if (sz < W || live_px <= 0.0) return false;
         const double j = live_px / closes_[sz - W] - 1.0;   // vs price W bars ago
-        return j >= cfg_.upjump_thr;                        // up-jump NOW = most-recent event = long
+        return j >= cfg_.mimic_thr;                        // mimic NOW = most-recent event = long
     }
 
-    // Drive an entry evaluation intra-bar at the live price/ts (UPJUMP only).
+    // Drive an entry evaluation intra-bar at the live price/ts (MIMIC only).
     // Reuses the full evaluate_signal_ gate chain (cluster/funding/vol/etc);
     // the override members make it open at the live price NOW, not next-bar-open.
     void evaluate_signal_intrabar_(double live_px, int64_t ts_ms) {
@@ -2023,7 +2023,7 @@ private:
             case StrategyKind::WILLIAMS_R:     fire = signal_williams_r_();        break;
             case StrategyKind::STOCH_RSI:      fire = signal_stoch_rsi_();         break;
             case StrategyKind::BREAKOUT_PULLBACK: fire = signal_breakout_pullback_(); break;
-            case StrategyKind::UPJUMP:         fire = (upjump_state_() == 1) ||
+            case StrategyKind::MIMIC:         fire = (mimic_state_() == 1) ||
                                                       (intrabar_entry_px_ > 0.0);  break;  // intra-bar: caller pre-verified the live jump
         }
         if (!fire) return;
@@ -2286,7 +2286,7 @@ private:
         // approximation: enter at last_close_ which is the price at this
         // moment of bar close. The error vs theoretical next-bar-open is
         // <1 tick on liquid pairs.
-        // Intra-bar UPJUMP entry opens at the LIVE price NOW; the normal path
+        // Intra-bar MIMIC entry opens at the LIVE price NOW; the normal path
         // opens at the just-closed bar's close (≈ next-bar-open on a live feed).
         entry_px_     = (intrabar_entry_px_ > 0.0) ? intrabar_entry_px_ : last_close_;
         atr_at_entry_ = a;
@@ -2358,7 +2358,7 @@ private:
 
     void check_exits_(double price, int64_t ts_ms) {
         if (!in_position_) return;
-        if (cfg_.ride_to_flip) return;   // UPJUMP: NO trade-level price stops; exit only on flip (close_bar_)
+        if (cfg_.ride_to_flip) return;   // MIMIC: NO trade-level price stops; exit only on flip (close_bar_)
 
         // Update MFE tracking
         if (price > mfe_px_) {

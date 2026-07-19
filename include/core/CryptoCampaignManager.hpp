@@ -4,18 +4,18 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // SHADOW, STANDALONE, ADDITIVE book (never touches, closes or moves any other
 // engine's position — feedback-companion-independent-engine). Faithful live
-// port of the `campaign` mode in Crypto/backtest/upjump_earlyarm_bt.cpp:1229
+// port of the `campaign` mode in Crypto/backtest/mimic_earlyarm_bt.cpp:1229
 // (the harness the 4 PASS parent cells were validated on, 2023-26 H1,
 // RT20 + 30/40bp full re-sims + 1-bar delay + 100-seed random-entry control):
 //
 //   WINDOW  (per cell): j = close[i]/close[i-W] - 1 on H1 closes. j >= thr
-//           opens an up-jump window; entry reference px = next bar's OPEN
+//           opens an mimic window; entry reference px = next bar's OPEN
 //           (first mark of the next H1 bar). j <= -thr ends the window
 //           (reversal) — any open parent is flushed at that close.
 //   PARENT  (ONE per window, ONE campaign per symbol): enters at the H1 close
 //           where fav = (close/epx - 1) >= confirm_bp (+20bp CONFIRMED entry —
 //           the permitted class; never immediate, never underwater,
-//           feedback-no-immediate-entry-upjump-mimic-only). Geometry scales
+//           feedback-no-immediate-entry-mimic-only). Geometry scales
 //           with the structural stop S:
 //             stop hit  : intra-tick px <= stop_px (backtest: bar LOW)
 //             fee-BE    : MFE >= 0.9*S -> stop = entry*(1 + (RT+3bp))
@@ -44,7 +44,7 @@
 // operator's rule and strictly reduces overlap exposure vs the per-cell BT.
 #pragma once
 
-#include "UpJumpLadderCompanion.hpp"   // reuse ClipRecord/LiveSnap contracts
+#include "MimicLadderCompanion.hpp"   // reuse ClipRecord/LiveSnap contracts
 #include "CryptoCostLedger.hpp"
 #include "CryptoOpportunityGate.hpp"
 
@@ -60,14 +60,14 @@ namespace chimera {
 
 class CryptoCampaignManager {
 public:
-    using ClipRecord   = UpJumpLadderCompanion::ClipRecord;
-    using ClipCallback = UpJumpLadderCompanion::ClipCallback;
-    using LiveSnap     = UpJumpLadderCompanion::LiveSnap;
+    using ClipRecord   = MimicLadderCompanion::ClipRecord;
+    using ClipCallback = MimicLadderCompanion::ClipCallback;
+    using LiveSnap     = MimicLadderCompanion::LiveSnap;
 
     struct CellCfg {
         std::string tag;          // ledger tag, e.g. "UNI-CAMP-W1"
         std::string cell;         // GUI cell id, e.g. "CW1-3.5"
-        int         W = 1;        // up-jump lookback, H1 bars
+        int         W = 1;        // mimic lookback, H1 bars
         double      thr = 0.035;  // window trigger (fraction)
         double      confirm_bp = 20.0;
         double      pstop_bp   = 50.0;   // structural stop S (bp)
@@ -274,7 +274,7 @@ public:
 
 private:
     struct CellState {
-        bool   win_in = false;       // inside an up-jump window
+        bool   win_in = false;       // inside an mimic window
         double epx = 0.0;            // window entry reference px (next-bar open)
         bool   epx_pending = false;  // trigger fired; epx anchors at next mark
         bool   pdone = false;        // parent already entered this window

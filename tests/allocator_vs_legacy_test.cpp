@@ -33,7 +33,7 @@ int main() {
     L.reserve_buy("pend","SOLUSDT","X",5.0,100.0);          // $500 pending
 
     struct Leg { const char* id; double usd; };
-    Leg legs[] = { {"XSEC",4000.0}, {"UPJUMP",2000.0}, {"PULLBACK",1500.0} };
+    Leg legs[] = { {"XSEC",4000.0}, {"MIMIC",2000.0}, {"PULLBACK",1500.0} };
     double legacy_total = 0.0; int legacy_orders = 0;
     for (auto& g : legs) { legacy_total += g.usd; ++legacy_orders; }   // legacy fires 3 raw orders
     CHECK(NEAR(legacy_total, 7500.0) && legacy_orders == 3);
@@ -46,7 +46,7 @@ int main() {
     int emitted = 0;
     A.emit = [&](const AllocDelta&, Factor, Family){ ++emitted; };   // must NEVER fire (track-only)
     A.set_target("XSEC",     "SOLUSDT", 4000.0, Factor::MOMENTUM, Family::XSEC);
-    A.set_target("UPJUMP",   "SOLUSDT", 2000.0, Factor::MOMENTUM, Family::UPJUMP);
+    A.set_target("MIMIC",   "SOLUSDT", 2000.0, Factor::MOMENTUM, Family::MIMIC);
     A.set_target("PULLBACK", "SOLUSDT", 1500.0, Factor::OTHER,    Family::EDGE);
 
     auto deltas = A.plan(&L);

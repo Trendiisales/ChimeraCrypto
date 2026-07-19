@@ -6,7 +6,7 @@
 //  percentile of its own recent history (a coiled range), the next decisive
 //  range expansion has an edge.  Enter on a CLOSE that breaks the upper band /
 //  range high WITH rising spot volume (participation confirms it's real).
-//  Distinct from trend-pullback (buys a dip) and UpJump (buys a single-bar
+//  Distinct from trend-pullback (buys a dip) and Mimic (buys a single-bar
 //  impulse): this waits for a coil, then buys the expansion.
 //
 //  ENTRY (close i, eligible):

@@ -4974,7 +4974,8 @@ int main() {
                       std::vector<double> arms; double retire_bp; };
     std::vector<GridCoin> _gcoins = {
         {"ETH", "ethusdt", &eth_mimic2_h1, 1, {0.2,2,3,4,6,8},        -31500.0},   // BE-cascade N6
-        {"BTC", "btcusdt", &btc_mimic4_h1, 2, {3,4,6,8,10,12},        -43000.0},   // arm>=3 N6, 2h window
+        // BTC cascade cell CULLED S-2026-07-20 (operator: delete BTC BECASC completely —
+        // honest measured-cost re-cert failed ALL BTC cells; successor = BTC-TREND20-D1).
         {"BNB", "bnbusdt", &bnb_mimic3_h1, 1, {3,4,6,8,10,12,14,16},  -38500.0},   // arm>=3 N8
         {"SOL", "solusdt", &sol_mimic5_h1, 1, {0.2,2,3,4,6,8,10,12}, -100000.0},   // BE-cascade N8
         {"DOGE","dogeusdt",&doge_mimic4_h4,4, {0.2,2,3,4,6,8},        -40500.0},   // BE-cascade N6, 4h window
@@ -5440,7 +5441,7 @@ int main() {
     {
         struct BcCell { const char* pfx; const char* cell; const char* sym; double thr; double retire_bp; };
         static const std::vector<BcCell> _bc_cells = {
-            {"BTC",  "MIM2-BECASC",  "btcusdt",  0.020, -8000.0},
+            // BTC MIM2-BECASC CULLED S-2026-07-20 (operator: delete BTC BECASC completely).
             {"ETH",  "MIM15-BECASC", "ethusdt",  0.015, -8000.0},
             {"SOL",  "MIM15-BECASC", "solusdt",  0.015, -8000.0},
             {"BNB",  "MIM15-BECASC", "bnbusdt",  0.015, -8000.0},
@@ -5504,7 +5505,7 @@ int main() {
         struct BcCell2 { const char* pfx; const char* cell; const char* sym; double thr;
                          int det_w; double giveback; double retire_bp; };
         static const std::vector<BcCell2> _bc_fast_cells = {
-            {"BTC", "BTC-MIM20-BECASC-F", "btcusdt", 0.020, 2, 0.75, -1563.0},  // n=1798 net=+2273% PF5.33 worst=-781.7bp
+            // BTC-MIM20-BECASC-F CULLED S-2026-07-20 (operator: delete BTC BECASC completely).
             {"ETH", "ETH-MIM15-BECASC-F", "ethusdt", 0.015, 2, 0.20, -1995.0},  // n=4134 net=+6113% PF16.21 worst=-997.5bp
             {"SOL", "SOL-MIM15-BECASC-F", "solusdt", 0.015, 2, 0.20, -1756.0},  // n=6409 net=+13602% PF17.72 worst=-877.8bp
             {"BNB", "BNB-MIM15-BECASC-F", "bnbusdt", 0.015, 2, 0.75, -1910.0},  // n=3577 net=+6397% PF7.18 worst=-955.0bp
@@ -5539,7 +5540,7 @@ int main() {
             {"RUNE", "RUNE-MIM15-BECASC-F", "runeusdt", 0.015, 2, 0.75, -3035.0},  // n=3754 net=+7731% PF6.94 worst=-1517.4bp
         };
         static const std::vector<BcCell2> _bc_slow_cells = {
-            {"BTC", "BTC-MIM20-BECASC-S", "btcusdt", 0.020, 12, 0.20, -961.0},  // n=2537 net=+3365% PF22.47 worst=-480.5bp
+            // BTC-MIM20-BECASC-S CULLED S-2026-07-20 (operator: delete BTC BECASC completely).
             {"ETH", "ETH-MIM15-BECASC-S", "ethusdt", 0.015, 8, 0.75, -2172.0},  // n=4517 net=+7163% PF6.71 worst=-1086.1bp
             {"SOL", "SOL-MIM15-BECASC-S", "solusdt", 0.015, 8, 0.75, -1482.0},  // n=6023 net=+12702% PF7.86 worst=-740.8bp
             {"BNB", "BNB-MIM15-BECASC-S", "bnbusdt", 0.015, 8, 0.75, -2036.0},  // n=4180 net=+7337% PF7.92 worst=-1017.9bp
@@ -5592,48 +5593,12 @@ int main() {
                 bc.det_w, bc.giveback));
             _grid_feeds.push_back(&_bc_fs_feeds.back());
         }
-        // ── S-2026-07-18ab: BTC LOW-THRESHOLD +4 mimic cells (operator: "we simply have to
-        // trade more on BTC ... find a lower entry point; min cost 30bp factored into the
-        // start of the mimic"). BTC was the ONLY coin still detecting at 2.0% (fleet=1.5%).
-        // Cert: same harness (eth_mimic_15_becascade_bt vs HEAD engine, honest 17f fills),
-        // confirm60 anchored = exactly 2x the operator's 30bp min cost, RT=30/60bp (stricter
-        // than the fleet's 28), thr {0.5,0.75,1.0,1.25,1.5,2.0}% x W{1,2,4,8,12,24} x
-        // g{0.2,0.5,0.75}: ALL 108 cells PASS the standalone gate (net>0 & PF>=1.3 & both
-        // WF halves>0 at base AND 2x cost, omit-2022) — deep plateau, zero fails. n saturates
-        // below thr=0.5% (confirm 60bp becomes the binding entry filter), so 0.5% is the
-        // practical floor, not a marginal scrape. Picks = best 2x-cost net per W lane at
-        // thr=0.5% (W2/W12 g0.20 also beat their g0.75 siblings on PF/tail); retire_bp = 2x
-        // own backtested worst clip. ADDITIVE alongside the four 2.0% BTC cells (independent
-        // books, cap8 each). BTC_LOWTHR_MIMIC_FINDINGS_2026-07-18.md.
-        // S-2026-07-18ac (operator: "all 3 of these" — the 1.5% + 1.0% quads from the same
-        // ALL-108-PASS sweep ship too, additive alongside 2.0% + 0.5%): +8 cells below.
-        // Same cert run, same gate, per-lane picks = best 2x-cost net (figures = exact
-        // harness reruns 2026-07-18, reproduce the operator's transcript tables).
-        // BTC total: 4 (2.0%) + 4 (MIM15) + 4 (MIM10) + 4 (MIM05) = 16 books.
-        static const std::vector<BcCell2> _bc_btc_lowthr_cells = {
-            {"BTC", "BTC-MIM05-BECASC-W1",  "btcusdt", 0.005,  1, 0.20, -1134.0},  // n=6215 net=+6963% PF16.57 worst=-566.9bp 2xnet=+5122%
-            {"BTC", "BTC-MIM05-BECASC-W2",  "btcusdt", 0.005,  2, 0.20,  -850.0},  // n=6639 net=+7782% PF19.31 worst=-424.9bp 2xnet=+5815%
-            {"BTC", "BTC-MIM05-BECASC-W4",  "btcusdt", 0.005,  4, 0.75, -1567.0},  // n=6512 net=+8297% PF8.17  worst=-783.7bp 2xnet=+6539%
-            {"BTC", "BTC-MIM05-BECASC-W12", "btcusdt", 0.005, 12, 0.20,  -969.0},  // n=5181 net=+6164% PF23.41 worst=-484.7bp 2xnet=+4630%
-            {"BTC", "BTC-MIM10-BECASC-W1",  "btcusdt", 0.010,  1, 0.20, -1134.0},  // n=3581 net=+4632% PF19.43 worst=-566.9bp 2xnet=+3570%
-            {"BTC", "BTC-MIM10-BECASC-W2",  "btcusdt", 0.010,  2, 0.20,  -967.0},  // n=4397 net=+5621% PF19.35 worst=-483.5bp 2xnet=+4315%
-            {"BTC", "BTC-MIM10-BECASC-W4",  "btcusdt", 0.010,  4, 0.20,  -965.0},  // n=4783 net=+6112% PF20.03 worst=-482.5bp 2xnet=+4692%
-            {"BTC", "BTC-MIM10-BECASC-W12", "btcusdt", 0.010, 12, 0.75, -1567.0},  // n=3997 net=+5129% PF6.45  worst=-783.7bp 2xnet=+4064%
-            {"BTC", "BTC-MIM15-BECASC-W1",  "btcusdt", 0.015,  1, 0.75, -1567.0},  // n=1999 net=+2748% PF6.50  worst=-783.7bp 2xnet=+2293%
-            {"BTC", "BTC-MIM15-BECASC-W2",  "btcusdt", 0.015,  2, 0.20, -1405.0},  // n=2800 net=+3650% PF17.72 worst=-702.4bp 2xnet=+2824%
-            {"BTC", "BTC-MIM15-BECASC-W4",  "btcusdt", 0.015,  4, 0.20,  -965.0},  // n=3293 net=+4180% PF19.67 worst=-482.5bp 2xnet=+3203%
-            {"BTC", "BTC-MIM15-BECASC-W12", "btcusdt", 0.015, 12, 0.75,  -965.0},  // n=3136 net=+3922% PF6.28  worst=-482.5bp 2xnet=+3065%
-        };
-        static std::vector<chimera::EdgeEngine> _bc_btc_lt_feeds; _bc_btc_lt_feeds.reserve(_bc_btc_lowthr_cells.size());
-        for (const auto& bc : _bc_btc_lowthr_cells) {
-            _grid_ptags.push_back(std::string(bc.pfx) + "-" + bc.cell + "-FEED");
-            _grid_ctags.push_back(std::string(bc.pfx) + "-" + bc.cell);
-            _bc_btc_lt_feeds.emplace_back(make_mim(bc.sym, _grid_ptags.back().c_str(), 3600, bc.det_w, bc.thr));
-            _grid.emplace_back(make_becascade_cell(
-                _grid_ptags.back().c_str(), _grid_ctags.back().c_str(), bc.sym, bc.thr, bc.retire_bp,
-                bc.det_w, bc.giveback));
-            _grid_feeds.push_back(&_bc_btc_lt_feeds.back());
-        }
+        // ── S-2026-07-18ab/ac BTC LOW-THRESHOLD 12-cell block CULLED S-2026-07-20 ──
+        // Operator order: delete the BTC BECASC engine COMPLETELY. The S-20z honest
+        // measured-cost re-cert (engine fill_px booking, 6d5d0dd) failed every BTC cell
+        // (32/32 incl. all 16 wired books); the old ALL-108-PASS figures were the
+        // anchored+clamped accounting artifact. Successor = BTC-TREND20-D1 slow trend
+        // core (separate engine class, own cert battery). Do NOT re-add BTC BECASC.
         // ── S-2026-07-18: ETH LOW-THRESHOLD +11 mimic cells (operator: "roll the same
         // setting out for eth now" — the S-18ab/ac BTC low-thr rollout applied to ETH).
         // Cert: same harness (eth_mimic_15_becascade_bt vs HEAD 01a30d2, honest 17f

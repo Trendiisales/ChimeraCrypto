@@ -1216,6 +1216,16 @@ public:
         return !was;
     }
 
+    // ENTRY-gate truth for the desk/heartbeat (S-2026-07-20). NOT the same thing as
+    // the snapshot()'s per-leg "armed" — that is the TRAIL-arm (lg.mfe >= lg.arm,
+    // always false on a flat book) and misled a live diagnosis into reading 419/419
+    // "disarmed" on a healthy armed desk. entry_armed answers "can this cell open on
+    // the next qualifying close": non-jump_floor cells have no standing gate (true);
+    // jump_floor cells report the fresh-jump gate. In-flight counts as armed.
+    bool entry_armed() const noexcept {
+        return !cfg_.jump_floor || jf_armed_ || jf_in_ || jf_pending_open_;
+    }
+
 private:
 
     Config        cfg_;

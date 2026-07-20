@@ -37,14 +37,19 @@ OUT=$(ssh -o ConnectTimeout=8 -o BatchMode=yes "$HOST" '
     FLATMIN=$(( ( $(date +%s) - $(stat -c %Y "$HOME/ChimeraCrypto/data/live_trades.csv") ) / 60 ))
   fi
   # DISARMED visibility (S-2026-07-20, operator: post-KILL-ALL blind window "missing these
-  # breakouts ... not acceptable"). A disarmed cell CANNOT enter whatever the market does —
-  # a flat desk that is also disarmed must never read as "normally flat". Counts pilot cells
-  # published to crypto_companion_state.json with armed=false (retired cells excluded).
+  # breakouts ... not acceptable"). A gate-disarmed cell CANNOT enter whatever the market
+  # does — a flat desk that is also disarmed must never read as "normally flat". Counts
+  # cells with entry_armed=false (the ENTRY gate, emitted since build ac8a4cb+; the
+  # older "armed" field is the per-leg TRAIL-arm, always false on a flat book — never
+  # use it here). Field absent (older binary) -> counts 0 = no false alarm. Retired
+  # excluded. NOTE quoting: this whole ssh block is single-quoted, so the python must
+  # contain NO single quotes (the S-20h version had them -> unbalanced-quote breakage).
   DISARM=$(python3 -c "
 import json
 d=json.load(open(\"$HOME/ChimeraCrypto/data/crypto_companion_state.json\"))
 legs=[l for l in d.get(\"legs\",[]) if not l.get(\"retired\")]
-print(f\"{sum(1 for l in legs if not l.get('armed'))}/{len(legs)}\")" 2>/dev/null)
+dis=sum(1 for l in legs if not l.get(\"entry_armed\", True))
+print(str(dis)+\"/\"+str(len(legs)))" 2>/dev/null)
   cd "$HOME/ChimeraCrypto" 2>/dev/null
   HASH=$(git rev-parse --short HEAD 2>/dev/null)
   git fetch origin -q 2>/dev/null

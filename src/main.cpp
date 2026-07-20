@@ -1931,6 +1931,10 @@ static void emit_companion_state() {
            << ",\"parent_thr_pct\":" << pcfg.mimic_thr * 100.0
            << ",\"canonical\":" << (canonical ? "true" : "false")
            << ",\"armed\":" << (snap.armed ? "true" : "false")
+           // entry_armed = the ENTRY gate (jump_floor fresh-jump state), distinct from
+           // "armed" above which is the per-leg TRAIL-arm (false whenever flat). The
+           // heartbeat's DISARMED check reads THIS field (S-2026-07-20).
+           << ",\"entry_armed\":" << (kv.second.second->entry_armed() ? "true" : "false")
            << std::setprecision(4) << ",\"peak_mfe_pct\":" << snap.peak_mfe_pct
            << ",\"bars_since_high\":" << snap.bars_since_high
            << ",\"clips\":" << snap.clips

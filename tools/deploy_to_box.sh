@@ -117,7 +117,8 @@ if ssh "$BOX" "cd $BOX_REPO && git push origin main"; then
   # Mac fast-forwards only if HEAD is now an ancestor of origin AND the deployed
   # files are the ONLY working-tree change (they already match origin -> go clean).
   if git -C "$HERE" merge-base --is-ancestor HEAD origin/main; then
-    other="$(git -C "$HERE" status --porcelain -- . ':(exclude)'"${FILES[0]}" ':(exclude)'"${FILES[1]}" ':(exclude)'"${FILES[2]}" | grep -vE '^\?\?' || true)"
+    excl=(); for f in "${FILES[@]}"; do excl+=(":(exclude)$f"); done
+    other="$(git -C "$HERE" status --porcelain -- . "${excl[@]}" | grep -vE '^\?\?' || true)"
     if [ -z "$other" ]; then
       git -C "$HERE" reset --hard origin/main && echo "Mac fast-forwarded to origin/main $want_hash — no drift."
     else

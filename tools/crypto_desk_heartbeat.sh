@@ -29,13 +29,20 @@ OUT=$(ssh -o ConnectTimeout=8 -o BatchMode=yes "$HOST" '
   PASS=$(printf "%s" "$BOOT" | grep -c "reconcile PASS")
   ABRT=$(printf "%s" "$BOOT" | grep -cE "STARTUP ABORT|terminate called")
   HOLDS=$(python3 -c "import json;d=json.load(open(\"$HOME/ChimeraCrypto/data/live_mimic_positions.json\"));print(len(d) if isinstance(d,list) else len(d.get(\"positions\",d)))" 2>/dev/null)
+  # FLAT-duration (S-2026-07-20, operator: flat-since-KILL-ALL book went unreported).
+  # live_trades.csv mtime = last live fill/close write (every live SELL books there since
+  # S-20f; a successful BUY flips HOLDS>0 which ends the flat state). Box-side = skew-free.
+  FLATMIN=""
+  if [ "${HOLDS:-1}" = "0" ] && [ -f "$HOME/ChimeraCrypto/data/live_trades.csv" ]; then
+    FLATMIN=$(( ( $(date +%s) - $(stat -c %Y "$HOME/ChimeraCrypto/data/live_trades.csv") ) / 60 ))
+  fi
   cd "$HOME/ChimeraCrypto" 2>/dev/null
   HASH=$(git rev-parse --short HEAD 2>/dev/null)
   git fetch origin -q 2>/dev/null
   ORIG=$(git rev-parse --short origin/main 2>/dev/null)
   ANC=$(git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 1 || echo 0)  # box behind==ancestor(benign) vs diverged
   RUN=$(grep -oE "build=[0-9a-f]+" logs/chimera.log 2>/dev/null | tail -1 | sed "s/build=//")
-  echo "AS=$AS|SS=$SS|NR=$NR|UP=${UP:-0}|PASS=$PASS|ABRT=$ABRT|HOLDS=${HOLDS:-?}|HASH=$HASH|ORIG=$ORIG|ANC=$ANC|RUN=$RUN"
+  echo "AS=$AS|SS=$SS|NR=$NR|UP=${UP:-0}|PASS=$PASS|ABRT=$ABRT|HOLDS=${HOLDS:-?}|HASH=$HASH|ORIG=$ORIG|ANC=$ANC|RUN=$RUN|FLAT=$FLATMIN"
 ' 2>/dev/null)
 
 if [ -z "$OUT" ]; then
@@ -54,6 +61,7 @@ HASH=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^HASH=//p')
 ORIG=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^ORIG=//p')
 ANC=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^ANC=//p')
 RUN=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^RUN=//p')
+FLAT=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^FLAT=//p')
 
 REASONS=""
 [ "$AS" != "active" ]   && REASONS="$REASONS ActiveState=$AS(not active)"
@@ -72,9 +80,33 @@ REASONS=""
 [ -n "$ORIG" ] && [ "$HASH" != "$ORIG" ] && [ "${ANC:-1}" = "0" ] \
   && REASONS="$REASONS LINEAGE-FORK box HEAD=$HASH diverged from origin/main=$ORIG (box has commits origin lacks — reconcile, do NOT deploy on top)"
 
+# FLAT-TOO-LONG (S-2026-07-20 operator ask: "no live capital" flat book must be REPORTED, not
+# discovered by eyeballing tiles). A flat book is often legitimate — mimic-at-BE only acquires
+# on a fresh confirmed up-move — so short flat is INFO on the GREEN line. Sustained flat while
+# LIVE means arms are firing into a dead/rejecting path (e.g. -2010s) or no signal path at all:
+#   >6h  = AMBER (investigate: grep BUY/-2010 in chimera.log, check USDT free)
+#   >24h = RED   (treat as outage — live book earning nothing for a full day)
+FLATNOTE=""
+FLATSEV=""
+if [ -n "$FLAT" ]; then
+  FLATH=$(( FLAT / 60 ))
+  FLATNOTE="LIVE book FLAT ${FLATH}h$((FLAT % 60))m since last live fill"
+  if [ "$FLAT" -ge 1440 ] 2>/dev/null; then FLATSEV="RED"
+  elif [ "$FLAT" -ge 360 ] 2>/dev/null; then FLATSEV="AMBER"
+  fi
+fi
+
 if [ -n "$REASONS" ]; then
-  echo "RED|$HASH holds=$HOLDS restarts=$NR —$REASONS"
+  echo "RED|$HASH holds=$HOLDS restarts=$NR —$REASONS${FLATNOTE:+ — $FLATNOTE}"
   exit 1
 fi
-echo "GREEN|$HASH (==origin==running) | reconcile PASS | active/running up=${UP}s restarts=$NR | live holds=$HOLDS"
+if [ "$FLATSEV" = "RED" ]; then
+  echo "RED|$HASH — $FLATNOTE (>24h: live book dead-flat a full day — check BUY/-2010 rejects + USDT free + signal path)"
+  exit 1
+fi
+if [ "$FLATSEV" = "AMBER" ]; then
+  echo "AMBER|$HASH (==origin==running) | reconcile PASS | up=${UP}s restarts=$NR | $FLATNOTE (>6h: verify arms firing — grep 'BUY\\|-2010' chimera.log, check USDT free)"
+  exit 0
+fi
+echo "GREEN|$HASH (==origin==running) | reconcile PASS | active/running up=${UP}s restarts=$NR | live holds=$HOLDS${FLATNOTE:+ | $FLATNOTE (normal short-flat: mimic awaits confirmed up-move)}"
 exit 0

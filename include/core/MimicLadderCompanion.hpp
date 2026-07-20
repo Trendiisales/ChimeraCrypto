@@ -490,6 +490,7 @@ public:
         if (cfg_.det_w > 0) {
             feed_selfdetect_(cur_px, ts_ms);
             if (cfg_.jump_floor) { jf_on_tick_(cur_px, ts_ms); return; }               // JUMP-FLOOR: fills + intrabar stops
+            intrabar_confirm_opens_(cur_px, ts_ms, bar);                              // per-tick BE-ENTRY confirm fill (S-2026-07-20)
             if (cfg_.loss_cut_bp > 0.0) intrabar_reversal_cut_(cur_px, ts_ms, bar);   // per-tick HARD STOP
             if (cfg_.mimic_floor)       intrabar_mimic_floor_(cur_px, ts_ms, bar);    // per-tick BE-floored trail stop
             return;                                                                    // internal detector (live, both modes)
@@ -502,6 +503,35 @@ public:
         }
         observe_ladder_(parent_in_pos, parent_entry_px, cur_px, ts_ms, bar);         // external window (parent-driven)
     }
+    // ── S-2026-07-20 intra-bar BE-ENTRY confirm fill (operator order: "stupid to wait
+    //   an hour if the next BE is met earlier") ────────────────────────────────────────
+    // Self-detect (det_w>0) ladder cells evaluated the confirm gate ONLY inside
+    // process_close_ -> observe_ladder_ -> step_leg_, i.e. once per completed H1 bar —
+    // a leg whose confirm level was crossed mid-bar waited up to an hour (or missed the
+    // move if it faded by the close). Parent-driven det_w==0 books already walk
+    // observe_ladder_ per tick, so this was an inconsistency of the self-detect path,
+    // not a certified design choice. This opens un-open confirmed legs the INSTANT the
+    // mark covers confirm, byte-matching step_leg_'s open block (le anchoring via
+    // confirm_anchor_epx preserved -> still floored-on-open at window-entry BE; the
+    // downside of a fade-after-open is bounded by the BE floor, exits unchanged).
+    // Immediate-entry legs (confirm==0) keep close-open semantics (they open on the
+    // first close walk by design). Certification: early_confirm BT vs close-confirm
+    // baseline across the live fleet (see EARLY_CONFIRM findings 2026-07-20).
+    void intrabar_confirm_opens_(double cur, int64_t ts_ms, int64_t bar) {
+        if (!det_in_ || cur <= 0.0 || legs_.empty()) return;
+        for (auto& lg : legs_) {
+            if (!lg.eligible || lg.open || lg.clipped) continue;
+            if (lg.confirm <= 0.0) continue;
+            const double fav = (cur - lg.epx) / lg.epx * 100.0;
+            if (fav * 100.0 < lg.confirm) continue;            // fav% -> bp vs confirm bp
+            lg.open = true; lg.open_ts = ts_ms; lg.open_bar = bar;
+            if (!cfg_.confirm_anchor_epx || lg.seeded_flat) lg.le = cur;   // same rule as step_leg_
+            lg.mfe = fav; lg.ext_bar = bar;
+            if (cfg_.mimic_floor) { lg.hwm = lg.le; lg.floored = false; lg.stop_px = -1.0; }
+            announce_open_(lg, ts_ms, cur);                    // live mirror buys NOW
+        }
+    }
+
     // Stop-ONLY tick: runs the hard reversal cut against px WITHOUT feeding the detector
     // (backtest feeds the bar LOW here; live, observe() already runs the cut per tick).
     void stop_check_only(double px, int64_t ts_ms) {

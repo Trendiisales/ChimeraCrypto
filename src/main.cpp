@@ -1255,6 +1255,31 @@ struct LiveMimicMirror {
     // on_clip sells and pending-sell retries run as before. Clear to "" ONLY once the
     // honest-basis re-cert passes (or the operator orders otherwise).
     std::string acquire_pause_substr = "BECASC";
+    // S-2026-07-20ab OPERATOR ORDER ("allowlist the ones that work"): the honest-basis +
+    // measured-cost re-cert (HONEST_LEDGER_MEASURED_RECERT_2026-07-20.md, 369/380 FAIL)
+    // left exactly these 11 survivors — all g0.75, full gate incl. 2× measured cost, both
+    // WF halves. They are EXEMPT from acquire_pause_substr; every other BECASC cell stays
+    // paused (no new legs) until a design solution exists. Match is boundary-safe: the
+    // entry must be followed by '-' (leg suffix -T<n>) or end the tag, so e.g. a W1 entry
+    // could never wildcard onto a W12 cell. Regenerate the list with
+    // Crypto/backtest/honest_basis_measured_2026-07-20/join_live_cells.py.
+    std::vector<std::string> acquire_allowlist = {
+        "AVAX-MIM15-BECASC-F",
+        "DOGE-MIM05-BECASC-W2",  "DOGE-MIM05-BECASC-W4",  "DOGE-MIM05-BECASC-W12",
+        "DOGE-MIM10-BECASC-W2",  "DOGE-MIM10-BECASC-W4",  "DOGE-MIM10-BECASC-W12",
+        "DOGE-MIM15-BECASC-S",
+        "INJ-MIM05-BECASC-W4",
+        "RUNE-MIM05-BECASC-W4",  "RUNE-MIM15-BECASC-F",
+    };
+    bool tag_allowlisted_(const std::string& tag) const {
+        for (const auto& a : acquire_allowlist) {
+            size_t p = tag.find(a);
+            if (p == std::string::npos) continue;
+            size_t end = p + a.size();
+            if (end == tag.size() || tag[end] == '-') return true;
+        }
+        return false;
+    }
     std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
     chimera::ExchangeFilters* filters = nullptr;   // S-2026-07-20: for the -1013 floor+retry
     std::map<std::string, Hold> held;       // clip-tag -> live holding
@@ -1518,11 +1543,19 @@ struct LiveMimicMirror {
         // S-2026-07-20u: acquire pause — refuse NEW legs for paused tag families (see
         // acquire_pause_substr above). Exits/floors/pending-sell retries unaffected.
         if (!acquire_pause_substr.empty() && r.tag.find(acquire_pause_substr) != std::string::npos) {
-            std::printf("[MIMIC-LIVE] BUY paused %s: acquire pause '%s' active (S-20u honest-basis re-cert) — no new legs\n",
-                        r.tag.c_str(), acquire_pause_substr.c_str());
-            std::fflush(stdout);
-            note_(r.tag, "PAUSED", "acquire pause (S-20u BECASC honest-basis re-cert owed)");
-            return;
+            // S-2026-07-20ab: 11 measured-cost re-cert survivors bypass the family pause
+            // (operator allowlist order); all other BECASC cells remain acquire-paused.
+            if (tag_allowlisted_(r.tag)) {
+                std::printf("[MIMIC-LIVE] BUY allowlisted %s: re-cert survivor (S-20ab) — acquire permitted\n",
+                            r.tag.c_str());
+                std::fflush(stdout);
+            } else {
+                std::printf("[MIMIC-LIVE] BUY paused %s: acquire pause '%s' active (S-20u re-cert FAIL, not allowlisted) — no new legs\n",
+                            r.tag.c_str(), acquire_pause_substr.c_str());
+                std::fflush(stdout);
+                note_(r.tag, "PAUSED", "acquire pause (S-20u BECASC re-cert FAIL — awaiting design solution)");
+                return;
+            }
         }
         // ── ACQUIRE PATH (S-2026-07-18al, operator order "NO paper — why are these not
         // live trades"): the former 56bp basis-gap REFUSAL (S-18s fix 3) made COMP's 5
@@ -3701,10 +3734,15 @@ int main() {
                         kv.second.px * (1.0 + g_mimic_mirror.cost_bound_bp / 1e4));
         // S-2026-07-20u greppable pause-state fact (watchdog/selftest hook): acquire pause
         // active => NO new mirror legs for the named family; exits/floors keep running.
-        if (!g_mimic_mirror.acquire_pause_substr.empty())
-            std::printf("[MIMIC-LIVE-PAUSE] acquire PAUSED for tags containing '%s' (S-20u operator order: "
-                        "honest-basis re-cert owed) — exits/floors/sell-retries unaffected\n",
+        if (!g_mimic_mirror.acquire_pause_substr.empty()) {
+            std::printf("[MIMIC-LIVE-PAUSE] acquire PAUSED for tags containing '%s' (S-20u re-cert 369/380 FAIL) "
+                        "— exits/floors/sell-retries unaffected\n",
                         g_mimic_mirror.acquire_pause_substr.c_str());
+            std::printf("[MIMIC-LIVE-ALLOW] %zu re-cert survivor cells EXEMPT from pause (S-20ab operator allowlist):",
+                        g_mimic_mirror.acquire_allowlist.size());
+            for (const auto& a : g_mimic_mirror.acquire_allowlist) std::printf(" %s", a.c_str());
+            std::printf("\n");
+        }
     } else {
         std::printf("[MIMIC-LIVE] mirror DISARMED (mode=SHADOW) — grid books unchanged, no real orders\n");
     }

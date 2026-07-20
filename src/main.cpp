@@ -1244,6 +1244,17 @@ struct LiveMimicMirror {
     bool enabled = false;                   // armed only in RuntimeMode::LIVE
     double order_usd = 0.0;                 // per-leg BUY notional (= live_pilot_max_order_usd)
     double cost_bound_bp = 56.0;            // acquire gate + floor-arm bound (2× worst measured RT cost)
+    // S-2026-07-20u OPERATOR ORDER (BECASC churn + honest-basis audit): mirror ACQUIRE is
+    // PAUSED for tags containing this substring — no NEW legs open while the BECASC cell
+    // economics are re-certified at the honest entry basis. The shadow book measures every
+    // clip from the anchored le=epx, but the mirror's real fill is le*(1+confirm)≈+60bp
+    // above it (no real order ever fills at epx): 479 shadow floor clips mean +21.7bp
+    // BOOKED -> ≈-38bp at real-fill basis, and the live ledger confirms it (13 real exits
+    // avg -36bp/leg, zero positive). 17f model-vs-fill class, entry-basis edition.
+    // EXITS ARE UNTOUCHED: existing holds keep their BE-exit / floor / lock management,
+    // on_clip sells and pending-sell retries run as before. Clear to "" ONLY once the
+    // honest-basis re-cert passes (or the operator orders otherwise).
+    std::string acquire_pause_substr = "BECASC";
     std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
     chimera::ExchangeFilters* filters = nullptr;   // S-2026-07-20: for the -1013 floor+retry
     std::map<std::string, Hold> held;       // clip-tag -> live holding
@@ -1504,6 +1515,15 @@ struct LiveMimicMirror {
         if (!enabled || !submit || order_usd <= 0.0 || r.px <= 0.0) return;
         std::lock_guard<std::mutex> lk(mu);
         retry_pending_();
+        // S-2026-07-20u: acquire pause — refuse NEW legs for paused tag families (see
+        // acquire_pause_substr above). Exits/floors/pending-sell retries unaffected.
+        if (!acquire_pause_substr.empty() && r.tag.find(acquire_pause_substr) != std::string::npos) {
+            std::printf("[MIMIC-LIVE] BUY paused %s: acquire pause '%s' active (S-20u honest-basis re-cert) — no new legs\n",
+                        r.tag.c_str(), acquire_pause_substr.c_str());
+            std::fflush(stdout);
+            note_(r.tag, "PAUSED", "acquire pause (S-20u BECASC honest-basis re-cert owed)");
+            return;
+        }
         // ── ACQUIRE PATH (S-2026-07-18al, operator order "NO paper — why are these not
         // live trades"): the former 56bp basis-gap REFUSAL (S-18s fix 3) made COMP's 5
         // legs paper-only while the desk showed TRADING. Since S-18s fix 2 every holding
@@ -3679,6 +3699,12 @@ int main() {
                         kv.first.c_str(), kv.second.symbol.c_str(), kv.second.qty, kv.second.px,
                         kv.second.be_px,
                         kv.second.px * (1.0 + g_mimic_mirror.cost_bound_bp / 1e4));
+        // S-2026-07-20u greppable pause-state fact (watchdog/selftest hook): acquire pause
+        // active => NO new mirror legs for the named family; exits/floors keep running.
+        if (!g_mimic_mirror.acquire_pause_substr.empty())
+            std::printf("[MIMIC-LIVE-PAUSE] acquire PAUSED for tags containing '%s' (S-20u operator order: "
+                        "honest-basis re-cert owed) — exits/floors/sell-retries unaffected\n",
+                        g_mimic_mirror.acquire_pause_substr.c_str());
     } else {
         std::printf("[MIMIC-LIVE] mirror DISARMED (mode=SHADOW) — grid books unchanged, no real orders\n");
     }

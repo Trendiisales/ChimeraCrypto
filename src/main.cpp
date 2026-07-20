@@ -1227,18 +1227,23 @@ struct LiveMimicMirror {
     // fill (UNI: shadow floor 3.563, live fill 3.640 → real coins -2.2% under a floor
     // that could never fire; a restore also RESETS the shadow leg's floor state, so the
     // live book can sit in pre-floor limbo with zero stop). Now every holding carries
-    // its OWN fill-anchored floor + hard stop, driven per tick, independent of shadow:
+    // its OWN fill-anchored floor, driven per tick, independent of shadow:
     //   • hwm/floored: floor arms once px covers fill*(1+2×cost) — then SELL at
     //     max(own BE incl cost, shadow clip) — the handoff fix-2 spec.
-    //   • own_stop_bp: pre-floor HARD CUT below the mirror's own fill — bounds the
-    //     UNI class (basis-gapped fill whose floor never arms). Engine-loss-protection
-    //     provision for the live layer itself, not inherited.
+    //   • be_px: the leg's SET BE point = anchored le*(1+RT) (the certified shadow
+    //     floor level), clamped to >= fill*(1-2×RT) so a basis-gapped fill can't
+    //     book a deep tail. Pre-arm exit fires the TICK the mark breaks be_px.
+    //     S-2026-07-20o OPERATOR ORDER: the former own_stop_bp=150 pre-floor cut
+    //     (S-18s session literal, never operator design) is RETIRED — the design is
+    //     "mimics trigger at the set BE points; if the trade ticks below any BE we
+    //     exit", NOT ride −150bp first. Mirror exit level now == shadow floor level,
+    //     so the certified anchored-reclip path drives any re-entry naturally.
     struct Hold { double qty = 0.0; double px = 0.0; std::string symbol; bool pending_sell = false; double sell_px = 0.0;
-                  double hwm = 0.0; bool floored = false; double last_retry_ms = 0.0; long long entry_ts_ms = 0; };
+                  double hwm = 0.0; bool floored = false; double last_retry_ms = 0.0; long long entry_ts_ms = 0;
+                  double be_px = 0.0; };
     bool enabled = false;                   // armed only in RuntimeMode::LIVE
     double order_usd = 0.0;                 // per-leg BUY notional (= live_pilot_max_order_usd)
     double cost_bound_bp = 56.0;            // acquire gate + floor-arm bound (2× worst measured RT cost)
-    double own_stop_bp   = 150.0;           // pre-floor hard cut below OWN fill (0 = off)
     std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
     chimera::ExchangeFilters* filters = nullptr;   // S-2026-07-20: for the -1013 floor+retry
     std::map<std::string, Hold> held;       // clip-tag -> live holding
@@ -1400,6 +1405,7 @@ struct LiveMimicMirror {
             js << (first ? "" : ",") << "{\"tag\":\"" << kv.first << "\",\"symbol\":\"" << kv.second.symbol
                << "\",\"qty\":" << kv.second.qty << ",\"px\":" << kv.second.px
                << ",\"entry_ts\":" << kv.second.entry_ts_ms
+               << ",\"be_px\":" << kv.second.be_px
                << ",\"pending_sell\":" << (kv.second.pending_sell ? "true" : "false") << "}";
             first = false;
         }
@@ -1423,9 +1429,14 @@ struct LiveMimicMirror {
             size_t xp = all.find("\"px\":", te);  if (xp != std::string::npos) h.px  = atof(all.c_str() + xp + 5);
             size_t ep = all.find("\"entry_ts\":", te);
             if (ep != std::string::npos && ep < all.find('}', te)) h.entry_ts_ms = atoll(all.c_str() + ep + 11);
+            size_t bp = all.find("\"be_px\":", te);
+            if (bp != std::string::npos && bp < all.find('}', te)) h.be_px = atof(all.c_str() + bp + 8);
             h.pending_sell = all.find("\"pending_sell\":true", te) != std::string::npos &&
                              all.find("\"pending_sell\":true", te) < all.find('}', te);
-            h.hwm = h.px; h.floored = false;   // own floor re-arms from live ticks; pre-floor own-stop protects meanwhile
+            h.hwm = h.px; h.floored = false;   // own floor re-arms from live ticks; pre-arm BE floor protects meanwhile
+            // S-20o: pre-be_px persist file — approximate the anchored BE from own fill
+            // (fill ≈ le*(1+2×RT) at confirm cross ⇒ le*(1+RT) ≈ fill*(1−RT)).
+            if (h.be_px <= 0.0) h.be_px = h.px * (1.0 - cost_bound_bp / 2.0 / 1e4);
             if (!tag.empty() && h.qty > 0.0) held[tag] = h;
             p = te;
         }
@@ -1492,10 +1503,11 @@ struct LiveMimicMirror {
         // ── ACQUIRE PATH (S-2026-07-18al, operator order "NO paper — why are these not
         // live trades"): the former 56bp basis-gap REFUSAL (S-18s fix 3) made COMP's 5
         // legs paper-only while the desk showed TRADING. Since S-18s fix 2 every holding
-        // carries its OWN fill-anchored floor + pre-floor hard stop (own_stop_bp), so a
-        // late fill is no longer the unprotected UNI class — the shadow anchor no longer
-        // gates the entry. We FILL the basis-gapped leg and protect it at the REAL fill;
-        // worst case per leg is bounded by own_stop_bp. Only a wide sanity bound remains:
+        // carries its OWN fill-anchored floor (S-20o: pre-arm exit at the SET BE point
+        // be_px, clamped >= fill*(1-2×RT)), so a late fill is no longer the unprotected
+        // UNI class — the shadow anchor no longer gates the entry. We FILL the
+        // basis-gapped leg and protect it at the REAL fill;
+        // worst case per leg is bounded by the be_px clamp. Only a wide sanity bound remains:
         // a mark >SANITY_GAP_BP above the anchor is a stale/glitched feed, not a late
         // entry — refuse those, loudly, into the desk event feed.
         static constexpr double SANITY_GAP_BP = 300.0;
@@ -1542,8 +1554,15 @@ struct LiveMimicMirror {
             h.symbol = r.symbol; h.pending_sell = false;
             h.entry_ts_ms = (long long)std::time(nullptr) * 1000LL;   // S-20f: realized-ledger entry stamp
             h.hwm = h.px; h.floored = false;     // OWN floor state anchors at the REAL fill
-            std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f)\n",
-                        r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px);
+            // S-20o: the SET BE point — anchored le*(1+RT) (certified shadow floor level),
+            // clamped so a basis-gapped fill's pre-BE tail is bounded at 2×RT below fill.
+            {
+                const double rt = cost_bound_bp / 2.0 / 1e4;
+                const double anc_be = r.floor_anchor > 0.0 ? r.floor_anchor * (1.0 + rt) : 0.0;
+                h.be_px = std::max(anc_be, h.px * (1.0 - 2.0 * rt));
+            }
+            std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f) be_exit=%.6f\n",
+                        r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px, h.be_px);
             std::fflush(stdout);
             {
                 char d[128]; std::snprintf(d, sizeof(d), "qty %.8f @ %.6f (~$%.2f)", h.qty, h.px, h.qty * h.px);
@@ -1608,7 +1627,10 @@ struct LiveMimicMirror {
             if (!h.floored && h.hwm >= h.px * (1.0 + cb)) h.floored = true;   // own fill covered 2×cost → floor armed
             const char* why = nullptr;
             if (h.floored && px <= h.px * (1.0 + cb / 2.0)) why = "LIVE-OWNFLOOR";          // BE incl ~1×cost
-            else if (!h.floored && own_stop_bp > 0.0 && px <= h.px * (1.0 - own_stop_bp / 1e4)) why = "LIVE-OWNSTOP";
+            // S-20o operator order: exit the TICK the mark breaks the SET BE point —
+            // no −150bp ride-down (own_stop retired). Mirror exit level == shadow
+            // floor level, so shadow reclip drives any re-entry.
+            else if (!h.floored && h.be_px > 0.0 && px <= h.be_px) why = "LIVE-PREBE-FLOOR";
             if (!why) { ++it; continue; }
             auto res = submit({ upsym(h.symbol), false, h.qty, px, /*is_exit*/ true, "MIMIC-LIVE" },
                               chimera::Factor::MOMENTUM);
@@ -2736,10 +2758,11 @@ struct LiveRuntimeConfig {
     // S-2026-07-18s mirror own-protection (LiveMirrorIncident20260718 fixes 2+3):
     //   cost_bound: acquire-gate slack over the leg's floor anchor AND the own-floor
     //     arm threshold (2× worst measured RT cost — CryptoCostLedger class, ~28bp).
-    //   own_stop: pre-floor hard cut below the mirror's OWN fill (bounds the
-    //     basis-gap class where the shadow floor never arms). 0 disables.
+    //   own_stop: DEPRECATED S-2026-07-20o (operator: exit at the BE point, not −150bp).
+    //     Parsed for config compat, NO LONGER WIRED — the mirror's pre-arm exit is the
+    //     anchored be_px. Key may still exist in older live_config.json; it is ignored.
     double      live_pilot_cost_bound_bp = 56.0;
-    double      live_pilot_own_stop_bp   = 150.0;
+    double      live_pilot_own_stop_bp   = 150.0;   // DEPRECATED, ignored (see above)
 };
 
 static std::string lrc_extract_string(const std::string& s, const char* key) {
@@ -3612,7 +3635,7 @@ int main() {
     g_mimic_mirror.enabled   = (g_runtime_mode == chimera::RuntimeMode::LIVE);
     g_mimic_mirror.order_usd = runtime_cfg.live_pilot_max_order_usd;
     g_mimic_mirror.cost_bound_bp = runtime_cfg.live_pilot_cost_bound_bp;
-    g_mimic_mirror.own_stop_bp   = runtime_cfg.live_pilot_own_stop_bp;
+    // S-20o: live_pilot_own_stop_bp intentionally NOT wired — own-stop retired.
     if (g_mimic_mirror.enabled) {
         g_mimic_mirror.submit = governed_submit;
         g_mimic_mirror.filters = &g_filters;   // S-2026-07-20: -1013 LOT_SIZE floor+retry
@@ -3632,14 +3655,16 @@ int main() {
         // mirror's own floor/stop layer is structural config — print it armed with the
         // per-holding state so 'protection exists' is a logged runtime fact, not prose.
         std::printf("[MIMIC-LIVE-GATE] own-protection ACTIVE: acquire fills at market (S-18al no-paper order, "
-                    "sanity refuse >300bp stale-gap only), floor arms at fill+%.0fbp sells at fill+%.0fbp, "
-                    "pre-floor own-stop %.0fbp; %zu restored holding(s)\n",
+                    "sanity refuse >300bp stale-gap only), FLOOR-FROM-OPEN: pre-arm exit the tick mark breaks "
+                    "the SET BE point (anchored le+%.0fbp, clamped >= fill-%.0fbp; own-stop -150 RETIRED S-20o), "
+                    "arm at fill+%.0fbp then lock fill+%.0fbp; %zu restored holding(s)\n",
+                    g_mimic_mirror.cost_bound_bp / 2.0, g_mimic_mirror.cost_bound_bp,
                     g_mimic_mirror.cost_bound_bp, g_mimic_mirror.cost_bound_bp / 2.0,
-                    g_mimic_mirror.own_stop_bp, g_mimic_mirror.held.size());
+                    g_mimic_mirror.held.size());
         for (const auto& kv : g_mimic_mirror.held)
-            std::printf("[MIMIC-LIVE-FLOOR] %s %s qty=%.8f fill=%.6f own_stop=%.6f floor_arm=%.6f\n",
+            std::printf("[MIMIC-LIVE-FLOOR] %s %s qty=%.8f fill=%.6f be_exit=%.6f floor_arm=%.6f\n",
                         kv.first.c_str(), kv.second.symbol.c_str(), kv.second.qty, kv.second.px,
-                        kv.second.px * (1.0 - g_mimic_mirror.own_stop_bp / 1e4),
+                        kv.second.be_px,
                         kv.second.px * (1.0 + g_mimic_mirror.cost_bound_bp / 1e4));
     } else {
         std::printf("[MIMIC-LIVE] mirror DISARMED (mode=SHADOW) — grid books unchanged, no real orders\n");

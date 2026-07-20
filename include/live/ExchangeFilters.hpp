@@ -56,6 +56,13 @@ public:
         auto it = filters_.find(symbol); return it == filters_.end() ? nullptr : &it->second;
     }
 
+    // S-2026-07-20: true iff a usable LOT_SIZE step is cached for this symbol.
+    // Callers use this to make the normalize() pass-through LOUD on live buys.
+    bool has_valid(const std::string& symbol) const {
+        auto it = filters_.find(symbol);
+        return it != filters_.end() && it->second.valid;
+    }
+
     // Snap a MARKET order's qty to the applicable filters. If no cached filter
     // exists, pass through (can't over-constrain what we haven't fetched) but
     // still enforce a caller floor via the gateway's own min_notional.
@@ -105,8 +112,15 @@ public:
             double mn1      = find_filter_num(obj, "MIN_NOTIONAL", "minNotional");
             double mn2      = find_filter_num(obj, "NOTIONAL", "minNotional");
             fl.min_notional = mn1 > 0 ? mn1 : mn2;
-            fl.valid        = true;
-            filters_[symbol] = fl; ++n;
+            // S-2026-07-20 LOT_SIZE live-reject fix: a symbol whose object parsed WITHOUT
+            // a LOT_SIZE stepSize (truncated/odd exchangeInfo body — seen live: TIA/SAND/
+            // LINK raw-qty -1013 rejects while AVAX/SOL conformed, varying per fetch) used
+            // to be stored valid=true with step 0 -> normalize applied NO floor and passed
+            // raw qty to Binance. step==0 now means NOT valid -> normalize falls to the
+            // explicit pass-through branch, which the gateway logs loudly on live BUYs,
+            // and the mirror's -1013 retry (main.cpp) floors the qty itself.
+            fl.valid        = fl.step_size > 0.0;
+            filters_[symbol] = fl; if (fl.valid) ++n;
             pos = obj_end;
         }
         return n;

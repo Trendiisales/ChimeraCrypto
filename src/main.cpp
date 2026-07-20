@@ -1240,6 +1240,7 @@ struct LiveMimicMirror {
     double cost_bound_bp = 56.0;            // acquire gate + floor-arm bound (2× worst measured RT cost)
     double own_stop_bp   = 150.0;           // pre-floor hard cut below OWN fill (0 = off)
     std::function<chimera::OrderResult(const chimera::OrderIntent&, chimera::Factor)> submit;
+    chimera::ExchangeFilters* filters = nullptr;   // S-2026-07-20: for the -1013 floor+retry
     std::map<std::string, Hold> held;       // clip-tag -> live holding
     std::mutex mu;
 
@@ -1515,6 +1516,27 @@ struct LiveMimicMirror {
         if (h.qty > 0.0) return;             // already holding for this leg (restart re-open etc.) — never stack
         auto res = submit({ upsym(r.symbol), true, order_usd / r.px, r.px,
                             /*is_exit*/ false, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
+        // S-2026-07-20 -1013 LOT_SIZE floor+retry: when the exchangeInfo parse left no
+        // valid step for this symbol the gateway passes RAW qty through and Binance
+        // rejects it (live misses: TIA/SAND/LINK). Retry ONCE with a self-floored qty —
+        // cached step if one exists, else 2 decimals, else whole units. Strictly
+        // smaller qty than the reject, so never over-buys.
+        if (!res.ok && res.error.find("LOT_SIZE") != std::string::npos) {
+            double q0 = order_usd / r.px, q1 = 0.0;
+            const chimera::SymbolFilter* fl = filters ? filters->get(upsym(r.symbol)) : nullptr;
+            if (fl && fl->step_size > 0.0) q1 = std::floor(q0 / fl->step_size) * fl->step_size;
+            else {
+                q1 = std::floor(q0 * 100.0) / 100.0;            // 2dp floor (covers 0.01/0.1/1 steps... partially)
+                if (q1 <= 0.0 || q0 >= 100.0) q1 = std::floor(q0);   // large-qty coins: whole units
+            }
+            if (q1 > 0.0 && q1 < q0) {
+                std::printf("[MIMIC-LIVE] BUY retry %s floored qty %.8f -> %.8f (LOT_SIZE reject)\n",
+                            r.tag.c_str(), q0, q1);
+                std::fflush(stdout);
+                res = submit({ upsym(r.symbol), true, q1, r.px,
+                               /*is_exit*/ false, "MIMIC-LIVE" }, chimera::Factor::MOMENTUM);
+            }
+        }
         if (res.ok && !res.shadow && res.executed_qty > 0.0) {
             h.qty = res.executed_qty; h.px = res.avg_price > 0.0 ? res.avg_price : r.px;
             h.symbol = r.symbol; h.pending_sell = false;
@@ -3593,6 +3615,7 @@ int main() {
     g_mimic_mirror.own_stop_bp   = runtime_cfg.live_pilot_own_stop_bp;
     if (g_mimic_mirror.enabled) {
         g_mimic_mirror.submit = governed_submit;
+        g_mimic_mirror.filters = &g_filters;   // S-2026-07-20: -1013 LOT_SIZE floor+retry
         // S-2026-07-19q: live free-balance clamp for the stuck-close path — sell only
         // coins actually held (BUY taker fee shrinks the base below the recorded qty).
         g_mimic_mirror.free_base = [&executor](const std::string& asset) -> double {

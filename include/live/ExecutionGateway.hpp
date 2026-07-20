@@ -119,6 +119,13 @@ public:
                 std::string why = "filter: " + n.reason;
                 log_reject(in, why.c_str()); r.error = why; return r;
             }
+            // S-2026-07-20: a pass-through (no valid LOT_SIZE cached — truncated
+            // exchangeInfo parse) used to submit RAW qty SILENTLY -> Binance -1013
+            // (TIA/SAND/LINK live misses). Silent-fallback class: make it LOUD.
+            if (in.is_buy && !in.is_exit && !filters_->has_valid(in.symbol))
+                std::printf("[FILTERS] WARN no valid LOT_SIZE for %s — raw qty %.8f goes out "
+                            "(exchangeInfo parse gap; -1013 likely; submitter should floor+retry)\n",
+                            in.symbol.c_str(), qty);
             qty = n.qty;
         }
         // 4b. LIVE PILOT SCOPE — entries only; inert outside LIVE mode.

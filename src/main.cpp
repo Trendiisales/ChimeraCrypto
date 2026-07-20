@@ -184,6 +184,7 @@
 #include "core/market_data/MultiSymbolFundingFilter.hpp"
 #include "core/LiquidationCascadeDetector.hpp"
 #include "live/LiquidationWSFeed.hpp"
+#include "core/BtcRegimeMomentumBook.hpp"          // S-2026-07-20af: LIVE directional BTC regime-momentum book (TRENDCORE+TSMOM30 50/50)
 
 #include "version_generated.hpp"
 #include "execution/ExchangeLatencyEngine.hpp"
@@ -1317,7 +1318,8 @@ struct LiveMimicMirror {
     // regenerated atomically from the in-memory list. Fees approx via px delta —
     // same cash convention the hand-written file declared. Call book_close_ under mu.
     struct LiveTrade { long long entry_ts_s = 0, exit_ts_s = 0; std::string coin, tag, reason;
-                       double entry = 0.0, exit_px = 0.0, qty = 0.0, usd = 0.0; };
+                       double entry = 0.0, exit_px = 0.0, qty = 0.0, usd = 0.0;
+                       std::string strat = "MIMIC-LIVE"; };   // desk strat label; external books (BTC regime) set their own
     static constexpr const char* LIVE_TRADES_CSV   = "data/live_trades.csv";
     static constexpr const char* LIVE_REALIZED_FILE = "data/live_realized.json";
     std::vector<LiveTrade> realized_;
@@ -1366,7 +1368,7 @@ struct LiveMimicMirror {
             const auto& t = realized_[i];
             js << (i == start ? "" : ",") << "\n    {\"entry_ts\":" << t.entry_ts_s
                << ",\"exit_ts\":" << t.exit_ts_s << ",\"sym\":\"" << t.coin
-               << "\",\"strat\":\"MIMIC-LIVE\"" << std::setprecision(6)
+               << "\",\"strat\":\"" << t.strat << "\"" << std::setprecision(6)
                << ",\"entry\":" << t.entry << ",\"exit\":" << t.exit_px
                << std::setprecision(4) << ",\"realized_usd\":" << t.usd
                << ",\"reason\":\"" << t.reason << "\"}";
@@ -1404,6 +1406,42 @@ struct LiveMimicMirror {
         std::printf("[LIVE-LEDGER] booked %s %s qty=%.8f %.6f->%.6f realized $%.4f (%s) — total $%.2f\n",
                     tag.c_str(), upsym(h.symbol).c_str(), qty, h.px, exit_px,
                     (exit_px - h.px) * qty, reason.c_str(), realized_total_);
+        std::fflush(stdout);
+    }
+
+    // ── S-2026-07-20af DESK FOLD for EXTERNAL directional books (BtcRegimeMomentumBook).
+    // Same ledger of record + desk HOP-3 file as MIMIC-LIVE, but the row carries the
+    // book's own strat label (e.g. "BTC-REGIME") so the desk can show it distinctly and
+    // total_usd (=_clivetot) includes it. Locks mu itself (called from the tick path,
+    // NOT from inside a mu-held section). Real cash: usd is passed pre-computed from the
+    // book's own fill delta — do NOT re-derive (the book already booked at real fills).
+    void book_external_close(const std::string& coin, const std::string& strat,
+                             long long entry_ts_ms, double entry_px, double exit_px,
+                             double qty, double usd, const std::string& reason) {
+        if (qty <= 0.0 || exit_px <= 0.0) return;
+        std::lock_guard<std::mutex> lk(mu);
+        long long now_s = (long long)std::time(nullptr);
+        LiveTrade t; t.exit_ts_s = now_s; t.entry_ts_s = entry_ts_ms > 0 ? entry_ts_ms / 1000 : now_s;
+        t.coin = coin; t.tag = strat; t.strat = strat; t.entry = entry_px; t.exit_px = exit_px;
+        t.qty = qty; t.usd = usd; t.reason = reason;
+        {   // append-only CSV ledger of record (same schema)
+            bool fresh = false; { std::ifstream chk(LIVE_TRADES_CSV); fresh = !chk.is_open(); }
+            FILE* f = fopen(LIVE_TRADES_CSV, "a");
+            if (f) {
+                if (fresh) std::fprintf(f, "exit_ts_ms,entry_ts_ms,coin,tag,qty,entry_px,exit_px,realized_usd,reason\n");
+                std::fprintf(f, "%lld,%lld,%s,%s,%.8f,%.6f,%.6f,%.4f,%s\n",
+                             t.exit_ts_s * 1000LL, t.entry_ts_s * 1000LL, t.coin.c_str(), t.tag.c_str(),
+                             qty, t.entry, t.exit_px, t.usd, reason.c_str());
+                fclose(f);
+            } else {
+                std::fprintf(stderr, "[LIVE-LEDGER] *** failed to append %s (%s $%.2f) ***\n",
+                             LIVE_TRADES_CSV, strat.c_str(), t.usd);
+            }
+        }
+        realized_total_ += t.usd; realized_.push_back(std::move(t));
+        write_realized_json_();
+        std::printf("[LIVE-LEDGER] booked EXTERNAL %s %s qty=%.8f %.6f->%.6f realized $%.4f (%s) — total $%.2f\n",
+                    strat.c_str(), coin.c_str(), qty, entry_px, exit_px, usd, reason.c_str(), realized_total_);
         std::fflush(stdout);
     }
 
@@ -1752,6 +1790,17 @@ struct LiveMimicMirror {
     }
 };
 static LiveMimicMirror g_mimic_mirror;
+
+// ── S-2026-07-20af BTC REGIME-MOMENTUM BOOK (operator: "take the ensemble btc book") ──
+// LIVE directional (long-only spot) BTC book: TRENDCORE Donchian-breakout sleeve +
+// TSMOM30 30d-momentum sleeve, 50/50. NOT a mimic/companion (directional), so the
+// BE-floor-on-open companion mandate does not apply; its loss protection is the
+// certified structural stop + chandelier/donch trail + 2R floor (TRENDCORE) and the
+// 30d momentum-flip to flat (TSMOM30). Cert S-2026-07-20af (Crypto backtest/
+// BTC_TRENDCORE_GATEFIX_2026-07-20.md); C++==python parity proven (backtest/
+// btc_regime_book_parity_bt.cpp, all sleeves/metrics MATCH). Honest null: the edge
+// is regime+trail+momentum, NOT breakout entry timing (59th-pct random-entry null).
+static chimera::BtcRegimeMomentumBook g_btc_regime_book;
 
 // Rehydrate cumulative clip counters (count + summed net_bp) per companion tag from
 // the append-only durable clip log, so the desk panel clips/bank_bp survive a restart.
@@ -2579,8 +2628,9 @@ static void http_server_thread(int port) {
                 save_companion_det_state();      // ...and a restart restores DISARMED, not re-armed
             }
             mirror_sold = g_mimic_mirror.flatten_all("api");
-            std::printf("[KILL-ALL] sleeves=%d companions=%d legs_flushed=%d mirror_sold=%d\n",
-                        sleeves, comps, legs_flushed, mirror_sold);
+            int btc_book_sold = g_btc_regime_book.flatten_all("api");   // S-20af: flatten the directional BTC book too
+            std::printf("[KILL-ALL] sleeves=%d companions=%d legs_flushed=%d mirror_sold=%d btc_book_sold=%d\n",
+                        sleeves, comps, legs_flushed, mirror_sold, btc_book_sold);
             std::fflush(stdout);
             std::ostringstream kj;
             kj << "{\"ok\":true,\"sleeves\":" << sleeves << ",\"companions\":" << comps
@@ -3745,6 +3795,39 @@ int main() {
         }
     } else {
         std::printf("[MIMIC-LIVE] mirror DISARMED (mode=SHADOW) — grid books unchanged, no real orders\n");
+    }
+    std::fflush(stdout);
+
+    // ── S-2026-07-20af arm the BTC REGIME-MOMENTUM BOOK (operator: take the ensemble) ──
+    // Directional long-only spot book. Routes BUY/SELL through the SAME governed_submit
+    // path (HARDCAP allocator + PILOT-SCOPE + kill-switch + filters + ledger). Armed
+    // ONLY in RuntimeMode::LIVE; SHADOW leaves submit unset -> the engine is pure
+    // accounting (no orders). Daily history is seeded from REST 1d klines in the seed
+    // block below (EMA200 warm); state persists so a restart cannot strand real coins.
+    g_btc_regime_book.live_enabled = (g_runtime_mode == chimera::RuntimeMode::LIVE);
+    g_btc_regime_book.order_usd    = runtime_cfg.live_pilot_max_order_usd;   // per-sleeve clip = pilot $/order
+    g_btc_regime_book.symbol       = "btcusdt";
+    if (g_btc_regime_book.live_enabled) {
+        g_btc_regime_book.submit    = governed_submit;
+        g_btc_regime_book.free_base = [&executor](const std::string& asset) -> double {
+            return executor.free_balance(asset);
+        };
+        // S-2026-07-20af DESK FOLD: real BTC-book closes book into the desk ledger/_clivetot
+        // (data/live_trades.csv + live_realized.json), tagged BTC-REGIME-TC/TS so the desk
+        // headline includes this book's REAL cash. usd is the book's real-fill delta.
+        g_btc_regime_book.on_live_close = [](const char* strat, const std::string& coin,
+                                             double entry, double exit_px, double qty,
+                                             double usd, const char* reason) {
+            g_mimic_mirror.book_external_close(coin, strat, /*entry_ts_ms*/ 0, entry, exit_px,
+                                               qty, usd, reason ? reason : "CLOSE");
+        };
+        std::printf("[BTC-REGIME-BOOK] ARMED: TRENDCORE+TSMOM30 50/50, per-sleeve clip $%.2f via gateway "
+                    "(%s); state persists %s\n",
+                    g_btc_regime_book.order_usd,
+                    runtime_cfg.live_full ? "live_full: gross bounded by portfolio hardcap" : "pilot caps enforce",
+                    g_btc_regime_book.persist_path.c_str());
+    } else {
+        std::printf("[BTC-REGIME-BOOK] DISARMED (mode=SHADOW) — pure accounting, no real orders\n");
     }
     std::fflush(stdout);
 
@@ -10406,6 +10489,38 @@ int main() {
         // (the BTC 200d-MA regime gate) is a SEPARATE master switch — out of scope, left intact.
         // init_grids();                      // S55: maker grid sleeve (shadow) — REMOVED #2b
         // init_macro_base();                 // S55: macro-bull base / bull-beta core (shadow) — REMOVED #2b
+
+        // ── S-2026-07-20af seed the BTC REGIME-MOMENTUM BOOK daily history ────
+        // EMA200 needs 202+ completed daily bars; fetch 600 1d klines (public
+        // endpoint) so both sleeves are warm at boot (no cold-start silent idle).
+        // Bars are OLDEST-FIRST; the LAST 1d kline is the in-progress day — DROP it
+        // so daily_ holds only COMPLETED bars (the live 1h tick aggregator builds
+        // today onward). Then restore persisted state so a restart cannot strand
+        // real coins, and print the boot gate line proving certified params loaded.
+        {
+            auto kl = seed_rest.fetch_klines("btcusdt", "1d", 600);
+            if ((int)kl.size() >= chimera::BtcRegimeMomentumBook::MIN_COMPLETED_DAILY + 1) {
+                int last = (int)kl.size() - 1;   // drop the in-progress current day
+                for (int i = 0; i < last; ++i)
+                    g_btc_regime_book.seed_daily(kl[i].open_ts_ms / 86400000LL,
+                                                 kl[i].o, kl[i].h, kl[i].l, kl[i].c);
+                g_btc_regime_book.finalize_seed();
+            } else {
+                std::fprintf(stderr, "[BTC-REGIME-BOOK] only %d 1d bars (<%d) — book stays WARMING "
+                             "until enough daily history accumulates\n",
+                             (int)kl.size(), chimera::BtcRegimeMomentumBook::MIN_COMPLETED_DAILY + 1);
+            }
+            g_btc_regime_book.load();   // restore in-flight positions / live coins from prior run
+            // Boot gate line (greppable): proves the book loaded with its EXACT certified
+            // params + current regime + warm/flat state. Loss-protection: the certified
+            // TRENDCORE structural stop + trail + 2R floor and TSMOM30 momentum-flip ARE
+            // the protection (directional book — no BE-floor mandate; see header verdict).
+            std::printf("[BTC-REGIME-BOOK-GATE] %s | PROTECTION: TRENDCORE struct-stop(1.75-3.0xATR)+2R-floor(66bp)+"
+                        "chandelier/donch trail (certified); TSMOM30 30d-flip-to-flat (certified) — no BE-floor "
+                        "mandate (directional). Honest null: edge=regime+trail+momentum NOT breakout timing.\n",
+                        g_btc_regime_book.boot_summary().c_str());
+            std::fflush(stdout);
+        }
     }
 
     // ── Position resume: restore open positions after restart ────────────
@@ -11083,6 +11198,14 @@ int main() {
         // (their floors anchor at SHADOW fills, not the mirror's real ones). No-op when
         // disarmed or flat.
         g_mimic_mirror.on_price(tick.symbol, mid, now_ms);
+
+        // S-2026-07-20af BTC REGIME-MOMENTUM BOOK: aggregate BTC ticks into completed
+        // 1h bars; on each hour rollover the engine runs the certified TRENDCORE 1h
+        // buy-stop / gap-honest-stop / trail state machine + the TSMOM30 daily step
+        // (signals on completed daily bars, TSMOM fills next daily open). No-op for
+        // non-BTC ticks and when disarmed (SHADOW). Live 1h OHLC = tick-mid aggregation
+        // (documented divergence from Binance klines; parity uses exact klines).
+        if (tick.symbol == "btcusdt") g_btc_regime_book.on_tick(mid, now_ms);
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;

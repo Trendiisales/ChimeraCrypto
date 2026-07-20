@@ -1437,6 +1437,10 @@ struct LiveMimicMirror {
             // S-20o: pre-be_px persist file — approximate the anchored BE from own fill
             // (fill ≈ le*(1+2×RT) at confirm cross ⇒ le*(1+RT) ≈ fill*(1−RT)).
             if (h.be_px <= 0.0) h.be_px = h.px * (1.0 - cost_bound_bp / 2.0 / 1e4);
+            // S-20o2: clamp a persisted be_px into the below-fill band (rows written by
+            // the first S-20o build could carry be_px ABOVE the fill — instant churn).
+            h.be_px = std::max(h.px * (1.0 - cost_bound_bp / 1e4),
+                               std::min(h.be_px, h.px * (1.0 - cost_bound_bp / 2.0 / 1e4)));
             if (!tag.empty() && h.qty > 0.0) held[tag] = h;
             p = te;
         }
@@ -1558,8 +1562,17 @@ struct LiveMimicMirror {
             // clamped so a basis-gapped fill's pre-BE tail is bounded at 2×RT below fill.
             {
                 const double rt = cost_bound_bp / 2.0 / 1e4;
-                const double anc_be = r.floor_anchor > 0.0 ? r.floor_anchor * (1.0 + rt) : 0.0;
-                h.be_px = std::max(anc_be, h.px * (1.0 - 2.0 * rt));
+                // S-20o2: the exit level must sit strictly BELOW the real fill — a
+                // cascade/reclip leg opens AT its BE point (le ≈ fill), so raw
+                // le*(1+RT) lands ABOVE the fill and instant-churns (live SOL: buy
+                // 76.84 be_exit 77.05, PREBE sell 76.83 seconds later — the shadow
+                // books that clip at the LEVEL as ~+28bp, the live mirror can only
+                // sell at market = real loss, 17f model-vs-fill class). Anchored
+                // le*(1+RT) honoured within the band [fill−2×RT, fill−RT].
+                const double anc_be = r.floor_anchor > 0.0 ? r.floor_anchor * (1.0 + rt)
+                                                           : h.px * (1.0 - rt);
+                h.be_px = std::max(h.px * (1.0 - 2.0 * rt),
+                                   std::min(anc_be, h.px * (1.0 - rt)));
             }
             std::printf("[MIMIC-LIVE] BUY %s %s qty=%.8f @%.6f (~$%.2f) be_exit=%.6f\n",
                         r.tag.c_str(), upsym(r.symbol).c_str(), h.qty, h.px, h.qty * h.px, h.be_px);

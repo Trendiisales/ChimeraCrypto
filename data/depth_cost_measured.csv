@@ -1,0 +1,21 @@
+# MEASURED per-coin p99 depth slip (bp) at $1k notional — DepthLiquidationModel walk of
+# data/bookdepth_perp (356-366 days incl Oct-2025 crash). Source run: backtest/depth_cost_all15_2026-07-20.txt
+# Regenerate: DC_COINS=... DC_NOTIONALS=100,1000,5000,25000,100000 backtest/depth_cost_model_bt
+# Consumed at boot: g_camp_cost_ledger.set_depth_slip(sym, entry_p99, exit_p99) -> safe_cost_bps(sym)
+# NEVER hand-edit numbers (feedback-crypto-cost-authoritative-depth-model). $1k >= pilot $100 = conservative.
+sym,entry_p99_bp,exit_p99_bp
+ethusdt,0.0,0.0
+xrpusdt,0.0,0.0
+btcusdt,0.0,0.0
+solusdt,0.0,0.0
+bnbusdt,0.0,0.0
+dogeusdt,0.0,0.0
+avaxusdt,0.0,0.0
+linkusdt,0.0,0.0
+runeusdt,0.7,0.6
+hbarusdt,0.1,0.1
+imxusdt,0.8,0.7
+renderusdt,0.3,0.2
+tonusdt,0.2,0.1
+xlmusdt,0.2,0.1
+1000flokiusdt,0.4,0.2

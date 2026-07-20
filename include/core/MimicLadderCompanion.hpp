@@ -249,6 +249,10 @@ public:
         // Binance H1 across the 10-coin roster. These fields carry the worse-of fill (the H1
         // close that tripped the stop) minus the 20bp RT cost. Judge the book on THESE.
         double  gross_bp_real = 0.0, net_bp_real = 0.0;
+        // S-2026-07-20 HONEST LEDGER: entry_px carries the REAL open fill (fill_px basis);
+        // anchor_le preserves the leg's anchored le (window-entry anchor for confirm_anchor_epx
+        // legs) so audits/harnesses can reconstruct the old anchored basis exactly.
+        double  anchor_le = 0.0;
         double  size_mult = 1.0;           // per-coin weight this clip was booked under (S-2026-07-08)
         int     bars_held = 0, clip_num = 0;
         bool    shadow = true;
@@ -355,7 +359,7 @@ public:
                 }
                 jf_open_ts_ = now_ms; jf_open_bar_ = bar; jf_ext_bar_ = bar;   // held-bars restart at boot (open ts not persisted)
                 legs_.clear();
-                Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
+                Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.fill_px = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
                 l.open = true; l.open_ts = now_ms; l.open_bar = bar; l.ext_bar = bar;
                 l.mfe = jf_mfe_ * 100.0;
                 legs_.push_back(l);
@@ -473,6 +477,13 @@ public:
         int     tier_idx = 0;          // base-tier open order (T1=0,T2=1,S1=2,...) for staggered release
         double  pk = 0.0, mfe = 0.0;
         int64_t ext_bar = 0, open_bar = 0, open_ts = 0;
+        // S-2026-07-20 HONEST LEDGER (operator order): the REAL open fill — the exact px
+        // announce_open_ hands the live mirror (cur at the moment of open on every path:
+        // intrabar confirm, step_leg_ open, reclip). ALL booking (emit_clip_) computes
+        // gross from THIS, never from the anchored le (le stays the design anchor for
+        // floor/stop LEVELS + gates). 0 = leg not opened via a live fill path (falls
+        // back to le, the pre-fix basis, for legacy/display legs only).
+        double  fill_px = 0.0;
         // BE-floor / MIMIC-FLOOR mode state
         double  trail_bp = 0.0;   // bp giveback-from-hwm (0 = ride to parent exit)
         double  hwm = 0.0;        // high-water price since open
@@ -526,6 +537,7 @@ public:
             if (fav * 100.0 < lg.confirm) continue;            // fav% -> bp vs confirm bp
             lg.open = true; lg.open_ts = ts_ms; lg.open_bar = bar;
             if (!cfg_.confirm_anchor_epx || lg.seeded_flat) lg.le = cur;   // same rule as step_leg_
+            lg.fill_px = cur;                                  // HONEST LEDGER: the real fill the mirror buys at
             lg.mfe = fav; lg.ext_bar = bar;
             if (cfg_.mimic_floor) { lg.hwm = lg.le; lg.floored = false; lg.stop_px = -1.0; }
             announce_open_(lg, ts_ms, cur);                    // live mirror buys NOW
@@ -778,7 +790,7 @@ private:
             jf_ext_bar_ = jf_open_bar_;
             det_in_ = true; det_entry_ = jf_E_;                 // persistence mirror
             legs_.clear();                                      // ONE display leg for the desk panel
-            Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
+            Leg l; l.label = "J1"; l.epx = jf_E_; l.le = jf_E_; l.fill_px = jf_E_; l.arm = cfg_.round_trip_bp / 100.0;
             l.open = true; l.open_ts = ts_ms; l.open_bar = jf_open_bar_; l.ext_bar = jf_open_bar_;
             legs_.push_back(l);
             announce_open_(legs_.back(), ts_ms, jf_E_);     // live mirror (jump-floor immediate entry)
@@ -879,7 +891,7 @@ private:
     void step_be_(Leg& lg, double cur, int64_t ts, int64_t bar) {
         if (!lg.open) {                                     // FLAT: wait for +be_bp from ref -> open here
             if ((cur / lg.ref_px - 1.0) * 1e4 < cfg_.be_bp) return;
-            lg.open = true; lg.le = cur; lg.hwm = cur;
+            lg.open = true; lg.le = cur; lg.hwm = cur; lg.fill_px = cur;
             lg.open_ts = ts; lg.open_bar = bar; lg.ext_bar = bar; lg.mfe = 0.0;
             announce_open_(lg, ts, cur);                    // live mirror
             return;                                         // opened this bar; stop==le, cur==le -> no exit yet
@@ -1030,6 +1042,7 @@ private:
         if (lg.clipped) {
             if (lg.rc > 0.0 && lg.pk > 0.0 && fav > lg.pk * (1.0 + lg.rc)) {
                 lg.clipped = false; lg.le = cur;      // RECLIP = re-enter at current price
+                lg.fill_px = cur;                     // HONEST LEDGER: reclip = a new real fill
                 if (cfg_.mimic_floor) { lg.hwm = cur; lg.floored = false; lg.stop_px = -1.0; }  // fresh floor on the new fill
                 announce_open_(lg, bar * cfg_.tf_secs * 1000, cur);   // reclip = a NEW live fill for the mirror
             } else return false;
@@ -1038,6 +1051,7 @@ private:
             if (lg.confirm > 0.0 && fav * 100.0 < lg.confirm) return false;   // OPTION-B: not yet confirmed -> stay flat, book nothing
             lg.open = true; lg.open_ts = bar * cfg_.tf_secs * 1000; lg.open_bar = bar;
             if ((lg.confirm > 0.0 && !cfg_.confirm_anchor_epx) || lg.seeded_flat) lg.le = cur;  // le = confirm price / first live mark (rehydrate-FLAT: never backdated). confirm_anchor_epx keeps le=epx so the leg is floored-on-open at window-entry BE (no pre-arm loss).
+            lg.fill_px = cur;                      // HONEST LEDGER: the real fill the mirror buys at (cur, never the anchored le)
             lg.mfe = fav; lg.ext_bar = bar;
             if (cfg_.mimic_floor) { lg.hwm = lg.le; lg.floored = false; lg.stop_px = -1.0; }     // floor gauged from the fill (le)
             announce_open_(lg, lg.open_ts, cur);   // live mirror buys at the CURRENT mark (cur), not the anchored le
@@ -1088,11 +1102,11 @@ private:
         // this books a real gap-through's sub-BE tail instead of hiding it. fill<=stop_px at the
         // call site; clamp UP to stop_px defensively (a stop can't fill BETTER than its level).
         const double exit_px = (fill_px > 0.0 && fill_px < lg.stop_px) ? fill_px : lg.stop_px;
+        // Anchored-basis gross/net computed here for the log's (anch=) reference ONLY —
+        // S-2026-07-20 HONEST LEDGER: emit_clip_ books from lg.fill_px (the real open fill),
+        // so an anchored cell's floor clip books its true ≈-(confirm-RT) shortfall instead of
+        // the inflated le-basis figure. (S-17f exit-side honesty — worse-of gap fill — kept.)
         const double gross = (exit_px / lg.le - 1.0) * 1e4;
-        // fp-noise clamp ONLY: when fill == stop == BE exactly (no gap), IEEE-754 rounding of
-        // (le*(1+rt)/le - 1)*1e4 yields ~-1e-7 bp — clamp that sub-bp noise to 0. A REAL gap-
-        // through (fill < stop) yields net << -1e-6 and is NOT clamped: it books its true sub-BE
-        // tail (the S-17f honesty fix — no longer masked to +0; nNeg>0 now means a real gap tail).
         double net = gross - cfg_.round_trip_bp;
         if (net < 0.0 && net > -1e-6) net = 0.0;
         emit_clip_(lg, exit_px, ts, bar, gross, net, "FLOOR_TRAIL_CLIP");
@@ -1104,7 +1118,7 @@ private:
             // >= confirm, and confirm_anchor_epx keeps le=epx => hwm>=le*(1+RT) on open => floored
             // ON OPEN => net_bp_real >= 0 by construction. epx=exit means the next open needs a fresh
             // >=confirm continuation from where we exited (be_floor reclip parity: ref becomes exit px).
-            lg.epx = exit_px; lg.le = exit_px;
+            lg.epx = exit_px; lg.le = exit_px; lg.fill_px = 0.0;   // flat: next open records its own real fill
             lg.open = false; lg.clipped = false;
             lg.mfe = 0.0; lg.pk = 0.0; lg.ext_bar = bar; lg.open_bar = bar;
             lg.floored = false; lg.stop_px = -1.0; lg.hwm = 0.0;
@@ -1174,13 +1188,30 @@ private:
     }
 
     void emit_clip_(Leg& lg, double exit_px, int64_t ts, int64_t bar,
-                    double gross, double net, const char* reason) {
+                    double gross_anch, double net_anch, const char* reason) {
+        // ── S-2026-07-20 HONEST LEDGER (operator order — MimicShadowEntryBasisError fix) ──
+        // Book gross from the REAL fill (lg.fill_px — the px announce_open_ handed the
+        // mirror), NEVER from the anchored le. Under confirm_anchor_epx the mirror buys at
+        // ~le*(1+confirm) while the shadow booked from le, inflating EVERY clip by ~confirm
+        // bp (479 live floor clips: mean +21.7bp booked vs ≈-38bp at the real fill — 13 live
+        // exits confirm, zero positive). Gate decisions and LEVELS (confirm gate, cost-gate,
+        // floor/stop from le, ladder-spawn on the caller's anchored net) keep the certified
+        // anchored DESIGN; only the BOOKING is real-fill. Shadow ledger == mirror economics
+        // by construction, all cells, forever. ALL columns (model AND real) book honest —
+        // one record, no reference-only inflated column left anywhere.
+        const double fpx = (lg.fill_px > 0.0) ? lg.fill_px : lg.le;   // fallback: legacy/display legs (le == their fill)
+        const double gross = (fpx > 0.0) ? (exit_px / fpx - 1.0) * 1e4 : gross_anch;
+        double net = gross - cfg_.round_trip_bp;
+        // fp-noise clamp ONLY (S-17f semantics): exact-BE fill yields ~-1e-7bp IEEE-754 dust.
+        // A real anchored-basis shortfall is orders of magnitude larger and books its true tail.
+        if (net < 0.0 && net > -1e-6) net = 0.0;
+        (void)net_anch;
         ClipRecord r;
         r.tag = cfg_.tag + "-" + lg.label; r.symbol = cfg_.symbol; r.reason = reason;
         r.entry_ts_ms = lg.open_ts; r.exit_ts_ms = ts;
-        r.entry_px = lg.le; r.exit_px = exit_px;
+        r.entry_px = fpx; r.exit_px = exit_px; r.anchor_le = lg.le;
         r.gross_bp = gross; r.net_bp = net; r.mfe_pct = lg.mfe;
-        r.gross_bp_real = gross; r.net_bp_real = net;   // ladder mode fills MTM at cur with cost debited -> model == real
+        r.gross_bp_real = gross; r.net_bp_real = net;   // honest fill basis == real: one column, one truth
         r.size_mult = cfg_.size_mult;
         r.bars_held = (int)(bar - lg.open_bar);
         r.clip_num = ++clip_num_;
@@ -1190,8 +1221,8 @@ private:
         banked_bp_real_w_ += net * cfg_.size_mult;
         if (on_clip_) on_clip_(r);
         check_retire_();
-        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp mfe=%.2f%% bars=%d px %.6f->%.6f shadow=%d\n",
-            r.tag.c_str(), reason, net, gross, lg.mfe, r.bars_held, lg.le, exit_px, shadow_mode ? 1 : 0);
+        std::printf("[CLIP][%s] %s net=%+.1fbp gross=%+.1fbp (anch=%+.1fbp) mfe=%.2f%% bars=%d fill=%.6f px %.6f->%.6f shadow=%d\n",
+            r.tag.c_str(), reason, net, gross, gross_anch, lg.mfe, r.bars_held, fpx, lg.le, exit_px, shadow_mode ? 1 : 0);
         std::fflush(stdout);
     }
 

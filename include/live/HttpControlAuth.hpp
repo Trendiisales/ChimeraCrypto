@@ -3,7 +3,7 @@
 // HttpControlAuth — auth/method helpers for the :8080 control API.
 //
 // Phase-1 review fix (2026-07-11): the control server bound to INADDR_ANY (the
-// public IP) and exposed POST /api/kill, /api/session_reset, /api/ratchet_reset,
+// public IP) and exposed POST /api/kill, /api/rearm, /api/session_reset, /api/ratchet_reset,
 // /api/daily_kill_clear with NO authentication. These helpers add a shared-token
 // check + strict POST-only enforcement for the mutating endpoints. Extracted to
 // a header so the logic is unit-testable without spinning up the socket server.
@@ -58,6 +58,7 @@ inline bool http_control_authorized(const char* req, const std::string& server_t
 // True iff the request targets one of the state-mutating control endpoints.
 inline bool http_is_mutating_control(const char* req) {
     return std::strstr(req, "/api/kill")
+        || std::strstr(req, "/api/rearm")
         || std::strstr(req, "/api/ratchet_reset")
         || std::strstr(req, "/api/daily_kill_clear")
         || std::strstr(req, "/api/session_reset");

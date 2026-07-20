@@ -36,13 +36,22 @@ OUT=$(ssh -o ConnectTimeout=8 -o BatchMode=yes "$HOST" '
   if [ "${HOLDS:-1}" = "0" ] && [ -f "$HOME/ChimeraCrypto/data/live_trades.csv" ]; then
     FLATMIN=$(( ( $(date +%s) - $(stat -c %Y "$HOME/ChimeraCrypto/data/live_trades.csv") ) / 60 ))
   fi
+  # DISARMED visibility (S-2026-07-20, operator: post-KILL-ALL blind window "missing these
+  # breakouts ... not acceptable"). A disarmed cell CANNOT enter whatever the market does —
+  # a flat desk that is also disarmed must never read as "normally flat". Counts pilot cells
+  # published to crypto_companion_state.json with armed=false (retired cells excluded).
+  DISARM=$(python3 -c "
+import json
+d=json.load(open(\"$HOME/ChimeraCrypto/data/crypto_companion_state.json\"))
+legs=[l for l in d.get(\"legs\",[]) if not l.get(\"retired\")]
+print(f\"{sum(1 for l in legs if not l.get('armed'))}/{len(legs)}\")" 2>/dev/null)
   cd "$HOME/ChimeraCrypto" 2>/dev/null
   HASH=$(git rev-parse --short HEAD 2>/dev/null)
   git fetch origin -q 2>/dev/null
   ORIG=$(git rev-parse --short origin/main 2>/dev/null)
   ANC=$(git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 1 || echo 0)  # box behind==ancestor(benign) vs diverged
   RUN=$(grep -oE "build=[0-9a-f]+" logs/chimera.log 2>/dev/null | tail -1 | sed "s/build=//")
-  echo "AS=$AS|SS=$SS|NR=$NR|UP=${UP:-0}|PASS=$PASS|ABRT=$ABRT|HOLDS=${HOLDS:-?}|HASH=$HASH|ORIG=$ORIG|ANC=$ANC|RUN=$RUN|FLAT=$FLATMIN"
+  echo "AS=$AS|SS=$SS|NR=$NR|UP=${UP:-0}|PASS=$PASS|ABRT=$ABRT|HOLDS=${HOLDS:-?}|HASH=$HASH|ORIG=$ORIG|ANC=$ANC|RUN=$RUN|FLAT=$FLATMIN|DIS=$DISARM"
 ' 2>/dev/null)
 
 if [ -z "$OUT" ]; then
@@ -62,6 +71,7 @@ ORIG=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^ORIG=//p')
 ANC=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^ANC=//p')
 RUN=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^RUN=//p')
 FLAT=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^FLAT=//p')
+DIS=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^DIS=//p')
 
 REASONS=""
 [ "$AS" != "active" ]   && REASONS="$REASONS ActiveState=$AS(not active)"
@@ -96,17 +106,38 @@ if [ -n "$FLAT" ]; then
   fi
 fi
 
+# DISARMED severity (S-2026-07-20): DIS="n/N" disarmed/active cells. ALL disarmed = the desk
+# structurally CANNOT enter any breakout (the exact post-KILL-ALL blind state that missed the
+# 2026-07-19 75-min +170bp rally) -> AMBER floor with the recovery command, whatever FLAT says.
+# Partial disarm rides the status line as info (fresh-jump cycling disarms cells transiently).
+DISNOTE=""
+DISSEV=""
+if [ -n "$DIS" ]; then
+  DN=${DIS%%/*}; DT=${DIS##*/}
+  if [ "${DN:-0}" -gt 0 ] 2>/dev/null; then
+    DISNOTE="cells DISARMED $DIS"
+    if [ "$DN" = "$DT" ] && [ "${DT:-0}" -gt 0 ] 2>/dev/null; then
+      DISSEV="AMBER"
+      DISNOTE="ALL cells DISARMED $DIS — desk CANNOT enter any breakout (post-kill blind state; intentional kill test -> POST /api/rearm to resume immediately)"
+    fi
+  fi
+fi
+
 if [ -n "$REASONS" ]; then
-  echo "RED|$HASH holds=$HOLDS restarts=$NR —$REASONS${FLATNOTE:+ — $FLATNOTE}"
+  echo "RED|$HASH holds=$HOLDS restarts=$NR —$REASONS${FLATNOTE:+ — $FLATNOTE}${DISNOTE:+ — $DISNOTE}"
   exit 1
 fi
 if [ "$FLATSEV" = "RED" ]; then
-  echo "RED|$HASH — $FLATNOTE (>24h: live book dead-flat a full day — check BUY/-2010 rejects + USDT free + signal path)"
+  echo "RED|$HASH — $FLATNOTE (>24h: live book dead-flat a full day — check BUY/-2010 rejects + USDT free + signal path)${DISNOTE:+ — $DISNOTE}"
   exit 1
 fi
-if [ "$FLATSEV" = "AMBER" ]; then
-  echo "AMBER|$HASH (==origin==running) | reconcile PASS | up=${UP}s restarts=$NR | $FLATNOTE (>6h: verify arms firing — grep 'BUY\\|-2010' chimera.log, check USDT free)"
+if [ "$DISSEV" = "AMBER" ]; then
+  echo "AMBER|$HASH (==origin==running) | reconcile PASS | up=${UP}s restarts=$NR | $DISNOTE${FLATNOTE:+ | $FLATNOTE}"
   exit 0
 fi
-echo "GREEN|$HASH (==origin==running) | reconcile PASS | active/running up=${UP}s restarts=$NR | live holds=$HOLDS${FLATNOTE:+ | $FLATNOTE (normal short-flat: mimic awaits confirmed up-move)}"
+if [ "$FLATSEV" = "AMBER" ]; then
+  echo "AMBER|$HASH (==origin==running) | reconcile PASS | up=${UP}s restarts=$NR | $FLATNOTE (>6h: verify arms firing — grep 'BUY\\|-2010' chimera.log, check USDT free)${DISNOTE:+ | $DISNOTE}"
+  exit 0
+fi
+echo "GREEN|$HASH (==origin==running) | reconcile PASS | active/running up=${UP}s restarts=$NR | live holds=$HOLDS${FLATNOTE:+ | $FLATNOTE (normal short-flat: mimic awaits confirmed up-move)}${DISNOTE:+ | $DISNOTE}"
 exit 0

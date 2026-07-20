@@ -1195,6 +1195,27 @@ public:
         return flushed;
     }
 
+    // ── S-2026-07-20 /api/rearm — intentional-kill recovery ──────────────────
+    // After the operator's 23:36Z KILL-ALL test, the fresh-jump rule left every
+    // cell disarmed through a 75-min rally (+126..170bp on 5 pilot coins) that the
+    // desk structurally could not enter. Operator: missing breakouts unacceptable.
+    // This re-opens the entry gate IMMEDIATELY (jf_armed_=true, no j<thr close
+    // required): the very next qualifying H1 jump-close can enter. Safe because
+    // the BE-ENTRY foundation bounds an aggressive re-arm — a leg books nothing
+    // until fav>=confirm and is floored on open, so re-arming mid-move cannot buy
+    // a pre-BE loss (it can only re-join late). Deliberately does NOT touch:
+    // in-flight legs (guard), the retired_ latch (un-retire = operator act), or
+    // the det ring (kill_disarm never cleared h1c_, so jump math is live).
+    // be_floor self-detect cells have no armed gate -> no-op false. Caller
+    // persists afterwards so a restart restores the ARMED truth.
+    bool kill_rearm() {
+        if (!cfg_.jump_floor) return false;
+        if (jf_in_ || jf_pending_open_) return false;   // never touch an in-flight leg
+        const bool was = jf_armed_;
+        jf_armed_ = true;
+        return !was;
+    }
+
 private:
 
     Config        cfg_;

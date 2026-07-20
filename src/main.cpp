@@ -2471,8 +2471,38 @@ static void http_server_thread(int port) {
             std::ostringstream kj;
             kj << "{\"ok\":true,\"sleeves\":" << sleeves << ",\"companions\":" << comps
                << ",\"companion_legs_flushed\":" << legs_flushed
-               << ",\"mirror_holdings_sold\":" << mirror_sold << "}";
+               << ",\"mirror_holdings_sold\":" << mirror_sold
+               << ",\"hint\":\"cells now DISARMED (fresh-jump rule); intentional kill test -> "
+                  "POST /api/rearm to resume entries immediately\"}";
             body = kj.str();
+        } else if (strstr(req, "POST /api/rearm")) {
+            // S-2026-07-20 intentional-kill recovery (operator: post-kill blind window
+            // "missing these breakouts ... not acceptable"). /api/kill leaves every cell
+            // disarmed BY DESIGN (panic semantics: a restart must restore DISARMED); when
+            // the kill was a TEST, this re-opens every jump-floor entry gate immediately
+            // instead of waiting out the fresh-jump cycle (j<thr close, then a NEW
+            // qualifying jump — up to hours of structural blindness). BE-ENTRY foundation
+            // bounds the aggressive re-arm: legs book nothing until fav>=confirm, floored
+            // on open. In-flight legs and the retired_ latch are untouched (see
+            // MimicLadderCompanion::kill_rearm). Persisted so a restart restores ARMED.
+            int rearmed = 0, comps = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_companion_mtx);
+                for (auto& kv : g_companion_by_parent) {
+                    chimera::MimicLadderCompanion* comp = kv.second.second;
+                    if (!comp) continue;
+                    if (comp->kill_rearm()) ++rearmed;
+                    ++comps;
+                }
+                emit_companion_state();          // desk shows ARMED truth immediately
+                save_companion_det_state();      // restart restores ARMED, not disarmed
+            }
+            std::printf("[REARM] via /api/rearm: companions=%d re-armed=%d (entry gates open; "
+                        "next qualifying H1 jump-close can enter)\n", comps, rearmed);
+            std::fflush(stdout);
+            std::ostringstream rj;
+            rj << "{\"ok\":true,\"companions\":" << comps << ",\"re_armed\":" << rearmed << "}";
+            body = rj.str();
         } else if (strstr(req, "POST /api/ratchet_reset")) {
             // S34: manual peak reset. Sets all_time_peak = all_time_cum,
             // unlocks ratchet, clears daily_kill. Use after absorbing a DD

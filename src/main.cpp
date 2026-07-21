@@ -5161,6 +5161,20 @@ int main() {
     chimera::EdgeEngine sushi_regime_d1(make_regime("sushiusdt","SUSHI-REGIME_SWITCH"));
     chimera::EdgeEngine ada_regime_d1  (make_regime("adausdt",  "ADA-REGIME_SWITCH"));
     chimera::EdgeEngine dot_regime_d1  (make_regime("dotusdt",  "DOT-REGIME_SWITCH"));
+#if 0  // ══ S-2026-07-21 TOMBSTONE: MIMIC-GRID REMOVED — non-viable BE-clamp illusion class ══
+    // REMOVED (operator order 2026-07-21, branch crypto-remove-nonviable-mimic-grid): the ENTIRE
+    // mimic/companion/clip grid guarded below — REGIME-BEMIMIC (make_be_mimic), SWEET MIMIC-FLOOR
+    // (make_mimic_floor_cell), PJ jump_floor mimic + GRT-PJ5W1-MIM, and every BE-CASCADE family
+    // (_bc_cells / _bc_fast / _bc_slow / _bc_eth_lowthr / _bc_alt_lowthr via make_becascade_cell) —
+    // is the ILLUSION class. It looked profitable ONLY under anchored-le / BE-clamp shadow
+    // accounting; under HONEST per-leg fills it is net-NEGATIVE (same finding as the Omega ladders,
+    // and as the S-20z/S-20u/S-20 honest re-cert that FAILED 369/380 live cells). Guarding it out
+    // leaves _grid EMPTY so NOTHING feeds g_mimic_mirror — zero mimic Binance orders; every boot
+    // gate (MIMIC-FLOOR-GATE / PROFIT-LOCK-GATE) then scans 0 cells = 0 VIOLATION. KEPT: the
+    // directional g_slots parents (near/theta/sushi/ada/dot_regime_d1, declared ABOVE this guard,
+    // plus the TSMom/EMAx/Keltner/Roc/IBS D1 engines + BtcRegimeMomentumBook wired BELOW) — the
+    // honest, verified directional trend/regime book. See CRYPTO_NONVIABLE_REMOVAL_2026-07-21.md +
+    // vault [[MimicGridNonViable]] / [[BeFloorOnOpenFoundation]] honesty correction.
     // BE-ENTRY MIMIC factory — reuses MimicLadderCompanion in LADDER mode: det_w=0
     // observes the EXTERNAL parent above (never self-detects), confirm_bp=20 keeps
     // every leg PENDING (booking nothing, paying no cost) until the parent's move has
@@ -5670,6 +5684,7 @@ int main() {
             _grid_feeds.push_back(&_bc_alt_lt_feeds.back());
         }
     }
+#endif  // ══ S-2026-07-21 END MIMIC-GRID TOMBSTONE — _grid stays EMPTY (no mimic cells wired) ══
     std::vector<chimera::MimicLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }

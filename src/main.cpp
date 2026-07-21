@@ -173,6 +173,7 @@
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
+#include "crypto/TrendRoster.hpp"     // S-2026-07-21 final-closeout: verified 19-leg DirectionalTrendRoster (SHADOW, opt-in via CHIMERA_WIRE_TRENDROSTER)
 #include "core/PortfolioOverlay.hpp"  // AUDIT-2026: cross-sec mom + vol-scale overlay
 #include "core/CrossSectionalMomentumEngine.hpp"  // S-2026-06-18: validated standalone XSec allocator
 #include "core/CrossSectionalMomentum2Engine.hpp" // S-2026-07-11: Phase-5 XSec 2.0 SHADOW comparison book
@@ -5161,6 +5162,20 @@ int main() {
     chimera::EdgeEngine sushi_regime_d1(make_regime("sushiusdt","SUSHI-REGIME_SWITCH"));
     chimera::EdgeEngine ada_regime_d1  (make_regime("adausdt",  "ADA-REGIME_SWITCH"));
     chimera::EdgeEngine dot_regime_d1  (make_regime("dotusdt",  "DOT-REGIME_SWITCH"));
+#if 0  // ══ S-2026-07-21 TOMBSTONE: MIMIC-GRID REMOVED — non-viable BE-clamp illusion class ══
+    // REMOVED (operator order 2026-07-21, branch crypto-remove-nonviable-mimic-grid): the ENTIRE
+    // mimic/companion/clip grid guarded below — REGIME-BEMIMIC (make_be_mimic), SWEET MIMIC-FLOOR
+    // (make_mimic_floor_cell), PJ jump_floor mimic + GRT-PJ5W1-MIM, and every BE-CASCADE family
+    // (_bc_cells / _bc_fast / _bc_slow / _bc_eth_lowthr / _bc_alt_lowthr via make_becascade_cell) —
+    // is the ILLUSION class. It looked profitable ONLY under anchored-le / BE-clamp shadow
+    // accounting; under HONEST per-leg fills it is net-NEGATIVE (same finding as the Omega ladders,
+    // and as the S-20z/S-20u/S-20 honest re-cert that FAILED 369/380 live cells). Guarding it out
+    // leaves _grid EMPTY so NOTHING feeds g_mimic_mirror — zero mimic Binance orders; every boot
+    // gate (MIMIC-FLOOR-GATE / PROFIT-LOCK-GATE) then scans 0 cells = 0 VIOLATION. KEPT: the
+    // directional g_slots parents (near/theta/sushi/ada/dot_regime_d1, declared ABOVE this guard,
+    // plus the TSMom/EMAx/Keltner/Roc/IBS D1 engines + BtcRegimeMomentumBook wired BELOW) — the
+    // honest, verified directional trend/regime book. See CRYPTO_NONVIABLE_REMOVAL_2026-07-21.md +
+    // vault [[MimicGridNonViable]] / [[BeFloorOnOpenFoundation]] honesty correction.
     // BE-ENTRY MIMIC factory — reuses MimicLadderCompanion in LADDER mode: det_w=0
     // observes the EXTERNAL parent above (never self-detects), confirm_bp=20 keeps
     // every leg PENDING (booking nothing, paying no cost) until the parent's move has
@@ -5670,6 +5685,7 @@ int main() {
             _grid_feeds.push_back(&_bc_alt_lt_feeds.back());
         }
     }
+#endif  // ══ S-2026-07-21 END MIMIC-GRID TOMBSTONE — _grid stays EMPTY (no mimic cells wired) ══
     std::vector<chimera::MimicLadderCompanion*> _all_clips;
     std::vector<chimera::EdgeEngine*>            _all_clip_parents;
     for (size_t i = 0; i < _grid.size(); ++i) { _all_clips.push_back(&_grid[i]); _all_clip_parents.push_back(_grid_feeds[i]); }
@@ -10207,6 +10223,182 @@ int main() {
             }
         }
         std::printf("[STARTUP] Funding filter + position sizing initialized\n");
+        std::fflush(stdout);
+    }
+
+    // ── S-2026-07-21 FINAL-READY: wire the verified DirectionalTrendRoster (17-leg
+    // LIVE BOOK — NDX dropped, see below) into the g_slots runtime (SHADOW). Now
+    // DEFAULT-ON (opt-OUT via env CHIMERA_NO_TRENDROSTER for a byte-identical fallback).
+    // ---------------------------------------------------------------------------
+    // NDX DECISION (crypto-final-ready): the book runs 17-leg. The 2 NDX legs
+    // (TSMom50, RSIrev) are marginally accretive in backtest (19-leg OOS Sharpe 1.71
+    // vs 17-leg 1.65; worst-DD 12.0% vs 12.7%) but NDX has NO Binance feed — a live
+    // index feed is a cross-venue integration that cannot be done cleanly in a
+    // Binance-only executor nor validated without touching the box. So the LIVE book
+    // DROPS the 2 is_index legs (leg.is_index==true) → a clean all-Binance-fed 17-leg
+    // book (still OOS Sharpe 1.65 / CAGR ~12%). The 19-leg number is kept for the
+    // record in backtest/crypto_final_results_bt.cpp + CRYPTO_FINAL_RESULTS_2026-07-21.md.
+    // ---------------------------------------------------------------------------
+    // WHY IT IS SAFE TO DEFAULT-ON (registry crash-loop does NOT apply): the prior port deferred registration citing a
+    // "registry crash-loop." The precise root cause (commit 9a9b464) is a registry
+    // DECLARED-vs-WIRED mismatch: a bucket declared ACTIVE (programmatic declare()
+    // OR a stale config/engine_registry.json load_from_json) but never mark_wired()
+    // → g_registry.validate() returns false → "[REGISTRY] STARTUP ABORT" → return 1
+    // → systemd/launchd restart loop (NRestarts=15, live desk down). That abort is
+    // NOT triggered by adding slots here: these 19 legs join the EXISTING EDGE-SLOTS
+    // bucket, whose mark_wired("EDGE-SLOTS", !g_slots.empty(), g_slots.size()) AUTO-
+    // reflects the real count (5 → 24) and stays SHADOW+wired+connected, so validate()
+    // still PASSES. No new JSON entry is added, so no stale-override can abort. The
+    // registration is therefore registry-safe BY CONSTRUCTION.
+    //
+    // The real reasons this is gated + inserted HERE (after the vol_filter/mtf/adx/
+    // volume/corr/funding/sizing gate-config loops, before the seed loop):
+    //   • FIDELITY: the validated book is ride_to_flip with NO in-flight gates. The
+    //     gate-config loops above would enable vol_filter/mtf/volume/corr on any leg
+    //     that is not is_trend_following() (i.e. EMAX/ROC/KELTNER_BREAK/IBS/RSIrev),
+    //     altering entries away from the penny-verified signal. Inserting AFTER those
+    //     loops leaves the roster legs gate-exempt = byte-faithful to the harness.
+    //   • NO DESK CONTAMINATION: the on_trade desk-export hook (chimera_inbound.csv)
+    //     is wired in that same earlier loop; skipping it keeps these SHADOW research
+    //     legs OUT of the live desk relay (operator: zero shadow contamination).
+    //   • HARD SHADOW: shadow_mode forced true; nothing can route live. The single
+    //     documented step to go live-real is a per-leg live-arm flip (flip shadow_mode
+    //     false + route via governed_submit under the $10k/vt-0.020 pool + 15% per-leg
+    //     cap) — the operator's funded go. NOT armed here (see CRYPTO_FINAL_RESULTS md
+    //     §LIVE-ARM READY CONFIG). No live-arm plumbing is present; legs are hard shadow.
+    // Default boot with the roster: 17 crypto legs connected (5 legacy + 17 = 22),
+    // reconcile PASS, gates 0 VIOLATION. Opt-OUT (CHIMERA_NO_TRENDROSTER set) →
+    // byte-identical legacy 5-connected boot.
+    if (!std::getenv("CHIMERA_NO_TRENDROSTER")) {
+        // ── S-2026-07-21 LIVE-ARM PLUMBING (branch crypto-live-arm-plumbing) ─────
+        // The 17 roster legs are HARD SHADOW by default: no routing callback is
+        // bound (on_order_intent is never set), so an EdgeEngine signal goes NOWHERE
+        // — SpotExecutor::execute() is friend-gated and unreachable without a callback
+        // that funnels into governed_submit. This block adds OPT-IN plumbing that makes
+        // each leg ROUTABLE, behind a default-OFF flag so nothing changes until armed:
+        //   • env CHIMERA_ARM_TRENDROSTER UNSET (DEFAULT) → byte-identical to base:
+        //       shadow_mode=true forced, NO callback, NO pool read, NO extra prints.
+        //   • env CHIMERA_ARM_TRENDROSTER SET → bind on_order_intent → governed_submit
+        //       (the SAME gateway path g_btc_regime_book uses: HARDCAP allocator +
+        //       PILOT-SCOPE + kill-switch + exchange filters + ledger), size from the
+        //       account-NLV pool (vt-0.020 blend, equal-slice, ≤15%/leg cap), and let
+        //       shadow_mode follow runtime (SHADOW=true paper / LIVE=false real).
+        // A DRY test runs arm=ON in RuntimeMode::SHADOW: callbacks bind + would route,
+        // but the executor is in shadow (paper) → place_order returns a shadow fill, so
+        // NO real Binance order is sent. Live money still needs mode=LIVE + funded creds
+        // (the executor is declared=HALTED today) — a separate operator go, NOT here.
+        //
+        // ADVERSE-PROTECTION VERDICT (memory feedback-engine-loss-protection-provision;
+        // vault [[DirectionalTrendRosterOOS]] + CRYPTO_FINAL_RESULTS_2026-07-21.md §PER-LEG
+        // + §DRAWDOWN). ALL 17 legs are directional trend engines, ride_to_flip, long-only
+        // spot — backtested verdict per leg = TRAIL-ONLY / NO COLD CUT:
+        //   legs 1-3  BTC/ETH/SOL EMAx (workhorse)  — trail-only; ride EMA20/50 cross, flip-out.
+        //   legs 4-6  BTC/ETH/SOL Keltner (trend)   — trail-only; exit on band re-entry (faithful).
+        //   legs 7-9  BTC/ETH/SOL Regime (regime)   — regime SIT-OUT is the protection (flat in
+        //                                             downtrend); no cold cut.
+        //   legs 10   ADA Keltner (satellite)       — trail-only; band re-entry exit.
+        //   legs 11-12 BTC/SOL Roc (satellite)      — trail-only; momentum flip-out.
+        //   legs 13-14 BTC/SOL IBS (satellite)      — mean-rev at extreme; vt=0 fixed size, own exit.
+        //   legs 17-19 XRP/XLM/GRT Keltner (adds)   — trail-only; small (cap binds), band re-entry.
+        // Rationale (backtested): the OOS study + the 2026-06-17 swing-protection sweep +
+        // MimicFloorUnification "tightening HURTS" all found a cold/tight stop AMPUTATES the
+        // fat tail and lowers net on trend engines. Protection = (a) vol-target sizing
+        // (never over-deploys; vt-0.020 per-leg realized-vol scaled), (b) regime sit-out /
+        // signal-flip (keeps legs flat in downtrends), (c) the engine's own ride_to_flip
+        // exit. Worst-DD bounded ~12.7% research / ~8.1% engine-basis / ~16% winter-plan.
+        // NO 200DMA anywhere (crypto hard rule). Backtest ref: crypto_final_results_bt.cpp.
+        // ────────────────────────────────────────────────────────────────────────
+        const bool arm_roster = (std::getenv("CHIMERA_ARM_TRENDROSTER") != nullptr);
+        // Account-NLV pool (item 3: NOT hardcoded $10k). Read free USDT at boot when the
+        // executor is ready; env override for controlled tests; documented ~1696 fallback
+        // when the balance is unreadable (shadow / no-creds dry run).
+        double pool_nlv = 0.0;
+        int    n_live_legs = 0;
+        const char* pool_src = "fallback";
+        if (arm_roster) {
+            for (const auto& leg : chimera::trend_roster::legs())
+                if (!leg.is_index) ++n_live_legs;
+            if (const char* pe = std::getenv("CHIMERA_TRENDROSTER_POOL_USD")) {
+                pool_nlv = std::atof(pe); pool_src = "env";
+            }
+            if (pool_nlv <= 0.0 && exec_ok && executor.is_ready()) {
+                double u = executor.free_balance("USDT");
+                if (u > 0.0) { pool_nlv = u; pool_src = "binance"; }
+            }
+            if (pool_nlv <= 0.0) { pool_nlv = 1696.0; pool_src = "fallback"; }  // documented NLV
+            std::printf("[TRENDROSTER-ARM] pool_nlv=$%.2f (source=%s) legs=%d equal-slice=$%.2f "
+                        "vt=0.020 per-leg-cap=$%.2f(15%%) mode=%s\n",
+                        pool_nlv, pool_src, n_live_legs,
+                        pool_nlv / (n_live_legs > 0 ? n_live_legs : 1), 0.15 * pool_nlv,
+                        (g_runtime_mode == chimera::RuntimeMode::LIVE) ? "LIVE" : "SHADOW(dry)");
+        }
+        const double slice_usd = (arm_roster && n_live_legs > 0) ? pool_nlv / n_live_legs : 0.0;
+        const double cap_usd   = 0.15 * pool_nlv;
+        // static deque = STABLE addresses for the process lifetime (a vector<>
+        // would realloc and invalidate the &engine pointers stored in g_slots).
+        static std::deque<chimera::EdgeEngine> g_trendroster_engines;
+        int wired_live = 0, dropped_ndx = 0, bound_live = 0;
+        for (const auto& leg : chimera::trend_roster::legs()) {
+            if (leg.is_index) { ++dropped_ndx; continue; }  // NDX: no Binance feed → 17-leg live book
+            chimera::EdgeEngine::Config c = chimera::trend_roster::make_config(leg);
+            g_trendroster_engines.emplace_back(c);
+            chimera::EdgeEngine* eng = &g_trendroster_engines.back();
+            if (!arm_roster) {
+                eng->shadow_mode = true;             // HARD SHADOW — never routes live (base default)
+            } else {
+                // ARMED: shadow_mode follows runtime (SHADOW=paper, LIVE=real). Bind the
+                // routing callback so on_order_intent → governed_submit → gateway →
+                // SpotExecutor::execute. Deliberately NOT wire_engine (it early-returns
+                // without CHIMERA_WIRE_LEGACY, and would re-enable vol/mtf/adx/corr gates
+                // that break the penny-verified ride_to_flip signal) — this replicates ONLY
+                // the on_order_intent→governed_submit binding, gate-exempt, with pool sizing.
+                eng->shadow_mode = runtime_cfg.shadow_mode;
+                eng->set_on_order_intent(
+                    [&, eng, slice_usd, cap_usd](const chimera::EdgeEngine::OrderIntentRecord& intent) {
+                        if (!exec_ok || !executor.is_ready()) {
+                            std::fprintf(stderr, "[TRENDROSTER-INTENT] executor not ready tag=%s sym=%s side=%s\n",
+                                intent.tag.c_str(), intent.symbol.c_str(), intent.is_buy ? "BUY" : "SELL");
+                            return;
+                        }
+                        if (intent.ref_px <= 0.0) return;
+                        double vt = eng->vol_target_size();          // vt-0.020 blend (1.0 for IBS/vt=0 legs)
+                        double notional = slice_usd * vt;            // equal-slice × vol-target
+                        if (notional > cap_usd) notional = cap_usd;  // ≤15%/leg cap
+                        double qty = notional / intent.ref_px;
+                        std::printf("[TRENDROSTER-INTENT] tag=%s sym=%s side=%s qty=%.8f px=%.6f vt=%.3f notional=$%.2f\n",
+                            intent.tag.c_str(), intent.symbol.c_str(), intent.is_buy ? "BUY" : "SELL",
+                            qty, intent.ref_px, vt, notional);
+                        std::fflush(stdout);
+                        auto result = governed_submit({ intent.symbol, intent.is_buy, qty, intent.ref_px,
+                                                        /*is_exit*/ !intent.is_buy, intent.tag.c_str() },
+                                                      chimera::Factor::MOMENTUM);
+                        if (!result.ok)
+                            std::fprintf(stderr, "[TRENDROSTER-INTENT] submit failed tag=%s sym=%s err=%s\n",
+                                intent.tag.c_str(), intent.symbol.c_str(), result.error.c_str());
+                    });
+            }
+            int sid = chimera::sym_id(leg.symbol);
+            g_slots.push_back({ sid, eng, std::string(leg.symbol), (int64_t)c.tf_secs,
+                                c.tag, /*oos_pf*/0.0, /*oos_sharpe*/0.0, /*oos_nbr*/0,
+                                /*oos_trades*/0, /*session*/72 });
+            if (sid >= 0) ++wired_live;
+            if (arm_roster && sid >= 0) {
+                ++bound_live;
+                std::printf("[TRENDROSTER-ARM] leg#%02d %-8s %-30s callback=BOUND routable=YES shadow=%d\n",
+                            bound_live, leg.symbol, c.tag.c_str(), eng->shadow_mode ? 1 : 0);
+            }
+        }
+        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (17-leg live book; %d NDX legs dropped, no Binance feed); "
+                    "DEFAULT-ON, gate-exempt, no-desk-export, ride_to_flip, NO-200DMA, %s\n",
+                    wired_live, dropped_ndx,
+                    arm_roster ? "ARM-FLAG-ON (governed_submit bound)" : "hard-shadow");
+        if (arm_roster) {
+            std::printf("[TRENDROSTER-ARM] %d/%d legs bound to governed_submit (ROUTABLE); mode=%s → %s. "
+                        "Live-arm = mode=LIVE + funded Binance creds (separate operator go).\n",
+                        bound_live, wired_live,
+                        (g_runtime_mode == chimera::RuntimeMode::LIVE) ? "LIVE" : "SHADOW",
+                        (g_runtime_mode == chimera::RuntimeMode::LIVE) ? "REAL orders" : "DRY-RUN paper (no real orders)");
+        }
         std::fflush(stdout);
     }
 

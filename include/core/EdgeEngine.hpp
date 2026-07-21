@@ -93,7 +93,10 @@ enum class StrategyKind {
     BREAKOUT_PULLBACK, // S38: N-bar high breakout, enter on pullback that holds the breakout level
     MIMIC,         // S-2026-07-03: wide W-bar mimic, ride to symmetric down-jump flip; NO trade-level stops (ride_to_flip)
     KELTNER_BREAK,  // S-2026-07-12: upper-Keltner breakout TREND (close>EMA+M*ATR -> long), ride to lower-band flip; NO stops. Folds the Mac ibkrcrypto Kelt(20,2.0). NOT KELTNER_REVERT (that's the opposite lower-band mean-revert).
-    REGIME_SWITCH   // S-2026-07-12: efficiency-ratio regime switch (ER>hi trending->momentum long; ER<lo chop->IBS mean-rev long; else flat). Folds the Mac ibkrcrypto Regime(20,0.40,0.25); ride_to_flip (exit when signal != long).
+    REGIME_SWITCH,  // S-2026-07-12: efficiency-ratio regime switch (ER>hi trending->momentum long; ER<lo chop->IBS mean-rev long; else flat). Folds the Mac ibkrcrypto Regime(20,0.40,0.25); ride_to_flip (exit when signal != long).
+    EMAX,           // S-2026-07-21 (DirectionalTrendRoster port): fast-EMA(F) > slow-EMA(S) -> long, ride until ef<=es. Folds the Mac ibkrcrypto EMAx(20,50). Research-faithful EMA seed (4*p). ride_to_flip long-only. THE WORKHORSE (~55% of book P&L).
+    ROC,            // S-2026-07-21 (port): N-bar rate-of-change > thr -> long, ride until roc<=thr. Folds the Mac ibkrcrypto Roc(20,0.0). ride_to_flip long-only. momentum satellite.
+    IBS             // S-2026-07-21 (port): standalone Internal-Bar-Strength (c-l)/(h-l) < lo -> long oversold close, exit when v>=lo. Folds the Mac ibkrcrypto IBS(0.15,0.85). mean-rev satellite (NOT the REGIME_SWITCH chop sub-branch).
 };
 
 inline const char* strategy_name(StrategyKind k) {
@@ -114,6 +117,9 @@ inline const char* strategy_name(StrategyKind k) {
         case StrategyKind::MIMIC:         return "MIMIC";
         case StrategyKind::KELTNER_BREAK:  return "KELTNER_BREAK";
         case StrategyKind::REGIME_SWITCH:  return "REGIME_SWITCH";
+        case StrategyKind::EMAX:           return "EMAX";
+        case StrategyKind::ROC:            return "ROC";
+        case StrategyKind::IBS:            return "IBS";
     }
     return "UNK";
 }
@@ -132,9 +138,11 @@ inline bool is_trend_kind(StrategyKind k) {
         case StrategyKind::BREAKOUT_PULLBACK:
         case StrategyKind::MIMIC:
         case StrategyKind::KELTNER_BREAK:  // upper-band breakout = trend kind
+        case StrategyKind::EMAX:           // EMA cross = trend kind
+        case StrategyKind::ROC:            // rate-of-change momentum = trend kind
             return true;
         default:               // BOLLINGER/RSI_REVERT/KELTNER_REVERT/WILLIAMS_R/
-            return false;      // STOCH_RSI/OVERNIGHT/WEEKDAY — ok in chop
+            return false;      // STOCH_RSI/OVERNIGHT/WEEKDAY/IBS — ok in chop
     }
 }
 
@@ -294,6 +302,55 @@ public:
         int          keltner_ema_len = 20;
         // keltner_atr_mult: ATR multiplier for channel width (default 2.0)
         double       keltner_atr_mult = 2.0;
+        // S-2026-07-21 (crypto-keltner-pool-fix): faithful-Keltner exit selector.
+        // The original KELTNER_BREAK (S-2026-07-12) rides a long until close falls
+        // through the LOWER band — a DIFFERENT engine from the validated research
+        // Kelt (which goes FLAT the moment close re-enters the band, i.e. close no
+        // longer > upper band). The ride-to-lower exit is a divergence from the
+        // stated "folds ibkrcrypto Kelt(20,2.0)" intent (verified: SOL Kelt was
+        // +1775% vs validated +315%). When TRUE, KELTNER_BREAK exits on re-entry
+        // of the band (close <= upper) = the validated research Kelt long-only path.
+        // DEFAULT FALSE preserves the existing (divergent) behavior for the already-
+        // wired main.cpp g_slots (ADA/AAVE/XLM/XRP/GRT-KELT-D1) so nothing changes
+        // for them; the DirectionalTrendRoster Keltner legs opt IN via make_config.
+        bool         keltner_exit_reenter_band = false;
+
+        // ── EMAX / ROC / IBS parameters (S-2026-07-21 DirectionalTrendRoster port) ──
+        // Research-faithful to Mac ibkrcrypto_bt.cpp EMAx(F,S)/Roc(N,thr)/IBS(lo,hi).
+        // EMAX uses ema_fast/ema_slow with the 4*p seed window (research EMA); ROC
+        // uses `lookback` as N with roc_thr; IBS uses ibs_lo/ibs_hi on the last bar.
+        int          ema_fast   = 20;    // EMAX fast EMA period
+        int          ema_slow   = 50;    // EMAX slow EMA period
+        double       roc_thr    = 0.0;   // ROC threshold (fraction, e.g. 0.0)
+        double       ibs_lo     = 0.15;  // IBS oversold entry level
+        double       ibs_hi     = 0.85;  // IBS overbought (research short leg; long-only spot ignores)
+
+        // ── RSI_REVERT faithful LEVEL-revert selector (S-2026-07-21 final-closeout) ──
+        // The original RSI_REVERT (Session 19/21) fires only on a CROSS-UP of the
+        // threshold (r_prev<=thr && r_now>thr) using an EXPONENTIAL RSI, and holds
+        // for a fixed hold_bars — a DIFFERENT engine from the validated research
+        // RSIrev, which is a LEVEL-revert: long WHENEVER RSI<oversold (SMA RSI over
+        // N=atr_period bars), ride_to_flip exit the moment RSI>=oversold. The
+        // cross-up construction fires ~0 trades on the NDX daily roster leg (+0.0%
+        // vs research +54.6%). When TRUE, signal_rsi_revert_ uses the research
+        // level-entry + a ride_to_flip flip-out (RSI>=thr). DEFAULT FALSE preserves
+        // the existing (cross-up, timed-hold) behavior for every live Session 19/21
+        // RSI_REVERT g_slot byte-identically; the DirectionalTrendRoster NDX RSIrev
+        // leg opts IN via make_config. Uses rsi_threshold as the oversold level.
+        bool         rsi_level_revert = false;
+
+        // ── VOL-TARGET sizing (S-2026-07-21 crypto-keltner-pool-fix) ────────────
+        // Ported from Crypto/src/ibkrcrypto_bt.cpp (Cfg.vt_target/vt_lb/vt_min/vt_max)
+        // and crypto_oos_engine_port.sizer. Per-trade size multiplier set AT ENTRY:
+        //   size = clamp(vt_target / realized_daily_vol(vt_lb), vt_min, vt_max)
+        // vt_target=0 -> size=1.0 (off; the live-engine default, unchanged). The
+        // DirectionalTrendRoster + VolTargetPool layer set vt_target=0.020 on the
+        // trend/Kelt/Regime/Roc legs (IBS + NDX legs stay 0). vt_max MUST be 1.50 to
+        // match the C++ ref (the Python port's 1.0 undersized every leg — corrected).
+        double       vt_target  = 0.0;   // target daily notional vol (0 = off)
+        int          vt_lb      = 20;    // realized-vol lookback (days)
+        double       vt_min     = 0.10;  // min size multiplier
+        double       vt_max     = 1.50;  // max size multiplier (== C++ Cfg.vt_max)
 
         // ── DUAL_THRUST parameters (Session 28) ─────────────────────────
         // dt_k1: multiplier for range to compute upper trigger (default 0.5)
@@ -519,6 +576,12 @@ public:
         if (cfg_.max_history < cfg_.sma_len + 5)    cfg_.max_history = cfg_.sma_len + 5;
         // Keltner needs EMA history
         if (cfg_.max_history < cfg_.keltner_ema_len + 5) cfg_.max_history = cfg_.keltner_ema_len + 5;
+        // EMAX (S-2026-07-21 port) needs the research 4*slow EMA seed window
+        if (cfg_.kind == StrategyKind::EMAX && cfg_.max_history < 4 * cfg_.ema_slow + 5)
+            cfg_.max_history = 4 * cfg_.ema_slow + 5;
+        // ROC needs lookback+1 bars
+        if (cfg_.kind == StrategyKind::ROC && cfg_.max_history < cfg_.lookback + 5)
+            cfg_.max_history = cfg_.lookback + 5;
         // DUAL_THRUST needs range_bars + 1
         if (cfg_.max_history < cfg_.dt_range_bars + 5) cfg_.max_history = cfg_.dt_range_bars + 5;
         // Vol filter needs ATR(50) which needs 51 bars
@@ -906,6 +969,30 @@ public:
     double total_bp() const { return total_bp_; }
     bool in_position() const { return in_position_; }
     int bars_in_buffer() const { return (int)closes_.size(); }
+
+    // ── VOL-TARGET sizing (ported, S-2026-07-21) ────────────────────────────
+    // realized daily vol over the last vt_lb close-to-close pct returns (population
+    // stddev — matches Crypto/src/ibkrcrypto_bt.cpp realized_vol()).
+    double realized_vol() const {
+        int sz = (int)closes_.size();
+        int lb = cfg_.vt_lb;
+        if (sz < lb + 1) return 0.0;
+        double m = 0.0; int k = 0;
+        for (int j = sz - lb; j < sz; ++j) { m += (closes_[j] - closes_[j-1]) / closes_[j-1]; ++k; }
+        m /= k;
+        double s2 = 0.0;
+        for (int j = sz - lb; j < sz; ++j) { double rr = (closes_[j] - closes_[j-1]) / closes_[j-1]; s2 += (rr - m) * (rr - m); }
+        return std::sqrt(s2 / k);
+    }
+    // vol-target size multiplier = clamp(vt_target/realized_vol, vt_min, vt_max).
+    // vt_target<=0 -> 1.0 (off). Faithful to research sizer() (vt_max=1.50).
+    double vol_target_size() const {
+        if (cfg_.vt_target <= 0.0) return 1.0;
+        double rv = realized_vol();
+        if (rv <= 0.0) return cfg_.vt_min;
+        double z = cfg_.vt_target / rv;
+        return std::max(cfg_.vt_min, std::min(cfg_.vt_max, z));
+    }
 
     // Unrealised P&L (bp) at given spot price. Returns 0 if flat.
     // Used by main.cpp aggregate drawdown circuit (Session 32).
@@ -1570,6 +1657,11 @@ private:
             if (cfg_.kind == StrategyKind::MIMIC)             flip_out = (mimic_state_() == 0);
             else if (cfg_.kind == StrategyKind::KELTNER_BREAK) flip_out = keltner_break_flipped_out_();
             else if (cfg_.kind == StrategyKind::REGIME_SWITCH) flip_out = regime_switch_flipped_out_();
+            else if (cfg_.kind == StrategyKind::EMAX)          flip_out = emax_flipped_out_();
+            else if (cfg_.kind == StrategyKind::ROC)           flip_out = roc_flipped_out_();
+            else if (cfg_.kind == StrategyKind::IBS)           flip_out = ibs_flipped_out_();
+            else if (cfg_.kind == StrategyKind::RSI_REVERT && cfg_.rsi_level_revert) flip_out = rsi_level_flipped_out_();  // research level-revert exits when RSI recovers >= thr
+            else if (cfg_.kind == StrategyKind::TSMOM)         flip_out = !signal_tsmom_();  // research TSMom rides until L-bar return sign flips
             if (flip_out) {
                 exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
             }
@@ -1679,17 +1771,32 @@ private:
         return mean - k * std::sqrt(var);
     }
 
-    // ── Keltner lower band: EMA(n) - mult * ATR(atr_period) ─────────────────
+    // Research-faithful Keltner midline EMA (S-2026-07-21): seed = close N bars
+    // back, N EMA iterations (N = keltner_ema_len) — EXACTLY the ibkrcrypto Kelt(N,M)
+    // EMA (seed c[i-N]). Distinct from ema_() (full-buffer seed) and research_ema_()
+    // (4*p seed for EMAx). Used ONLY when keltner_exit_reenter_band is set.
+    double kelt_research_ema_() const {
+        const int N = cfg_.keltner_ema_len; const int sz = (int)closes_.size();
+        if (sz < N + 1) return 0.0;
+        double a = 2.0 / (N + 1.0); double e = closes_[sz - 1 - N];
+        for (int j = sz - N; j <= sz - 1; ++j) e = a * closes_[j] + (1.0 - a) * e;
+        return e;
+    }
+    // Keltner midline + width. When keltner_exit_reenter_band (the validated research
+    // Kelt mode) is set, use the faithful N-bar-seed EMA and ATR over keltner_ema_len
+    // (= research N); otherwise keep the legacy ema_()/atr_(atr_period) so the existing
+    // KELTNER_REVERT engines and legacy KELTNER_BREAK g_slots are byte-unchanged.
+    double keltner_mid_()   const { return cfg_.keltner_exit_reenter_band ? kelt_research_ema_() : ema_(cfg_.keltner_ema_len); }
+    double keltner_width_() const { return cfg_.keltner_exit_reenter_band ? atr_(cfg_.keltner_ema_len) : atr_(cfg_.atr_period); }
+    // ── Keltner lower band: EMA(n) - mult * ATR ─────────────────────────────
     double keltner_lower_() const {
-        double e = ema_(cfg_.keltner_ema_len);
-        double a = atr_(cfg_.atr_period);
+        double e = keltner_mid_(); double a = keltner_width_();
         if (e <= 0.0 || a <= 0.0) return 0.0;
         return e - cfg_.keltner_atr_mult * a;
     }
     // S-2026-07-12: upper Keltner band (EMA + M*ATR) for KELTNER_BREAK (trend breakout).
     double keltner_upper_() const {
-        double e = ema_(cfg_.keltner_ema_len);
-        double a = atr_(cfg_.atr_period);
+        double e = keltner_mid_(); double a = keltner_width_();
         if (e <= 0.0 || a <= 0.0) return 0.0;
         return e + cfg_.keltner_atr_mult * a;
     }
@@ -1745,11 +1852,41 @@ private:
         return (lows_.back() <= lower) && (closes_.back() > lower);
     }
 
+    // Research-faithful SMA RSI (S-2026-07-21 final-closeout): simple mean of the
+    // last N gains/losses (N=atr_period), EXACTLY the ibkrcrypto RSIrev computation
+    // (Crypto/src/ibkrcrypto_bt.cpp sig_rsirev). Distinct from rsi_() (exponential,
+    // whole-buffer) — used ONLY for the level-revert path so all legacy cross-up
+    // RSI_REVERT g_slots keep the exponential rsi_() byte-for-byte.
+    double research_rsi_() const {
+        const int n = cfg_.atr_period; const int sz = (int)closes_.size();
+        if (sz < n + 1) return 50.0;
+        double g = 0.0, ll = 0.0;
+        for (int j = sz - n; j <= sz - 1; ++j) {
+            double d = closes_[j] - closes_[j - 1];
+            if (d > 0) g += d; else ll -= d;
+        }
+        g /= (double)n; ll /= (double)n;
+        double rs = ll > 0.0 ? g / ll : 999.0;
+        return 100.0 - 100.0 / (1.0 + rs);
+    }
     bool signal_rsi_revert_() const {
+        if (cfg_.rsi_level_revert) {
+            // Research LEVEL-revert: long whenever RSI(SMA,N) < oversold level.
+            if ((int)closes_.size() < cfg_.atr_period + 1) return false;
+            return research_rsi_() < cfg_.rsi_threshold;
+        }
+        // Legacy CROSS-UP (Session 19/21): fire on the bar RSI crosses above thr.
         if ((int)closes_.size() < cfg_.atr_period + 3) return false;
         double r_now  = rsi_(cfg_.atr_period);
         double r_prev = rsi_prev_(cfg_.atr_period);
         return (r_prev <= cfg_.rsi_threshold) && (r_now > cfg_.rsi_threshold);
+    }
+    // ride_to_flip flip-out for the research level-revert: FLAT the moment RSI
+    // recovers to >= the oversold level (the exact complement of the entry). Only
+    // consulted when rsi_level_revert is set (see close_bar_).
+    bool rsi_level_flipped_out_() const {
+        if ((int)closes_.size() < cfg_.atr_period + 1) return false;
+        return !(research_rsi_() < cfg_.rsi_threshold);
     }
 
     // ── KELTNER_REVERT: bar pierces lower Keltner band, closes back above ───
@@ -1772,10 +1909,22 @@ private:
         if (upper <= 0.0) return false;
         return closes_.back() > upper;         // entry: close breaks the upper band
     }
-    // flip-out: long exits when close falls back through the LOWER band
+    // flip-out. Two exits, selected by cfg_.keltner_exit_reenter_band:
+    //  • FALSE (default, legacy S-2026-07-12): long rides until close falls through
+    //    the LOWER band (ride-to-lower). Kept for the already-wired g_slots.
+    //  • TRUE (validated research Kelt, long-only): exit the moment close is no
+    //    longer above the UPPER band (close re-enters the channel) — this is the
+    //    exact complement of the entry signal (close>upper), reproducing the
+    //    ibkrcrypto Kelt long-only want=1->0 transition. The DirectionalTrendRoster
+    //    Keltner legs use this to penny-match the validated per-leg net%.
     bool keltner_break_flipped_out_() const {
         if ((int)closes_.size() < std::max(cfg_.keltner_ema_len, cfg_.atr_period) + 1)
             return false;
+        if (cfg_.keltner_exit_reenter_band) {
+            double upper = keltner_upper_();
+            if (upper <= 0.0) return false;
+            return !(closes_.back() > upper);   // FLAT when close re-enters the band
+        }
         double lower = keltner_lower_();
         if (lower <= 0.0) return false;
         return closes_.back() < lower;
@@ -1806,6 +1955,55 @@ private:
     }
     bool signal_regime_switch_() const      { return regime_switch_state_() == 1; }
     bool regime_switch_flipped_out_() const { return regime_switch_state_() != 1; }
+
+    // ── EMAX (S-2026-07-21 DirectionalTrendRoster port): research-faithful EMA
+    //    cross. Folds Mac ibkrcrypto_bt.cpp EMAx(F,S). Long when EMA(F) > EMA(S);
+    //    ride_to_flip exits when EMA(F) <= EMA(S) (research want != long). EMA uses
+    //    the research 4*p seed window (NOT the whole-buffer ema_()), so max_history
+    //    must be >= 4*ema_slow + 1 (set by the roster). THE WORKHORSE. ────────────
+    double research_ema_(int p, int back = 0) const {
+        int sz = (int)closes_.size();
+        int i  = sz - 1 - back;
+        if (i < 0) return 0.0;
+        int st = i - 4 * p; if (st < 0) st = 0;
+        double a = 2.0 / (p + 1.0);
+        double e = closes_[st];
+        for (int j = st + 1; j <= i; ++j) e = a * closes_[j] + (1.0 - a) * e;
+        return e;
+    }
+    bool signal_emax_() const {
+        if ((int)closes_.size() < 4 * cfg_.ema_slow + 1) return false;   // research: i < 4*S -> 0
+        return research_ema_(cfg_.ema_fast) > research_ema_(cfg_.ema_slow);
+    }
+    bool emax_flipped_out_() const {
+        if ((int)closes_.size() < 4 * cfg_.ema_slow + 1) return false;
+        return !(research_ema_(cfg_.ema_fast) > research_ema_(cfg_.ema_slow));
+    }
+
+    // ── ROC (port): research Roc(N,thr). N-bar % change > thr -> long; ride until
+    //    roc <= thr. Long-only (research short leg clamped). N = cfg_.lookback. ───
+    double roc_val_() const {
+        int sz = (int)closes_.size();
+        int N  = cfg_.lookback > 0 ? cfg_.lookback : 20;
+        if (sz < N + 1) return 0.0;
+        double base = closes_[sz - 1 - N];
+        if (base == 0.0) return 0.0;
+        return (closes_[sz - 1] - base) / base;
+    }
+    bool signal_roc_()       const { if ((int)closes_.size() < (cfg_.lookback>0?cfg_.lookback:20)+1) return false; return roc_val_() > cfg_.roc_thr; }
+    bool roc_flipped_out_()  const { if ((int)closes_.size() < (cfg_.lookback>0?cfg_.lookback:20)+1) return false; return !(roc_val_() > cfg_.roc_thr); }
+
+    // ── IBS (port): research IBS(lo,hi). v=(c-l)/(h-l); v<lo -> long oversold;
+    //    exit when v>=lo. Long-only spot (research short leg v>hi ignored). ───────
+    double ibs_val_() const {
+        int sz = (int)closes_.size();
+        if (sz < 1) return 0.5;
+        double rng = highs_[sz - 1] - lows_[sz - 1];
+        if (rng <= 0.0) return 0.5;
+        return (closes_[sz - 1] - lows_[sz - 1]) / rng;
+    }
+    bool signal_ibs_()      const { return ibs_val_() < cfg_.ibs_lo; }
+    bool ibs_flipped_out_() const { return !(ibs_val_() < cfg_.ibs_lo); }
 
     // ── BREAKOUT_PULLBACK (S38): N-bar high breakout, enter on pullback ────
     // Search the last [1..bp_max_age] bars for a prior bar whose close
@@ -2017,6 +2215,9 @@ private:
             case StrategyKind::KELTNER_REVERT: fire = signal_keltner_revert_(); break;
             case StrategyKind::KELTNER_BREAK:  fire = signal_keltner_break_();  break;
             case StrategyKind::REGIME_SWITCH:  fire = signal_regime_switch_();  break;
+            case StrategyKind::EMAX:           fire = signal_emax_();           break;
+            case StrategyKind::ROC:            fire = signal_roc_();            break;
+            case StrategyKind::IBS:            fire = signal_ibs_();            break;
             case StrategyKind::DUAL_THRUST:    fire = signal_dual_thrust_();    break;
             case StrategyKind::ICHIMOKU:       fire = signal_ichimoku_();       break;
             case StrategyKind::SUPERTREND:     fire = signal_supertrend_(st_flip); break;

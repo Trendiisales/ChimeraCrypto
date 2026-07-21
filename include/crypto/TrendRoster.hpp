@@ -95,6 +95,11 @@ inline EdgeEngine::Config make_config(const LegSpec& s) {
     // S-2026-07-21 (crypto-keltner-pool-fix): the Keltner legs use the VALIDATED
     // research exit (flat on band re-entry), NOT the legacy ride-to-lower divergence.
     c.keltner_exit_reenter_band = (s.kind == StrategyKind::KELTNER_BREAK);
+    // S-2026-07-21 (crypto-final-closeout): the NDX RSIrev leg uses the VALIDATED
+    // research level-revert (long while RSI<oversold, ride_to_flip exit on recovery),
+    // NOT the legacy cross-up (which fires ~0 trades). Default false keeps every
+    // live Session 19/21 RSI_REVERT g_slot byte-identical.
+    c.rsi_level_revert = (s.kind == StrategyKind::RSI_REVERT);
     // VOL-TARGET sizing (ported): trend/Kelt/Regime/Roc legs take the pool vt=0.020;
     // IBS + NDX index legs stay size=1.0 (vt=0), matching the research 19-leg pool.
     c.vt_target      = (s.kind == StrategyKind::IBS || s.is_index) ? 0.0 : 0.020;

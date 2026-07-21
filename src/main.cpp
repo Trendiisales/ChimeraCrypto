@@ -173,6 +173,7 @@
 #include "core/GridEngine.hpp"            // S55: maker-native grid sleeve (shadow)
 #include "core/MacroBaseEngine.hpp"       // S55: macro-bull base (bull-beta core, shadow)
 #include "core/SymbolIndex.hpp"
+#include "crypto/TrendRoster.hpp"     // S-2026-07-21 final-closeout: verified 19-leg DirectionalTrendRoster (SHADOW, opt-in via CHIMERA_WIRE_TRENDROSTER)
 #include "core/PortfolioOverlay.hpp"  // AUDIT-2026: cross-sec mom + vol-scale overlay
 #include "core/CrossSectionalMomentumEngine.hpp"  // S-2026-06-18: validated standalone XSec allocator
 #include "core/CrossSectionalMomentum2Engine.hpp" // S-2026-07-11: Phase-5 XSec 2.0 SHADOW comparison book
@@ -10222,6 +10223,58 @@ int main() {
             }
         }
         std::printf("[STARTUP] Funding filter + position sizing initialized\n");
+        std::fflush(stdout);
+    }
+
+    // ── S-2026-07-21 FINAL-CLOSEOUT: wire the verified 19-leg DirectionalTrendRoster
+    // into the g_slots runtime (SHADOW), OPT-IN via env CHIMERA_WIRE_TRENDROSTER.
+    // ---------------------------------------------------------------------------
+    // WHY OPT-IN / DEFAULT-OFF: the prior port deferred registration citing a
+    // "registry crash-loop." The precise root cause (commit 9a9b464) is a registry
+    // DECLARED-vs-WIRED mismatch: a bucket declared ACTIVE (programmatic declare()
+    // OR a stale config/engine_registry.json load_from_json) but never mark_wired()
+    // → g_registry.validate() returns false → "[REGISTRY] STARTUP ABORT" → return 1
+    // → systemd/launchd restart loop (NRestarts=15, live desk down). That abort is
+    // NOT triggered by adding slots here: these 19 legs join the EXISTING EDGE-SLOTS
+    // bucket, whose mark_wired("EDGE-SLOTS", !g_slots.empty(), g_slots.size()) AUTO-
+    // reflects the real count (5 → 24) and stays SHADOW+wired+connected, so validate()
+    // still PASSES. No new JSON entry is added, so no stale-override can abort. The
+    // registration is therefore registry-safe BY CONSTRUCTION.
+    //
+    // The real reasons this is gated + inserted HERE (after the vol_filter/mtf/adx/
+    // volume/corr/funding/sizing gate-config loops, before the seed loop):
+    //   • FIDELITY: the validated book is ride_to_flip with NO in-flight gates. The
+    //     gate-config loops above would enable vol_filter/mtf/volume/corr on any leg
+    //     that is not is_trend_following() (i.e. EMAX/ROC/KELTNER_BREAK/IBS/RSIrev),
+    //     altering entries away from the penny-verified signal. Inserting AFTER those
+    //     loops leaves the roster legs gate-exempt = byte-faithful to the harness.
+    //   • NO DESK CONTAMINATION: the on_trade desk-export hook (chimera_inbound.csv)
+    //     is wired in that same earlier loop; skipping it keeps these SHADOW research
+    //     legs OUT of the live desk relay (operator: zero shadow contamination).
+    //   • HARD SHADOW: shadow_mode forced true; nothing can route live.
+    //   • NDX (2 legs: TSMom50, RSIrev) has NO Binance feed → sym_id=-1 → the leg is
+    //     constructed + counted but never ticks (inert). Reproducing NDX live needs an
+    //     external index feed (documented; out of scope for a box-untouched session).
+    // Default boot is byte-identical (flag unset → block skipped → 5 connected).
+    if (std::getenv("CHIMERA_WIRE_TRENDROSTER")) {
+        // static deque = STABLE addresses for the process lifetime (a vector<>
+        // would realloc and invalidate the &engine pointers stored in g_slots).
+        static std::deque<chimera::EdgeEngine> g_trendroster_engines;
+        int wired_live = 0, wired_inert = 0;
+        for (const auto& leg : chimera::trend_roster::legs()) {
+            chimera::EdgeEngine::Config c = chimera::trend_roster::make_config(leg);
+            g_trendroster_engines.emplace_back(c);
+            chimera::EdgeEngine* eng = &g_trendroster_engines.back();
+            eng->shadow_mode = true;                 // HARD SHADOW — never routes live
+            int sid = chimera::sym_id(leg.symbol);   // -1 for NDX (no Binance feed) → inert
+            g_slots.push_back({ sid, eng, std::string(leg.symbol), (int64_t)c.tf_secs,
+                                c.tag, /*oos_pf*/0.0, /*oos_sharpe*/0.0, /*oos_nbr*/0,
+                                /*oos_trades*/0, /*session*/72 });
+            if (sid >= 0) ++wired_live; else ++wired_inert;
+        }
+        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (%d live-feed, %d inert/NDX-no-feed); "
+                    "gate-exempt, no-desk-export, ride_to_flip, NO-200DMA\n",
+                    wired_live + wired_inert, wired_live, wired_inert);
         std::fflush(stdout);
     }
 

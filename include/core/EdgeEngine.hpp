@@ -325,6 +325,20 @@ public:
         double       ibs_lo     = 0.15;  // IBS oversold entry level
         double       ibs_hi     = 0.85;  // IBS overbought (research short leg; long-only spot ignores)
 
+        // ── RSI_REVERT faithful LEVEL-revert selector (S-2026-07-21 final-closeout) ──
+        // The original RSI_REVERT (Session 19/21) fires only on a CROSS-UP of the
+        // threshold (r_prev<=thr && r_now>thr) using an EXPONENTIAL RSI, and holds
+        // for a fixed hold_bars — a DIFFERENT engine from the validated research
+        // RSIrev, which is a LEVEL-revert: long WHENEVER RSI<oversold (SMA RSI over
+        // N=atr_period bars), ride_to_flip exit the moment RSI>=oversold. The
+        // cross-up construction fires ~0 trades on the NDX daily roster leg (+0.0%
+        // vs research +54.6%). When TRUE, signal_rsi_revert_ uses the research
+        // level-entry + a ride_to_flip flip-out (RSI>=thr). DEFAULT FALSE preserves
+        // the existing (cross-up, timed-hold) behavior for every live Session 19/21
+        // RSI_REVERT g_slot byte-identically; the DirectionalTrendRoster NDX RSIrev
+        // leg opts IN via make_config. Uses rsi_threshold as the oversold level.
+        bool         rsi_level_revert = false;
+
         // ── VOL-TARGET sizing (S-2026-07-21 crypto-keltner-pool-fix) ────────────
         // Ported from Crypto/src/ibkrcrypto_bt.cpp (Cfg.vt_target/vt_lb/vt_min/vt_max)
         // and crypto_oos_engine_port.sizer. Per-trade size multiplier set AT ENTRY:
@@ -1646,6 +1660,7 @@ private:
             else if (cfg_.kind == StrategyKind::EMAX)          flip_out = emax_flipped_out_();
             else if (cfg_.kind == StrategyKind::ROC)           flip_out = roc_flipped_out_();
             else if (cfg_.kind == StrategyKind::IBS)           flip_out = ibs_flipped_out_();
+            else if (cfg_.kind == StrategyKind::RSI_REVERT && cfg_.rsi_level_revert) flip_out = rsi_level_flipped_out_();  // research level-revert exits when RSI recovers >= thr
             else if (cfg_.kind == StrategyKind::TSMOM)         flip_out = !signal_tsmom_();  // research TSMom rides until L-bar return sign flips
             if (flip_out) {
                 exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
@@ -1837,11 +1852,41 @@ private:
         return (lows_.back() <= lower) && (closes_.back() > lower);
     }
 
+    // Research-faithful SMA RSI (S-2026-07-21 final-closeout): simple mean of the
+    // last N gains/losses (N=atr_period), EXACTLY the ibkrcrypto RSIrev computation
+    // (Crypto/src/ibkrcrypto_bt.cpp sig_rsirev). Distinct from rsi_() (exponential,
+    // whole-buffer) — used ONLY for the level-revert path so all legacy cross-up
+    // RSI_REVERT g_slots keep the exponential rsi_() byte-for-byte.
+    double research_rsi_() const {
+        const int n = cfg_.atr_period; const int sz = (int)closes_.size();
+        if (sz < n + 1) return 50.0;
+        double g = 0.0, ll = 0.0;
+        for (int j = sz - n; j <= sz - 1; ++j) {
+            double d = closes_[j] - closes_[j - 1];
+            if (d > 0) g += d; else ll -= d;
+        }
+        g /= (double)n; ll /= (double)n;
+        double rs = ll > 0.0 ? g / ll : 999.0;
+        return 100.0 - 100.0 / (1.0 + rs);
+    }
     bool signal_rsi_revert_() const {
+        if (cfg_.rsi_level_revert) {
+            // Research LEVEL-revert: long whenever RSI(SMA,N) < oversold level.
+            if ((int)closes_.size() < cfg_.atr_period + 1) return false;
+            return research_rsi_() < cfg_.rsi_threshold;
+        }
+        // Legacy CROSS-UP (Session 19/21): fire on the bar RSI crosses above thr.
         if ((int)closes_.size() < cfg_.atr_period + 3) return false;
         double r_now  = rsi_(cfg_.atr_period);
         double r_prev = rsi_prev_(cfg_.atr_period);
         return (r_prev <= cfg_.rsi_threshold) && (r_now > cfg_.rsi_threshold);
+    }
+    // ride_to_flip flip-out for the research level-revert: FLAT the moment RSI
+    // recovers to >= the oversold level (the exact complement of the entry). Only
+    // consulted when rsi_level_revert is set (see close_bar_).
+    bool rsi_level_flipped_out_() const {
+        if ((int)closes_.size() < cfg_.atr_period + 1) return false;
+        return !(research_rsi_() < cfg_.rsi_threshold);
     }
 
     // ── KELTNER_REVERT: bar pierces lower Keltner band, closes back above ───

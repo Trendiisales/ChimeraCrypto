@@ -89,6 +89,18 @@ inline EdgeEngine::Config make_config(const LegSpec& s) {
     c.ema_slow       = 50;
     c.keltner_ema_len= 20;
     c.keltner_atr_mult = 2.0;
+    // S-2026-07-22 (crypto-trigger-sensitivity-sweep): per-coin Keltner retune on the
+    // 3 high-beta ALT legs where the uniform (N20,M2.0) band was TOO WIDE — it entered
+    // the up-run late and gave back the early leg. OOS-validated (fit 2021-22, tested
+    // 2023-26): SOL +37→+123, XRP +218→+305, XLM +332→+326, all WF folds → 3/3, lower
+    // DD. Majors (BTC/ETH EMAx+Kelt, ADA) left at (N20,M2.0) — tightening them only adds
+    // fakeouts (ETH IS-best 20/30 was a clear overfit). N drives BOTH the midline EMA and
+    // the ATR window (keltner_exit_reenter_band). Ref backtest/CRYPTO_TRIGGER_SENSITIVITY_SWEEP_2026-07-22.md.
+    if (s.kind == StrategyKind::KELTNER_BREAK) {
+        if      (std::string(s.coin) == "SOL") { c.keltner_ema_len = 20; c.keltner_atr_mult = 1.5; }
+        else if (std::string(s.coin) == "XRP") { c.keltner_ema_len = 30; c.keltner_atr_mult = 1.5; }
+        else if (std::string(s.coin) == "XLM") { c.keltner_ema_len = 10; c.keltner_atr_mult = 1.5; }
+    }
     c.roc_thr        = 0.0;
     c.ibs_lo         = 0.15;
     c.ibs_hi         = 0.85;

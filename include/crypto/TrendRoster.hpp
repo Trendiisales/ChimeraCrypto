@@ -18,11 +18,13 @@
 //   • NO 200DMA (regime_gate_ma is never set — the crypto hard rule)
 //   • per-coin corrected round-trip cost (the 56bp stress cost is DEAD)
 //
-// KELTNER faithfulness caveat (see the veracity report): ChimeraCrypto's
-// KELTNER_BREAK rides to the LOWER band, whereas the validated research Kelt
-// exits when price falls back INSIDE the upper band. The Keltner legs below use
-// KELTNER_BREAK (the available kind) but DO NOT yet reproduce the research Kelt
-// net% — flagged, faithful-Keltner exit is remaining work.
+// KELTNER exit — FIXED S-2026-07-21 (crypto-keltner-pool-fix). The legacy
+// KELTNER_BREAK rode a long to the LOWER band (a different engine: SOL was +1775%
+// vs validated +315%). make_config now sets keltner_exit_reenter_band=true on the
+// Keltner legs so they EXIT on band re-entry (close no longer > upper) = the exact
+// validated research Kelt(20,2.0) long-only path. Penny-match re-verified in
+// backtest/keltner_pool_reverify_bt.cpp. The already-wired main.cpp g_slots keep
+// the legacy exit (flag default false) — untouched.
 // ============================================================================
 #pragma once
 
@@ -90,6 +92,12 @@ inline EdgeEngine::Config make_config(const LegSpec& s) {
     c.roc_thr        = 0.0;
     c.ibs_lo         = 0.15;
     c.ibs_hi         = 0.85;
+    // S-2026-07-21 (crypto-keltner-pool-fix): the Keltner legs use the VALIDATED
+    // research exit (flat on band re-entry), NOT the legacy ride-to-lower divergence.
+    c.keltner_exit_reenter_band = (s.kind == StrategyKind::KELTNER_BREAK);
+    // VOL-TARGET sizing (ported): trend/Kelt/Regime/Roc legs take the pool vt=0.020;
+    // IBS + NDX index legs stay size=1.0 (vt=0), matching the research 19-leg pool.
+    c.vt_target      = (s.kind == StrategyKind::IBS || s.is_index) ? 0.0 : 0.020;
     // NOTE: regime_gate_ma is intentionally NEVER set — NO 200DMA in crypto (hard rule).
     return c;
 }

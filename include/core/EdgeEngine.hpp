@@ -302,6 +302,18 @@ public:
         int          keltner_ema_len = 20;
         // keltner_atr_mult: ATR multiplier for channel width (default 2.0)
         double       keltner_atr_mult = 2.0;
+        // S-2026-07-21 (crypto-keltner-pool-fix): faithful-Keltner exit selector.
+        // The original KELTNER_BREAK (S-2026-07-12) rides a long until close falls
+        // through the LOWER band — a DIFFERENT engine from the validated research
+        // Kelt (which goes FLAT the moment close re-enters the band, i.e. close no
+        // longer > upper band). The ride-to-lower exit is a divergence from the
+        // stated "folds ibkrcrypto Kelt(20,2.0)" intent (verified: SOL Kelt was
+        // +1775% vs validated +315%). When TRUE, KELTNER_BREAK exits on re-entry
+        // of the band (close <= upper) = the validated research Kelt long-only path.
+        // DEFAULT FALSE preserves the existing (divergent) behavior for the already-
+        // wired main.cpp g_slots (ADA/AAVE/XLM/XRP/GRT-KELT-D1) so nothing changes
+        // for them; the DirectionalTrendRoster Keltner legs opt IN via make_config.
+        bool         keltner_exit_reenter_band = false;
 
         // ── EMAX / ROC / IBS parameters (S-2026-07-21 DirectionalTrendRoster port) ──
         // Research-faithful to Mac ibkrcrypto_bt.cpp EMAx(F,S)/Roc(N,thr)/IBS(lo,hi).
@@ -312,6 +324,19 @@ public:
         double       roc_thr    = 0.0;   // ROC threshold (fraction, e.g. 0.0)
         double       ibs_lo     = 0.15;  // IBS oversold entry level
         double       ibs_hi     = 0.85;  // IBS overbought (research short leg; long-only spot ignores)
+
+        // ── VOL-TARGET sizing (S-2026-07-21 crypto-keltner-pool-fix) ────────────
+        // Ported from Crypto/src/ibkrcrypto_bt.cpp (Cfg.vt_target/vt_lb/vt_min/vt_max)
+        // and crypto_oos_engine_port.sizer. Per-trade size multiplier set AT ENTRY:
+        //   size = clamp(vt_target / realized_daily_vol(vt_lb), vt_min, vt_max)
+        // vt_target=0 -> size=1.0 (off; the live-engine default, unchanged). The
+        // DirectionalTrendRoster + VolTargetPool layer set vt_target=0.020 on the
+        // trend/Kelt/Regime/Roc legs (IBS + NDX legs stay 0). vt_max MUST be 1.50 to
+        // match the C++ ref (the Python port's 1.0 undersized every leg — corrected).
+        double       vt_target  = 0.0;   // target daily notional vol (0 = off)
+        int          vt_lb      = 20;    // realized-vol lookback (days)
+        double       vt_min     = 0.10;  // min size multiplier
+        double       vt_max     = 1.50;  // max size multiplier (== C++ Cfg.vt_max)
 
         // ── DUAL_THRUST parameters (Session 28) ─────────────────────────
         // dt_k1: multiplier for range to compute upper trigger (default 0.5)
@@ -930,6 +955,30 @@ public:
     double total_bp() const { return total_bp_; }
     bool in_position() const { return in_position_; }
     int bars_in_buffer() const { return (int)closes_.size(); }
+
+    // ── VOL-TARGET sizing (ported, S-2026-07-21) ────────────────────────────
+    // realized daily vol over the last vt_lb close-to-close pct returns (population
+    // stddev — matches Crypto/src/ibkrcrypto_bt.cpp realized_vol()).
+    double realized_vol() const {
+        int sz = (int)closes_.size();
+        int lb = cfg_.vt_lb;
+        if (sz < lb + 1) return 0.0;
+        double m = 0.0; int k = 0;
+        for (int j = sz - lb; j < sz; ++j) { m += (closes_[j] - closes_[j-1]) / closes_[j-1]; ++k; }
+        m /= k;
+        double s2 = 0.0;
+        for (int j = sz - lb; j < sz; ++j) { double rr = (closes_[j] - closes_[j-1]) / closes_[j-1]; s2 += (rr - m) * (rr - m); }
+        return std::sqrt(s2 / k);
+    }
+    // vol-target size multiplier = clamp(vt_target/realized_vol, vt_min, vt_max).
+    // vt_target<=0 -> 1.0 (off). Faithful to research sizer() (vt_max=1.50).
+    double vol_target_size() const {
+        if (cfg_.vt_target <= 0.0) return 1.0;
+        double rv = realized_vol();
+        if (rv <= 0.0) return cfg_.vt_min;
+        double z = cfg_.vt_target / rv;
+        return std::max(cfg_.vt_min, std::min(cfg_.vt_max, z));
+    }
 
     // Unrealised P&L (bp) at given spot price. Returns 0 if flat.
     // Used by main.cpp aggregate drawdown circuit (Session 32).
@@ -1707,17 +1756,32 @@ private:
         return mean - k * std::sqrt(var);
     }
 
-    // ── Keltner lower band: EMA(n) - mult * ATR(atr_period) ─────────────────
+    // Research-faithful Keltner midline EMA (S-2026-07-21): seed = close N bars
+    // back, N EMA iterations (N = keltner_ema_len) — EXACTLY the ibkrcrypto Kelt(N,M)
+    // EMA (seed c[i-N]). Distinct from ema_() (full-buffer seed) and research_ema_()
+    // (4*p seed for EMAx). Used ONLY when keltner_exit_reenter_band is set.
+    double kelt_research_ema_() const {
+        const int N = cfg_.keltner_ema_len; const int sz = (int)closes_.size();
+        if (sz < N + 1) return 0.0;
+        double a = 2.0 / (N + 1.0); double e = closes_[sz - 1 - N];
+        for (int j = sz - N; j <= sz - 1; ++j) e = a * closes_[j] + (1.0 - a) * e;
+        return e;
+    }
+    // Keltner midline + width. When keltner_exit_reenter_band (the validated research
+    // Kelt mode) is set, use the faithful N-bar-seed EMA and ATR over keltner_ema_len
+    // (= research N); otherwise keep the legacy ema_()/atr_(atr_period) so the existing
+    // KELTNER_REVERT engines and legacy KELTNER_BREAK g_slots are byte-unchanged.
+    double keltner_mid_()   const { return cfg_.keltner_exit_reenter_band ? kelt_research_ema_() : ema_(cfg_.keltner_ema_len); }
+    double keltner_width_() const { return cfg_.keltner_exit_reenter_band ? atr_(cfg_.keltner_ema_len) : atr_(cfg_.atr_period); }
+    // ── Keltner lower band: EMA(n) - mult * ATR ─────────────────────────────
     double keltner_lower_() const {
-        double e = ema_(cfg_.keltner_ema_len);
-        double a = atr_(cfg_.atr_period);
+        double e = keltner_mid_(); double a = keltner_width_();
         if (e <= 0.0 || a <= 0.0) return 0.0;
         return e - cfg_.keltner_atr_mult * a;
     }
     // S-2026-07-12: upper Keltner band (EMA + M*ATR) for KELTNER_BREAK (trend breakout).
     double keltner_upper_() const {
-        double e = ema_(cfg_.keltner_ema_len);
-        double a = atr_(cfg_.atr_period);
+        double e = keltner_mid_(); double a = keltner_width_();
         if (e <= 0.0 || a <= 0.0) return 0.0;
         return e + cfg_.keltner_atr_mult * a;
     }
@@ -1800,10 +1864,22 @@ private:
         if (upper <= 0.0) return false;
         return closes_.back() > upper;         // entry: close breaks the upper band
     }
-    // flip-out: long exits when close falls back through the LOWER band
+    // flip-out. Two exits, selected by cfg_.keltner_exit_reenter_band:
+    //  • FALSE (default, legacy S-2026-07-12): long rides until close falls through
+    //    the LOWER band (ride-to-lower). Kept for the already-wired g_slots.
+    //  • TRUE (validated research Kelt, long-only): exit the moment close is no
+    //    longer above the UPPER band (close re-enters the channel) — this is the
+    //    exact complement of the entry signal (close>upper), reproducing the
+    //    ibkrcrypto Kelt long-only want=1->0 transition. The DirectionalTrendRoster
+    //    Keltner legs use this to penny-match the validated per-leg net%.
     bool keltner_break_flipped_out_() const {
         if ((int)closes_.size() < std::max(cfg_.keltner_ema_len, cfg_.atr_period) + 1)
             return false;
+        if (cfg_.keltner_exit_reenter_band) {
+            double upper = keltner_upper_();
+            if (upper <= 0.0) return false;
+            return !(closes_.back() > upper);   // FLAT when close re-enters the band
+        }
         double lower = keltner_lower_();
         if (lower <= 0.0) return false;
         return closes_.back() < lower;

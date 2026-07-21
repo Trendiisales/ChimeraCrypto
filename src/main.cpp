@@ -10226,10 +10226,20 @@ int main() {
         std::fflush(stdout);
     }
 
-    // ── S-2026-07-21 FINAL-CLOSEOUT: wire the verified 19-leg DirectionalTrendRoster
-    // into the g_slots runtime (SHADOW), OPT-IN via env CHIMERA_WIRE_TRENDROSTER.
+    // ── S-2026-07-21 FINAL-READY: wire the verified DirectionalTrendRoster (17-leg
+    // LIVE BOOK — NDX dropped, see below) into the g_slots runtime (SHADOW). Now
+    // DEFAULT-ON (opt-OUT via env CHIMERA_NO_TRENDROSTER for a byte-identical fallback).
     // ---------------------------------------------------------------------------
-    // WHY OPT-IN / DEFAULT-OFF: the prior port deferred registration citing a
+    // NDX DECISION (crypto-final-ready): the book runs 17-leg. The 2 NDX legs
+    // (TSMom50, RSIrev) are marginally accretive in backtest (19-leg OOS Sharpe 1.71
+    // vs 17-leg 1.65; worst-DD 12.0% vs 12.7%) but NDX has NO Binance feed — a live
+    // index feed is a cross-venue integration that cannot be done cleanly in a
+    // Binance-only executor nor validated without touching the box. So the LIVE book
+    // DROPS the 2 is_index legs (leg.is_index==true) → a clean all-Binance-fed 17-leg
+    // book (still OOS Sharpe 1.65 / CAGR ~12%). The 19-leg number is kept for the
+    // record in backtest/crypto_final_results_bt.cpp + CRYPTO_FINAL_RESULTS_2026-07-21.md.
+    // ---------------------------------------------------------------------------
+    // WHY IT IS SAFE TO DEFAULT-ON (registry crash-loop does NOT apply): the prior port deferred registration citing a
     // "registry crash-loop." The precise root cause (commit 9a9b464) is a registry
     // DECLARED-vs-WIRED mismatch: a bucket declared ACTIVE (programmatic declare()
     // OR a stale config/engine_registry.json load_from_json) but never mark_wired()
@@ -10251,30 +10261,34 @@ int main() {
     //   • NO DESK CONTAMINATION: the on_trade desk-export hook (chimera_inbound.csv)
     //     is wired in that same earlier loop; skipping it keeps these SHADOW research
     //     legs OUT of the live desk relay (operator: zero shadow contamination).
-    //   • HARD SHADOW: shadow_mode forced true; nothing can route live.
-    //   • NDX (2 legs: TSMom50, RSIrev) has NO Binance feed → sym_id=-1 → the leg is
-    //     constructed + counted but never ticks (inert). Reproducing NDX live needs an
-    //     external index feed (documented; out of scope for a box-untouched session).
-    // Default boot is byte-identical (flag unset → block skipped → 5 connected).
-    if (std::getenv("CHIMERA_WIRE_TRENDROSTER")) {
+    //   • HARD SHADOW: shadow_mode forced true; nothing can route live. The single
+    //     documented step to go live-real is a per-leg live-arm flip (flip shadow_mode
+    //     false + route via governed_submit under the $10k/vt-0.020 pool + 15% per-leg
+    //     cap) — the operator's funded go. NOT armed here (see CRYPTO_FINAL_RESULTS md
+    //     §LIVE-ARM READY CONFIG). No live-arm plumbing is present; legs are hard shadow.
+    // Default boot with the roster: 17 crypto legs connected (5 legacy + 17 = 22),
+    // reconcile PASS, gates 0 VIOLATION. Opt-OUT (CHIMERA_NO_TRENDROSTER set) →
+    // byte-identical legacy 5-connected boot.
+    if (!std::getenv("CHIMERA_NO_TRENDROSTER")) {
         // static deque = STABLE addresses for the process lifetime (a vector<>
         // would realloc and invalidate the &engine pointers stored in g_slots).
         static std::deque<chimera::EdgeEngine> g_trendroster_engines;
-        int wired_live = 0, wired_inert = 0;
+        int wired_live = 0, dropped_ndx = 0;
         for (const auto& leg : chimera::trend_roster::legs()) {
+            if (leg.is_index) { ++dropped_ndx; continue; }  // NDX: no Binance feed → 17-leg live book
             chimera::EdgeEngine::Config c = chimera::trend_roster::make_config(leg);
             g_trendroster_engines.emplace_back(c);
             chimera::EdgeEngine* eng = &g_trendroster_engines.back();
             eng->shadow_mode = true;                 // HARD SHADOW — never routes live
-            int sid = chimera::sym_id(leg.symbol);   // -1 for NDX (no Binance feed) → inert
+            int sid = chimera::sym_id(leg.symbol);
             g_slots.push_back({ sid, eng, std::string(leg.symbol), (int64_t)c.tf_secs,
                                 c.tag, /*oos_pf*/0.0, /*oos_sharpe*/0.0, /*oos_nbr*/0,
                                 /*oos_trades*/0, /*session*/72 });
-            if (sid >= 0) ++wired_live; else ++wired_inert;
+            if (sid >= 0) ++wired_live;
         }
-        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (%d live-feed, %d inert/NDX-no-feed); "
-                    "gate-exempt, no-desk-export, ride_to_flip, NO-200DMA\n",
-                    wired_live + wired_inert, wired_live, wired_inert);
+        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (17-leg live book; %d NDX legs dropped, no Binance feed); "
+                    "DEFAULT-ON, gate-exempt, no-desk-export, ride_to_flip, NO-200DMA, hard-shadow\n",
+                    wired_live, dropped_ndx);
         std::fflush(stdout);
     }
 

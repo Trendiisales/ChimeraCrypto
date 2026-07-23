@@ -119,13 +119,22 @@ public:
                 std::string why = "filter: " + n.reason;
                 log_reject(in, why.c_str()); r.error = why; return r;
             }
-            // S-2026-07-20: a pass-through (no valid LOT_SIZE cached — truncated
-            // exchangeInfo parse) used to submit RAW qty SILENTLY -> Binance -1013
-            // (TIA/SAND/LINK live misses). Silent-fallback class: make it LOUD.
-            if (in.is_buy && !in.is_exit && !filters_->has_valid(in.symbol))
-                std::printf("[FILTERS] WARN no valid LOT_SIZE for %s — raw qty %.8f goes out "
-                            "(exchangeInfo parse gap; -1013 likely; submitter should floor+retry)\n",
+            // S-2026-07-23: NEVER send RAW qty to Binance (guaranteed -1013). The
+            // S-20 code merely WARNED and let the unfloored qty through -> the
+            // silent-fallback -1013 class the operator paused the book for. With the
+            // startup per-symbol LOT_SIZE backfill (main.cpp) every live symbol has a
+            // valid filter, so this is unreachable for a real live symbol; if it DOES
+            // fire, the symbol has no cached step -> REJECT honestly (skip the doomed
+            // order) rather than post it. Exits are never blocked (risk-reducing) and
+            // sells still floor via normalize() above.
+            if (in.is_buy && !in.is_exit && !filters_->has_valid(in.symbol)) {
+                std::printf("[FILTERS] REJECT live BUY %s — no valid LOT_SIZE cached "
+                            "(backfill gap); skipping doomed order (was: raw qty %.8f -> -1013)\n",
                             in.symbol.c_str(), qty);
+                std::fflush(stdout);
+                log_reject(in, "no valid LOT_SIZE (backfill gap)");
+                r.error = "no valid LOT_SIZE"; return r;
+            }
             qty = n.qty;
         }
         // 4b. LIVE PILOT SCOPE — entries only; inert outside LIVE mode.

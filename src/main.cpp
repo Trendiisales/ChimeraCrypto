@@ -1617,8 +1617,28 @@ struct LiveMimicMirror {
             note_(r.tag, "REFUSED", d);
             return;
         }
+        // S-2026-07-23 BASIS-GAP ACQUIRE CAP (operator owed root-cause fix for the
+        // −$14.70/day bleed the book was DISABLED 07-20 for). S-18al removed the 56bp
+        // basis-gap REFUSAL and filled every leg gapped up to SANITY_GAP_BP=300 —
+        // chasing legs that had already run far past the signal anchor, which then
+        // reverted (the bleed). Reinstate a TIGHT acquire cap at +61bp (operator spec
+        // "tighten +61bp basis-gap acquire"; ≈ 2×RT cost + margin): a NEW leg gapped
+        // more than +61bp above its floor anchor is a chase — REFUSE it. Crucially this
+        // is an HONEST refusal: we return BEFORE held[r.tag] is created, so NO phantom
+        // position is booked (broker-evidence: no fill => no tracked leg). Exits/floors/
+        // pending-sell retries are elsewhere and unaffected; the ≤61bp legs still FILL
+        // and protect at the real fill (S-18al no-paper intent preserved for in-band gaps).
+        static constexpr double ACQUIRE_MAX_GAP_BP = 61.0;
+        if (gap_bp > ACQUIRE_MAX_GAP_BP) {
+            std::printf("[MIMIC-LIVE] BUY refused %s: basis-gap +%.0fbp > acquire cap %.0fbp — chase, not filling (S-23 root-cause bleed fix; no phantom booked)\n",
+                        r.tag.c_str(), gap_bp, ACQUIRE_MAX_GAP_BP);
+            std::fflush(stdout);
+            char d2[128]; std::snprintf(d2, sizeof(d2), "basis-gap +%.0fbp > cap %.0fbp (chase)", gap_bp, ACQUIRE_MAX_GAP_BP);
+            note_(r.tag, "REFUSED", d2);
+            return;
+        }
         if (gap_bp > cost_bound_bp)
-            std::printf("[MIMIC-LIVE] BUY basis-gap %s: px %.6f > anchor %.6f +%.0fbp — FILLING anyway, own floor/stop anchors at real fill (S-18al no-paper order)\n",
+            std::printf("[MIMIC-LIVE] BUY basis-gap %s: px %.6f > anchor %.6f +%.0fbp (≤acquire cap) — FILLING, own floor/stop anchors at real fill (S-18al no-paper order)\n",
                         r.tag.c_str(), r.px, r.floor_anchor, gap_bp);
         auto& h = held[r.tag];
         if (h.qty > 0.0) return;             // already holding for this leg (restart re-open etc.) — never stack
@@ -3588,6 +3608,43 @@ int main() {
             int nf = info.empty() ? 0 : g_filters.load_from_json(info);
             std::printf("[FILTERS] exchangeInfo cached: %d symbols%s\n",
                         nf, info.empty() ? " (probe failed — pass-through)" : "");
+            std::fflush(stdout);
+
+            // S-2026-07-23 LOT_SIZE robust fix (kills the -1013 silent-fallback class).
+            // The BULK exchangeInfo fetch can truncate (varying per fetch — the comment
+            // in ExchangeFilters.hpp), leaving some symbols WITHOUT a valid LOT_SIZE step
+            // -> normalize() passed RAW qty -> Binance -1013 "Filter failure: LOT_SIZE"
+            // (live misses SOL/BTC/TIA/SAND/LINK; the TRENDROSTER path has NO floor+retry
+            // so its legs bounced with zero fills). Deterministic fix: after the bulk load,
+            // PER-SYMBOL fetch (a single-symbol exchangeInfo body is ~2KB, cannot truncate)
+            // for every symbol the live book can actually trade that is still missing a
+            // valid filter. Guarantees has_valid()==true on the hot path so the gateway
+            // never sends an unfloored qty for a live symbol.
+            std::vector<std::string> want_filters;
+            auto add_filter_sym = [&](std::string s){
+                for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+                if (s.size() >= 6 &&
+                    std::find(want_filters.begin(), want_filters.end(), s) == want_filters.end())
+                    want_filters.push_back(s);
+            };
+            for (const auto& s : runtime_cfg.live_pilot_symbols) add_filter_sym(s);
+            for (const auto& leg : chimera::trend_roster::legs())
+                if (!leg.is_index) add_filter_sym(leg.symbol);   // "btcusdt" -> "BTCUSDT"
+            int bf_recovered = 0, bf_missing = 0, bf_tried = 0;
+            for (const auto& sym : want_filters) {
+                if (g_filters.has_valid(sym)) continue;
+                ++bf_tried;
+                std::string one = executor.exchange_info(sym);   // per-symbol, no truncation
+                if (!one.empty()) g_filters.load_from_json(one);
+                if (g_filters.has_valid(sym)) ++bf_recovered;
+                else { ++bf_missing;
+                    std::fprintf(stderr, "[FILTERS] BACKFILL still no LOT_SIZE for %s "
+                                 "(per-symbol fetch failed) — live BUYs on it will be rejected, not sent raw\n",
+                                 sym.c_str()); }
+            }
+            std::printf("[FILTERS] per-symbol LOT_SIZE backfill: %d recovered, %d still-missing "
+                        "(%d fetched of %d tradeable)\n",
+                        bf_recovered, bf_missing, bf_tried, (int)want_filters.size());
             std::fflush(stdout);
         }
 

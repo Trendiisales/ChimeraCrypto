@@ -368,6 +368,23 @@ public:
         // armed stop = entry*(1 + peak*(1-g)), floored at BE. Certified g=0.9 (cert config).
         double       rsirev_giveback_g = 0.9;
 
+        // ── RSIREV RUNNER lever (S-2026-07-23b, "L2 run 50% %trail15") ─────────────
+        // At the RSI>=thr mean-revert flip-out, instead of closing the WHOLE armed
+        // position, close (1-frac) at the flip and let `frac` RIDE ON as a runner
+        // governed by a %-trailing stop: stop = entry*(1 + peak*(1-runner_trail)),
+        // floored at BE. Certified FREE +50% Sharpe (1.92->2.87) + WR (51->61.5%) at
+        // ~flat net (+178->+176) and IDENTICAL poolDD (10.04%) — the max-profit/min-DD
+        // lever from backtest/rsirev_levers_bt.cpp row "L2 run 50% %trail15".
+        // DEFAULT rsirev_runner_frac=0.0 ⇒ base RSIREV (full flip-exit, no runner) —
+        // ZERO change to the parity-passed base config or ANY non-runner leg.
+        // FAITHFUL on the single-position model: measured over the full SOL+XRP window
+        // the 15%-trail runner ALWAYS stops out before RSI re-crosses <thr (0 cases of a
+        // new base entry while a runner is live; max 1 concurrent position), so the
+        // runner is just the SAME position continuing with a reduced size + tighter
+        // trail — no multi-position capability required.
+        double       rsirev_runner_frac  = 0.0;    // fraction kept as runner at RSI-flip (0=off)
+        double       rsirev_runner_trail = 0.15;   // %-trail: stop=entry*(1+peak*(1-trail)), floored BE
+
         // ── VOL-TARGET sizing (S-2026-07-21 crypto-keltner-pool-fix) ────────────
         // Ported from Crypto/src/ibkrcrypto_bt.cpp (Cfg.vt_target/vt_lb/vt_min/vt_max)
         // and crypto_oos_engine_port.sizer. Per-trade size multiplier set AT ENTRY:
@@ -567,6 +584,13 @@ public:
         // whole chain (signal -> gate -> target -> order -> fill -> pnl) is
         // resolvable in the GateAttribution store. 0 => no sink attached.
         uint64_t    corr_id = 0;
+        // S-2026-07-23b RSIREV runner: fraction of the position this intent covers.
+        // 1.0 for every ordinary open/close (byte-identical to before). The RSIREV
+        // runner emits a partial SELL at the flip (qty_frac=1-runner_frac) and the
+        // runner-stop SELL (qty_frac=runner_frac) so the live venue sells the exact
+        // held fraction on each of the two exits. Consumed by the routing callback
+        // (qty *= qty_frac); default 1.0 leaves all other legs unchanged.
+        double      qty_frac = 1.0;
     };
 
     using OrderIntentCallback = std::function<void(const OrderIntentRecord&)>;
@@ -1371,6 +1395,7 @@ private:
     // Trailing stop state
     bool    trail_armed_    = false;
     bool    rsirev_flat_book_ = false;  // S-2026-07-23: one-shot — next exit_position_ books FLAT 0 (BE-ENTRY unarmed)
+    bool    rsirev_runner_active_ = false;  // S-2026-07-23b: position is now the trailing runner remnant (%-trail, not g-floor)
     double  trail_stop_px_  = 0.0;  // ratchets up, never down
     double  trail_arm_px_   = 0.0;  // price level that arms the trail
     double  mfe_px_         = 0.0;  // max favourable excursion (highest price seen)
@@ -1699,13 +1724,31 @@ private:
         // exact complement of the entry, mirroring the ride_to_flip block below but
         // for the non-ride RSIREV-floor leg. Fully guarded ⇒ no effect when the flag
         // is off. Books at this bar's close (≈ next-day open on a live feed).
+        // `!rsirev_runner_active_`: once the flip has converted this position into a
+        // trailing runner, the RSI-flip is spent — the runner exits ONLY on its %-trail
+        // (check_exits_), never re-flips. Matches the cert (a runner is never RSI-rechecked).
         if (cfg_.rsi_revert_intraday_floor && cfg_.rsi_level_revert && !cfg_.ride_to_flip
-            && in_position_ && bars_held_ >= 2 && rsi_level_flipped_out_()) {
-            // BE-ENTRY: if the leg NEVER armed (fav never reached +confirm) it never really
-            // opened — book FLAT 0 (no P&L, no cost, no SELL routed), the cert's
-            // `(be_floor && !armed) ? 0 : (eret-cost)`. trail_armed_ is the arm flag.
-            rsirev_flat_book_ = !trail_armed_;
-            exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
+            && in_position_ && !rsirev_runner_active_ && bars_held_ >= 2 && rsi_level_flipped_out_()) {
+            if (cfg_.rsirev_runner_frac > 0.0 && trail_armed_) {
+                // ── RUNNER LEVER (S-2026-07-23b) ────────────────────────────────────
+                // Armed flip: book (1-frac) NOW at the flip price, KEEP frac riding as a
+                // %-trail runner on the SAME entry_px_/peak. Faithful to the cert's
+                // `book((1-frac)) + runs.push_back(frac, peak=max(peak,eret))`.
+                exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP_RUN",
+                               /*keep_runner=*/true, /*size_frac=*/1.0 - cfg_.rsirev_runner_frac);
+                rsirev_runner_active_ = true;   // check_exits_ now trails the frac remnant
+                std::printf("[%s] RSIREV_RUNNER_ARM  book_frac=%.2f  runner_frac=%.2f  trail=%.0f%%  "
+                            "entry=%.6f  peak_mfe=+%.1fbp\n",
+                    cfg_.tag.c_str(), 1.0 - cfg_.rsirev_runner_frac, cfg_.rsirev_runner_frac,
+                    cfg_.rsirev_runner_trail * 100.0, entry_px_, mfe_bp_);
+                std::fflush(stdout);
+            } else {
+                // Base RSIREV (no runner) OR unarmed. BE-ENTRY: if the leg NEVER armed
+                // (fav never reached +confirm) it never really opened — book FLAT 0 (no
+                // P&L, no cost, no SELL routed), the cert's `(be_floor && !armed) ? 0`.
+                rsirev_flat_book_ = !trail_armed_;
+                exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
+            }
         }
         if (cfg_.ride_to_flip && in_position_) {
             bool flip_out = false;
@@ -2670,13 +2713,24 @@ private:
                 }
             }
             if (trail_armed_) {
-                double stop = entry_px_ * (1.0 + std::max(0.0, peak * (1.0 - cfg_.rsirev_giveback_g)));
+                // Two regimes, both floored at BE:
+                //   • pre-flip (base):  keep = 1-g (=0.10 at g0.9) → loose profit-lock floor.
+                //   • runner (post-flip): keep = 1-runner_trail (=0.85) → tight 15%-below-peak
+                //     trail. Faithful to the cert runner `tstop = peak*(1-runner_trail)`.
+                const double keep = rsirev_runner_active_
+                                    ? (1.0 - cfg_.rsirev_runner_trail)
+                                    : (1.0 - cfg_.rsirev_giveback_g);
+                double stop = entry_px_ * (1.0 + std::max(0.0, peak * keep));
                 if (stop < entry_px_) stop = entry_px_;           // floor at BE(=entry)
                 if (price <= stop) {
                     double fill = stop;                            // touch books the stop level
                     if (cfg_.realistic_gap_fill && price < stop)   // gap-through books the worse tick price
                         fill = price * (1.0 - cfg_.gap_extra_slip_bp / 1e4);
-                    exit_position_(fill, ts_ms, "RSIREV_FLOOR");
+                    if (rsirev_runner_active_)
+                        exit_position_(fill, ts_ms, "RSIREV_RUN",
+                                       /*keep_runner=*/false, /*size_frac=*/cfg_.rsirev_runner_frac);
+                    else
+                        exit_position_(fill, ts_ms, "RSIREV_FLOOR");
                     return;
                 }
             }
@@ -2877,7 +2931,12 @@ private:
         }
     }
 
-    void exit_position_(double exit_px, int64_t ts_ms, const char* reason) {
+    // keep_runner: book this (partial) exit but DO NOT close/reset the position — it
+    //   stays open as the trailing runner remnant (RSIREV runner lever only).
+    // size_frac: fraction of the position this exit covers (1.0 = ordinary full exit ⇒
+    //   byte-identical to before). Scales the booked economics + the routed SELL qty.
+    void exit_position_(double exit_px, int64_t ts_ms, const char* reason,
+                        bool keep_runner = false, double size_frac = 1.0) {
         if (!in_position_) return;
         double gross_bp = (exit_px / entry_px_ - 1.0) * 1e4;
         double net_bp   = gross_bp - cfg_.round_trip_bp;
@@ -2902,6 +2961,13 @@ private:
         const bool rsirev_flat = rsirev_flat_book_;
         rsirev_flat_book_ = false;   // consume the one-shot flag
         if (rsirev_flat) { gross_bp = 0.0; net_bp = 0.0; pyramid_bp = 0.0; total_net_bp = 0.0; }
+
+        // ── RSIREV runner partial-slice sizing (S-2026-07-23b) ──────────────────
+        // A runner flip books (1-frac); the runner stop books frac. Scale the booked
+        // economics by this exit's size fraction (1.0 for every ordinary full exit ⇒
+        // unchanged). gross_bp stays the raw price move (informational); net_bp and
+        // total_net_bp — the recorded/ledgered economics — carry the size weight.
+        if (size_frac != 1.0) { net_bp *= size_frac; pyramid_bp *= size_frac; total_net_bp *= size_frac; }
 
         trades_++;
         if (total_net_bp > 0) wins_++;
@@ -2930,6 +2996,7 @@ private:
             intent.is_buy = false;
             intent.ref_px = exit_px;
             intent.ts_ms  = ts_ms;
+            intent.qty_frac = size_frac;   // RSIREV runner: sell only the exited fraction
             on_order_intent_(intent);
         }
 
@@ -2957,6 +3024,11 @@ private:
             on_trade_(rec);
         }
 
+        // RSIREV runner: the (1-frac) slice is booked but the position stays OPEN as the
+        // trailing runner remnant — keep entry_px_/mfe_px_/trail_armed_/bars_held_ intact
+        // (peak keeps ratcheting, %-trail continues in check_exits_). Skip the reset.
+        if (keep_runner) return;
+
         in_position_ = false;
         entry_px_ = 0.0;
         sl_px_    = 0.0;
@@ -2967,6 +3039,7 @@ private:
 
         // Reset trailing stop state
         trail_armed_    = false;
+        rsirev_runner_active_ = false;   // S-2026-07-23b: runner remnant fully closed
         trail_stop_px_  = 0.0;
         trail_arm_px_   = 0.0;
         mfe_px_         = 0.0;

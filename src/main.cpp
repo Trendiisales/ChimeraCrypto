@@ -10442,9 +10442,13 @@ int main() {
                         double notional = slice_usd * vt;            // equal-slice × vol-target
                         if (notional > cap_usd) notional = cap_usd;  // ≤15%/leg cap
                         double qty = notional / intent.ref_px;
-                        std::printf("[TRENDROSTER-INTENT] tag=%s sym=%s side=%s qty=%.8f px=%.6f vt=%.3f notional=$%.2f\n",
+                        // S-2026-07-23b RSIREV runner: a partial exit covers only a fraction
+                        // of the held position (SELL 50% at the flip, 50% at the trail stop).
+                        // qty_frac=1.0 for every ordinary open/close ⇒ all other legs unchanged.
+                        qty *= intent.qty_frac;
+                        std::printf("[TRENDROSTER-INTENT] tag=%s sym=%s side=%s qty=%.8f px=%.6f vt=%.3f qty_frac=%.2f notional=$%.2f\n",
                             intent.tag.c_str(), intent.symbol.c_str(), intent.is_buy ? "BUY" : "SELL",
-                            qty, intent.ref_px, vt, notional);
+                            qty, intent.ref_px, vt, intent.qty_frac, notional * intent.qty_frac);
                         std::fflush(stdout);
                         auto result = governed_submit({ intent.symbol, intent.is_buy, qty, intent.ref_px,
                                                         /*is_exit*/ !intent.is_buy, intent.tag.c_str() },

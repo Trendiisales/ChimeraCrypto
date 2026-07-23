@@ -143,6 +143,13 @@ inline EdgeEngine::Config make_config(const LegSpec& s) {
         c.rsirev_giveback_g = 0.9;                 // profit-lock g0.9 (give back 10% of peak)
         c.vt_target      = 0.0;                     // unsized standalone book (matches cert)
         c.tag            = std::string(s.coin) + "-RSIREV";
+        // ── RUNNER lever (S-2026-07-23b, "L2 run 50% %trail15") ──────────────────
+        // At the RSI>=25 flip, close 50% and let 50% ride a 15%-below-peak %-trail
+        // (floored at BE). Certified FREE +50% Sharpe (1.92->2.87) + WR (51->61.5%) at
+        // ~flat net & identical poolDD — backtest/rsirev_levers_bt.cpp "L2 run 50%
+        // %trail15", re-proven live-path faithful (rsirev_live_path_parity_bt.cpp).
+        c.rsirev_runner_frac  = 0.50;              // keep 50% as runner at the flip
+        c.rsirev_runner_trail = 0.15;              // 15%-below-peak %-trail, floored BE
     }
     // NOTE: regime_gate_ma is intentionally NEVER set — NO 200DMA in crypto (hard rule).
     return c;

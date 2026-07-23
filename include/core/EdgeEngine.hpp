@@ -77,6 +77,17 @@
 
 namespace chimera {
 
+// S-2026-07-23 LIVE-ONLY CULL (operator: viable-only rebuild step 2). Every EdgeEngine
+// prints an "[TAG] ARMED ... shadow=%d" line at construction. Most constructed engines
+// are the culled non-roster shadow zoo (never g_slots'd, wire_engine is a live no-op) —
+// their ARMED lines are dead-engine boot noise that VIOLATES never-display-dead-engines.
+// When g_edge_arm_quiet is set (main.cpp sets it true before building the zoo), the ctor
+// suppresses the per-engine ARMED line and instead bumps g_edge_arm_suppressed, so the
+// aggregate [LIVE-ONLY-GATE] boot line can report a COUNT with no individual dead names.
+// Default false = byte-identical behavior for every other build (backtests etc.).
+inline bool g_edge_arm_quiet = false;
+inline int  g_edge_arm_suppressed = 0;
+
 enum class StrategyKind {
     TSMOM,          // 20-bar return > 0
     DONCHIAN,       // close > prior 20-bar high
@@ -594,13 +605,19 @@ public:
         // SuperTrend needs st_atr_period + 2
         if (cfg_.kind == StrategyKind::SUPERTREND && cfg_.max_history < cfg_.st_atr_period + 5)
             cfg_.max_history = cfg_.st_atr_period + 5;
-        std::printf("[%s] ARMED  symbol=%s strat=%s tf=%llds lookback=%d hold=%d sl=%.2f*atr trail_arm=%.1f*atr trail_dist=%.1f*atr  shadow=%d\n",
-            cfg_.tag.c_str(), cfg_.symbol.c_str(),
-            strategy_name(cfg_.kind),
-            (long long)cfg_.tf_secs, cfg_.lookback, cfg_.hold_bars, cfg_.sl_atr_mult,
-            cfg_.trail_arm_atr, cfg_.trail_dist_atr,
-            shadow_mode ? 1 : 0);
-        std::fflush(stdout);
+        if (g_edge_arm_quiet) {
+            // LIVE-ONLY CULL: suppress the per-engine ARMED line (dead-engine boot noise);
+            // count it for the aggregate [LIVE-ONLY-GATE] line instead (no dead names shown).
+            ++g_edge_arm_suppressed;
+        } else {
+            std::printf("[%s] ARMED  symbol=%s strat=%s tf=%llds lookback=%d hold=%d sl=%.2f*atr trail_arm=%.1f*atr trail_dist=%.1f*atr  shadow=%d\n",
+                cfg_.tag.c_str(), cfg_.symbol.c_str(),
+                strategy_name(cfg_.kind),
+                (long long)cfg_.tf_secs, cfg_.lookback, cfg_.hold_bars, cfg_.sl_atr_mult,
+                cfg_.trail_arm_atr, cfg_.trail_dist_atr,
+                shadow_mode ? 1 : 0);
+            std::fflush(stdout);
+        }
     }
 
     // -----------------------------------------------------------------------

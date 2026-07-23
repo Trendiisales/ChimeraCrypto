@@ -1265,13 +1265,14 @@ struct LiveMimicMirror {
     // entry must be followed by '-' (leg suffix -T<n>) or end the tag, so e.g. a W1 entry
     // could never wildcard onto a W12 cell. Regenerate the list with
     // Crypto/backtest/honest_basis_measured_2026-07-20/join_live_cells.py.
+    // S-2026-07-23 LIVE-ONLY CULL (operator: viable-only rebuild step 2): the 4 non-DOGE
+    // BECASC singletons (AVAX-MIM15-BECASC-F, INJ-MIM05-BECASC-W4, RUNE-MIM05-BECASC-W4,
+    // RUNE-MIM15-BECASC-F) are DROPPED — fragile singletons, operator verdict. Only the 7
+    // DOGE BECASC cells (the coherent survivor family) stay acquire-exempt / live-routable.
     std::vector<std::string> acquire_allowlist = {
-        "AVAX-MIM15-BECASC-F",
         "DOGE-MIM05-BECASC-W2",  "DOGE-MIM05-BECASC-W4",  "DOGE-MIM05-BECASC-W12",
         "DOGE-MIM10-BECASC-W2",  "DOGE-MIM10-BECASC-W4",  "DOGE-MIM10-BECASC-W12",
         "DOGE-MIM15-BECASC-S",
-        "INJ-MIM05-BECASC-W4",
-        "RUNE-MIM05-BECASC-W4",  "RUNE-MIM15-BECASC-F",
     };
     bool tag_allowlisted_(const std::string& tag) const {
         for (const auto& a : acquire_allowlist) {
@@ -3856,6 +3857,12 @@ int main() {
     }
     std::fflush(stdout);
 
+#if 0  // S-2026-07-23 LIVE-ONLY CULL (operator: viable-only rebuild step 2) — BtcRegimeMomentumBook
+       // CULLED: NOT VIABLE (EMA200/200DMA gate = forbidden-in-crypto, hand-quoted cost, WF folds
+       // fail, 59th-pctile null, zero realized PnL). Arm block gated OFF so no [BTC-REGIME-BOOK]
+       // line prints, submit/on_live_close never bind (no desk fold), live_enabled stays default
+       // false. Object left constructed-but-inert (every method no-ops on !live_enabled). The seed
+       // + per-tick drive are gated OFF below too (see matching CULL notes).
     // ── S-2026-07-20af arm the BTC REGIME-MOMENTUM BOOK (operator: take the ensemble) ──
     // Directional long-only spot book. Routes BUY/SELL through the SAME governed_submit
     // path (HARDCAP allocator + PILOT-SCOPE + kill-switch + filters + ledger). Armed
@@ -3888,6 +3895,7 @@ int main() {
         std::printf("[BTC-REGIME-BOOK] DISARMED (mode=SHADOW) — pure accounting, no real orders\n");
     }
     std::fflush(stdout);
+#endif  // S-2026-07-23 LIVE-ONLY CULL: end BtcRegimeMomentumBook arm block (culled — inert object kept)
 
 #if 0  // S-2026-07-20 CRYPTO LIVE-ONLY REBUILD (operator: mimic-only). The XSEC/
        // XSEC2/P6/P7/RIP sleeves below are shadow-LABELED but 4 carry REAL Binance
@@ -4698,6 +4706,16 @@ int main() {
                 }
             });
     };
+
+    // ── S-2026-07-23 LIVE-ONLY CULL (operator: viable-only rebuild step 2) ──────
+    // From here on EVERY EdgeEngine construction is either (a) the culled non-roster
+    // shadow zoo (TSMOM/MIMIC/BOLL/DONCH/RSI/ICHI/KELT/REGIME — never g_slots'd,
+    // wire_engine is a live no-op) or (b) a keep-set leg (17-leg TRENDROSTER, wired
+    // below). Silence the per-engine "[TAG] ARMED ... shadow=1" ctor line for ALL of
+    // them (dead-engine boot noise = never-display-dead-engines violation); the count
+    // surfaces in the aggregate [LIVE-ONLY-GATE] line and roster visibility comes from
+    // the [TRENDROSTER]/[TRENDROSTER-ARM] lines. Suppressed count = g_edge_arm_suppressed.
+    chimera::g_edge_arm_quiet = true;
 
     // ══════════════════════════════════════════════════════════════════════
     // ── SECTION A: D1 ENGINES (Sessions 13-14) ──────────────────────────
@@ -9722,17 +9740,19 @@ int main() {
     g_slots.push_back({chimera::SYM_TRX,  &trx_mimic5_h1,  "trxusdt",  3600, "TRX-MIMIC5-H1",  0.0, 0.0, 0, 0, 57});
     }
 
-    // ── PHASE 3 (2026-07-13): REGIME_SWITCH D1 trend parents — the live book ─────
-    // Phase-1 winner kind (parent_scan_bt, 54 coins, certified data, random-entry
-    // control). Stats = today's certified-data rerun (parent_scan_bt REGIME_SWITCH
-    // cost=20 seed=20): PF / trades per coin. These feed the *-REGIME-BEMIMIC
-    // companions (registered above) via on_bar_callback. EXEMPT from tier-preset/
-    // S44N/vol_filter overrides — config is the Phase-2 backtest parity config.
-    g_slots.push_back({chimera::SYM_NEAR,  &near_regime_d1,  "nearusdt",  86400, "NEAR-REGIME_SWITCH",  1.98, 0.0, 0, 33, 60});
-    g_slots.push_back({chimera::SYM_THETA, &theta_regime_d1, "thetausdt", 86400, "THETA-REGIME_SWITCH", 6.98, 0.0, 0, 12, 60});
-    g_slots.push_back({chimera::SYM_SUSHI, &sushi_regime_d1, "sushiusdt", 86400, "SUSHI-REGIME_SWITCH", 4.00, 0.0, 0, 23, 60});
-    g_slots.push_back({chimera::SYM_ADA,   &ada_regime_d1,   "adausdt",   86400, "ADA-REGIME_SWITCH",   5.78, 0.0, 0, 30, 60});
-    g_slots.push_back({chimera::SYM_DOT,   &dot_regime_d1,   "dotusdt",   86400, "DOT-REGIME_SWITCH",   2.58, 0.0, 0, 24, 60});
+    // ── PHASE 3 REGIME_SWITCH D1 parents — CULLED from g_slots S-2026-07-23 ──────
+    // LIVE-ONLY rebuild step 2 (operator: viable-only, g_slots = ONLY the 17-leg
+    // TRENDROSTER). The 5 REGIME_SWITCH parents (near/theta/sushi/ada/dot) are removed
+    // from the trade path — they were the "5 legacy" non-roster slots (EDGE-SLOTS 22→17).
+    // Their additive REGIME-BEMIMIC companions were already tombstoned (mimic-grid #if 0,
+    // S-2026-07-21), so nothing else consumed their bar closes. The parent EdgeEngine
+    // objects stay CONSTRUCTED-BUT-INERT (declared above; no live refs outside the #if 0
+    // grid) — un-slotted => never ticked => never trade. ARMED line suppressed (quiet gate).
+    // g_slots.push_back({chimera::SYM_NEAR,  &near_regime_d1,  "nearusdt",  86400, "NEAR-REGIME_SWITCH",  1.98, 0.0, 0, 33, 60});  // CULLED S-23
+    // g_slots.push_back({chimera::SYM_THETA, &theta_regime_d1, "thetausdt", 86400, "THETA-REGIME_SWITCH", 6.98, 0.0, 0, 12, 60});  // CULLED S-23
+    // g_slots.push_back({chimera::SYM_SUSHI, &sushi_regime_d1, "sushiusdt", 86400, "SUSHI-REGIME_SWITCH", 4.00, 0.0, 0, 23, 60});  // CULLED S-23
+    // g_slots.push_back({chimera::SYM_ADA,   &ada_regime_d1,   "adausdt",   86400, "ADA-REGIME_SWITCH",   5.78, 0.0, 0, 30, 60});  // CULLED S-23
+    // g_slots.push_back({chimera::SYM_DOT,   &dot_regime_d1,   "dotusdt",   86400, "DOT-REGIME_SWITCH",   2.58, 0.0, 0, 24, 60});  // CULLED S-23
 
     // H12 engines (3)
     // DISABLED-AUDIT2026-P7: g_slots.push_back({chimera::SYM_BTC,  &btc_tsmom_h12,  "btcusdt",  43200, "BTC-TSMOM-H12",  3.63, 3.40,  96,  31, 14});
@@ -10739,6 +10759,7 @@ int main() {
         // init_grids();                      // S55: maker grid sleeve (shadow) — REMOVED #2b
         // init_macro_base();                 // S55: macro-bull base / bull-beta core (shadow) — REMOVED #2b
 
+#if 0  // S-2026-07-23 LIVE-ONLY CULL: BtcRegimeMomentumBook seed/gate CULLED (no [BTC-REGIME-BOOK-GATE] line)
         // ── S-2026-07-20af seed the BTC REGIME-MOMENTUM BOOK daily history ────
         // EMA200 needs 202+ completed daily bars; fetch 600 1d klines (public
         // endpoint) so both sleeves are warm at boot (no cold-start silent idle).
@@ -10770,6 +10791,7 @@ int main() {
                         g_btc_regime_book.boot_summary().c_str());
             std::fflush(stdout);
         }
+#endif  // S-2026-07-23 LIVE-ONLY CULL: end BtcRegimeMomentumBook seed/gate block (culled)
     }
 
     // ── Position resume: restore open positions after restart ────────────
@@ -11454,7 +11476,9 @@ int main() {
         // (signals on completed daily bars, TSMOM fills next daily open). No-op for
         // non-BTC ticks and when disarmed (SHADOW). Live 1h OHLC = tick-mid aggregation
         // (documented divergence from Binance klines; parity uses exact klines).
-        if (tick.symbol == "btcusdt") g_btc_regime_book.on_tick(mid, now_ms);
+        // S-2026-07-23 LIVE-ONLY CULL: BtcRegimeMomentumBook per-tick drive gated OFF (book culled;
+        // arm+seed also gated above). Inert object never armed/seeded → this was already a no-op.
+        // if (tick.symbol == "btcusdt") g_btc_regime_book.on_tick(mid, now_ms);
 
         static std::atomic<int> tc{0};
         int n = tc.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -11524,7 +11548,7 @@ int main() {
         bool wire_legacy = std::getenv("CHIMERA_WIRE_LEGACY") != nullptr;
         // Programmatic defaults (authoritative fallback) …
         g_registry.declare("EDGE-SLOTS", chimera::Lifecycle::SHADOW,
-                           "REGIME_SWITCH D1 parents (g_slots) — TSMOM/ICHI book culled Phase-3 2026-07-13");
+                           "17-leg DirectionalTrendRoster (g_slots) — REGIME_SWITCH parents + TSMOM/ICHI zoo culled LIVE-ONLY 2026-07-23");
         g_registry.declare("LEGACY-EDGE", chimera::Lifecycle::DISABLED,
                            "285 per-symbol EdgeEngines — CULLED unless CHIMERA_WIRE_LEGACY");
         // S-2026-07-20 LIVE-ONLY: XSEC-BTC/XSEC-BR/RIPRIDER engines removed (mimic-only) — decls dropped.
@@ -11603,14 +11627,34 @@ int main() {
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
     std::printf("[STARTUP] ✓ CHIMERA READY — %d engines connected (from the real graph; shadow_mode=true)\n",
                 g_registry.connected_count());
-    std::printf("[STARTUP]   EDGE-SLOTS=%d  LEGACY-EDGE=%d(wired)  XSEC=2  RIPRIDER=1  MIMIC-GRID=%d\n",
-                (int)g_slots.size(), (int)g_all_wired.size(), g_grid_clip_count);
+    std::printf("[STARTUP]   EDGE-SLOTS=%d (17-leg TRENDROSTER live book)  MIMIC-GRID=%d  (XSEC/RIPRIDER/CAMPAIGN/CORE-TRIGGER/legacy-zoo culled)\n",
+                (int)g_slots.size(), g_grid_clip_count);
     std::printf("[STARTUP]   Gates observed (item 21): portfolio+cluster+confirm+funding+vol_regime+corr+session+volume+vol_filter+mtf+adx\n");
     std::printf("[STARTUP]   spot-long-only | NO 200DMA | SHADOW | counts are RECONCILED (not aspirational)\n");
     std::printf("[STARTUP]   GUI: http://localhost:8080\n");
     std::printf("[STARTUP]   API: /api/state2  /api/positions  /api/trades\n");
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
     std::fflush(stdout);
+
+    // ── [LIVE-ONLY-GATE] (operator live-only rebuild step 2; feedback-live-only-cull-dont-park) ──
+    // Aggregate-count assertion — NO dead-engine names (feedback-never-display-dead-engines):
+    //   live      = g_slots (17 TRENDROSTER legs, session-tag 72) + DOGE BECASC mimic allowlist (7) = 24
+    //   culled    = EdgeEngine objects constructed but never live-armed (non-roster shadow zoo, inert;
+    //               ARMED ctor line suppressed via chimera::g_edge_arm_quiet) minus the roster legs
+    //   VIOLATION = any g_slots entry that is NOT a roster leg (a shadow cell still slotted) + the
+    //               BtcRegimeMomentumBook if it somehow armed. MUST be 0 or engine_init cleanup is owed.
+    {
+        int roster_live = 0, nonroster_slots = 0;
+        for (const auto& s : g_slots) { if (s.session == 72) ++roster_live; else ++nonroster_slots; }
+        int doge_mimic  = (int)g_mimic_mirror.acquire_allowlist.size();
+        int live_armed  = roster_live + doge_mimic;
+        int culled      = chimera::g_edge_arm_suppressed - roster_live;   // roster legs excluded from the culled tally
+        int violation   = nonroster_slots + (g_btc_regime_book.live_enabled ? 1 : 0);
+        std::printf("[LIVE-ONLY-GATE] %d live / %d culled / %d VIOLATION "
+                    "(roster=%d doge_mimic=%d | g_slots=%d all-roster | btc_regime=CULLED | shadow-zoo ARMED-lines suppressed)\n",
+                    live_armed, culled, violation, roster_live, doge_mimic, (int)g_slots.size());
+        std::fflush(stdout);
+    }
 
     // ── Periodic open-position snapshot (every 60s) ────────────────────────
     // Writes data/open_positions.json so that if the process is SIGKILL'd or

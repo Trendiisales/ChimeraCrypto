@@ -32,6 +32,9 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <atomic>
+#include <mutex>
+#include <map>
 #include "live/BinanceREST.hpp"   // OrderResult
 #include "live/RuntimeMode.hpp"
 #include "live/ExchangeLedger.hpp"
@@ -98,6 +101,11 @@ public:
 
     OrderResult submit(const OrderIntent& in) {
         OrderResult r;
+        // 0. CIRCUIT-BREAKER (sticky) — once an order-storm tripped the breaker,
+        //    every subsequent send (entry OR exit) is hard-rejected until a restart.
+        //    Already logged once at trip time. See the breaker block just before the
+        //    executor call (step 10) for the trip conditions.
+        if (circuit_tripped_.load()) { r.error = "circuit-breaker tripped"; return r; }
         // 1. MODE
         if (mode_ == RuntimeMode::DISABLED) {
             log_reject(in, "mode=DISABLED"); r.error = "mode=DISABLED"; return r;
@@ -205,8 +213,51 @@ public:
             ledger_->note_sell(cid, in.symbol, in.source ? in.source : "?", qty, in.ref_px);
         }
 
+        // 9b. ORDER CIRCUIT-BREAKER (2026-07-24) — the LAST gate before a real POST
+        //     to Binance. Makes an order-storm PHYSICALLY IMPOSSIBLE. Root incident
+        //     (Omega, mirrored here per operator demand): ConnorsRSI2 fired 24,776
+        //     unfilled orders in ~40s the instant its exec reconnected because there
+        //     was NO cap between the connect-check and placeOrder. The crypto path had
+        //     the same gap: a runaway engine could spam Binance without limit
+        //     (-1003 order-rate ban + exposure). Two hard limits + a STICKY halt:
+        //       (a) global > MAX_ORDERS_PER_SEC in any rolling 1s window, and
+        //       (b) per-symbol >= MAX_UNFILLED_PER_SYM sends with 0 fills (the runaway
+        //           signature — a filling trade resets its symbol's counter below).
+        //     LIVE-only: in SHADOW/PAPER no order reaches Binance (no -1003 risk) and
+        //     research books legitimately batch full-universe rebalances, so scoping
+        //     to LIVE keeps the shadow record byte-identical and avoids false trips.
+        //     On trip: circuit_tripped_ (sticky) -> every submit() returns an error;
+        //     cleared ONLY by a restart (operator investigates the runaway first).
+        //     Emergency-flatten uses a SEPARATE path (SpotExecutor::emergency_flatten),
+        //     so a manual flatten still works after a trip.
+        if (mode_ == RuntimeMode::LIVE) {
+            std::lock_guard<std::mutex> lk(cb_mtx_);
+            long long now_cb = (long long)now_ms();
+            if (now_cb - rate_win_start_ms_ >= 1000) { rate_win_start_ms_ = now_cb; rate_win_count_ = 0; }
+            if (++rate_win_count_ > MAX_ORDERS_PER_SEC) {
+                trip_circuit_("global rate > " + std::to_string(MAX_ORDERS_PER_SEC) + " orders/sec");
+                if (reserved && ledger_) ledger_->release(cid);
+                if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, false);
+                r.error = "circuit-breaker: rate"; return r;
+            }
+            if (++unfilled_by_sym_[in.symbol] > MAX_UNFILLED_PER_SYM) {
+                trip_circuit_(in.symbol + ": " + std::to_string(unfilled_by_sym_[in.symbol]) +
+                              " orders sent, 0 fills (runaway loop)");
+                if (reserved && ledger_) ledger_->release(cid);
+                if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, false);
+                r.error = "circuit-breaker: per-symbol unfilled"; return r;
+            }
+        }
+
         // 10. Forward to the (befriended) private executor with the deterministic id.
         r = ex_.execute(in.symbol, in.is_buy, qty, in.ref_px, cid);
+
+        // CIRCUIT-BREAKER: a real fill clears this symbol's unfilled counter so
+        // normal filling trades never approach the per-symbol cap.
+        if (mode_ == RuntimeMode::LIVE && r.ok && r.executed_qty > 0.0) {
+            std::lock_guard<std::mutex> lk(cb_mtx_);
+            unfilled_by_sym_[in.symbol] = 0;
+        }
 
         // 11. Apply the result to the truth ledger (via the stream path if wired).
         if (!r.ok) {
@@ -268,6 +319,31 @@ private:
                      in.source ? in.source : "?", in.is_buy ? "BUY" : "SELL",
                      in.symbol.c_str(), in.qty, in.ref_px, why);
     }
+
+    // ── ORDER CIRCUIT-BREAKER (2026-07-24) — mirror of Omega's IbkrExecutionEngine
+    //    place_order breaker. Thresholds identical to Omega (25/sec, 8 unfilled/sym):
+    //    each LIVE execute() blocks on a real HTTP POST (~50-200ms round trip), so
+    //    legitimate LIVE orders — including a serial full-universe rebalance — are
+    //    naturally throttled well under 25/sec; a fast-reject runaway loop is not.
+    //    The per-symbol-unfilled cap is the precise single-symbol runaway detector
+    //    (the incident was one symbol); the global rate is the multi-symbol backstop.
+    static constexpr int          MAX_ORDERS_PER_SEC   = 25;
+    static constexpr int          MAX_UNFILLED_PER_SYM = 8;
+    std::atomic<bool>             circuit_tripped_{false};
+    std::mutex                    cb_mtx_;                 // guards the three below
+    long long                     rate_win_start_ms_ = 0;
+    int                           rate_win_count_    = 0;
+    std::map<std::string,int>     unfilled_by_sym_;
+
+    void trip_circuit_(const std::string& why) {           // call under cb_mtx_
+        if (circuit_tripped_.exchange(true)) return;       // one-shot
+        std::fprintf(stderr,
+            "[GATEWAY] *** CIRCUIT-BREAKER TRIPPED *** %s -- ALL ORDERS HALTED "
+            "(exec hard-disabled; restart + investigate the runaway before re-enabling)\n",
+            why.c_str());
+        std::fflush(stderr);
+    }
+
     Exec&           ex_;
     RuntimeMode     mode_;
     ExchangeLedger* ledger_  = nullptr;

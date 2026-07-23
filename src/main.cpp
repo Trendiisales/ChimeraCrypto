@@ -10469,7 +10469,7 @@ int main() {
                             bound_live, leg.symbol, c.tag.c_str(), eng->shadow_mode ? 1 : 0);
             }
         }
-        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (19-leg live book: 17 trend + 2 SOL/XRP RSIREV BE-floor; %d NDX legs dropped, no Binance feed); "
+        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (21-leg live book: 17 trend + 4 RSIREV BE-floor [SOL/XRP/ATOM/DOT]; %d NDX legs dropped, no Binance feed); "
                     "DEFAULT-ON, gate-exempt, no-desk-export, ride_to_flip, NO-200DMA, %s\n",
                     wired_live, dropped_ndx,
                     arm_roster ? "ARM-FLAG-ON (governed_submit bound)" : "hard-shadow");
@@ -11642,7 +11642,7 @@ int main() {
 
     // ── [LIVE-ONLY-GATE] (operator live-only rebuild step 2; feedback-live-only-cull-dont-park) ──
     // Aggregate-count assertion — NO dead-engine names (feedback-never-display-dead-engines):
-    //   live      = g_slots (19 TRENDROSTER legs, session-tag 72; incl. 2 SOL/XRP RSIREV BE-floor S-23) + DOGE BECASC mimic allowlist (7) = 26
+    //   live      = g_slots (21 TRENDROSTER legs, session-tag 72; incl. 4 SOL/XRP/ATOM/DOT RSIREV BE-floor S-23) + DOGE BECASC mimic allowlist (7) = 28
     //   culled    = EdgeEngine objects constructed but never live-armed (non-roster shadow zoo, inert;
     //               ARMED ctor line suppressed via chimera::g_edge_arm_quiet) minus the roster legs
     //   VIOLATION = any g_slots entry that is NOT a roster leg (a shadow cell still slotted) + the

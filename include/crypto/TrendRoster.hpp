@@ -75,6 +75,17 @@ inline const std::vector<LegSpec>& legs() {
         // leg (#16), which stays ride_to_flip.
         {  "SOL", "solusdt",  "meanrev",   StrategyKind::RSI_REVERT,    11.0, false }, // 20 (SOL-RSIREV)
         {  "XRP", "xrpusdt",  "meanrev",   StrategyKind::RSI_REVERT,    30.0, false }, // 21 (XRP-RSIREV)
+        // S-2026-07-23 ATOM+DOT RSIrev intraday BE-floor legs — SAME proven pattern as
+        // SOL/XRP-RSIREV (#20/#21), re-certified GO at MEASURED cost (DepthLiquidationModel
+        // safe_cost, pilot $1k): ATOM 28.2bp / DOT 28.1bp (NOT the old 40bp placeholder).
+        // Cert backtest/rsirev_atomdot_recert_bt.cpp RUNNER50/tr15 (the live config):
+        //   ATOM WR64.3% netFULL+186.9 netOOS+93.6 Sh2.57 DD10.4% null-pctl88.3%
+        //   DOT  WR61.7% netFULL+132.7 netOOS+63.8 Sh2.51 DD16.7% null-pctl97.0%
+        // kind RSI_REVERT + is_index=false = the UNIQUE make_config key → intraday-floor
+        // config (ride_to_flip=false, RSI14<25 entry / >=25 exit, g0.9, runner 50%/trail15%),
+        // per-leg measured cost, confirm=max(60bp,2×cost).
+        {  "ATOM","atomusdt", "meanrev",   StrategyKind::RSI_REVERT,    28.2, false }, // 22 (ATOM-RSIREV)
+        {  "DOT", "dotusdt",  "meanrev",   StrategyKind::RSI_REVERT,    28.1, false }, // 23 (DOT-RSIREV)
     };
     return L;
 }

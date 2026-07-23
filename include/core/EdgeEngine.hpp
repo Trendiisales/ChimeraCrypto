@@ -350,6 +350,24 @@ public:
         // leg opts IN via make_config. Uses rsi_threshold as the oversold level.
         bool         rsi_level_revert = false;
 
+        // ── RSIREV intraday BE-floor mode (S-2026-07-23, SOL+XRP RSIrev port) ──────
+        // OPT-IN, DEFAULT FALSE. Only meaningful when rsi_level_revert is ALSO true.
+        // When true the leg runs the CERTIFIED honest-intraday BE-floor management from
+        // backtest/rsirev_intraday_verify_full_bt.cpp instead of ride_to_flip:
+        //   • ride_to_flip=false so check_exits_ stays active (intraday floor lives there);
+        //   • the RSI>=thr mean-revert flip-out is evaluated in close_bar_ EVEN THOUGH the
+        //     leg is not ride_to_flip (decoupled exit — see close_bar_);
+        //   • check_exits_ bypasses the staged-ratchet/early-kill/trail/giveback-cap block
+        //     and runs the harness-exact arm+BE-floor+g-giveback stop with honest worse-of
+        //     fill (see check_exits_).
+        // DEFAULT FALSE ⇒ ZERO behavior change for every existing leg (the block is fully
+        // guarded on this flag; the one pre-existing TIME-exit conditional gains
+        // `&& !rsi_revert_intraday_floor`, which is `&& true` when the flag is off ⇒ identical).
+        bool         rsi_revert_intraday_floor = false;
+        // Profit-lock giveback for the RSIREV floor (g0.9 = give back 10% of peak MFE). The
+        // armed stop = entry*(1 + peak*(1-g)), floored at BE. Certified g=0.9 (cert config).
+        double       rsirev_giveback_g = 0.9;
+
         // ── VOL-TARGET sizing (S-2026-07-21 crypto-keltner-pool-fix) ────────────
         // Ported from Crypto/src/ibkrcrypto_bt.cpp (Cfg.vt_target/vt_lb/vt_min/vt_max)
         // and crypto_oos_engine_port.sizer. Per-trade size multiplier set AT ENTRY:
@@ -1352,6 +1370,7 @@ private:
 
     // Trailing stop state
     bool    trail_armed_    = false;
+    bool    rsirev_flat_book_ = false;  // S-2026-07-23: one-shot — next exit_position_ books FLAT 0 (BE-ENTRY unarmed)
     double  trail_stop_px_  = 0.0;  // ratchets up, never down
     double  trail_arm_px_   = 0.0;  // price level that arms the trail
     double  mfe_px_         = 0.0;  // max favourable excursion (highest price seen)
@@ -1664,10 +1683,29 @@ private:
 
         // First, check if a time-based exit just landed on this bar boundary.
         // MIMIC (ride_to_flip): skip TIME; exit only on symmetric down-jump flip.
-        if (!cfg_.ride_to_flip && in_position_ &&
+        // RSIREV-FLOOR (S-2026-07-23): also skip TIME — this mode is not ride_to_flip
+        // but the certified exit is the RSI>=thr flip (below) + the intraday BE-floor
+        // (check_exits_), NOT a fixed hold_bars timeout. `&& !rsi_revert_intraday_floor`
+        // is `&& true` for every existing leg (flag default false) ⇒ identical.
+        if (!cfg_.ride_to_flip && !cfg_.rsi_revert_intraday_floor && in_position_ &&
             cur_open_ts_ms_ + cfg_.tf_secs * 1000 > time_exit_ts_ms_) {
             // exit at this bar's close
             exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "TIME");
+        }
+        // ── RSIREV-FLOOR decoupled mean-revert flip-out (S-2026-07-23) ──────────
+        // This mode runs ride_to_flip=false (so check_exits_ stays active for the
+        // intraday BE-floor), but the CERT exits a level-revert long the moment RSI
+        // recovers to >= thr. Evaluate that flip here at the daily bar close — the
+        // exact complement of the entry, mirroring the ride_to_flip block below but
+        // for the non-ride RSIREV-floor leg. Fully guarded ⇒ no effect when the flag
+        // is off. Books at this bar's close (≈ next-day open on a live feed).
+        if (cfg_.rsi_revert_intraday_floor && cfg_.rsi_level_revert && !cfg_.ride_to_flip
+            && in_position_ && bars_held_ >= 2 && rsi_level_flipped_out_()) {
+            // BE-ENTRY: if the leg NEVER armed (fav never reached +confirm) it never really
+            // opened — book FLAT 0 (no P&L, no cost, no SELL routed), the cert's
+            // `(be_floor && !armed) ? 0 : (eret-cost)`. trail_armed_ is the arm flag.
+            rsirev_flat_book_ = !trail_armed_;
+            exit_position_(cur_close_, cur_open_ts_ms_ + cfg_.tf_secs * 1000, "FLIP");
         }
         if (cfg_.ride_to_flip && in_position_) {
             bool flip_out = false;
@@ -2561,7 +2599,15 @@ private:
             cfg_.pyramid_enabled ? "ON" : "off");
         std::fflush(stdout);
 
-        if (on_order_intent_) {
+        // RSIREV BE-floor (S-2026-07-23): DEFER the BUY. This is a BE-ENTRY — the leg
+        // opens (routes real) ONLY when fav>=confirm (armed, in check_exits_). Firing the
+        // BUY here would be an immediate-entry that can trade into a pre-BE loss
+        // (feedback-no-immediate-entry-mimic-only / feedback-no-prebe-loss-ever). The
+        // position is tracked internally (in_position_) but nothing is routed until arm;
+        // an unarmed exit books 0 (see exit_position_). Guarded ⇒ every other leg routes
+        // its BUY here exactly as before.
+        const bool rsirev_defer_open = (cfg_.rsi_revert_intraday_floor && cfg_.rsi_level_revert);
+        if (on_order_intent_ && !rsirev_defer_open) {
             OrderIntentRecord intent;
             intent.tag    = cfg_.tag;
             intent.symbol = cfg_.symbol;
@@ -2577,6 +2623,65 @@ private:
     void check_exits_(double price, int64_t ts_ms) {
         if (!in_position_) return;
         if (cfg_.ride_to_flip) return;   // MIMIC: NO trade-level price stops; exit only on flip (close_bar_)
+
+        // ── RSIREV intraday BE-floor (S-2026-07-23) — CERTIFIED honest management ──
+        // Guarded, OPT-IN. Reproduces backtest/rsirev_intraday_verify_full_bt.cpp's
+        // intraday arm + BE/giveback stop, per tick, and BYPASSES the staged-ratchet/
+        // early-kill/trail/giveback-cap/mfe-trail/time logic below (early return). The
+        // RSI>=thr flip-out is handled at the daily close in close_bar_. Cert math:
+        //   confirm = entry*(1 + max(60bp, 2*cost));  arm when a tick reaches confirm.
+        //   peak    = running fractional MFE = (max_price - entry)/entry.
+        //   armed stop = entry*(1 + max(0, peak*(1-g))), floored at BE(=entry); g=0.9.
+        //   exit at the stop with honest worse-of fill (gap-through books the tick price).
+        // BE-floor-on-open: leg books nothing until fav>=confirm (BE-ENTRY), so a stop
+        // hit at/above BE nets >=0 before cost; a gap-through can still book a real tail
+        // (honest — nNeg>0, NOT zero by construction — per feedback-no-prebe-loss-ever).
+        if (cfg_.rsi_revert_intraday_floor && cfg_.rsi_level_revert) {
+            // ENTRY-DAY skip: the cert does NOT manage intraday on the entry day —
+            // management (arm + floor + peak) starts the FIRST FULL day after entry.
+            // bars_held_==1 during the entry day, >=2 thereafter. Skipping the entry
+            // day is load-bearing: without it the oversold-bounce noise churns into
+            // repeated BE-stops (measured: WR 26% vs cert 63%). Return (don't fall
+            // through to the staged-ratchet/trail block, which is not this engine).
+            if (bars_held_ < 2) return;
+            if (price > mfe_px_) {
+                mfe_px_ = price;
+                mfe_bp_ = (price / entry_px_ - 1.0) * 1e4;
+            }
+            double peak = (mfe_px_ - entry_px_) / entry_px_;      // running fractional MFE
+            if (peak < 0.0) peak = 0.0;
+            const double confirm_bp = std::max(60.0, cfg_.round_trip_bp * 2.0);
+            const double confirm_px = entry_px_ * (1.0 + confirm_bp / 1e4);
+            if (!trail_armed_ && price >= confirm_px) {           // BE-floor arms (reuse trail_armed_)
+                trail_armed_ = true;
+                std::printf("[%s] RSIREV_ARM  px=%.6f  confirm=%.6f(+%.1fbp)  entry=%.6f\n",
+                    cfg_.tag.c_str(), price, confirm_px, confirm_bp, entry_px_);
+                std::fflush(stdout);
+                // BE-ENTRY: NOW the leg really opens — route the deferred BUY (the open
+                // was withheld at signal so nothing routes into a pre-BE loss). ref_px is
+                // the live confirm price (the real fill); P&L is still booked from the
+                // original entry_px_ (the cert basis) at exit.
+                if (on_order_intent_) {
+                    OrderIntentRecord intent;
+                    intent.tag = cfg_.tag; intent.symbol = cfg_.symbol;
+                    intent.is_buy = true; intent.ref_px = price; intent.ts_ms = ts_ms;
+                    intent.risk_mult = risk_mult_; intent.corr_id = cur_corr_id_;
+                    on_order_intent_(intent);
+                }
+            }
+            if (trail_armed_) {
+                double stop = entry_px_ * (1.0 + std::max(0.0, peak * (1.0 - cfg_.rsirev_giveback_g)));
+                if (stop < entry_px_) stop = entry_px_;           // floor at BE(=entry)
+                if (price <= stop) {
+                    double fill = stop;                            // touch books the stop level
+                    if (cfg_.realistic_gap_fill && price < stop)   // gap-through books the worse tick price
+                        fill = price * (1.0 - cfg_.gap_extra_slip_bp / 1e4);
+                    exit_position_(fill, ts_ms, "RSIREV_FLOOR");
+                    return;
+                }
+            }
+            return;   // bypass the staged-ratchet/early-kill/trail/giveback/time block
+        }
 
         // Update MFE tracking
         if (price > mfe_px_) {
@@ -2788,6 +2893,16 @@ private:
         // Total trade result: base net + weighted pyramid net
         double total_net_bp = net_bp + pyramid_bp;
 
+        // ── RSIREV BE-ENTRY flat-book (S-2026-07-23) ────────────────────────────
+        // The leg was flagged unarmed at exit (never reached +confirm) ⇒ it never
+        // really opened ⇒ book FLAT 0 (no P&L, no cost), matching the cert's
+        // `(be_floor && !armed) ? 0`. No SELL is routed (no BUY was ever routed). The
+        // trade is still COUNTED (trades_++) so ntr/WR match the cert. Guarded flag ⇒
+        // no effect on any other engine.
+        const bool rsirev_flat = rsirev_flat_book_;
+        rsirev_flat_book_ = false;   // consume the one-shot flag
+        if (rsirev_flat) { gross_bp = 0.0; net_bp = 0.0; pyramid_bp = 0.0; total_net_bp = 0.0; }
+
         trades_++;
         if (total_net_bp > 0) wins_++;
         total_bp_      += total_net_bp;
@@ -2807,7 +2922,8 @@ private:
         std::fflush(stdout);
 
         // Fire order intent (SELL) for paper broker mirror BEFORE trade record.
-        if (on_order_intent_) {
+        // RSIREV BE-ENTRY flat exit routes NO sell (no buy was ever routed).
+        if (on_order_intent_ && !rsirev_flat) {
             OrderIntentRecord intent;
             intent.tag    = cfg_.tag;
             intent.symbol = cfg_.symbol;

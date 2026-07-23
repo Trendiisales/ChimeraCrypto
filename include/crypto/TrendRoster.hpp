@@ -66,6 +66,15 @@ inline const std::vector<LegSpec>& legs() {
         {  "XRP", "xrpusdt",  "add",       StrategyKind::KELTNER_BREAK, 30.0, false }, // 17
         {  "XLM", "xlmusdt",  "add",       StrategyKind::KELTNER_BREAK, 40.0, false }, // 18
         {  "GRT", "grtusdt",  "add",       StrategyKind::KELTNER_BREAK, 60.0, false }, // 19
+        // S-2026-07-23 SOL+XRP RSIrev intraday BE-floor legs (certified
+        // backtest/rsirev_intraday_verify_full_bt.cpp: SOL FULL/OOS +191/+48% Sh1.42/1.77
+        // WR63% DD20%; XRP +177/+104% Sh1.32/1.34 WR43.5% DD11%; measured cost SOL 11 /
+        // XRP 30 bp). kind RSI_REVERT + is_index=false is the UNIQUE key make_config uses
+        // to build the intraday-floor config (ride_to_flip=false, rsi_revert_intraday_floor
+        // =true, RSI14<25 entry / >=25 exit, g0.9) — distinct from the is_index NDX RSIrev
+        // leg (#16), which stays ride_to_flip.
+        {  "SOL", "solusdt",  "meanrev",   StrategyKind::RSI_REVERT,    11.0, false }, // 20 (SOL-RSIREV)
+        {  "XRP", "xrpusdt",  "meanrev",   StrategyKind::RSI_REVERT,    30.0, false }, // 21 (XRP-RSIREV)
     };
     return L;
 }
@@ -115,6 +124,26 @@ inline EdgeEngine::Config make_config(const LegSpec& s) {
     // VOL-TARGET sizing (ported): trend/Kelt/Regime/Roc legs take the pool vt=0.020;
     // IBS + NDX index legs stay size=1.0 (vt=0), matching the research 19-leg pool.
     c.vt_target      = (s.kind == StrategyKind::IBS || s.is_index) ? 0.0 : 0.020;
+    // ── S-2026-07-23 SOL+XRP RSIrev intraday BE-floor legs (#20/#21) ─────────────
+    // UNIQUE key: RSI_REVERT + non-index (the NDX RSIrev #16 is is_index=true). These
+    // legs opt IN to the certified honest-intraday BE-floor management instead of
+    // ride_to_flip: arm at entry*(1+max(60bp,2*cost)), floor stop at BE, g0.9 giveback,
+    // honest worse-of fill; RSI14<25 entry / >=25 flip-out. Cert: rsirev_intraday_verify_
+    // full_bt.cpp (SOL +191/+48% Sh1.42/1.77 WR63% DD20%; XRP +177/+104% Sh1.32/1.34
+    // WR43.5% DD11%; measured cost SOL 11 / XRP 30 bp).
+    // ADVERSE-PROTECTION: BE-floor-on-open (arm≥confirm=max(60bp,2×cost), stop floored at
+    // BE) + profit-lock g0.9 giveback; honest worse-of fill books a real tail on gaps
+    // (nNeg>0, NOT zero by construction) — feedback-no-prebe-loss-ever / feedback-profit-
+    // lock-mandatory. Backtested verdict = certified net-positive FULL+OOS both legs.
+    if (s.kind == StrategyKind::RSI_REVERT && !s.is_index) {
+        c.rsi_revert_intraday_floor = true;
+        c.ride_to_flip   = false;                 // OVERRIDE base(true): floor lives in check_exits_
+        c.rsi_threshold  = 25.0;                  // RSI14<25 entry, >=25 flip-out
+        c.atr_period     = 14;                     // RSI window = 14
+        c.rsirev_giveback_g = 0.9;                 // profit-lock g0.9 (give back 10% of peak)
+        c.vt_target      = 0.0;                     // unsized standalone book (matches cert)
+        c.tag            = std::string(s.coin) + "-RSIREV";
+    }
     // NOTE: regime_gate_ma is intentionally NEVER set — NO 200DMA in crypto (hard rule).
     return c;
 }

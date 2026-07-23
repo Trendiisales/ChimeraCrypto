@@ -15,6 +15,21 @@
 // cached exchangeInfo JSON string so a filter CHANGE refreshes the cache and a
 // now-sub-min order is rejected.
 //
+// CASE-INSENSITIVE KEYS (S-2026-07-23 -1013 root fix). Binance exchangeInfo
+// returns symbols UPPERCASE ("SOLUSDT"), but the strategy books pass their
+// symbol in whatever case the leg spec uses — the TrendRoster legs are LOWERCASE
+// ("solusdt"/"btcusdt"). A raw std::map<string> lookup is case-sensitive, so a
+// lowercase intent MISSED the uppercase cache entry: normalize() fell to the
+// "no cached filter -> pass-through" branch and sent the RAW (unfloored) qty to
+// Binance -> guaranteed -1013 "Filter failure: LOT_SIZE" (SOL 1.61260197,
+// BTC 0.00211552 sent un-stepped). The backfill's has_valid() check UPPERCASED
+// first, so it reported "0 still-missing" — a false-clean that hid the hot-path
+// miss. Fix: every key is normalized to UPPER on both store and lookup (set/
+// load_from_json store upper; has/get/has_valid/normalize upper their arg), so
+// ANY caller case (trend + RSIrev + mimic + future legs) resolves to the one
+// cached filter and gets floored. Uppercasing an already-upper symbol (the XSEC/
+// RIP/mimic "BTC"+"USDT" callers) is a no-op, so working paths are unchanged.
+//
 // Header-only, no curl dependency — the JSON parse is a tiny hand-roll matching
 // the repo's existing hand-rolled JSON style. The REST fetch is a thin
 // live-activated method on BinanceREST (added separately); this cache is what
@@ -25,6 +40,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
+#include <cctype>
 
 namespace chimera {
 
@@ -46,20 +62,21 @@ struct NormalizedOrder {
 
 class ExchangeFilters {
 public:
-    // Install/refresh one symbol's rules (symbol upper, e.g. "BTCUSDT").
-    void set(const std::string& symbol, SymbolFilter f) { f.valid = true; filters_[symbol] = f; }
+    // Install/refresh one symbol's rules (symbol case-insensitive, e.g. "BTCUSDT"
+    // or "btcusdt" — stored + looked up UPPERCASE).
+    void set(const std::string& symbol, SymbolFilter f) { f.valid = true; filters_[up(symbol)] = f; }
 
-    bool has(const std::string& symbol) const { return filters_.count(symbol) != 0; }
+    bool has(const std::string& symbol) const { return filters_.count(up(symbol)) != 0; }
     size_t size() const { return filters_.size(); }
 
     const SymbolFilter* get(const std::string& symbol) const {
-        auto it = filters_.find(symbol); return it == filters_.end() ? nullptr : &it->second;
+        auto it = filters_.find(up(symbol)); return it == filters_.end() ? nullptr : &it->second;
     }
 
     // S-2026-07-20: true iff a usable LOT_SIZE step is cached for this symbol.
     // Callers use this to make the normalize() pass-through LOUD on live buys.
     bool has_valid(const std::string& symbol) const {
-        auto it = filters_.find(symbol);
+        auto it = filters_.find(up(symbol));
         return it != filters_.end() && it->second.valid;
     }
 
@@ -70,7 +87,7 @@ public:
                               bool is_market = true) const {
         NormalizedOrder out; out.qty = qty;
         if (qty <= 0.0 || ref_px <= 0.0) { out.reason = "invalid qty/px"; return out; }
-        auto it = filters_.find(symbol);
+        auto it = filters_.find(up(symbol));
         if (it == filters_.end() || !it->second.valid) { out.ok = true; return out; }
         const SymbolFilter& fl = it->second;
 
@@ -120,13 +137,18 @@ public:
             // explicit pass-through branch, which the gateway logs loudly on live BUYs,
             // and the mirror's -1013 retry (main.cpp) floors the qty itself.
             fl.valid        = fl.step_size > 0.0;
-            filters_[symbol] = fl; if (fl.valid) ++n;
+            filters_[up(symbol)] = fl; if (fl.valid) ++n;   // UPPER key: case-insensitive lookup (S-23)
             pos = obj_end;
         }
         return n;
     }
 
 private:
+    // Normalize a symbol to UPPERCASE for case-insensitive keying (S-2026-07-23).
+    static std::string up(std::string s) {
+        for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+        return s;
+    }
     static double round_prec(double v, int prec) {
         if (prec < 0) prec = 0; if (prec > 12) prec = 12;
         double m = std::pow(10.0, prec);

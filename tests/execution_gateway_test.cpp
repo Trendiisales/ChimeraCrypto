@@ -63,6 +63,20 @@ int main() {
         CHECK(gw.submit({ "ETHUSDT", false, 2.0, 50.0, true, "T" }).ok && ex.calls == 1);
     }
 
-    std::printf(fails == 0 ? "PASS: gateway mode/kill-switch/filters/exit-passthrough\n" : "FAILED (%d)\n", fails);
+    // 6. A4 PRICE COLLAR: entry whose ref deviates >10% from live is rejected; near-ref passes;
+    //    exits are never collared. live=100.
+    {
+        MockExec ex; ExecutionGatewayT<MockExec> gw(ex, RuntimeMode::SHADOW);
+        gw.price_fn = [](const std::string&){ return 100.0; };
+        CHECK(gw.submit({ "ETHUSDT", true, 2.0, 100.0, false, "T" }).ok);   // dev 0%   -> pass
+        CHECK(gw.submit({ "ETHUSDT", true, 2.0, 105.0, false, "T" }).ok);   // dev 5%   -> pass (<10)
+        auto blocked = gw.submit({ "ETHUSDT", true, 2.0, 120.0, false, "T" });
+        CHECK(!blocked.ok && blocked.error == "price collar");             // dev 20%  -> REJECT
+        CHECK(gw.submit({ "ETHUSDT", true, 2.0, 82.0, false, "T" }).ok == false); // dev ~22% -> REJECT
+        // exit at a wildly-off ref is NEVER collared (risk-reducing)
+        CHECK(gw.submit({ "ETHUSDT", false, 2.0, 200.0, true, "T" }).ok);   // exit -> pass
+    }
+
+    std::printf(fails == 0 ? "PASS: gateway mode/kill-switch/filters/exit-passthrough/price-collar\n" : "FAILED (%d)\n", fails);
     return fails == 0 ? 0 : 1;
 }

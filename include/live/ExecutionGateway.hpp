@@ -131,6 +131,16 @@ public:
     std::function<OrderResult(const std::string&, double, double, double)> place_stop_fn;
     std::function<bool(const std::string&, const std::string&, long)>      cancel_stop_fn;
 
+    // ── A4 PRICE COLLAR (2026-07-24 audit): reject an ENTRY whose reference (signal) price
+    //    deviates > price_collar_pct_ from the CURRENT live price. A stale/gapped signal or a
+    //    fat-finger ref would otherwise fill a MARKET order far from the intended level (the
+    //    15c3-5 / RTS-6 erroneous-order control both systems lacked). WIDE by design (10%): a
+    //    legit entry never fills 10% off its signal; only a gross error does -> no legit trade is
+    //    rejected. Entries only; exits (risk-reducing) never blocked. Inert if price_fn unset
+    //    (mock executor / unit tests). Wired in main.cpp to the live g_last_spot_px feed.
+    double                   price_collar_pct_ = 10.0;
+    std::function<double(const std::string&)> price_fn;
+
     OrderResult submit(const OrderIntent& in) {
         OrderResult r;
         // 0. CIRCUIT-BREAKER (sticky) — once an order-storm tripped the breaker, every
@@ -151,6 +161,20 @@ public:
         // 3. sanity
         if (in.qty <= 0.0 || in.ref_px <= 0.0) {
             log_reject(in, "invalid qty/price"); r.error = "invalid qty/price"; return r;
+        }
+        // 3b. A4 PRICE COLLAR (entries only): reject a stale/gapped/fat-finger reference price so a
+        //     MARKET order can't fill far from the intended level. Wide (10%) -> only gross errors trip.
+        if (!in.is_exit && price_fn) {
+            double live = price_fn(in.symbol);
+            if (live > 0.0 && in.ref_px > 0.0) {
+                double dev = std::fabs(live - in.ref_px) / in.ref_px;
+                if (dev > price_collar_pct_ / 100.0) {
+                    char cb[160];
+                    std::snprintf(cb, sizeof cb, "price-collar: ref %.6f vs live %.6f dev %.2f%% > %.1f%%",
+                                  in.ref_px, live, dev * 100.0, price_collar_pct_);
+                    log_reject(in, cb); r.error = "price collar"; return r;
+                }
+            }
         }
         // LOT_SIZE QUARANTINE — a leg that clustered -1013 rejects is disabled for
         // ENTRIES (exits always pass — risk-reducing). Targeted per-leg, not a book halt.

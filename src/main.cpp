@@ -3685,6 +3685,13 @@ int main() {
                                              const std::string& cid, long oid){
             return executor.cancel_protective_stop(sym, cid, oid);
         };
+        // A4 price collar (2026-07-24 audit): feed the live spot price so the gateway can reject
+        // an entry whose signal ref deviates >10% from the current market (stale/gapped/fat-finger).
+        // Returns 0 for an unknown symbol -> collar inert for it (fail-safe, never a false reject).
+        gateway.price_fn = [](const std::string& sym) -> double {
+            int id = chimera::symbol_to_id(sym);
+            return id >= 0 ? load_dbl_atomic(g_last_spot_px_bits[id]) : 0.0;
+        };
 
         // Phase-4 item 22: attach the ADDITIVE realistic-fill observer. Every
         // gateway-routed fill (XSec / RipRider / Mimic-parent — NOT the grid

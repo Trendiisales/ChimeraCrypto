@@ -257,6 +257,14 @@ public:
     }
     size_t num_pending() const { return pending_.size(); }
     size_t num_positions() const { size_t n = 0; for (auto& kv : pos_) if (kv.second.qty > 0) ++n; return n; }
+    // Symbols with a live (qty>0) held position — the exact set that needs a
+    // broker-side protective stop. Used by ExecutionGateway::reconcile_stops()
+    // so the live universe is derived from ledger truth, not a separate list.
+    std::vector<std::string> held_symbols() const {
+        std::vector<std::string> out;
+        for (auto& kv : pos_) if (kv.second.qty > 0) out.push_back(kv.first);
+        return out;
+    }
 
     // Total book value at a reference price map (symbol->px). Cash + mark-to-ref.
     double equity(const std::map<std::string, double>& ref_px) const {

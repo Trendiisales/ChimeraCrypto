@@ -50,6 +50,7 @@ struct SymbolFilter {
     double max_qty      = 0.0;   // LOT_SIZE maxQty (0 => no cap)
     double market_step  = 0.0;   // MARKET_LOT_SIZE stepSize (0 => use step_size)
     double min_notional = 0.0;   // MIN_NOTIONAL / NOTIONAL minNotional
+    double tick_size    = 0.0;   // PRICE_FILTER tickSize (0 => no constraint)
     int    qty_prec     = 8;     // baseAssetPrecision
     bool   valid        = false;
 };
@@ -83,12 +84,60 @@ public:
     // Snap a MARKET order's qty to the applicable filters. If no cached filter
     // exists, pass through (can't over-constrain what we haven't fetched) but
     // still enforce a caller floor via the gateway's own min_notional.
+    // ── FALLBACK LOT_SIZE STEP (2026-07-24, -1013 root belt-and-suspenders).
+    //    The case-insensitive fix (S-2026-07-23) resolves the lowercase-intent miss,
+    //    but if the exchangeInfo parse GAPS (truncated body, seen live: TIA/SAND/LINK,
+    //    and the live SOL/BTC -1013s) a symbol has NO cached filter at all and
+    //    normalize() used to pass RAW qty -> Binance -1013. This is the authoritative
+    //    Binance-spot stepSize for the traded universe (fetched from api.binance.com,
+    //    2026-07-24), used ONLY when no valid filter is cached, so qty is ALWAYS
+    //    floored to a real step. A gap can no longer leak a raw un-stepped order.
+    static double fallback_step(const std::string& up_sym) {
+        static const std::map<std::string, double> S = {
+            {"BTCUSDT", 0.00001}, {"ETHUSDT", 0.0001}, {"SOLUSDT", 0.001},
+            {"XRPUSDT", 0.1},     {"XLMUSDT", 1.0},    {"ATOMUSDT", 0.01},
+            {"DOTUSDT", 0.01},    {"DOGEUSDT", 1.0},   {"AVAXUSDT", 0.01},
+            {"LINKUSDT", 0.01},   {"ADAUSDT", 0.1},    {"TRXUSDT", 0.1},
+        };
+        auto it = S.find(up_sym);
+        return it == S.end() ? 0.0 : it->second;
+    }
+
+    // Snap a PRICE to the symbol's PRICE_FILTER tickSize, rounding DOWN to the
+    // nearest tick. Binance rejects any order whose price is not a tickSize
+    // multiple with -1013 PRICE_FILTER, which for a protective stop LOSES the
+    // order. Rounding DOWN is the safe direction for a protective SELL: the stop
+    // trigger and the (already-below-trigger) limit both move slightly lower, so
+    // the stop stays protective and the limit stays below the trigger. If no
+    // PRICE_FILTER is cached (unfetched/gapped exchangeInfo) the price passes
+    // through unchanged — the caller's -1013 reject stays the loud backstop.
+    double snap_price_to_tick(const std::string& symbol, double px) const {
+        if (px <= 0.0) return px;
+        auto it = filters_.find(up(symbol));
+        if (it == filters_.end() || it->second.tick_size <= 0.0) return px;   // no tick -> pass-through
+        double t = it->second.tick_size;
+        double snapped = std::floor(px / t) * t;
+        return round_prec(snapped, 8);   // kill FP residue so 8-dp formatting is exact
+    }
+
     NormalizedOrder normalize(const std::string& symbol, double qty, double ref_px,
                               bool is_market = true) const {
         NormalizedOrder out; out.qty = qty;
         if (qty <= 0.0 || ref_px <= 0.0) { out.reason = "invalid qty/px"; return out; }
         auto it = filters_.find(up(symbol));
-        if (it == filters_.end() || !it->second.valid) { out.ok = true; return out; }
+        if (it == filters_.end() || !it->second.valid) {
+            // No cached filter — floor to the authoritative fallback step instead of
+            // leaking RAW qty (the -1013 root). Unknown sym (no fallback) still passes
+            // through, but the gateway logs that case LOUD via has_valid()==false.
+            double fs = fallback_step(up(symbol));
+            if (fs > 0.0) {
+                double q = std::floor(qty / fs) * fs;
+                q = round_prec(q, 8);
+                if (q <= 0.0) { out.qty = 0; out.reason = "qty rounds to 0 (fallback step)"; return out; }
+                out.qty = q; out.ok = true; return out;
+            }
+            out.ok = true; return out;
+        }
         const SymbolFilter& fl = it->second;
 
         double step = is_market && fl.market_step > 0.0 ? fl.market_step : fl.step_size;
@@ -129,6 +178,7 @@ public:
             double mn1      = find_filter_num(obj, "MIN_NOTIONAL", "minNotional");
             double mn2      = find_filter_num(obj, "NOTIONAL", "minNotional");
             fl.min_notional = mn1 > 0 ? mn1 : mn2;
+            fl.tick_size    = find_filter_num(obj, "PRICE_FILTER", "tickSize");
             // S-2026-07-20 LOT_SIZE live-reject fix: a symbol whose object parsed WITHOUT
             // a LOT_SIZE stepSize (truncated/odd exchangeInfo body — seen live: TIA/SAND/
             // LINK raw-qty -1013 rejects while AVAX/SOL conformed, varying per fetch) used

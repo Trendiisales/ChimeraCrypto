@@ -504,6 +504,95 @@ public:
     }
 
     // -----------------------------------------------------------------------
+    // place_stop_loss — post a RESTING broker-side protective stop (SELL).
+    //
+    // This is the crypto twin of Omega's IbkrExecutionEngine native STP-on-fill
+    // (2026-07-24, operator: "protections must survive the bot dying"). The order
+    // lives AT BINANCE, so it fires autonomously even if the chimera process is
+    // dead. For a LONG spot position the protective order is a SELL that triggers
+    // when price falls to stop_price.
+    //
+    // type = STOP_LOSS_LIMIT: triggers a LIMIT SELL at limit_price once the last
+    // price crosses stop_price. limit_price is set BELOW stop_price by the caller
+    // (a slip band) so the resting limit actually fills through a fast drop rather
+    // than resting un-hit. timeInForce=GTC so it survives across sessions until it
+    // is hit or explicitly cancelled (cancel-on-flat, mirror of positionEnd).
+    //
+    // Returns OrderResult: ok + order_id + client_id + status="NEW" on success.
+    // In shadow mode: logs [SHADOW-STOP] and returns a synthetic NEW (no POST).
+    //
+    // NOTE (parity with place_limit_maker): price/qty are formatted with 8-dp and
+    // NOT snapped here — the caller passes exchange-valid values. As of 2026-07-24
+    // SpotExecutor::place_protective_stop snaps BOTH stop_price and limit_price to
+    // the PRICE_FILTER tickSize (round-down) via ExchangeFilters before calling this,
+    // so a -1013/PRICE_FILTER reject is avoided when a filter is cached. If no filter
+    // is cached the raw price passes through and the -1013 reject remains the loud
+    // backstop (surfaces via http_code != 200 + the "[REST] ... rejected" log below).
+    // -----------------------------------------------------------------------
+    OrderResult place_stop_loss(const std::string& symbol,
+                                double qty,
+                                double stop_price,
+                                double limit_price,
+                                const std::string& client_id) {
+        OrderResult r;
+        r.shadow    = shadow_mode_;
+        r.client_id = client_id;
+        if (shadow_mode_) {
+            std::printf("[SHADOW-STOP] SELL STOP_LOSS_LIMIT %s qty=%.8f stop=%.8f limit=%.8f cid=%s\n",
+                        symbol.c_str(), qty, stop_price, limit_price, client_id.c_str());
+            std::fflush(stdout);
+            r.ok     = true;
+            r.status = "NEW";
+            return r;
+        }
+        if (!ready_) { r.error = "not_ready"; return r; }
+
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::string ts = timestamp_ms();
+
+        std::ostringstream stop_ss, price_ss, qty_ss;
+        stop_ss  << std::fixed << std::setprecision(8) << stop_price;
+        price_ss << std::fixed << std::setprecision(8) << limit_price;
+        qty_ss   << std::fixed << std::setprecision(8) << qty;
+
+        std::ostringstream qs;
+        qs << "symbol="          << symbol
+           << "&side=SELL"
+           << "&type=STOP_LOSS_LIMIT"
+           << "&timeInForce=GTC"
+           << "&quantity="       << qty_ss.str()
+           << "&price="          << price_ss.str()
+           << "&stopPrice="      << stop_ss.str()
+           << "&newClientOrderId=" << client_id
+           << "&recvWindow=5000"
+           << "&timestamp="      << ts;
+        std::string payload = qs.str();
+        payload += "&signature=" + sign(payload);
+
+        std::string body;
+        long http_code = 0;
+        post("/api/v3/order", payload, body, http_code);
+
+        if (http_code != 200) {
+            r.error = "HTTP " + std::to_string(http_code) + ": " + body;
+            std::fprintf(stderr, "[REST] stop-loss rejected %s: http=%ld body=%s\n",
+                         symbol.c_str(), http_code, body.c_str());
+            return r;
+        }
+
+        r.ok        = true;
+        r.order_id  = (long)extract_json_int(body, "orderId");
+        r.status    = extract_json_string(body, "status");
+        if (r.status.empty()) r.status = "NEW";
+        orders_sent_.fetch_add(1, std::memory_order_relaxed);
+        std::printf("[LIVE-STOP] SELL STOP_LOSS_LIMIT %s qty=%.8f stop=%.8f limit=%.8f "
+                    "| id=%ld status=%s (broker-side GTC, survives bot death)\n",
+                    symbol.c_str(), qty, stop_price, limit_price, r.order_id, r.status.c_str());
+        std::fflush(stdout);
+        return r;
+    }
+
+    // -----------------------------------------------------------------------
     // query_order — GET order status by client order id
     // -----------------------------------------------------------------------
     OrderResult query_order(const std::string& symbol,

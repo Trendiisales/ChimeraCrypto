@@ -3651,9 +3651,26 @@ int main() {
 
         gateway.set_ledger(&g_ledger);
         gateway.set_filters(&g_filters);   // empty until exchangeInfo is loaded (pass-through)
+        executor.set_filters(&g_filters);  // 2026-07-24: snap protective-stop stop/limit prices to PRICE_FILTER tick before POST (-1013 avoidance)
         gateway.set_clock(&g_clock);
         gateway.set_id_registry(&g_idreg);
         gateway.set_stream(&g_userstream);
+
+        // ── NATIVE BROKER-SIDE PROTECTIVE STOP (2026-07-24, operator: "protections
+        //    must survive the bot dying"; crypto twin of Omega's IbkrExecutionEngine
+        //    native STP-on-fill). Wire the gateway's stop hooks to the executor so
+        //    every opening LIVE fill arms a RESTING Binance SELL STOP_LOSS_LIMIT at
+        //    fill*(1-pct) that fires even if the process dies; cancel-on-flat clears
+        //    it. Inert in SHADOW/PAPER (place_protective_stop no-ops in shadow and
+        //    the gateway only calls these in LIVE on a real fill).
+        gateway.place_stop_fn = [&executor](const std::string& sym, double qty,
+                                            double entry_px, double stop_pct){
+            return executor.place_protective_stop(sym, qty, entry_px, stop_pct);
+        };
+        gateway.cancel_stop_fn = [&executor](const std::string& sym,
+                                             const std::string& cid, long oid){
+            return executor.cancel_protective_stop(sym, cid, oid);
+        };
 
         // Phase-4 item 22: attach the ADDITIVE realistic-fill observer. Every
         // gateway-routed fill (XSec / RipRider / Mimic-parent — NOT the grid
@@ -3674,6 +3691,30 @@ int main() {
         // and ACTIVATES LIVE once a full account snapshot is wired to the reconciler.
         chimera::StartupReconciler reconciler;
         chimera::ExchangeSnapshot snap; snap.ok = true;   // clean shadow boot: no working orders
+        // TODO (native-stop snapshot seed, OWED 2026-07-24): `snap` is still the
+        // empty clean-boot snapshot — no real Binance account balances are fetched
+        // or seeded into g_ledger here. Consequence for native protective stops:
+        // reconcile_stops() below can only protect positions the LEDGER knows, i.e.
+        // positions OPENED this session (armed on-fill + re-verified periodically).
+        // A position HELD BEFORE boot (a coin already on the account, or one carried
+        // across a restart) is NOT in g_ledger, so held_symbols() omits it and it
+        // gets NO broker-side stop until it is touched again.
+        // To close this safely a real snapshot must seed BOTH qty AND an entry
+        // anchor, because manage_protective_stop_() uses ledger avg_price as the
+        // stop anchor (px<=0 => it skips). Wiring needed (do NOT fake — a wrong
+        // anchor arms a stop at the wrong level):
+        //   1. executor-side: fetch balances (rest_.get_account_balance /
+        //      get_free_asset per traded base) + open orders; populate
+        //      snap.base_balances / snap.open_orders / snap.usdt_free.
+        //   2. reconstruct avg entry per held base from myTrades (BinanceREST has no
+        //      myTrades accessor yet — add one), OR anchor the stop at the CURRENT
+        //      market price (a stop at mkt*(1-pct) is still protective) if entry is
+        //      unknown; either way seed g_ledger via a synthetic FILLED ExecReport
+        //      so position()+avg_price() report the held coin.
+        //   3. only then does StartupReconciler stop reporting a false position
+        //      mismatch on a pre-existing balance, and reconcile_stops() protects it.
+        // Until then this is HONEST-EMPTY: post-boot fills are protected; pre-boot
+        // holds are the documented gap, not silently "covered".
         auto rec = reconciler.reconcile(snap, g_ledger, &g_idreg,
             (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
@@ -3684,6 +3725,14 @@ int main() {
         // (defensive; latch starts clear). The live periodic reconcile below is
         // what auto-clears an in-session heartbeat-lapse halt.
         g_stream_halt.on_reconcile(rec.passed);
+
+        // ── NATIVE PROTECTIVE-STOP BOOT SWEEP (2026-07-24). Arm a broker-side stop
+        // for every position the ledger already holds at boot. Self-gates to LIVE +
+        // native_stops_enabled_ + place_stop_fn wired (inert no-op in SHADOW/PAPER).
+        // At a clean boot the ledger is empty (see the snapshot TODO above) so this
+        // is a no-op today; it becomes load-bearing the moment a real account
+        // snapshot seeds pre-existing holds. Harmless + future-proof to call now.
+        gateway.reconcile_stops();
     }
 
     // ── Phase-8G (2026-07-11): USER-STREAM HEARTBEAT AUTO-HALT (go-live blocker).
@@ -12483,6 +12532,25 @@ int main() {
                     if (now_ms_l - last >= 60000) {
                         recompute_live_tiers();
                         g_last_live_recalc_ms.store(now_ms_l, std::memory_order_relaxed);
+                    }
+                }
+
+                // ── NATIVE PROTECTIVE-STOP PERIODIC RECONCILE (2026-07-24). Every
+                // ~30s re-assert the broker-side stop for every held position: arm
+                // one if a position lost its stop (external cancel, prior-restart
+                // gap, or a fill that pre-dated the native-stop path) and cancel a
+                // stale stop on a now-flat symbol. The no-arg overload derives the
+                // universe from ledger truth (held_symbols()) via the gateway's own
+                // ledger_. Self-gates to LIVE + native_stops_enabled_ + place_stop_fn
+                // wired, so it is a pure no-op in SHADOW/PAPER (identical to before).
+                {
+                    static std::atomic<int64_t> s_last_stop_reconcile_ms{0};
+                    int64_t now_sr = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    int64_t last_sr = s_last_stop_reconcile_ms.load(std::memory_order_relaxed);
+                    if (now_sr - last_sr >= 30000) {
+                        gateway.reconcile_stops();
+                        s_last_stop_reconcile_ms.store(now_sr, std::memory_order_relaxed);
                     }
                 }
 

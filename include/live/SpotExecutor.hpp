@@ -14,6 +14,7 @@
 // A mutex inside BinanceREST serialises concurrent calls.
 // ============================================================================
 #include "live/BinanceREST.hpp"
+#include "live/ExchangeFilters.hpp"   // PRICE_FILTER tickSize snapping for protective stops
 #include <string>
 #include <atomic>
 #include <cstdio>
@@ -272,6 +273,74 @@ public:
     int   errors()    const { return errors_.load();    }
 
     // -----------------------------------------------------------------------
+    // place_protective_stop — post a RESTING broker-side SELL stop for a held
+    // LONG (crypto twin of Omega's native STP-on-fill). Called by the
+    // ExecutionGateway on an opening fill; NOT a strategy-order path (protection,
+    // like emergency_flatten — it does not route through the entry gateway).
+    //
+    // stop_pct is the % below entry the stop triggers. limit_slip_pct extends the
+    // limit price BELOW the trigger so the resting limit fills through a fast drop.
+    // Returns the OrderResult (r.client_id / r.order_id identify the resting order
+    // for a later cancel-on-flat).
+    // -----------------------------------------------------------------------
+    OrderResult place_protective_stop(const std::string& symbol,
+                                      double qty,
+                                      double entry_px,
+                                      double stop_pct,
+                                      double limit_slip_pct = 0.5) {
+        OrderResult r;
+        if (!rest_.is_ready() || qty <= 0.0 || entry_px <= 0.0 || stop_pct <= 0.0) return r;
+        std::string sym_upper = symbol;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+
+        double stop_price  = entry_px * (1.0 - stop_pct / 100.0);
+        double limit_price = stop_price * (1.0 - limit_slip_pct / 100.0);
+        if (stop_price <= 0.0 || limit_price <= 0.0) return r;
+
+        // Snap BOTH legs of the STOP_LOSS_LIMIT to the symbol's PRICE_FILTER tick,
+        // rounding DOWN. An off-tick price is a -1013 PRICE_FILTER reject that loses
+        // the protective order. Rounding down keeps the SELL stop protective and
+        // keeps limit < stop (limit is already below stop, and floor only lowers).
+        if (filters_) {
+            stop_price  = filters_->snap_price_to_tick(sym_upper, stop_price);
+            limit_price = filters_->snap_price_to_tick(sym_upper, limit_price);
+            if (stop_price <= 0.0 || limit_price <= 0.0) return r;
+        }
+
+        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string cid = sym_upper.substr(0, 3) + "STP" + std::to_string(now_us);
+        if (cid.size() > 36) cid = cid.substr(cid.size() - 36);
+
+        r = rest_.place_stop_loss(sym_upper, qty, stop_price, limit_price, cid);
+        if (!r.ok) {
+            std::fprintf(stderr, "[EXECUTOR] protective stop failed %s: %s\n",
+                         sym_upper.c_str(), r.error.c_str());
+            errors_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return r;
+    }
+
+    // cancel_protective_stop — cancel a resting protective stop (cancel-on-flat,
+    // mirror of positionEnd). Prefer the client_id; falls back to order_id.
+    bool cancel_protective_stop(const std::string& symbol,
+                                const std::string& client_id,
+                                long order_id = 0) {
+        if (!rest_.is_ready()) return false;
+        if (rest_.is_shadow()) return true;   // shadow: no real resting order
+        std::string sym_upper = symbol;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+        bool ok = !client_id.empty() ? rest_.cancel_order(sym_upper, client_id)
+                                     : (order_id > 0 && rest_.cancel_order(sym_upper, order_id));
+        if (ok) {
+            std::printf("[EXECUTOR] protective stop cancelled %s cid=%s (position flat)\n",
+                        sym_upper.c_str(), client_id.empty() ? "-" : client_id.c_str());
+            std::fflush(stdout);
+        }
+        return ok;
+    }
+
+    // -----------------------------------------------------------------------
     // emergency_flatten — cancel all open orders for a symbol then market sell qty.
     // Called by emergency kill button. Works in both shadow and live mode.
     // -----------------------------------------------------------------------
@@ -288,10 +357,17 @@ public:
         return true;
     }
 
+    // Wire the shared exchangeInfo filter cache so protective-stop prices are
+    // snapped to PRICE_FILTER tickSize before POST (avoids -1013). Optional: if
+    // unset, prices are formatted raw (prior behaviour) and a -1013 reject stays
+    // the loud backstop. Same &g_filters instance the gateway uses.
+    void set_filters(const ExchangeFilters* f) { filters_ = f; }
+
 private:
-    BinanceREST         rest_;
-    std::atomic<int>    fills_{0};
-    std::atomic<int>    errors_{0};
+    BinanceREST             rest_;
+    const ExchangeFilters*  filters_ = nullptr;
+    std::atomic<int>        fills_{0};
+    std::atomic<int>        errors_{0};
 };
 
 } // namespace chimera

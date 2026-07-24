@@ -133,11 +133,12 @@ public:
 
     OrderResult submit(const OrderIntent& in) {
         OrderResult r;
-        // 0. CIRCUIT-BREAKER (sticky) — once an order-storm tripped the breaker,
-        //    every subsequent send (entry OR exit) is hard-rejected until a restart.
-        //    Already logged once at trip time. See the breaker block just before the
-        //    executor call (step 10) for the trip conditions.
-        if (circuit_tripped_.load()) { r.error = "circuit-breaker tripped"; return r; }
+        // 0. CIRCUIT-BREAKER (sticky) — once an order-storm tripped the breaker, every
+        //    subsequent ENTRY is hard-rejected until a restart. A2 fix (2026-07-24 audit):
+        //    EXITS must still pass — a flatten / risk-reducing close is exactly what you
+        //    need after a trip, and routing it through here (not a dead separate path) is
+        //    the only working post-trip flatten. Already logged once at trip time.
+        if (circuit_tripped_.load() && !in.is_exit) { r.error = "circuit-breaker tripped"; return r; }
         // 1. MODE
         if (mode_ == RuntimeMode::DISABLED) {
             log_reject(in, "mode=DISABLED"); r.error = "mode=DISABLED"; return r;
@@ -287,7 +288,10 @@ public:
             std::lock_guard<std::mutex> lk(cb_mtx_);
             long long now_cb = (long long)now_ms();
             if (now_cb - rate_win_start_ms_ >= 1000) { rate_win_start_ms_ = now_cb; rate_win_count_ = 0; }
-            if (++rate_win_count_ > MAX_ORDERS_PER_SEC) {
+            // A2 fix (2026-07-24 audit): EXITS don't count toward / trip the global rate —
+            // an exit burst is risk-reducing (bounded by holdings), and tripping on it would
+            // block the flatten you need. Entries only.
+            if (!in.is_exit && ++rate_win_count_ > MAX_ORDERS_PER_SEC) {
                 trip_circuit_("global rate > " + std::to_string(MAX_ORDERS_PER_SEC) + " orders/sec");
                 if (reserved && ledger_) ledger_->release(cid);
                 if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, false);

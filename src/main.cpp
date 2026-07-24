@@ -12171,6 +12171,15 @@ int main() {
                                 ++closed;
                             }
                         }
+                        // A1 fix (2026-07-24 audit): the shadow-engine kill_all above does NOT
+                        // flatten the REAL Binance position. Flatten the live mimic mirror +
+                        // directional BTC book too, else real capital rides to the 15% native
+                        // stop on an AUTOMATED emergency. Mirror of the manual /api/kill path.
+                        int em_mirror_sold = g_mimic_mirror.flatten_all("EMERGENCY");
+                        int em_btc_sold    = g_btc_regime_book.flatten_all("EMERGENCY");
+                        std::printf("[EMERGENCY] real-book flatten: mirror=%d btc=%d\n",
+                                    em_mirror_sold, em_btc_sold);
+                        std::fflush(stdout);
                         std::snprintf(buf, sizeof(buf), "Force-closed %d open positions", closed);
                         push_alert(buf);
                         std::printf("[EMERGENCY] %s\n", buf);
@@ -12204,6 +12213,11 @@ int main() {
                         double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
                         if (spot > 0.0) { s.engine->kill_all(spot, now_ms); killed++; }
                     }
+                    // A1 fix (2026-07-24 audit): flatten the REAL live book too, not just shadow.
+                    int agg_mirror_sold = g_mimic_mirror.flatten_all("AGG_KILL");
+                    int agg_btc_sold    = g_btc_regime_book.flatten_all("AGG_KILL");
+                    std::printf("[PORTFOLIO] AGG_KILL real-book flatten: mirror=%d btc=%d\n",
+                                agg_mirror_sold, agg_btc_sold);
                     std::printf("[PORTFOLIO] AGG_KILL flattened %d positions\n", killed);
                     std::fflush(stdout);
                 }
@@ -12241,6 +12255,11 @@ int main() {
                         double spot = load_dbl_atomic(g_last_spot_px_bits[s.symbol_id]);
                         if (spot > 0.0) { s.engine->kill_all(spot, now_ms); killed++; }
                     }
+                    // A1 fix (2026-07-24 audit): flatten the REAL live book too, not just shadow.
+                    int dk_mirror_sold = g_mimic_mirror.flatten_all("DAILY_KILL");
+                    int dk_btc_sold    = g_btc_regime_book.flatten_all("DAILY_KILL");
+                    std::printf("[PORTFOLIO] DAILY_KILL real-book flatten: mirror=%d btc=%d\n",
+                                dk_mirror_sold, dk_btc_sold);
                     std::printf("[PORTFOLIO] DAILY_KILL flattened %d positions\n", killed);
                     std::fflush(stdout);
                 }

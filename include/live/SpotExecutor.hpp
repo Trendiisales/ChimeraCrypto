@@ -285,6 +285,12 @@ public:
     //
     // stop_pct is the % below entry the stop triggers. limit_slip_pct extends the
     // limit price BELOW the trigger so the resting limit fills through a fast drop.
+    // B5 fix (2026-07-24 audit): default widened 0.5% -> 5%. This is a DISASTER stop
+    // (15% trigger) — fill CERTAINTY beats price. A 0.5% band left the limit resting
+    // unfilled on a fast gap-through (position naked below the stop); a 5% band fills
+    // through almost any realistic gap while still bounding the worst-case fill
+    // (~trigger-5%). (Binance spot STOP_LOSS market-on-trigger would be ideal but is
+    // pair-restricted; the wide-band STOP_LOSS_LIMIT is the portable equivalent.)
     // Returns the OrderResult (r.client_id / r.order_id identify the resting order
     // for a later cancel-on-flat).
     // -----------------------------------------------------------------------
@@ -292,7 +298,7 @@ public:
                                       double qty,
                                       double entry_px,
                                       double stop_pct,
-                                      double limit_slip_pct = 0.5) {
+                                      double limit_slip_pct = 5.0) {
         OrderResult r;
         if (!rest_.is_ready() || qty <= 0.0 || entry_px <= 0.0 || stop_pct <= 0.0) return r;
         std::string sym_upper = symbol;

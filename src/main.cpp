@@ -3690,31 +3690,66 @@ int main() {
         // the hard-block on mismatch/fetch-failure is proven by the regression test
         // and ACTIVATES LIVE once a full account snapshot is wired to the reconciler.
         chimera::StartupReconciler reconciler;
-        chimera::ExchangeSnapshot snap; snap.ok = true;   // clean shadow boot: no working orders
-        // TODO (native-stop snapshot seed, OWED 2026-07-24): `snap` is still the
-        // empty clean-boot snapshot — no real Binance account balances are fetched
-        // or seeded into g_ledger here. Consequence for native protective stops:
-        // reconcile_stops() below can only protect positions the LEDGER knows, i.e.
-        // positions OPENED this session (armed on-fill + re-verified periodically).
-        // A position HELD BEFORE boot (a coin already on the account, or one carried
-        // across a restart) is NOT in g_ledger, so held_symbols() omits it and it
-        // gets NO broker-side stop until it is touched again.
-        // To close this safely a real snapshot must seed BOTH qty AND an entry
-        // anchor, because manage_protective_stop_() uses ledger avg_price as the
-        // stop anchor (px<=0 => it skips). Wiring needed (do NOT fake — a wrong
-        // anchor arms a stop at the wrong level):
-        //   1. executor-side: fetch balances (rest_.get_account_balance /
-        //      get_free_asset per traded base) + open orders; populate
-        //      snap.base_balances / snap.open_orders / snap.usdt_free.
-        //   2. reconstruct avg entry per held base from myTrades (BinanceREST has no
-        //      myTrades accessor yet — add one), OR anchor the stop at the CURRENT
-        //      market price (a stop at mkt*(1-pct) is still protective) if entry is
-        //      unknown; either way seed g_ledger via a synthetic FILLED ExecReport
-        //      so position()+avg_price() report the held coin.
-        //   3. only then does StartupReconciler stop reporting a false position
-        //      mismatch on a pre-existing balance, and reconcile_stops() protects it.
-        // Until then this is HONEST-EMPTY: post-boot fills are protected; pre-boot
-        // holds are the documented gap, not silently "covered".
+        chimera::ExchangeSnapshot snap; snap.ok = true;   // clean boot: no working orders
+        // ── PRE-BOOT HOLDINGS SEED (2026-07-24, native-stop residual — closes the gap
+        //    the on-fill/periodic protection left open). In LIVE, fetch the real
+        //    account balances for every tradeable base in ONE signed call and seed
+        //    the ledger, so a position HELD BEFORE boot (carried across a restart) is
+        //    known to held_symbols() and gets a broker-side protective stop from the
+        //    reconcile_stops() sweep below — not just positions opened this session.
+        //    Stop anchor = avg entry reconstructed from myTrades, CLAMPED to <= current
+        //    market so a hold that dumped while the bot was down can never arm a
+        //    self-triggering (stop-above-market) stop; if entry is unknown we anchor
+        //    at market (the sanctioned fallback — a stop at mkt*(1-pct) is still
+        //    protective). SHADOW/PAPER skip entirely (no real balances; research
+        //    record stays clean). Honest scope: seeds the FREE balance — a qty locked
+        //    by a prior session's still-resting stop is already protected by that
+        //    order; snap.base_balances mirrors the seed so the reconcile agrees.
+        if (exec_ok && g_runtime_mode == chimera::RuntimeMode::LIVE) {
+            // Tradeable USDT-quoted universe -> base asset (e.g. BTCUSDT -> BTC).
+            std::map<std::string, std::string> base_to_symbol;   // "BTC" -> "BTCUSDT"
+            auto add_sym = [&](std::string s){
+                for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+                if (s.size() > 4 && s.compare(s.size()-4, 4, "USDT") == 0)
+                    base_to_symbol[s.substr(0, s.size()-4)] = s;
+            };
+            for (const auto& s : runtime_cfg.live_pilot_symbols) add_sym(s);
+            for (const auto& leg : chimera::trend_roster::legs())
+                if (!leg.is_index) add_sym(leg.symbol);
+
+            std::vector<std::string> bases;
+            for (const auto& kv : base_to_symbol) bases.push_back(kv.first);
+            auto free_bal = executor.free_balances(bases);   // ONE /api/v3/account call
+
+            int seeded = 0;
+            for (const auto& kv : free_bal) {
+                const std::string& base = kv.first;
+                double qty = kv.second;
+                const std::string& sym = base_to_symbol[base];
+                double mkt = executor.last_price(sym);
+                if (mkt <= 0.0) {
+                    std::fprintf(stderr, "[BOOT-SEED] %s held qty=%.8f but price fetch failed "
+                                 "— NOT seeding (cannot anchor a safe stop)\n", sym.c_str(), qty);
+                    continue;
+                }
+                if (qty * mkt < 5.0) continue;   // dust below Binance MIN_NOTIONAL — no stop possible
+                double entry  = executor.reconstruct_entry(sym, qty);   // 0.0 if unavailable
+                double anchor = entry > 0.0 ? entry : mkt;              // fallback: market
+                if (anchor > mkt) anchor = mkt;                         // clamp: never above market
+                g_ledger.seed_position(sym, qty, anchor);
+                snap.base_balances[sym] = qty;                          // reconcile agrees by construction
+                ++seeded;
+                std::printf("[BOOT-SEED] %s pre-boot hold qty=%.8f mkt=%.6f entry=%.6f "
+                            "anchor=%.6f%s (native stop will arm at anchor-%.0f%%)\n",
+                            sym.c_str(), qty, mkt, entry, anchor,
+                            (entry > 0.0 && anchor < entry) ? " [clamped-to-mkt: underwater]"
+                            : (entry <= 0.0 ? " [market-anchor: no trade history]" : ""),
+                            gateway.native_disaster_stop_pct_);
+            }
+            std::printf("[BOOT-SEED] pre-boot holdings seed: %d position(s) seeded for native-stop protection "
+                        "(of %zu tradeable bases queried)\n", seeded, bases.size());
+            std::fflush(stdout);
+        }
         auto rec = reconciler.reconcile(snap, g_ledger, &g_idreg,
             (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());

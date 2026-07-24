@@ -266,6 +266,11 @@ public:
     // used to populate exchange filters + clock sync. Safe in shadow.
     int64_t     server_time()                              { return rest_.get_server_time(); }
     std::string exchange_info(const std::string& s = "")   { return rest_.fetch_exchange_info(s); }
+    // Pre-boot holdings seed (native-stop residual, 2026-07-24): signed reads used
+    // once at LIVE boot to reconstruct + protect a position held before this process.
+    std::map<std::string, double> free_balances(const std::vector<std::string>& assets) { return rest_.get_free_balances(assets); }
+    double      last_price(const std::string& s)           { return rest_.get_price(s); }
+    double      reconstruct_entry(const std::string& s, double q) { return rest_.my_trades_avg_entry(s, q); }
 
     bool  is_shadow() const { return rest_.is_shadow(); }
     bool  is_ready()  const { return rest_.is_ready();  }

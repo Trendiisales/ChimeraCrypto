@@ -255,6 +255,24 @@ public:
         pending_[client_id] = p;
         if (is_buy) reserved_cash_ += p.reserved;
     }
+    // Seed a KNOWN pre-boot holding at startup reconciliation (2026-07-24, native-
+    // stop residual). CASH-NEUTRAL by design: unlike apply_report(buy) this does NOT
+    // touch total_cash_ / reservations, because the coins were acquired BEFORE this
+    // process started, so their cost already left the account — booking a buy here
+    // would double-charge seed cash. It exists purely so position()/avg_price()/
+    // held_symbols() report a pre-existing balance, letting StartupReconciler agree
+    // with the exchange and ExecutionGateway::reconcile_stops() arm a native
+    // protective stop on it. avg_price is used ONLY as that stop's anchor. Idempotent
+    // (SET, not +=) so a re-seed cannot drift the qty. Note (honest): for an
+    // underwater pre-boot hold the caller clamps avg_price to market, so unrealized
+    // PnL on such a seed reads ~0 until it trades — protection is the goal here.
+    void seed_position(const std::string& symbol, double qty, double avg_price) {
+        if (qty <= 0.0) return;
+        SymbolPos& sp = pos_[symbol];
+        sp.qty       = qty;
+        sp.avg_price = avg_price > 0.0 ? avg_price : sp.avg_price;
+    }
+
     size_t num_pending() const { return pending_.size(); }
     size_t num_positions() const { size_t n = 0; for (auto& kv : pos_) if (kv.second.qty > 0) ++n; return n; }
     // Symbols with a live (qty>0) held position — the exact set that needs a

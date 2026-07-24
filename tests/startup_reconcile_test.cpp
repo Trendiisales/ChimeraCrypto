@@ -4,8 +4,10 @@
 // a position mismatch BLOCKS trading; a clean match passes.
 #include "live/StartupReconciler.hpp"
 #include "live/ExecutionGateway.hpp"
+#include "live/BinanceREST.hpp"   // reconstruct_avg_entry_from_body (pure static; no curl/HMAC called here)
 #include <cstdio>
 #include <cmath>
+#include <string>
 using namespace chimera;
 static int fails = 0;
 #define CHECK(c) do{ if(!(c)){ std::printf("FAIL: %s (line %d)\n", #c, __LINE__); ++fails; } }while(0)
@@ -68,6 +70,54 @@ int main() {
         snap.base_balances["BTCUSDT"] = 0.5;
         CHECK(R.reconcile(snap, L).passed);
     }
-    std::printf(fails==0 ? "PASS: restart adopt (no dup) / mismatch block / fetch-fail block / match pass\n" : "FAILED (%d)\n", fails);
+    // ── PRE-BOOT HOLDINGS SEED (2026-07-24 native-stop residual) ──────────────
+    // myTrades vwap reconstruction (pure parse). Oldest-first array; the current
+    // lot is reconstructed from the MOST-RECENT buys back to held_qty. Sells ignored.
+    {
+        const std::string body =
+          "[{\"symbol\":\"BTCUSDT\",\"id\":1,\"orderId\":1,\"price\":\"100.00\",\"qty\":\"1.00000000\","
+            "\"quoteQty\":\"100.0\",\"commission\":\"0.1\",\"commissionAsset\":\"USDT\",\"time\":1,\"isBuyer\":true,\"isMaker\":false},"
+           "{\"symbol\":\"BTCUSDT\",\"id\":2,\"orderId\":2,\"price\":\"110.00\",\"qty\":\"0.50000000\","
+            "\"quoteQty\":\"55.0\",\"commission\":\"0.1\",\"commissionAsset\":\"USDT\",\"time\":2,\"isBuyer\":false,\"isMaker\":false},"
+           "{\"symbol\":\"BTCUSDT\",\"id\":3,\"orderId\":3,\"price\":\"120.00\",\"qty\":\"2.00000000\","
+            "\"quoteQty\":\"240.0\",\"commission\":\"0.1\",\"commissionAsset\":\"USDT\",\"time\":3,\"isBuyer\":true,\"isMaker\":false}]";
+        // held 2.0 -> fully covered by the newest buy (2.0 @ 120) -> vwap 120
+        CHECK(std::fabs(BinanceREST::reconstruct_avg_entry_from_body(body, 2.0) - 120.0) < 1e-6);
+        // held 2.5 -> newest 2.0@120 + 0.5 of the old 1.0@100 -> (240+50)/2.5 = 116
+        CHECK(std::fabs(BinanceREST::reconstruct_avg_entry_from_body(body, 2.5) - 116.0) < 1e-6);
+        // no buys / empty -> 0 (caller falls back to a market anchor)
+        CHECK(BinanceREST::reconstruct_avg_entry_from_body("[]", 1.0) == 0.0);
+        CHECK(BinanceREST::reconstruct_avg_entry_from_body(body, 0.0) == 0.0);
+    }
+    // seed_position closes the pre-boot gap: a balance held before boot no longer
+    // BLOCKS the reconcile (the mismatch case above) once seeded — and shows up in
+    // held_symbols() so reconcile_stops() can arm a native stop on it.
+    {
+        ExchangeLedger L; L.configure(100000.0, true, 0.001);
+        double before_cash = L.total_cash();
+        L.seed_position("ETHUSDT", 3.0, 2000.0);             // pre-boot hold, anchor 2000
+        CHECK(L.position("ETHUSDT") == 3.0);
+        CHECK(L.avg_price("ETHUSDT") == 2000.0);
+        CHECK(L.total_cash() == before_cash);                // CASH-NEUTRAL (no double-charge)
+        bool in_held = false;
+        for (const auto& s : L.held_symbols()) if (s == "ETHUSDT") in_held = true;
+        CHECK(in_held);
+        StartupReconciler R; ExchangeSnapshot snap; snap.ok = true;
+        snap.base_balances["ETHUSDT"] = 3.0;                 // exchange truth == seeded ledger
+        CHECK(R.reconcile(snap, L).passed);                  // was a BLOCK before the seed
+    }
+    // stop-anchor clamp rule (mirrors main.cpp): anchor = min(entry, mkt) so an
+    // underwater pre-boot hold can never arm a stop AT/above market.
+    {
+        auto clamp = [](double entry, double mkt){ double a = entry>0?entry:mkt; return a>mkt?mkt:a; };
+        CHECK(clamp(2000.0, 1500.0) == 1500.0);              // underwater -> clamp to market
+        CHECK(clamp(1000.0, 1500.0) == 1000.0);              // in profit  -> keep true entry
+        CHECK(clamp(0.0,    1500.0) == 1500.0);              // unknown    -> market fallback
+        // and the placed stop (anchor*(1-15%)) is strictly below market in every case
+        CHECK(clamp(2000.0,1500.0)*0.85 < 1500.0);
+        CHECK(clamp(1000.0,1500.0)*0.85 < 1500.0);
+    }
+    std::printf(fails==0 ? "PASS: restart adopt (no dup) / mismatch block / fetch-fail block / match pass / "
+                           "pre-boot seed (vwap+cash-neutral+reconcile+clamp)\n" : "FAILED (%d)\n", fails);
     return fails==0?0:1;
 }

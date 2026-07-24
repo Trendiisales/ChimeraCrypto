@@ -24,6 +24,7 @@
 // ============================================================================
 #include <string>
 #include <vector>
+#include <map>
 #include <cstring>
 #include <cstdio>
 #include <ctime>
@@ -198,6 +199,100 @@ public:
             return -1.0;
         }
         return parse_balance(body, asset);
+    }
+
+    // get_free_balances — ONE signed GET /api/v3/account, returning {asset -> free
+    // qty} for each requested asset (uppercase) that is held (free>0). Empty map on
+    // fetch failure so the caller can distinguish "query failed" (do NOT treat as
+    // all-flat) from "genuinely nothing held". One call covers the whole tradeable
+    // universe — used by the pre-boot holdings seed (native-stop residual, 2026-07-24).
+    std::map<std::string, double> get_free_balances(const std::vector<std::string>& assets) {
+        std::map<std::string, double> out;
+        if (!ready_ || assets.empty()) return out;
+        std::string params = "recvWindow=5000&timestamp=" + timestamp_ms();
+        params += "&signature=" + sign(params);
+        std::string body; long http_code = 0;
+        if (!get("/api/v3/account", params, body, http_code) || http_code != 200) {
+            std::fprintf(stderr, "[REST] get_free_balances failed: http=%ld\n", http_code);
+            return out;   // empty => caller must not treat as flat
+        }
+        for (const auto& a : assets) { double f = parse_balance(body, a); if (f > 0.0) out[a] = f; }
+        return out;
+    }
+
+    // get_price — GET /api/v3/ticker/price (public). Last trade price for a symbol,
+    // 0.0 on failure. Used to CLAMP a reconstructed stop anchor to <= market so a
+    // pre-boot hold that dumped while the bot was down can never arm a self-
+    // triggering (stop-above-market) protective stop.
+    double get_price(const std::string& symbol) {
+        if (symbol.empty()) return 0.0;
+        static std::once_flag curl_init_once;
+        std::call_once(curl_init_once, [](){ curl_global_init(CURL_GLOBAL_DEFAULT); });
+        std::string up; for (char c : symbol) up.push_back((c>='a'&&c<='z')?char(c-32):c);
+        CURL* curl = curl_easy_init(); if (!curl) return 0.0;
+        std::string url = "https://api.binance.com/api/v3/ticker/price?symbol=" + up;
+        std::string body; long http_code = 0;
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_cleanup(curl);
+        if (res != CURLE_OK || http_code != 200) return 0.0;
+        return extract_json_double(body, "price");
+    }
+
+    // my_trades_avg_entry — signed GET /api/v3/myTrades for `symbol`, reconstruct the
+    // cost basis of the current `held_qty` from the MOST-RECENT BUY fills (vwap back
+    // until accumulated buy qty >= held_qty). Returns 0.0 when unavailable/no buys so
+    // the caller falls back to a market anchor. Approximate by design: it anchors a
+    // wide (15%) disaster stop and the caller clamps the result to <= market, so a
+    // slightly-off basis cannot arm a bad stop. myTrades returns oldest-first; Binance's
+    // fixed field order per object is ... "price":"..","qty":"..", ... "isBuyer":bool ...
+    double my_trades_avg_entry(const std::string& symbol, double held_qty) {
+        if (!ready_ || symbol.empty() || held_qty <= 0.0) return 0.0;
+        std::string up; for (char c : symbol) up.push_back((c>='a'&&c<='z')?char(c-32):c);
+        std::string params = "symbol=" + up + "&limit=1000&recvWindow=5000&timestamp=" + timestamp_ms();
+        params += "&signature=" + sign(params);
+        std::string body; long http_code = 0;
+        if (!get("/api/v3/myTrades", params, body, http_code) || http_code != 200) {
+            std::fprintf(stderr, "[REST] my_trades(%s) failed: http=%ld\n", up.c_str(), http_code);
+            return 0.0;
+        }
+        return reconstruct_avg_entry_from_body(body, held_qty);
+    }
+
+    // reconstruct_avg_entry_from_body — PURE parse of a /api/v3/myTrades array body:
+    // vwap of the MOST-RECENT BUY fills back until they cover `held_qty`. Split out of
+    // my_trades_avg_entry so the (riskiest) parse+reconstruct logic is unit-testable
+    // without a live API call. 0.0 if no buys / empty. myTrades is oldest-first.
+    static double reconstruct_avg_entry_from_body(const std::string& body, double held_qty) {
+        if (held_qty <= 0.0) return 0.0;
+        struct T { double price; double qty; bool buy; };
+        std::vector<T> trades;
+        size_t pos = 0;
+        while (true) {
+            auto pp = body.find("\"price\":", pos);
+            if (pp == std::string::npos) break;
+            auto qp = body.find("\"qty\":", pp);
+            auto bp = body.find("\"isBuyer\":", qp == std::string::npos ? pp : qp);
+            if (qp == std::string::npos || bp == std::string::npos) break;
+            double price = extract_num_after_(body, pp + 8);   // past "price":
+            double qty   = extract_num_after_(body, qp + 6);   // past "qty":
+            bool   buy   = (body.compare(bp + 10, 4, "true") == 0);
+            trades.push_back({price, qty, buy});
+            pos = bp + 10;
+        }
+        double acc_qty = 0.0, acc_cost = 0.0;
+        for (auto it = trades.rbegin(); it != trades.rend(); ++it) {   // newest -> oldest
+            if (!it->buy || it->qty <= 0.0 || it->price <= 0.0) continue;
+            double take = it->qty;
+            if (acc_qty + take > held_qty) take = held_qty - acc_qty;
+            acc_qty += take; acc_cost += take * it->price;
+            if (acc_qty >= held_qty - 1e-12) break;
+        }
+        return acc_qty > 0.0 ? acc_cost / acc_qty : 0.0;
     }
 
     // -----------------------------------------------------------------------
@@ -898,6 +993,17 @@ private:
         auto end = s.find_first_of(",}", pos);
         if (end == std::string::npos) return 0;
         try { return std::stoll(s.substr(pos, end - pos)); } catch (...) { return 0; }
+    }
+
+    // Parse a quoted-or-bare number whose value begins at/after `pos` (used to read
+    // per-object fields in a myTrades array, where the global key-search parsers
+    // above would only ever find the first object's value).
+    static double extract_num_after_(const std::string& s, size_t pos) {
+        while (pos < s.size() && (s[pos]==' '||s[pos]=='\t'||s[pos]==':')) pos++;
+        bool q = (pos < s.size() && s[pos]=='"'); if (q) pos++;
+        size_t end = q ? s.find('"', pos) : s.find_first_of(",}", pos);
+        if (end == std::string::npos) return 0.0;
+        try { return std::stod(s.substr(pos, end - pos)); } catch (...) { return 0.0; }
     }
 
     static double parse_balance(const std::string& body, const std::string& asset) {

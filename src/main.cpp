@@ -3572,6 +3572,20 @@ int main() {
         bool enforce = runtime_cfg.portfolio_cash_usd > 0.0;
         g_ledger.configure(seed_cash, enforce, /*fee*/0.001);
 
+        // C9 fix (2026-07-24 audit): in LIVE, cash-enforce OFF (portfolio_cash_usd<=0) silently
+        // drops the overbook/reservation guard -- only pilot-gross + hard_max_order_usd remain.
+        // Surface it LOUD at boot. NOT fatal on purpose: a crash-loop on the live box is worse
+        // than a warning (see the josgp1 mode-conflict incident); the operator sets config
+        // intentionally. To enforce, set portfolio_cash_usd to the real USDT balance.
+        if (g_runtime_mode == chimera::RuntimeMode::LIVE && !enforce) {
+            std::fprintf(stderr, "[LEDGER][WARN] LIVE with cash-enforce OFF (portfolio_cash_usd=%.2f) -- "
+                         "overbook/reservation guard INACTIVE; only pilot-gross + hard_max_order_usd bound "
+                         "exposure. Set portfolio_cash_usd>0 to enforce.\n", seed_cash);
+            std::printf("[LEDGER][WARN] LIVE cash-enforce OFF -- overbook guard inactive "
+                        "(pilot-gross + hard-cap only)\n");
+            std::fflush(stdout);
+        }
+
         // The user-data stream drives the ledger from every execution report.
         // LIVE: real executionReport events. SHADOW: the simulated fill fed by the
         // gateway. Either way the same handler updates the one ledger.

@@ -10591,9 +10591,11 @@ int main() {
                             bound_live, leg.symbol, c.tag.c_str(), eng->shadow_mode ? 1 : 0);
             }
         }
-        std::printf("[TRENDROSTER] wired %d SHADOW legs into g_slots (21-leg live book: 17 trend + 4 RSIREV BE-floor [SOL/XRP/ATOM/DOT]; %d NDX legs dropped, no Binance feed); "
+        // S-2026-07-25e: "SHADOW legs" was a hardcoded literal printed even when these legs
+        // route REAL orders (the next line already says "mode=LIVE -> REAL orders").
+        std::printf("[TRENDROSTER] wired %d %s legs into g_slots (21-leg live book: 17 trend + 4 RSIREV BE-floor [SOL/XRP/ATOM/DOT]; %d NDX legs dropped, no Binance feed); "
                     "DEFAULT-ON, gate-exempt, no-desk-export, ride_to_flip, NO-200DMA, %s\n",
-                    wired_live, dropped_ndx,
+                    wired_live, runtime_cfg.shadow_mode ? "SHADOW" : "LIVE", dropped_ndx,
                     arm_roster ? "ARM-FLAG-ON (governed_submit bound)" : "hard-shadow");
         if (arm_roster) {
             std::printf("[TRENDROSTER-ARM] %d/%d legs bound to governed_submit (ROUTABLE); mode=%s → %s. "
@@ -11673,7 +11675,12 @@ int main() {
     {
         bool wire_legacy = std::getenv("CHIMERA_WIRE_LEGACY") != nullptr;
         // Programmatic defaults (authoritative fallback) …
-        g_registry.declare("EDGE-SLOTS", chimera::Lifecycle::SHADOW,
+        // S-2026-07-25e: was HARDCODED SHADOW even when the process runs LIVE with the legs
+        // bound to governed_submit ("mode=LIVE -> REAL orders"). Lifecycle::LIVE existed and was
+        // never used, so the honest registry mislabelled a real-money book as shadow. Reflect
+        // the resolved runtime mode.
+        g_registry.declare("EDGE-SLOTS",
+                           runtime_cfg.shadow_mode ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::LIVE,
                            "17-leg DirectionalTrendRoster (g_slots) — REGIME_SWITCH parents + TSMOM/ICHI zoo culled LIVE-ONLY 2026-07-23");
         g_registry.declare("LEGACY-EDGE", chimera::Lifecycle::DISABLED,
                            "285 per-symbol EdgeEngines — CULLED unless CHIMERA_WIRE_LEGACY");
@@ -11693,7 +11700,9 @@ int main() {
         // EXECUTOR surfaces order-routing readiness HONESTLY without ever aborting
         // the shadow desk: SHADOW when the executor is ready, HALTED when creds
         // failed (sleeves still compute signals+books; only routing is a no-op).
-        g_registry.declare("EXECUTOR", chimera::Lifecycle::SHADOW, "SpotExecutor order-routing readiness");
+        g_registry.declare("EXECUTOR",
+                           runtime_cfg.shadow_mode ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::LIVE,
+                           "SpotExecutor order-routing readiness");
         // … operator override (config/engine_registry.json, if present) …
         int loaded = g_registry.load_from_json("config/engine_registry.json");
         // … then the env truth for the legacy layer wins regardless of the json.
@@ -11711,7 +11720,12 @@ int main() {
         g_registry.set_state("CAMPAIGN-MGR",
                              g_campaign_cell_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
         // Executor-readiness reflected as a non-aborting HALTED when not ready.
-        g_registry.set_state("EXECUTOR", exec_ok ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::HALTED);
+        // S-2026-07-25e: ready-executor state must reflect the REAL runtime mode, not a
+        // hardcoded SHADOW (it routes REAL orders when shadow_mode=false).
+        g_registry.set_state("EXECUTOR",
+                             exec_ok ? (runtime_cfg.shadow_mode ? chimera::Lifecycle::SHADOW
+                                                                : chimera::Lifecycle::LIVE)
+                                     : chimera::Lifecycle::HALTED);
         // Runtime wiring truth. The XSec/RipRider/grid sleeves are installed +
         // seeded UNCONDITIONALLY (their blocks run regardless of exec_ok — only
         // order routing checks exec_ok), so they are wired+connected in shadow
@@ -11751,12 +11765,18 @@ int main() {
         }
     }
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");
-    std::printf("[STARTUP] ✓ CHIMERA READY — %d engines connected (from the real graph; shadow_mode=true)\n",
-                g_registry.connected_count());
+    // S-2026-07-25e: these two lines carried HARDCODED "shadow_mode=true" / "SHADOW"
+    // literals while the process ran LIVE with real money armed (config shadow_mode=false,
+    // [EXECUTOR] Ready. shadow=NO). A banner that reads "nothing at risk" over a live book
+    // is the dangerous direction of the same class Omega fixed in f6c22b63. Print the REAL
+    // resolved flag, and make LIVE visually unmissable.
+    std::printf("[STARTUP] ✓ CHIMERA READY — %d engines connected (from the real graph; shadow_mode=%s)\n",
+                g_registry.connected_count(), runtime_cfg.shadow_mode ? "true" : "false");
     std::printf("[STARTUP]   EDGE-SLOTS=%d (17-leg TRENDROSTER live book)  MIMIC-GRID=%d  (XSEC/RIPRIDER/CAMPAIGN/CORE-TRIGGER/legacy-zoo culled)\n",
                 (int)g_slots.size(), g_grid_clip_count);
     std::printf("[STARTUP]   Gates observed (item 21): portfolio+cluster+confirm+funding+vol_regime+corr+session+volume+vol_filter+mtf+adx\n");
-    std::printf("[STARTUP]   spot-long-only | NO 200DMA | SHADOW | counts are RECONCILED (not aspirational)\n");
+    std::printf("[STARTUP]   spot-long-only | NO 200DMA | %s | counts are RECONCILED (not aspirational)\n",
+                runtime_cfg.shadow_mode ? "SHADOW" : "*** LIVE -- REAL MONEY ***");
     std::printf("[STARTUP]   GUI: http://localhost:8080\n");
     std::printf("[STARTUP]   API: /api/state2  /api/positions  /api/trades\n");
     std::printf("[STARTUP] ════════════════════════════════════════════════════════\n");

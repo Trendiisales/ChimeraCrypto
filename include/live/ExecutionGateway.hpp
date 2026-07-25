@@ -35,6 +35,7 @@
 #include <atomic>
 #include <mutex>
 #include <map>
+#include <set>
 #include <cmath>
 #include "live/BinanceREST.hpp"   // OrderResult
 #include "live/RuntimeMode.hpp"
@@ -130,6 +131,17 @@ public:
     //   cancel:(symbol, cid, oid) -> bool
     std::function<OrderResult(const std::string&, double, double, double)> place_stop_fn;
     std::function<bool(const std::string&, const std::string&, long)>      cancel_stop_fn;
+    // ── NAKED-POSITION AUTO-FLATTEN HOOK (2026-07-25, Omega class-port; operator
+    //    "safety fix = both systems"). When place_stop_fn REJECTS (pair doesn't
+    //    support STOP_LOSS_LIMIT, filter/balance error, ...) the long is left NAKED
+    //    — the exact class of the Omega incident where a whole account rode with no
+    //    protection because the rejected stop had no else-branch. The gateway then
+    //    calls this to MARKET-SELL the held base (long-only spot). Wired in main.cpp
+    //    to the broker-truth close (SpotExecutor::close_symbol_from_broker) with
+    //    emergency_flatten as the fallback. null => no auto-flatten (the alert still
+    //    fires, and the FLATTEN-ALSO-FAILED line says the hook is unwired).
+    //   flatten: (symbol, held_qty) -> true iff the position is no longer naked.
+    std::function<bool(const std::string&, double)>                        emergency_flatten_fn;
 
     // ── A4 PRICE COLLAR (2026-07-24 audit): reject an ENTRY whose reference (signal) price
     //    deviates > price_collar_pct_ from the CURRENT live price. A stale/gapped signal or a
@@ -440,6 +452,9 @@ private:
     //    dust is not worth protecting).
     struct RestingStop { std::string cid; long oid = 0; double qty = 0.0; };
     std::map<std::string, RestingStop> resting_stop_;   // symbol -> resting stop
+    // Symbols whose protective stop was REJECTED by the exchange. Suppresses the
+    // reject -> re-arm -> reject storm (Omega does the same); erased when flat.
+    std::set<std::string>              stop_rejected_;  // guarded by stop_mtx_
     std::mutex                         stop_mtx_;
     void manage_protective_stop_(const std::string& symbol) {
         double held  = ledger_->position(symbol);
@@ -456,6 +471,7 @@ private:
                 if (cancel_stop_fn) cancel_stop_fn(symbol, it->second.cid, it->second.oid);
                 resting_stop_.erase(it);
             }
+            stop_rejected_.erase(symbol);   // flat => a later re-buy may arm a fresh stop
             return;
         }
         // Held position. Arm if none, or re-arm if the protected qty drifted from
@@ -467,8 +483,41 @@ private:
             resting_stop_.erase(it);
         }
         if (px <= 0.0 || !place_stop_fn) return;   // no entry anchor / hook -> skip
+        // Do NOT retry a stop this symbol has already had REJECTED. Omega deliberately
+        // avoids a reject -> re-arm -> reject storm (it would spam Binance every fill and
+        // every reconcile tick with an order the pair cannot accept). Cleared on flat.
+        if (stop_rejected_.count(symbol)) return;
         OrderResult sr = place_stop_fn(symbol, held, px, native_disaster_stop_pct_);
-        if (sr.ok) resting_stop_[symbol] = RestingStop{ sr.client_id, sr.order_id, held };
+        if (sr.ok) { resting_stop_[symbol] = RestingStop{ sr.client_id, sr.order_id, held }; return; }
+        // ── REJECTED PROTECTIVE STOP => NAKED POSITION (2026-07-25). Before this the
+        //    else-branch simply did not exist: the stop failed, nothing was recorded,
+        //    nothing was logged, and the long sat unprotected. Alert LOUD + flatten.
+        stop_rejected_.insert(symbol);
+        naked_flatten_(symbol, held, sr.error);
+    }
+
+    // Alert + auto-flatten a position left NAKED by a rejected protective stop.
+    // Called under stop_mtx_ (same as place/cancel_stop_fn, which also block on HTTP).
+    void naked_flatten_(const std::string& symbol, double held, const std::string& why) {
+        std::fprintf(stderr,
+            "[SYSTEM-ALERT] NAKED_POSITION %s -- protective stop REJECTED (%s); AUTO-FLATTENING "
+            "qty=%.8f\n",
+            symbol.c_str(), why.empty() ? "no reason returned" : why.c_str(), held);
+        std::fflush(stderr);
+        bool cleared = emergency_flatten_fn && emergency_flatten_fn(symbol, held);
+        if (cleared) {
+            std::fprintf(stderr,
+                "[SYSTEM-ALERT] NAKED_POSITION %s FLATTENED (market SELL of the held base sent) "
+                "-- stop NOT re-armed (reject storm guard); investigate why the stop was rejected\n",
+                symbol.c_str());
+        } else {
+            std::fprintf(stderr,
+                "[SYSTEM-ALERT] NAKED_POSITION %s FLATTEN ALSO FAILED -- MANUAL ACTION NEEDED "
+                "(qty=%.8f held with NO protective stop; %s)\n",
+                symbol.c_str(), held,
+                emergency_flatten_fn ? "market SELL rejected" : "no emergency_flatten_fn wired");
+        }
+        std::fflush(stderr);
     }
 
 public:
@@ -490,6 +539,7 @@ public:
                 if (ledger_->position(kv.first) <= 0.0) stale.push_back(kv.first);
         }
         for (const auto& s : stale) manage_protective_stop_(s);
+        naked_sweep_();
     }
 
     // No-arg overload — derive the live universe from ledger truth (every held
@@ -503,6 +553,35 @@ public:
         reconcile_stops(ledger_->held_symbols());
     }
 private:
+
+    // ── NAKED SWEEP (2026-07-25, Omega class-port). Detection that does NOT depend on
+    //    the reject path having run: after the arm/cancel pass in reconcile_stops(),
+    //    ANY symbol the ledger shows HELD with no entry in resting_stop_ is
+    //    unprotected. Covers a stop rejected before this code existed, a stop the
+    //    exchange cancelled out from under us, and a hold whose stop reject already
+    //    tripped the storm guard. Read-only + LOUD: it never places or cancels an
+    //    order (the auto-flatten fires ONCE, at reject time — a periodic sweep must
+    //    not silently dump a position).
+    void naked_sweep_() {
+        if (!ledger_) return;
+        std::vector<std::pair<std::string, double>> naked;
+        {
+            std::lock_guard<std::mutex> lk(stop_mtx_);
+            for (const auto& s : ledger_->held_symbols()) {
+                double held = ledger_->position(s);
+                if (held <= 0.0) continue;
+                double px = ledger_->avg_price(s);
+                if (px > 0.0 && held * px < min_notional_usd) continue;  // dust: no stop possible
+                if (resting_stop_.count(s)) continue;                   // protected
+                naked.emplace_back(s, held);
+            }
+        }
+        for (const auto& kv : naked)
+            std::fprintf(stderr,
+                "[SYSTEM-ALERT] NAKED_POSITION %s -- ledger holds qty=%.8f with NO protective stop "
+                "resting at the broker; MANUAL ACTION NEEDED\n", kv.first.c_str(), kv.second);
+        if (!naked.empty()) std::fflush(stderr);
+    }
 
     // ── ORDER CIRCUIT-BREAKER (2026-07-24) — mirror of Omega's IbkrExecutionEngine
     //    place_order breaker. Thresholds identical to Omega (25/sec, 8 unfilled/sym):

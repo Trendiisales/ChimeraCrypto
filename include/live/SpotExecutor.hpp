@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <vector>
 
@@ -366,6 +367,88 @@ public:
             return r.ok;
         }
         return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // close_symbol_from_broker — close a symbol off BROKER TRUTH, not engine state.
+    //
+    // GAP-6 (2026-07-25, Omega class-port; operator "safety fix = both systems").
+    // Every close path sized itself from ENGINE state (BalancedEngine's
+    // s.pos.total_qty / entered_qty), so a PHANTOM — the engine believing it holds
+    // coins it never actually filled, the 2026-07-23 SOL class — market-SOLD the
+    // WRONG amount: an oversell that the exchange rejects (position stays open, the
+    // operator thinks it closed) or an undersell that leaves a silent residual.
+    // This path asks BINANCE what is actually held and sells exactly that:
+    //   1. cancel every open order on the symbol FIRST, so qty locked by a resting
+    //      protective stop is released back into `free` before the balance read
+    //      (reading first would under-count by the whole protected size);
+    //   2. read the free base balance (-1.0 => query FAILED, distinct from 0 held);
+    //   3. floor it to the symbol's LOT_SIZE / MARKET_LOT_SIZE step from the shared
+    //      ExchangeFilters cache (fallback_step when the cache gapped) — an un-stepped
+    //      qty is a guaranteed Binance -1013 that would LOSE the close;
+    //   4. MARKET SELL exactly that.
+    // Long-only spot: there is no short side. SHADOW returns READ_FAILED so the
+    // caller keeps the existing engine-qty behaviour and the research record is
+    // byte-identical. `outcome` tells the caller WHICH of the four things happened —
+    // only READ_FAILED justifies falling back to the (untrustworthy) engine qty.
+    // Returns true iff a real SELL was accepted (outcome == SENT).
+    // -----------------------------------------------------------------------
+    enum class BrokerClose {
+        READ_FAILED,   // not ready / shadow / balance query failed -> caller MAY fall back
+        BROKER_FLAT,   // broker genuinely holds nothing sellable -> engine state was PHANTOM
+        SENT,          // MARKET SELL accepted
+        SEND_FAILED    // MARKET SELL rejected -> still exposed, manual action
+    };
+    bool close_symbol_from_broker(const std::string& symbol, BrokerClose* outcome = nullptr) {
+        auto done = [&](BrokerClose o) { if (outcome) *outcome = o; return o == BrokerClose::SENT; };
+        if (!rest_.is_ready()) {
+            std::fprintf(stderr, "[EMERGENCY-KILL] %s broker-truth close: executor not ready\n",
+                         symbol.c_str());
+            return done(BrokerClose::READ_FAILED);
+        }
+        std::string sym_upper = symbol;
+        for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
+        if (rest_.is_shadow()) {
+            std::printf("[EMERGENCY-KILL] %s broker-truth close skipped (shadow) — engine qty path\n",
+                        sym_upper.c_str());
+            std::fflush(stdout);
+            return done(BrokerClose::READ_FAILED);
+        }
+        // 1. Cancel first — frees any qty locked by the resting protective stop.
+        rest_.cancel_all_open_orders(sym_upper);
+        // 2. Broker truth. The live universe is USDT-quoted (BTCUSDT -> BTC).
+        std::string base = sym_upper;
+        if (base.size() > 4 && base.compare(base.size() - 4, 4, "USDT") == 0)
+            base = base.substr(0, base.size() - 4);
+        double free_qty = rest_.get_free_asset(base);
+        if (free_qty < 0.0) {
+            std::fprintf(stderr, "[EMERGENCY-KILL] %s broker balance read FAILED (%s) — "
+                         "cannot size off broker truth\n", sym_upper.c_str(), base.c_str());
+            return done(BrokerClose::READ_FAILED);
+        }
+        // 3. Floor to the symbol's step (market step preferred, as for a MARKET order).
+        double step = 0.0;
+        if (filters_) {
+            const SymbolFilter* f = filters_->get(sym_upper);
+            if (f && f->valid) step = f->market_step > 0.0 ? f->market_step : f->step_size;
+        }
+        if (step <= 0.0) step = ExchangeFilters::fallback_step(sym_upper);
+        double qty = free_qty;
+        if (step > 0.0) qty = std::floor(qty / step) * step;
+        qty = std::floor(qty * 1e8 + 0.5) / 1e8;   // kill FP residue (REST formats at 8dp)
+        std::printf("[EMERGENCY-KILL] %s BROKER-TRUTH close: free=%.8f step=%.8f -> sell %.8f\n",
+                    sym_upper.c_str(), free_qty, step, qty);
+        std::fflush(stdout);
+        if (qty <= 0.0) {
+            std::printf("[EMERGENCY-KILL] %s broker holds nothing sellable (free=%.8f) — no SELL sent "
+                        "(engine state was PHANTOM)\n", sym_upper.c_str(), free_qty);
+            std::fflush(stdout);
+            return done(BrokerClose::BROKER_FLAT);
+        }
+        // 4. Sell exactly what the exchange says is there.
+        auto r = rest_.market_sell(sym_upper, qty);
+        if (!r.ok) errors_.fetch_add(1, std::memory_order_relaxed);
+        return done(r.ok ? BrokerClose::SENT : BrokerClose::SEND_FAILED);
     }
 
     // Wire the shared exchangeInfo filter cache so protective-stop prices are

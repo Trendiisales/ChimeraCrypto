@@ -1034,6 +1034,42 @@ public:
     }
 
     // -----------------------------------------------------------------------
+    // close_from_broker_or_engine — GAP-6 (2026-07-25, Omega class-port).
+    // The ONE close chokepoint for the emergency-flatten paths. Asks Binance what is
+    // actually held and sells exactly that; the engine-derived qty is used ONLY when
+    // the broker balance read fails (or in shadow), and the chosen path is logged so
+    // a phantom close is never silent. BROKER_FLAT deliberately sends NOTHING — the
+    // engine believed in coins the exchange does not have, and selling the engine's
+    // number there is the exact bug this closes.
+    // -----------------------------------------------------------------------
+    void close_from_broker_or_engine(const char* sym_name, const char* sym_lc, double engine_qty) {
+        if (!executor_) return;
+        SpotExecutor::BrokerClose oc = SpotExecutor::BrokerClose::READ_FAILED;
+        executor_->close_symbol_from_broker(sym_lc, &oc);
+        switch (oc) {
+            case SpotExecutor::BrokerClose::SENT:
+                std::printf("[EMERGENCY-KILL] %s closed off BROKER TRUTH (engine qty was %.8f)\n",
+                            sym_name, engine_qty);
+                break;
+            case SpotExecutor::BrokerClose::BROKER_FLAT:
+                std::printf("[EMERGENCY-KILL] %s broker is FLAT — nothing sold; engine qty %.8f was "
+                            "PHANTOM (not selling it)\n", sym_name, engine_qty);
+                break;
+            case SpotExecutor::BrokerClose::SEND_FAILED:
+                std::fprintf(stderr, "[EMERGENCY-KILL] %s BROKER-TRUTH SELL FAILED — still exposed, "
+                             "MANUAL ACTION NEEDED\n", sym_name);
+                break;
+            case SpotExecutor::BrokerClose::READ_FAILED:
+            default:
+                std::printf("[EMERGENCY-KILL] %s broker read unavailable — FALLBACK to ENGINE-QTY "
+                            "close qty=%.8f\n", sym_name, engine_qty);
+                executor_->emergency_flatten(sym_lc, engine_qty);
+                break;
+        }
+        std::fflush(stdout);
+    }
+
+    // -----------------------------------------------------------------------
     // emergency_flatten_all — immediately close every open position at market.
     // Called by GUI kill button. Cancels pending limits first, then market sells.
     // -----------------------------------------------------------------------
@@ -1059,8 +1095,12 @@ public:
                         qty);
             std::fflush(stdout);
 
+            // GAP-6 (2026-07-25): size the close off BROKER TRUTH, not engine state.
+            // `qty` above comes from s.pos.* — a PHANTOM (engine believes it holds
+            // coins it never filled, the 07-23 SOL class) would sell the WRONG amount.
+            // Engine qty survives ONLY as the fallback when the balance read fails.
             if (executor_) {
-                executor_->emergency_flatten(sym_lower(i), qty);
+                close_from_broker_or_engine(sym_short(i), sym_lower(i), qty);
             }
 
             // Force-reset position in engine state
@@ -1091,7 +1131,8 @@ public:
             }
             double qty = (s.pos.pyramid_done && s.pos.total_qty > 0.0)
                          ? s.pos.total_qty : s.pos.entered_qty;
-            if (executor_) executor_->emergency_flatten(sym_lower(i), qty);
+            // GAP-6 (2026-07-25): BROKER TRUTH first, engine qty only as fallback.
+            if (executor_) close_from_broker_or_engine(sym_name.c_str(), sym_lower(i), qty);
             pending_exit_reason_ = "EMERGENCY_KILL";
             double move_bp = s.pos.entry_price > 0
                 ? (s.last_price - s.pos.entry_price) / s.pos.entry_price * 10000.0 : 0.0;

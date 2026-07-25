@@ -3685,6 +3685,23 @@ int main() {
                                              const std::string& cid, long oid){
             return executor.cancel_protective_stop(sym, cid, oid);
         };
+        // ── NAKED-POSITION AUTO-FLATTEN (2026-07-25, Omega class-port; operator
+        //    "safety fix = both systems"). Fires ONLY when place_protective_stop was
+        //    REJECTED — the long is naked at that point, which is exactly the Omega
+        //    incident class. Closes off BROKER TRUTH (free base balance, LOT_SIZE
+        //    snapped) so a phantom can't make us sell the wrong amount; falls back to
+        //    the engine qty the gateway passed only when the balance read is
+        //    unavailable (also the SHADOW path — emergency_flatten no-ops there).
+        //    Returns true iff the position is no longer naked; false makes the gateway
+        //    print the persistent FLATTEN-ALSO-FAILED / MANUAL ACTION alert.
+        gateway.emergency_flatten_fn = [&executor](const std::string& sym, double qty) -> bool {
+            chimera::SpotExecutor::BrokerClose oc = chimera::SpotExecutor::BrokerClose::READ_FAILED;
+            executor.close_symbol_from_broker(sym, &oc);
+            if (oc == chimera::SpotExecutor::BrokerClose::SENT)        return true;
+            if (oc == chimera::SpotExecutor::BrokerClose::BROKER_FLAT) return true;  // nothing held => not naked
+            if (oc == chimera::SpotExecutor::BrokerClose::SEND_FAILED) return false; // still exposed: alert
+            return executor.emergency_flatten(sym, qty);   // READ_FAILED -> engine-qty fallback
+        };
         // A4 price collar (2026-07-24 audit): feed the live spot price so the gateway can reject
         // an entry whose signal ref deviates >10% from the current market (stale/gapped/fat-finger).
         // Returns 0 for an unknown symbol -> collar inert for it (fail-safe, never a false reject).

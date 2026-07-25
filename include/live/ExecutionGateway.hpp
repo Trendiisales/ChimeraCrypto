@@ -345,6 +345,36 @@ public:
             }
         }
 
+        // ── 9b. CANCEL THE RESTING PROTECTIVE STOP BEFORE ANY SELL (S-2026-07-25e, P0) ──
+        // On Binance SPOT a resting SELL STOP_LOSS_LIMIT LOCKS the base asset. Since the
+        // native stops shipped 07-24 every held symbol carries one for the FULL held qty.
+        // The exit below sent the market SELL FIRST and only reached manage_protective_stop_
+        // (the sole cancel site) AFTERWARDS -- and on a failed execute it early-returns
+        // before ever getting there. So every exit sold into its own locked collateral ->
+        // Binance -2010 insufficient balance -> the position could NOT be closed and the
+        // stop was never cancelled. This defeated EVERY exit path: ordinary signal flips,
+        // /api/kill, EMERGENCY, AGG_KILL and DAILY_KILL. Latent only because the book has
+        // never held a position.
+        // The correct order already exists in this codebase: close_symbol_from_broker and
+        // emergency_flatten both cancel first, explicitly so qty locked by a resting stop is
+        // released back into `free` before the sell. The ordinary exit was the one path
+        // that skipped it.
+        if (!in.is_buy) {
+            std::lock_guard<std::mutex> lk(stop_mtx_);
+            auto it = resting_stop_.find(in.symbol);
+            if (it != resting_stop_.end()) {
+                const bool ok = cancel_stop_fn ? cancel_stop_fn(in.symbol, it->second.cid,
+                                                                it->second.oid) : false;
+                std::fprintf(stderr, "[GATEWAY] pre-exit cancel of resting protective stop %s "
+                             "oid=%ld -> %s (frees the locked base so the SELL can fill)\n",
+                             in.symbol.c_str(), it->second.oid, ok ? "OK" : "FAILED");
+                std::fflush(stderr);
+                // Erase either way: a stale entry would make the NEXT attempt skip the
+                // cancel entirely. Re-arm happens on the next fill via manage_protective_stop_.
+                resting_stop_.erase(it);
+            }
+        }
+
         // 10. Forward to the (befriended) private executor with the deterministic id.
         r = ex_.execute(in.symbol, in.is_buy, qty, in.ref_px, cid);
 

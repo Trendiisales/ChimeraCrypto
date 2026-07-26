@@ -11716,6 +11716,18 @@ int main() {
         // LEGACY-EDGE above: the json may annotate, the wiring decides the state.
         g_registry.set_state("MIMIC-GRID",
                              g_grid_clip_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);
+        // EDGE-SLOTS: wiring truth wins over any stale json -- the one bucket that never
+        // got this line. config/engine_registry.json pins "EDGE-SLOTS": "SHADOW"; when the
+        // DirectionalTrendRoster is disarmed (CHIMERA_NO_TRENDROSTER=1) g_slots is EMPTY, so
+        // mark_wired() below reports not-wired and validate() aborts with "declared SHADOW
+        // but callback DISCONNECTED" -> systemd crash-loop (S-2026-07-27: 11,153 restarts,
+        // live desk down 83h with the book flat). Identical pattern to LEGACY-EDGE /
+        // MIMIC-GRID / CAMPAIGN-MGR above; keeps the S-25e honesty that a real-money book
+        // reports LIVE, not a hardcoded SHADOW.
+        g_registry.set_state("EDGE-SLOTS",
+                             g_slots.empty() ? chimera::Lifecycle::DISABLED
+                                             : (runtime_cfg.shadow_mode ? chimera::Lifecycle::SHADOW
+                                                                        : chimera::Lifecycle::LIVE));
         // Campaign books: wiring truth wins over any stale json, same pattern.
         g_registry.set_state("CAMPAIGN-MGR",
                              g_campaign_cell_count > 0 ? chimera::Lifecycle::SHADOW : chimera::Lifecycle::DISABLED);

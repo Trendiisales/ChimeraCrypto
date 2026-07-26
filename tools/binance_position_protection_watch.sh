@@ -28,14 +28,26 @@ notify(){ /usr/bin/osascript -e "display notification \"$2\" with title \"$1\" s
 ts(){ date -u '+%Y-%m-%d %H:%MZ'; }
 
 # 1. BOT-DEATH — is the chimera engine running on the box?
-ACTIVE=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$HOST" \
-         'systemctl show chimera -p ActiveState --value 2>/dev/null' 2>/dev/null)
+#    UnitFileState distinguishes the two reasons it can be inactive:
+#      enabled  + inactive -> it DIED (crash / OOM / failed start)      -> alarm
+#      disabled + inactive -> the OPERATOR stood it down deliberately   -> silent
+#    The crypto desk is currently stopped+disabled on purpose, and alarming every
+#    10 minutes about an intentional state trains the operator to ignore the
+#    channel -- which is what makes a real death invisible. Log it either way.
+PROBE_STATE=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$HOST" \
+         'systemctl show chimera -p ActiveState -p UnitFileState --value 2>/dev/null' 2>/dev/null)
+ACTIVE=$(printf '%s\n' "$PROBE_STATE" | sed -n 1p)
+ENABLED=$(printf '%s\n' "$PROBE_STATE" | sed -n 2p)
 if [ -z "$ACTIVE" ]; then
   echo "[$(ts)] box unreachable" >> "$LOG"; exit 0   # can't verify -> no false alarm
 fi
 if [ "$ACTIVE" != "active" ]; then
-  notify "🛑 CHIMERA BOT DOWN" "chimera service ActiveState=$ACTIVE on $HOST -- engine not managing positions. Broker stops (if armed) still protect; investigate now."
-  echo "[$(ts)] BOT DOWN: ActiveState=$ACTIVE" >> "$LOG"
+  if [ "$ENABLED" = "disabled" ] || [ "$ENABLED" = "masked" ]; then
+    echo "[$(ts)] DESK STOOD DOWN (intentional): ActiveState=$ACTIVE UnitFileState=$ENABLED -- no alarm" >> "$LOG"
+  else
+    notify "🛑 CHIMERA BOT DOWN" "chimera service ActiveState=$ACTIVE (unit $ENABLED) on $HOST -- engine not managing positions. Broker stops (if armed) still protect; investigate now."
+    echo "[$(ts)] BOT DOWN: ActiveState=$ACTIVE UnitFileState=$ENABLED" >> "$LOG"
+  fi
 fi
 
 # 2. NAKED-POSITION — stream the read-only probe to the box and run it there so the

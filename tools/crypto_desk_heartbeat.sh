@@ -22,6 +22,12 @@ OUT=$(ssh -o ConnectTimeout=8 -o BatchMode=yes "$HOST" '
   AS=$(systemctl show chimera -p ActiveState --value 2>/dev/null)
   SS=$(systemctl show chimera -p SubState --value 2>/dev/null)
   NR=$(systemctl show chimera -p NRestarts --value 2>/dev/null)
+  # UnitFileState distinguishes a DELIBERATE stop from an outage (S-2026-07-27). A
+  # crash-looping unit is enabled+activating; a desk the operator stood down is
+  # disabled+inactive. Without this the heartbeat screamed RED "LIVE holds may be
+  # UNSERVICED -- fix before any other work" at an intentionally-stopped book, and a
+  # session duly "fixed" it by restarting the desk the operator had just shut off.
+  UE=$(systemctl is-enabled chimera 2>/dev/null)
   PID=$(systemctl show chimera -p MainPID --value 2>/dev/null)
   UP=$(ps -o etimes= -p "$PID" 2>/dev/null | tr -d " ")
   SL=$(grep -n "Tier-2 Edge Engines" "$F" 2>/dev/null | tail -1 | cut -d: -f1)
@@ -56,7 +62,7 @@ print(str(dis)+\"/\"+str(len(legs)))" 2>/dev/null)
   ORIG=$(git rev-parse --short origin/main 2>/dev/null)
   ANC=$(git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 1 || echo 0)  # box behind==ancestor(benign) vs diverged
   RUN=$(grep -oE "build=[0-9a-f]+" logs/chimera.log 2>/dev/null | tail -1 | sed "s/build=//")
-  echo "AS=$AS|SS=$SS|NR=$NR|UP=${UP:-0}|PASS=$PASS|ABRT=$ABRT|HOLDS=${HOLDS:-?}|HASH=$HASH|ORIG=$ORIG|ANC=$ANC|RUN=$RUN|FLAT=$FLATMIN|DIS=$DISARM"
+  echo "AS=$AS|SS=$SS|NR=$NR|UE=$UE|UP=${UP:-0}|PASS=$PASS|ABRT=$ABRT|HOLDS=${HOLDS:-?}|HASH=$HASH|ORIG=$ORIG|ANC=$ANC|RUN=$RUN|FLAT=$FLATMIN|DIS=$DISARM"
 ' 2>/dev/null)
 
 if [ -z "$OUT" ]; then
@@ -67,6 +73,7 @@ fi
 AS=$(echo "$OUT"   | tr '|' '\n' | sed -n 's/^AS=//p')
 SS=$(echo "$OUT"   | tr '|' '\n' | sed -n 's/^SS=//p')
 NR=$(echo "$OUT"   | tr '|' '\n' | sed -n 's/^NR=//p')
+UE=$(echo "$OUT"   | tr '|' '\n' | sed -n 's/^UE=//p')
 UP=$(echo "$OUT"   | tr '|' '\n' | sed -n 's/^UP=//p')
 PASS=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^PASS=//p')
 ABRT=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^ABRT=//p')
@@ -77,6 +84,26 @@ ANC=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^ANC=//p')
 RUN=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^RUN=//p')
 FLAT=$(echo "$OUT" | tr '|' '\n' | sed -n 's/^FLAT=//p')
 DIS=$(echo "$OUT"  | tr '|' '\n' | sed -n 's/^DIS=//p')
+
+# ── STOPPED BY DESIGN (S-2026-07-27) ─────────────────────────────────────────
+# A desk the operator deliberately stood down is inactive AND disabled. That is a
+# DECISION, not an outage, and it must not be reported with "LIVE holds may be
+# UNSERVICED -- fix before any other work": on 2026-07-27 a session read exactly
+# that banner, treated the 11,153-restart crash loop as a fault to repair, and
+# restarted the book the operator had intentionally stopped.
+# The discriminator is precise: a crash loop is enabled + activating/auto-restart;
+# an intentional stand-down is disabled + inactive. A unit that is stopped but
+# still ENABLED is deliberately NOT covered -- it returns on the next reboot, so
+# that genuinely is a problem and keeps its RED.
+# HOLDS is still surfaced: a stopped desk holding coins is worth saying out loud.
+if [ "$UE" = "disabled" ] && [ "$AS" = "inactive" ]; then
+  if [ "${HOLDS:-0}" != "0" ] && [ "${HOLDS:-?}" != "?" ]; then
+    echo "STOPPED|desk STOPPED + DISABLED by operator (intentional, not an outage) — but book still holds ${HOLDS} position(s); nothing is servicing them while stopped"
+  else
+    echo "STOPPED|desk STOPPED + DISABLED by operator (intentional, not an outage) — book flat, nothing to service. Do NOT restart it to 'fix' this."
+  fi
+  exit 0
+fi
 
 REASONS=""
 [ "$AS" != "active" ]   && REASONS="$REASONS ActiveState=$AS(not active)"

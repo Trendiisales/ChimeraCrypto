@@ -37,6 +37,11 @@ run_pos runtime_mode           runtime_mode_test.cpp
 run_pos http_control_auth      http_control_auth_test.cpp
 run_pos execution_gateway      execution_gateway_test.cpp "$BREW_INC"
 run_pos pilot_scope            pilot_scope_test.cpp "$BREW_INC"
+# S-2026-07-27p: adversarial verification of the storm guards ported from Omega
+# (`feedback-safety-fix-both-systems-default`). Each gate is watched go RED, boundary-
+# walked (n-1 pass / n+1 fail) and proven not to block an operator close. Mock
+# executor only — it never constructs BinanceREST, opens a socket or loads a key.
+run_pos storm_guards           storm_guards_test.cpp "$BREW_INC"
 
 # NEGATIVE compile test: raw execute() from strategy code MUST NOT compile.
 printf '── %-28s ' "spotexecutor_private"

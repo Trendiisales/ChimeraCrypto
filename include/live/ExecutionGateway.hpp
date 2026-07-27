@@ -44,6 +44,8 @@
 #include "live/ExchangeTimeSync.hpp"
 #include "live/OrderIdRegistry.hpp"
 #include "live/UserDataStream.hpp"
+#include "live/GlobalOrderRateGuard.hpp"   // S-27p: desk-wide SLIDING rate + fan-out cap
+#include "live/SlowStormGuard.hpp"         // S-27p: cumulative unfilled/day + backoff
 
 namespace chimera {
 
@@ -55,6 +57,13 @@ struct OrderIntent {
     bool        is_exit = false; // true => risk-reducing; never blocked by halts
     const char* source  = "?";   // engine / sleeve tag (logging + attribution)
     uint64_t    signal_id = 0;   // unique per intended order; 0 => id-recovery gate off
+    // S-2026-07-27p (Omega OrderOdometer::Origin port): did a HUMAN ask for this, or
+    // did an automated loop? An operator risk-reducing order is never delayed or
+    // refused by the storm controls -- the 2026-07-27 Omega incident was the operator's
+    // OWN close being refused by a brake that an automated retry loop had exhausted.
+    // Appended LAST on purpose: every existing positional aggregate-init site keeps
+    // compiling and keeps defaulting to AUTOMATED, which is the safe direction.
+    bool        operator_initiated = false;
 };
 
 template <class Exec>
@@ -79,6 +88,24 @@ public:
     void set_id_registry(OrderIdRegistry* r) { idreg_ = r; }
     void set_stream(UserDataStream* s)     { stream_ = s; }
     ExchangeLedger* ledger() const { return ledger_; }
+
+    // ── S-2026-07-27p storm controls (ported from Omega) ────────────────────────
+    // Exposed so main.cpp can tune caps from config and so a test can drive them
+    // directly. Both are members of this gateway, not process globals.
+    GlobalOrderRateGuard& rate_guard()  { return rate_guard_; }
+    SlowStormGuard&       slow_storm()  { return slow_storm_; }
+
+    // Register an order that did NOT come through submit(). The ONLY caller that
+    // should exist is SpotExecutor::emergency_flatten, which is documented as a
+    // SEPARATE path that survives a circuit trip -- correct for closing, but it means
+    // its orders were invisible to every desk-wide count. Exactly the bypass
+    // `close_broker_position` had on the Omega side until S-27m
+    // (`feedback-separate-binary-bypasses-guards`). COUNTING ONLY: this can never
+    // refuse anything, because the path it covers is risk-reducing by construction and
+    // must keep working after a trip.
+    void note_out_of_band_order(const std::string& sym) {
+        if (mode_ == RuntimeMode::LIVE) rate_guard_.note_out_of_band(sym);
+    }
 
     RuntimeMode mode() const { return mode_; }
     double min_notional_usd = 5.0;   // Binance spot MIN_NOTIONAL floor
@@ -320,15 +347,73 @@ public:
         //     cleared ONLY by a restart (operator investigates the runaway first).
         //     Emergency-flatten uses a SEPARATE path (SpotExecutor::emergency_flatten),
         //     so a manual flatten still works after a trip.
+        // ── 9b-PRE. S-2026-07-27p STORM CONTROLS PORTED FROM OMEGA ────────────────
+        //    (`feedback-safety-fix-both-systems-default`). Two defects were measured in
+        //    THIS file and are fixed below:
+        //      * the rate limit was a RESET-EVERY-SECOND BUCKET (line ~326 pre-edit),
+        //        which admits 2N across a boundary and cannot see a sustained storm;
+        //      * `unfilled_by_sym_` is zeroed by every fill (~line 385), so a storm
+        //        whose orders FILL resets its own breaker -- which is precisely how
+        //        twelve QQQ sells got out on the Omega side on 2026-07-24.
+        //    The desk-wide SLIDING window below is the control that bounds a FILLING
+        //    storm; the cumulative counter bounds the slow non-filling drip. They are
+        //    different failures and are NOT interchangeable -- see the header of each.
+        //
+        //    SCOPE, stated rather than implied: LIVE only, matching the existing
+        //    breaker's rationale (in SHADOW/PAPER no order reaches Binance, and
+        //    research books legitimately batch full-universe rebalances, so scoping to
+        //    LIVE keeps the shadow research record byte-identical). LIMITATION: a
+        //    runaway loop in SHADOW is therefore still not rate-bounded here. It costs
+        //    no money and places no order, but it is not covered, and that is a
+        //    deliberate trade, not an oversight.
         if (mode_ == RuntimeMode::LIVE) {
+            // (i) SLOW STORM -- cumulative unfilled/day + exponential backoff.
+            //     Evaluated FIRST so a stopped retry loop does not even consume
+            //     desk-wide rate budget on its way to being refused.
+            {
+                auto sv = slow_storm_.admit(
+                    in.symbol, storm_intent_(in), in.is_exit,
+                    in.operator_initiated ? SlowStormGuard::OPERATOR
+                                          : SlowStormGuard::AUTOMATED);
+                if (!sv.allow) {
+                    if (reserved && ledger_) ledger_->release(cid);
+                    if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, false);
+                    log_reject(in, ("slow-storm: " + sv.why).c_str());
+                    r.error = "slow-storm: " + sv.why; return r;
+                }
+            }
+            // (ii) DESK-WIDE SLIDING RATE + NEW-SYMBOL FAN-OUT. Entries fail closed;
+            //      exits are counted and warned about but NEVER blocked.
+            {
+                bool new_sym = false;
+                if (ledger_ && in.is_buy && !in.is_exit)
+                    new_sym = (ledger_->position(in.symbol) <= 0.0);
+                auto rv = rate_guard_.admit(in.symbol, in.is_exit, new_sym);
+                if (!rv.allow) {
+                    if (reserved && ledger_) ledger_->release(cid);
+                    if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, false);
+                    std::fprintf(stderr, "[SYSTEM-ALERT] [ORDER-RATE] BLOCKED %s %s -- %s\n",
+                                 in.symbol.c_str(), in.is_buy ? "BUY" : "SELL", rv.why.c_str());
+                    std::fflush(stderr);
+                    r.error = "order-rate: " + rv.why; return r;
+                }
+            }
+        }
+        if (mode_ == RuntimeMode::LIVE) {
+            // (iii) The COARSE runaway limit keeps its sticky circuit trip, but is now
+            //       evaluated on the SLIDING window instead of a reset bucket. The old
+            //       bucket zeroed itself every second, so 25 at t=0.999s and 25 more at
+            //       t=1.001s both passed -- a limit that the passage of time resets is
+            //       not a limit. `rate_guard_` already recorded this order above, so the
+            //       count includes it.
+            const int sliding_1s = rate_guard_.count_in_last_ms(1000);
             std::lock_guard<std::mutex> lk(cb_mtx_);
-            long long now_cb = (long long)now_ms();
-            if (now_cb - rate_win_start_ms_ >= 1000) { rate_win_start_ms_ = now_cb; rate_win_count_ = 0; }
             // A2 fix (2026-07-24 audit): EXITS don't count toward / trip the global rate —
             // an exit burst is risk-reducing (bounded by holdings), and tripping on it would
             // block the flatten you need. Entries only.
-            if (!in.is_exit && ++rate_win_count_ > MAX_ORDERS_PER_SEC) {
-                trip_circuit_("global rate > " + std::to_string(MAX_ORDERS_PER_SEC) + " orders/sec");
+            if (!in.is_exit && sliding_1s > MAX_ORDERS_PER_SEC) {
+                trip_circuit_("global rate > " + std::to_string(MAX_ORDERS_PER_SEC) +
+                              " orders/sec (SLIDING 1s window, not a reset bucket)");
                 if (reserved && ledger_) ledger_->release(cid);
                 if (idreg_ && in.signal_id != 0) idreg_->on_result(cid, false);
                 r.error = "circuit-breaker: rate"; return r;
@@ -376,14 +461,29 @@ public:
         }
 
         // 10. Forward to the (befriended) private executor with the deterministic id.
+        //     S-27p: the send is booked as UNFILLED first. A send that is never
+        //     answered is exactly the shape the cumulative counter exists to see, so
+        //     it must be counted BEFORE the call, not after a result comes back.
+        if (mode_ == RuntimeMode::LIVE) slow_storm_.on_send(in.symbol);
         r = ex_.execute(in.symbol, in.is_buy, qty, in.ref_px, cid);
 
         // CIRCUIT-BREAKER: a real fill clears this symbol's unfilled counter so
         // normal filling trades never approach the per-symbol cap.
         if (mode_ == RuntimeMode::LIVE && r.ok && r.executed_qty > 0.0) {
-            std::lock_guard<std::mutex> lk(cb_mtx_);
-            unfilled_by_sym_[in.symbol] = 0;
+            { std::lock_guard<std::mutex> lk(cb_mtx_);
+              unfilled_by_sym_[in.symbol] = 0; }
+            // S-27p: a real fill also clears the cumulative counter and every retry
+            // latch for this symbol. DELIBERATE, and the reason this guard is NOT the
+            // control that bounds a FILLING storm -- see SlowStormGuard's header
+            // blind-spot (a). The sliding desk-wide window above is that control.
+            slow_storm_.on_fill(in.symbol);
         }
+        // S-27p: a terminal non-fill is a FAILURE and must arm the backoff. A reject
+        // is obvious; an `ok` result that filled nothing and came back CANCELED /
+        // EXPIRED / REJECTED is the same thing wearing a success flag, and treating it
+        // as a success is how a loop re-sends the identical refused order all day.
+        if (mode_ == RuntimeMode::LIVE && (!r.ok || (r.executed_qty <= 0.0 && terminal_nofill_(r))))
+            slow_storm_.on_fail(in.symbol, storm_intent_(in));
 
         // 11. Apply the result to the truth ledger (via the stream path if wired).
         if (!r.ok) {
@@ -466,6 +566,17 @@ private:
         rep.fee        = 0.0;   // ledger estimates from fee_rate when 0
         return rep;
     }
+    // S-27p: the (symbol,intent) retry identity. "the same order, again" must hash to
+    // the same key or the backoff can never see a repeat.
+    static std::string storm_intent_(const OrderIntent& in) {
+        return in.is_exit ? "EXIT" : (in.is_buy ? "OPEN" : "SELL");
+    }
+    // A result that filled nothing and reached a terminal exchange state.
+    static bool terminal_nofill_(const OrderResult& r) {
+        const std::string& s = r.status;
+        return s == "REJECTED" || s == "EXPIRED" || s == "CANCELED" || s == "CANCELLED";
+    }
+
     void log_reject(const OrderIntent& in, const char* why) {
         std::fprintf(stderr, "[GATEWAY] REJECT src=%s %s %s qty=%.8f px=%.6f — %s\n",
                      in.source ? in.source : "?", in.is_buy ? "BUY" : "SELL",
@@ -624,8 +735,11 @@ private:
     static constexpr int          MAX_UNFILLED_PER_SYM = 8;
     std::atomic<bool>             circuit_tripped_{false};
     std::mutex                    cb_mtx_;                 // guards the three below
-    long long                     rate_win_start_ms_ = 0;
-    int                           rate_win_count_    = 0;
+    // rate_win_start_ms_ / rate_win_count_ REMOVED (S-2026-07-27p). They implemented a
+    // reset-every-second bucket, which admits up to 2N orders across a boundary and is
+    // blind to a storm sustained across seconds. The coarse 25/sec trip is now taken
+    // from rate_guard_.count_in_last_ms(1000) -- a sliding window. Deleted rather than
+    // left unused so nothing can quietly start reading a bucket again.
     std::map<std::string,int>     unfilled_by_sym_;
     // ── LOT_SIZE / -1013 QUARANTINE (2026-07-24): a Binance -1013 LOT_SIZE reject
     //    that comes back UNDER the 8-count unfilled trip was SILENTLY skipped — the
@@ -644,6 +758,13 @@ private:
             why.c_str());
         std::fflush(stderr);
     }
+
+    // S-2026-07-27p. Members, not singletons (the Omega originals are singletons
+    // because its exec is one global object). One gateway instance exists in
+    // production (src/main.cpp), so behaviour is identical, and a test can construct
+    // an isolated gateway with clean counters instead of fighting shared state.
+    GlobalOrderRateGuard rate_guard_;
+    SlowStormGuard       slow_storm_;
 
     Exec&           ex_;
     RuntimeMode     mode_;

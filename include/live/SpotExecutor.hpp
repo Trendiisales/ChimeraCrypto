@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <vector>
 
 namespace chimera {
@@ -35,6 +36,18 @@ class SpotExecutor {
     // Only the execution gateway may call the raw execute() path.
     template <class E> friend class ExecutionGatewayT;
 public:
+    // ── OUT-OF-BAND ORDER OBSERVER (S-2026-07-27p) ──────────────────────────────
+    // emergency_flatten() and close_symbol_from_broker() reach Binance WITHOUT going
+    // through ExecutionGatewayT::submit(). That is CORRECT and must stay that way --
+    // they are the paths that have to keep working after the circuit-breaker trips.
+    // But it also meant every order they send was invisible to every desk-wide count,
+    // which is exactly the bypass Omega's close_broker_position had until S-27m
+    // (`feedback-separate-binary-bypasses-guards`: a guard protects only the path it
+    // sits on). Wired in main.cpp to ExecutionGatewayT::note_out_of_band_order.
+    // COUNTING ONLY -- this observer cannot refuse anything, no caller checks a
+    // return, so a flatten can never be blocked by the act of having been counted.
+    std::function<void(const std::string&)> on_out_of_band_order;
+
     // -----------------------------------------------------------------------
     // init — must be called before execute().
     // Returns false if credentials file is missing or keys are invalid.
@@ -361,6 +374,7 @@ public:
         for (auto& c : sym_upper) c = (char)std::toupper((unsigned char)c);
         std::printf("[EMERGENCY-KILL] Flattening %s qty=%.8f\n", sym_upper.c_str(), qty);
         std::fflush(stdout);
+        if (on_out_of_band_order) on_out_of_band_order(sym_upper);   // S-27p: counted, never blocked
         rest_.cancel_all_open_orders(sym_upper);
         if (qty > 0.0) {
             auto r = rest_.market_sell(sym_upper, qty);
@@ -414,6 +428,7 @@ public:
             std::fflush(stdout);
             return done(BrokerClose::READ_FAILED);
         }
+        if (on_out_of_band_order) on_out_of_band_order(sym_upper);   // S-27p: counted, never blocked
         // 1. Cancel first — frees any qty locked by the resting protective stop.
         rest_.cancel_all_open_orders(sym_upper);
         // 2. Broker truth. The live universe is USDT-quoted (BTCUSDT -> BTC).

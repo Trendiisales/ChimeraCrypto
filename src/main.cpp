@@ -3702,6 +3702,19 @@ int main() {
             if (oc == chimera::SpotExecutor::BrokerClose::SEND_FAILED) return false; // still exposed: alert
             return executor.emergency_flatten(sym, qty);   // READ_FAILED -> engine-qty fallback
         };
+        // ── S-2026-07-27p: COUNT the out-of-band flatten path in the desk-wide rate view.
+        //    emergency_flatten() and close_symbol_from_broker() POST to Binance without
+        //    passing through gateway.submit(), deliberately -- they must keep working
+        //    after the circuit-breaker trips. The consequence, until now, was that a
+        //    flatten storm was invisible to every desk-wide count -- precisely the bypass
+        //    Omega's close_broker_position had until S-27m
+        //    (`feedback-separate-binary-bypasses-guards`: a guard protects only the path
+        //    it sits on). This observer COUNTS those orders and can never refuse one:
+        //    note_out_of_band_order returns void and nothing on the flatten path inspects
+        //    it. A close is never blocked; it is only made visible.
+        executor.on_out_of_band_order = [&gateway](const std::string& sym) {
+            gateway.note_out_of_band_order(sym);
+        };
         // A4 price collar (2026-07-24 audit): feed the live spot price so the gateway can reject
         // an entry whose signal ref deviates >10% from the current market (stale/gapped/fat-finger).
         // Returns 0 for an unknown symbol -> collar inert for it (fail-safe, never a false reject).
